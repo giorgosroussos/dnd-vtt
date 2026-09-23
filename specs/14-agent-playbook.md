@@ -108,11 +108,11 @@ Reviewers propose findings with file evidence and severity; they do not redesign
 ## 8. Database-change rules
 
 - One owner per migration sequence or aggregate during active work.
-- Prefer additive nullable columns and tables, backfill, enforce, then later cleanup (expand, migrate, contract).
+- Prefer additive nullable columns and tables, backfill, enforce, then later cleanup (expand, migrate, contract). [Q-081]
 - Index foreign keys and primary query paths.
 - Use database constraints for key invariants where practical.
-- Never expose sequential IDs because internal keys exist.
-- Test migrations on a realistic anonymized dataset before production.
+- UUIDs (sha256 for Image) are the only keys; no internal sequential key exists to expose. [Q-084]
+- Test migrations on the generated fixture database before every release; no real campaign data enters the repository or CI. [Q-082]
 
 ## 9. Contract-change rules
 

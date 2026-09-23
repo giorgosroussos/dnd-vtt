@@ -2,6 +2,8 @@
 
 This matrix maps the commercial and product intent in `docs/inputs/` to the specified implementation and prevents both omissions and scope expansion. It is owner-maintained. Implementation status per work package lives in the root `TRACEABILITY.md`.
 
+Each row's status restates the tagged statement it cites in `01`. [input, Q-013, Q-016]
+
 | Original intent / requirement | Implemented feature/spec | Status |
 | --- | --- | --- |
 | DM prepares a session in advance and runs it on a TV or projector, alone | `01` §1, `08` §10 | MVP |
@@ -45,4 +47,4 @@ This matrix maps the commercial and product intent in `docs/inputs/` to the spec
 
 ## Coverage rule
 
-Any future commercial promise MUST be added here before implementation and classified as MVP, Future or Out of Scope; a code change alone does not change product scope. [input]
+Any future commercial promise MUST be added here before implementation and classified as MVP, Future or Out of Scope; a code change alone does not change product scope. [Q-074, D-043]

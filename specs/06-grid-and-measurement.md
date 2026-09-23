@@ -30,16 +30,16 @@ The MVP MUST offer three calibration methods, each with a live overlay while the
 ## 4. Snapping
 
 - Dropped tokens MUST snap to the grid. [input]
-- Snapping is on by default and aligns footprints to whole squares (Tiny to half squares); holding Alt while dropping places freely. [D-023]
+- Snapping is on by default and aligns footprints to whole squares (Tiny to half squares); holding Alt while dropping MUST place the token freely. [Q-059, D-023]
 
 ## 5. Ruler
 
 - The ruler MUST measure by the PHB 2014 rule, every diagonal square counting 5 ft, with the optional DMG rule (diagonals alternating 5 ft and 10 ft) available as a setting. [input]
-- Distances MUST scale with the scene's feet per square. [input]
-- The diagonal rule is one server-wide setting, default PHB; a new scene's feet per square defaults to 5. [D-024]
-- The ruler measures a straight path between two square centres, without waypoints. [D-025]
+- Distances MUST scale with the scene's feet per square. [Q-087, D-045]
+- The diagonal rule MUST be one server-wide setting, default PHB; a new scene's feet per square defaults to 5. [Q-037]
+- The ruler MUST measure a straight path between two square centres, without waypoints. [Q-048]
 - On the live scene the measurement is shown on the player view (`04` §11). [Q-027]
 
 ## 6. Out of the MVP
 
-Automatic grid detection, hex grids and physical screen scale for miniatures are not part of the MVP (`01` §6, `01` §7).
+Automatic grid detection, hex grids and physical screen scale for miniatures are not part of the MVP (`01` §6, `01` §7). [input]

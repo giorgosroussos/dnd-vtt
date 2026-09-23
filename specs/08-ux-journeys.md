@@ -5,7 +5,7 @@ How the DM prepares and runs a session, what the TV shows, and how screens get c
 ## 1. DM workspace
 
 - The DM view MUST be one workspace: a left sidebar with the Campaign → Session → Scene tree, the scene canvas in the centre, the asset library as a right-hand panel, and a live bar at the top that names the live scene. [Q-023]
-- Campaigns, sessions and scenes MUST be creatable, renamable, reorderable and deletable from the sidebar. [input, Q-023]
+- Campaigns, sessions and scenes MUST be creatable, renamable, reorderable and deletable from the sidebar; reordering is by dragging in the tree, with a keyboard alternative. [input, Q-023, Q-089]
 
 ## 2. Live mode and prep mode
 
@@ -13,7 +13,7 @@ How the DM prepares and runs a session, what the TV shows, and how screens get c
 - Live mode MUST be unmistakable (a persistent live indicator around the canvas), and every action in it reaches the TV; nothing done in prep mode reaches the TV. [Q-024]
 - The live bar MUST return the canvas to the live scene in one click. [Q-024]
 - "Go live" on the scene being edited MUST activate it, and a "Blank TV" action MUST clear the live scene (`04` §2). [Q-024, Q-025]
-- In live mode the DM view MUST show the frame of what the TV sees, which the DM can move and resize to steer the player camera (`04` §9). [input]
+- In live mode the DM view MUST show the frame of what the TV sees, which the DM can move and resize to steer the player camera (`04` §9). [input, Q-080]
 
 ## 3. Canvas
 
@@ -23,14 +23,14 @@ How the DM prepares and runs a session, what the TV shows, and how screens get c
 ## 4. Player view
 
 - When no scene is live, the player view MUST show a dark idle screen with the product name only. [Q-025]
-- When a scene goes live the player view MUST switch to it, fitted to the map (`04` §9). [input]
+- When a scene goes live the player view MUST switch to it, fitted to the map (`04` §9). [input, Q-038]
 
 ## 5. Connecting a screen
 
 - The server MUST find its LAN address and show a QR code. [input]
 - The QR code and a short URL to type MUST be shown in the server console at start and in a "Connect a screen" panel of the DM view, and MUST open the player view; the DM view's address MUST NOT be put in a QR code. [Q-026]
-- All non-internal IPv4 addresses are listed, the first private-range one shown prominently. [D-030]
-- On Windows the first start triggers a firewall prompt; the console and README MUST tell the DM to allow private networks (`09` §4). [input]
+- All non-internal IPv4 addresses MUST be listed, the first private-range one shown prominently. [Q-053]
+- On Windows the first start triggers a firewall prompt; the console and README MUST tell the DM to allow private networks only (`09` §4). [input, Q-076]
 
 ## 6. Language
 
@@ -47,9 +47,11 @@ How the DM prepares and runs a session, what the TV shows, and how screens get c
 
 ## 9. Presentation details
 
-- A hidden token is drawn semi-transparent with a hidden marker in the DM view; the player view has no controls and hides the cursor after two seconds. [D-031]
+- A hidden token is drawn semi-transparent with a hidden marker in the DM view; the player view has no controls and hides the cursor after two seconds. [Q-054]
 
 ## 10. Critical journeys
+
+The critical journeys MUST be these five: [Q-065]
 
 | Journey | Steps | Specs |
 | --- | --- | --- |

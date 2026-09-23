@@ -1,14 +1,14 @@
 # Emberglass — MVP Specifications
 
-Version: 0.1-draft  
-Status: Draft, not yet an implementation baseline  
+Version: 1.0  
+Status: Implementation baseline, 2026-09-23  
 Audience: Product owner, architects, developers, QA, DevOps and GenAI SWE agents
 
 ## Product statement
 
-> Emberglass is a free, self-hosted virtual tabletop for in-person D&D 5e (2014, SRD 5.1) play: the DM prepares a session as a series of scenes in advance and runs it on a TV or projector, operating everything alone. It is not a remote-play platform, a character manager or a map maker, and the MVP puts no game rules in code. [input]
+> Emberglass is a free, self-hosted virtual tabletop for in-person D&D 5e (2014, SRD 5.1) play: the DM prepares a session as a series of scenes in advance and runs it on a TV or projector, operating everything alone. It is not a remote-play platform or a map maker; the MVP has no player devices or character sheets and puts no game rules in code. [input]
 
-The DM runs one Node server on their own PC; every other screen joins from a browser on the same Wi-Fi. The core loop is prepare (campaigns, sessions, scenes, a shared asset library, grid calibration, pre-placed and hidden tokens) then run (activate a scene, move and reveal tokens, steer the TV's camera, measure, undo). The one property that must always hold is that the player view never receives anything hidden: filtering happens on the server, and a hidden token does not exist for a player client.
+The DM runs one Node server on their own PC; every other screen joins from a browser on the same Wi-Fi. The core loop is prepare (campaigns, sessions, scenes, a shared asset library, grid calibration, pre-placed and hidden tokens) then run (activate a scene, move and reveal tokens, steer the TV's camera, measure, undo). The player view receives only what is visible: filtering happens on the server, and the player client does not know hidden tokens exist. [input]
 
 ## Technology baseline
 
@@ -48,7 +48,7 @@ The DM runs one Node server on their own PC; every other screen joins from a bro
 
 ## Requirement language
 
-`MUST`, `SHOULD` and `MAY` are normative. Unless explicitly labeled Future, every `MUST` requirement is part of MVP acceptance. Every `MUST` is testable: the testing specification or the work package that delivers it names the check that verifies it.
+`MUST`, `SHOULD` and `MAY` are normative. Unless explicitly labeled Future, every `MUST` requirement is part of MVP acceptance (card Q-062). Every `MUST` is testable: the testing specification or the work package that delivers it names the check that verifies it.
 
 Sections are numbered and never renumbered. New content is appended as a new section or a new bullet; other documents cite `specs/NN-name.md §M` and those citations must keep resolving. `make check-docs` verifies every citation.
 
@@ -67,13 +67,13 @@ Every normative statement ends with a provenance tag:
 
 ## Scope labels
 
-- **MVP:** required for the first production release.
-- **Future:** anticipated in architecture, but not implemented in MVP.
-- **Out of Scope:** intentionally excluded; implementation agents must not add it.
+- **MVP:** required for the first production release. [Q-078]
+- **Future:** anticipated in architecture, but not implemented in MVP. [Q-070]
+- **Out of Scope:** intentionally excluded; implementation agents must not add it. [Q-079]
 
 ## Conflict resolution
 
-1. `12-decision-register.md` and the product statement override inferred behavior.
-2. Security and hidden-information isolation requirements override convenience.
-3. A feature not described as MVP is not silently added.
-4. Ambiguities that materially affect data, security or scope become an Architecture Decision Record before implementation.
+1. `12-decision-register.md` and the product statement override inferred behavior. [Q-077]
+2. Security and hidden-information isolation requirements override convenience. [Q-069]
+3. A feature not described as MVP is not silently added. [Q-074]
+4. Ambiguities that materially affect data, security or scope become an Architecture Decision Record before implementation. [Q-071]

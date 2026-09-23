@@ -10,9 +10,9 @@ How a DM installs, starts, configures and backs up Emberglass.
 
 ## 2. Start-up
 
-- On start the server MUST print the player-view URL and QR code for its LAN address (`08` §5). [input]
+- On start the server MUST print the player-view URL and QR code for its LAN address (`08` §5). [input, Q-026]
 - When no PIN is set, the console MUST tell the DM to open the DM view on the server PC to set it (`07` §1). [Q-007, recommendation accepted]
-- The server MUST apply pending SQLite migrations before accepting connections. [D-009]
+- The server MUST apply pending SQLite migrations before accepting connections, after copying the database file to a dated backup in the data directory. [Q-075]
 
 ## 3. Supported systems
 
@@ -20,23 +20,23 @@ How a DM installs, starts, configures and backs up Emberglass.
 
 ## 4. Firewall
 
-- On Windows the firewall asks for permission on first start; the README MUST explain allowing Node on private networks. [input]
+- On Windows the firewall asks for permission on first start; the README MUST explain allowing Node on private networks only. [input, Q-076]
 - The README MUST also explain opening the port on Linux with a common host firewall. [Q-018, recommendation accepted]
 
 ## 5. Data directory and backup
 
-- All state MUST live in one data directory: the SQLite database and the images folder (`02` §7). [input]
+- All state MUST live in one data directory: the SQLite database and the images folder (`02` §7). [input, Q-039]
 - A backup MUST be a copy of the data directory, with no database server to set up. [input]
 - In the MVP, moving a campaign to another PC means copying the whole data directory; there is no per-campaign export (`01` §4). [Q-013, recommendation accepted]
-- The default location is the per-user application data folder of each system, holding `emberglass.db`, `images/` and `logs/`; the README says to stop the server before copying it. [D-034]
+- The default location is the per-user application data folder of each system, holding `emberglass.db`, `images/` and `logs/`; the README says to stop the server before copying it. [Q-039]
 
 ## 6. Logging
 
-- Logs follow `07` §8 and go to the console and to a rotating file in the data directory. [D-035]
+- Logs MUST follow `07` §8 and go to the console and to a rotating file in the data directory. [Q-040]
 
 ## 7. Configuration
 
-- The upload size limit (`05` §6), the display-version size (`05` §7) and the ruler rule (`06` §5) MUST be settings the DM changes from the DM view without restarting. [input, D-021, D-024]
+- The upload size limit (`05` §6), the display-version size (`05` §7) and the ruler rule (`06` §5) MUST be settings the DM changes from the DM view without restarting. [Q-051]
 - Port and data directory are set with `EMBERGLASS_PORT` and `EMBERGLASS_DATA_DIR`. [D-034]
 
 ## 8. Repository documents

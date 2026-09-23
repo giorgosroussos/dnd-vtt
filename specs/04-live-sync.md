@@ -6,11 +6,11 @@ The WebSocket contract for the live scene: who sends what, what each room receiv
 
 - The WebSocket MUST carry only the live scene; everything else is REST (`02` §4). [input]
 - The real-time layer MUST use Socket.io with two rooms, `dm` and `players`. [input]
-- A socket MUST join `dm` only when it carries a valid DM session (`07` §2); every other socket joins `players`. [input, Q-010]
+- A socket MUST join `dm` only when it carries a valid DM session (`07` §2); every other socket joins `players`. [Q-046, Q-010]
 
 ## 2. Commands
 
-Commands flow from a DM socket to the server; the server MUST reject any command from a socket that is not in `dm`. [input]
+Commands flow from a DM socket to the server; the server MUST reject any command from a socket that is not in `dm`. [input, Q-046]
 
 | Command | Effect | Undoable |
 | --- | --- | --- |
@@ -31,6 +31,8 @@ Commands flow from a DM socket to the server; the server MUST reject any command
 
 ## 3. Events
 
+Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-027, Q-038, Q-047, Q-083, D-049]
+
 | Event | `dm` room | `players` room |
 | --- | --- | --- |
 | `scene.snapshot` | full scene, all tokens | visible tokens only, player fields only |
@@ -47,14 +49,15 @@ Commands flow from a DM socket to the server; the server MUST reject any command
 - Filtering MUST happen on the server before emitting, never in the player client. [input]
 - Revealing a token MUST reach players as `token.added`, and hiding it as `token.removed`. [input]
 - A player client MUST NOT receive anything from which the existence of a hidden token can be learnt: no hidden token, no hidden token's ID, asset or image, no count. [input]
-- A player-room token MUST carry only what rendering needs: ID, position, size, image reference, stacking order and label; asset notes and defaults are never sent. [input, Q-032]
-- The grid overlay MUST NOT be sent to players when the scene's grid is set hidden for players (`06` §2). [input]
+- A player-room token MUST carry only what rendering needs: ID, position, size, image reference, stacking order and label; asset notes and defaults are never sent. [Q-047, Q-032]
+- The grid overlay MUST NOT be drawn on the player view when the scene's grid is set hidden for players (`06` §2). [input]
 
 ## 5. Snapshot and versioning
 
-- A client MUST receive a `scene.snapshot` for its role on connection and after every scene activation. [input]
+- A client MUST receive a `scene.snapshot` for its role on connection. [input]
+- Activating a scene sends every client a fresh snapshot. [D-039]
 - Every event MUST carry an ascending version number; a client that sees a gap MUST request a new snapshot. [input]
-- The version counter is one per server process, starting at 1 on start-up. [D-017]
+- The version counter MUST be one per server process, starting at 1 on start-up. [Q-056]
 
 ## 6. Reconnection
 
@@ -69,16 +72,17 @@ Commands flow from a DM socket to the server; the server MUST reject any command
 ## 8. Undo
 
 - The server MUST keep the inverse of every undoable DM command on the live scene: move, add, delete, visibility. [input]
-- Ctrl+Z in the DM view MUST send `undo`, and the server MUST apply the inverse through the same path as a normal command, emitting the same events. [input]
+- Ctrl+Z in the DM view MUST cause the most recent inverse command to be applied as an ordinary command, so synchronisation does not change. [input]
+- Ctrl+Z sends `undo`; the server applies the inverse from its history through the ordinary command path. [D-040]
 - The undo history MUST be held in memory only, cleared when another scene is activated or the server restarts, and bounded to the last 100 commands. [Q-005]
-- Setup edits to the live scene (`04` §10) are not undoable. [input]
+- Setup edits to the live scene (`04` §10) MUST NOT be undoable. [Q-050]
 
 ## 9. Cameras
 
 - The DM view and the player view MUST have independent cameras (zoom and pan). [input]
 - The player view MUST start fitted to the map. [input]
 - The DM MUST be able to set the player camera from the DM view, which shows a frame of what the TV sees, without changing the DM's own camera. [input]
-- The player camera is held in server memory and resets to fit-to-map on every activation. [D-018]
+- The player camera MUST be held in server memory and reset to fit-to-map on every activation. [Q-038]
 
 ## 10. Editing the live scene's setup
 
@@ -87,4 +91,4 @@ Commands flow from a DM socket to the server; the server MUST reject any command
 ## 11. Ruler on the TV
 
 - While the DM measures on the live scene, the ruler line and distance MUST be shown on the player view through `ruler.shown` and `ruler.cleared`; measurements are never stored. [Q-027]
-- A measurement made on a scene that is not live MUST NOT be sent to players. [input]
+- A measurement made on a scene that is not live MUST NOT be sent to players. [Q-086]

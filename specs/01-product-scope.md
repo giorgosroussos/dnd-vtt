@@ -9,10 +9,13 @@ What Emberglass is for, who uses it, and what each release contains.
 - Motivation: a free, self-hosted alternative to virtual tabletops with limited free plans. [input]
 - Differentiator: a session is a series of scenes the DM prepares in advance, with pre-placed and hidden tokens. [input]
 - Rules baseline: D&D 5e, 2014 edition (SRD 5.1); every campaign carries `rules_version = 5e-2014` (`03` §8). [input]
-- The MVP MUST NOT encode game rules beyond the token size table (`05` §2) and the ruler's diagonal rules (`06` §5). [input]
-- One server hosts one game at a time: at most one scene is live per server. [input]
+- The MVP MUST NOT put game rules in code. [input]
+- The input itself specifies the token size table (`05` §2) and the ruler's diagonal rules (`06` §5). [input]
+- One server hosts one game at a time; Settings hold a single live scene (`03` §1). [input]
 
 ## 2. Actors
+
+The actors MUST be exactly these: [input, Q-007, Q-010, Q-029]
 
 | Actor | Device | Access | Can |
 | --- | --- | --- | --- |
@@ -29,7 +32,7 @@ The MVP MUST provide: [input]
 
 - a local Node server serving the React client and the WebSocket (`02` §2);
 - SQLite storage and an images folder (`02` §7);
-- joining from the LAN with a QR code and a typed URL (`08` §5);
+- joining from the LAN with a QR code (`08` §5);
 - a PIN protecting the DM view (`07` §1);
 - automatic reconnection with snapshot and versioning (`04` §5, `04` §6);
 - Campaign → Sessions → Scenes (`03` §1);
@@ -85,7 +88,7 @@ These MUST NOT be implemented in the MVP: [input]
 - physical screen scale for miniatures (1 square = 25 mm);
 - a live drag preview with throttling.
 
-Adding tokens by dragging them from a sidebar is Future, unscheduled; the MVP flow is button, picker, click on the map (`05` §5). [input]
+Adding tokens by dragging them from a sidebar comes later (the input says «αργότερα» without naming a phase); the MVP flow is button, picker, click on the map (`05` §5). [input]
 
 Area-of-effect templates and a pointer/ping on the TV are nice-to-haves and MUST NOT be implemented in the MVP. [Q-016, recommendation accepted]
 
@@ -105,4 +108,4 @@ Emberglass MUST NOT implement: [input]
 - The product name, UI title and package names MUST NOT contain "D&D" or "Dungeons & Dragons"; the product MAY describe itself as compatible with 5th edition (SRD 5.1). [Q-022]
 - The source is licensed under AGPL-3.0, with the licence text at the repository root. [Q-021]
 - The MVP is installed from source (`09` §1). [Q-017, recommendation accepted]
-- SRD 5.1 content (CC-BY-4.0) enters from Phase 2 on; its attribution is a Phase 2 obligation. [input]
+- SRD 5.1 content (CC-BY-4.0) enters from Phase 2 on. [input]

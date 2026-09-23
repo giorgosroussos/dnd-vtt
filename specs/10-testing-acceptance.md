@@ -20,10 +20,10 @@ Every change MUST pass these gates through the root `Makefile`, locally and in C
 
 ## 3. Hidden-information acceptance
 
-- A test MUST record every message and image response a player view receives across a scripted session (add hidden tokens, reveal, hide, move, delete, undo, activate another scene, reconnect) and assert that no hidden token's ID, asset, image or count appears in it (`04` §4, `07` §5). [input, Q-012]
-- A test MUST assert that every command sent from the players room is rejected and changes nothing (`07` §3). [input]
+- A test MUST record every message and image response a player view receives across a scripted session (add hidden tokens, reveal, hide, move, delete, undo, activate another scene, reconnect) and assert that no hidden token's ID, asset, image or count appears in it (`04` §4, `07` §5). [Q-067, D-042]
+- A test MUST assert that every command sent from the players room is rejected and changes nothing (`07` §3). [Q-068, D-042]
 - A test MUST assert that an image a player once fetched is refused after its token is hidden (`07` §5). [Q-012, recommendation accepted]
-- The large-scene fixture is a generated 10,000 × 7,000 px map with 50 tokens, plus a map-less scene. [D-036]
+- The large-scene fixture MUST be a generated 10,000 × 7,000 px map with 50 tokens, plus a map-less scene; no third-party art enters the repository. [Q-060, Q-088]
 
 ## 4. Acceptance devices
 
@@ -34,7 +34,7 @@ Every change MUST pass these gates through the root `Makefile`, locally and in C
 
 ## 5. Acceptance scenarios
 
-The MVP is accepted when each critical journey of `08` §10 passes end to end: [input]
+The MVP MUST be accepted when each critical journey of `08` §10 passes end to end, together with the gates of §1–§3 and §6: [input, Q-061, Q-065, Q-006, Q-007, Q-008, Q-020, Q-025, Q-027]
 
 - first run: start, set the PIN from localhost, a LAN browser cannot set it;
 - prepare: campaign, session, a scene from a map and a map-less scene, each calibration method, tokens added through the picker with automatic numbering, some hidden;

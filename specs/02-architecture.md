@@ -28,8 +28,8 @@ specs/  docs/      specifications and inputs
 ## 2. Runtime topology
 
 - Emberglass MUST run as one Node process on the DM's PC that serves the built React client, the REST API and the WebSocket. [input]
-- Every other screen MUST connect from a browser on the LAN; the DM view uses REST and WebSocket, the player view only the WebSocket and image files. [input]
-- The server MUST listen on port 3000 by default, configurable (`09` §7); the player view is served at `/` and the DM view at `/dm`. [D-014]
+- Every other screen MUST connect from a browser on the LAN; the DM view uses REST and WebSocket, the player view only the WebSocket and the image files of the live scene (`07` §5). [input, Q-012]
+- The server MUST listen on port 3000 by default, configurable (`09` §7); the player view is served at `/` and the DM view at `/dm`. [D-014, Q-052]
 
 ```mermaid
 flowchart LR
@@ -54,6 +54,8 @@ flowchart LR
 
 The REST API MUST be served under `/api`, with JSON bodies validated against schemas derived from the `shared` contract types. [D-015]
 
+The REST API MUST offer these resources and operations: [input, Q-001, Q-007, Q-051, Q-058, Q-085]
+
 | Resource | Operations |
 | --- | --- |
 | `/api/auth` | enter PIN, leave, current role (`07` §2) |
@@ -65,7 +67,7 @@ The REST API MUST be served under `/api`, with JSON bodies validated against sch
 | `/api/scenes/:id` | setup (map, grid), tokens while not live |
 | `/api/settings` | ruler rule, upload limit, display variant size, PIN change |
 
-Every `/api` route except `/api/auth` (PIN entry) and `/api/setup` MUST require a DM session (`07` §2). [input, Q-007]
+Every `/api` route except `/api/auth` (PIN entry) and `/api/setup` MUST require a DM session (`07` §2). [Q-046]
 
 ## 6. Offline operation
 
@@ -74,10 +76,12 @@ Every `/api` route except `/api/auth` (PIN entry) and `/api/setup` MUST require 
 
 ## 7. Storage
 
-- State MUST be stored in one SQLite database plus one images folder, both inside one data directory (`09` §5). [input]
+- State MUST be stored in one SQLite database plus one images folder, both inside one data directory (`09` §5). [input, Q-039]
 - Image files MUST be named by the sha256 of the original upload (`05` §7). [input]
 - Backing up MUST require nothing more than copying the data directory. [input]
 
 ## 8. Future packaging
 
-Phase 3 wraps the same server and client in Tauri or Electron without changing this architecture (`01` §5). Nothing in the MVP may assume a browser-only deployment in a way that such a wrapper could not host, but no packaging work is done now.
+Phase 3 wraps the same server and client in Tauri or Electron without changing this architecture (`01` §5). [input] 
+
+The MVP MUST NOT assume a browser-only deployment in a way that such a wrapper could not host; no packaging work is done now. [Q-049]

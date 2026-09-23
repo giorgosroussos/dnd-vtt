@@ -9,14 +9,15 @@ Who can do what, how the DM proves it, and what the server never reveals or trus
 - The DM MUST be able to change the PIN from the DM view by entering the current one. [Q-007, recommendation accepted]
 - The PIN MUST be recoverable only by a command run on the server machine, which clears it so that setup runs again from localhost. [Q-007, recommendation accepted]
 - The command is `npm run reset-pin`. [D-028]
-- The PIN is stored only as a salted scrypt hash. [D-027]
+- The PIN MUST be stored only as a salted scrypt hash. [Q-042]
 
 ## 2. DM session
 
 - Entering the correct PIN MUST give that browser a DM session that lasts until the server restarts; sessions MUST NOT be written to disk. [Q-008, recommendation accepted]
 - Automatic reconnection within the same server run MUST NOT ask for the PIN again (`04` §6). [Q-008, recommendation accepted]
 - Changing the PIN MUST end every other DM session at once; the device that made the change stays signed in. [Q-033, recommendation accepted]
-- The session is a random 256-bit identifier in an HttpOnly, SameSite=Strict cookie, also read by the WebSocket handshake; REST writes and handshakes whose Origin does not match the server's host are refused. [D-027]
+- The DM MUST be able to sign a browser out of the DM view, ending that browser's session. [Q-058]
+- The session is a random 256-bit identifier in an HttpOnly, SameSite=Strict cookie, also read by the WebSocket handshake; REST writes and handshakes whose Origin does not match the server's host MUST be refused. [Q-043]
 
 ## 3. Player view
 
@@ -42,11 +43,11 @@ Who can do what, how the DM proves it, and what the server never reveals or trus
 
 ## 7. What the server trusts
 
-- The server MUST derive a socket's or request's role only from its DM session, never from anything the client declares. [input]
-- The server MUST validate every command and REST body against the shared contract before applying it. [input]
+- The server MUST derive a socket's or request's role only from its DM session, never from anything the client declares. [Q-046]
+- The server MUST validate every command and REST body against the shared contract before applying it. [input, D-015, D-047]
 - Uploads MUST be validated by content, not extension (`05` §6). [input]
 
 ## 8. Logging
 
-- Logs MUST NOT contain a PIN, a session identifier or a cookie. [D-029]
-- Logs record start-up, the LAN addresses served, connections by role, failed PIN attempts with the client address, lockouts and errors (`09` §6). [D-029]
+- Logs MUST NOT contain a PIN, a session identifier or a cookie. [Q-044]
+- Logs record start-up, the LAN addresses served, connections by role, failed PIN attempts with the client address, lockouts and errors (`09` §6). [Q-041]

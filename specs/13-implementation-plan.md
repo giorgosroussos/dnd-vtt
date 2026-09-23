@@ -35,7 +35,7 @@ Goal: a reproducible repository, one command that runs every gate, CI that runs 
 
 `FND-02` CI baseline
 
-- A pipeline on the project's remote, running on every merge request and every push to the default branch, on Linux and Windows runners (`10` §4), against a real SQLite file, never a mock (`10` §2).
+- A pipeline on the project's remote, running on every merge request and every push to the default branch, on Linux and Windows runners (`10` §4), against a real SQLite file, never a mock (`10` §2); GitHub with GitHub Actions. [Q-066, recommendation accepted]
 - Every job runs exactly one `Makefile` target, so "CI is green" and "`make verify` is green" are the same statement; `README.md` maps job to command.
 - `make check-docs` runs as its own job.
 - Every gate the testing specification requires but nothing implements yet is a failing-forward tripwire: a job that passes only while the gate is provably absent and fails with promotion instructions the moment it becomes runnable. A missing gate and a silently passing gate must never look alike.
@@ -49,24 +49,23 @@ Goal: a reproducible repository, one command that runs every gate, CI that runs 
 - `/api` base path, JSON schemas derived from the `shared` types, and one error envelope for REST (`02` §5).
 - Typed command and event envelopes for Socket.io in `shared`, with version numbers (`04` §2, `04` §3, `04` §5).
 - Structured logging to console and rotating file, with the exclusions of `07` §8.
-- Surfaces: security, scope, ux
+- Surfaces: data, security, scope, ux
 - Touches red line: yes
 - Contract change: yes
 
-<!-- if:UI -->
 `FND-04` Design, accessibility and localization foundation
 
 - Shared tokens and base components, focus and error patterns, the DM and player view shells at `/dm` and `/` (`02` §2).
 - English message catalogue with no hard-coded UI strings (`08` §6).
 - A keyboard-operability smoke test for core DM actions wired as a real gate (`08` §8).
 - Every font and icon bundled locally (`02` §6).
-- Surfaces: external, ux
+- Surfaces: security, external, ux
 - Touches red line: yes
 - Contract change: no
 
 ### Exit criteria
 
-A fresh clone boots locally through `make clean-start`; CI is green on the remote and a red pipeline blocks a merge; `make check-docs` passes; every tripwire is either promoted or still provably absent.<!-- if:API --> Both clients call the health endpoint through the generated client and a controlled error carries a correlation ID.
+A fresh clone boots locally through `make clean-start`; CI is green on the remote and a red pipeline blocks a merge; `make check-docs` passes; every tripwire is either promoted or still provably absent. A REST error and a rejected WebSocket command both arrive in the shared envelope.
 ## 4. Phase 1 — Server core
 
 Goal: the server stores and serves everything the DM prepares, behind the PIN, with images processed on upload.
@@ -86,7 +85,7 @@ Goal: the server stores and serves everything the DM prepares, behind the PIN, w
 - First-run setup from loopback only, PIN change ending other sessions, `npm run reset-pin` (`07` §1, `07` §2).
 - Numeric PIN with per-client lockout; Origin checks; role derived only from the session (`07` §6, `07` §7).
 - Every `/api` route except PIN entry and setup requires a DM session (`02` §5).
-- Surfaces: security
+- Surfaces: data, security
 - Touches red line: yes
 - Contract change: yes
 
@@ -111,7 +110,7 @@ Goal: the server stores and serves everything the DM prepares, behind the PIN, w
 
 - Assets, categories, sizes, tags, notes, default visibility, search and filters (`05` §1, `05` §2, `05` §4).
 - Usage listing and refusal to delete an asset in use; image change propagating to tokens (`05` §5).
-- Surfaces: —
+- Surfaces: security, ux
 - Touches red line: no
 - Contract change: yes
 
@@ -169,7 +168,7 @@ Goal: the DM runs a prepared session on the TV with hidden information never lea
 
 - `dm` and `players` rooms from the session cookie, role-filtered snapshots, version numbers and gap recovery (`04` §1, `04` §5).
 - Automatic reconnection without a PIN prompt (`04` §6).
-- Surfaces: security
+- Surfaces: data, security
 - Touches red line: no
 - Contract change: yes
 
@@ -186,7 +185,7 @@ Goal: the DM runs a prepared session on the TV with hidden information never lea
 
 - Idle screen, fit-to-map on activation, rendering of visible tokens and labels, no controls (`08` §4, `08` §9).
 - Console and "Connect a screen" QR and URL for the player view; LAN address listing (`08` §5).
-- Surfaces: ux
+- Surfaces: data, security, ux
 - Touches red line: no
 - Contract change: no
 
@@ -201,21 +200,21 @@ Goal: the DM runs a prepared session on the TV with hidden information never lea
 `LIV-05` Undo
 
 - In-memory inverse history for the live scene, Ctrl+Z through the normal command path, bounded and cleared on activation (`04` §8).
-- Surfaces: data
+- Surfaces: data, scope
 - Touches red line: no
 - Contract change: yes
 
 `LIV-06` Cameras
 
 - Independent cameras, the TV frame in the DM view, player camera steering and reset on activation (`04` §9).
-- Surfaces: ux
+- Surfaces: data, ux
 - Touches red line: no
 - Contract change: yes
 
 `LIV-07` Ruler
 
 - Two-point ruler with PHB and DMG diagonal rules and feet per square, shown on the TV for the live scene (`06` §5, `04` §11).
-- Surfaces: ux
+- Surfaces: data, security, scope, ux
 - Touches red line: no
 - Contract change: yes
 
@@ -234,7 +233,7 @@ Goal: a DM can install, run, back up and trust the MVP on their own PC and TV.
 - `npm install` / `npm start`, start-up output, migrations at start, data directory, configuration, logging (`09` §1, `09` §2, `09` §5, `09` §6, `09` §7).
 - Settings screen for upload limit, display size and ruler rule (`09` §7).
 - README with firewall guidance, network exposure and naming, `LICENSE` (`09` §4, `09` §8).
-- Surfaces: data, security, scope, external
+- Surfaces: data, security, scope, external, ux
 - Touches red line: yes
 - Contract change: yes
 
@@ -249,7 +248,7 @@ Goal: a DM can install, run, back up and trust the MVP on their own PC and TV.
 `REL-03` Acceptance on the owner's TV
 
 - The player view accepted on the owner's LG TV built-in browser with the large-scene fixture; display-size default confirmed or changed (`10` §4, `05` §7).
-- Surfaces: scope
+- Surfaces: data, security, scope
 - Touches red line: no
 - Contract change: no
 
@@ -274,6 +273,6 @@ Each lane uses a branch or worktree and integrates through small reviewed merges
 
 ## 9. Backlog discipline
 
-Each ticket MUST include spec references, dependency and allowed file surface, contract and schema impact, acceptance tests and explicit exclusions. [input]
+Each ticket MUST include spec references, dependency and allowed file surface, contract and schema impact, acceptance tests and explicit exclusions. [D-005]
 
 If a ticket reveals a locked-decision conflict, stop and create an ADR; do not improvise a redesign.

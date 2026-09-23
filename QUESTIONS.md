@@ -56,6 +56,62 @@ Every card opens `Blocking` and is answered before the specification proceeds. `
 - Q-031 — Deleting the scene that is live — data — Resolved
 - Q-032 — Token labels on the player view — ux — Resolved
 - Q-033 — Effect of a PIN change on DM sessions — security — Resolved
+- Q-034 — Map-less scene default extent and attaching a map later — data — Resolved
+- Q-035 — Rejected uploads leave nothing behind — data — Resolved
+- Q-036 — Image variant format, sizes and regeneration — data — Resolved
+- Q-037 — Scope of the diagonal-rule setting — data — Resolved
+- Q-038 — Player camera kept in memory and reset on activation — data — Resolved
+- Q-039 — Default data directory location — data — Resolved
+- Q-040 — Log file on disk — data — Resolved
+- Q-041 — Client addresses in logs — data — Resolved
+- Q-042 — PIN stored only as a slow hash — security — Resolved
+- Q-043 — DM session cookie and origin checks — security — Resolved
+- Q-044 — Credentials never in logs — security — Resolved
+- Q-045 — Default visibility of npc and object assets — security — Resolved
+- Q-046 — The DM session as the only source of DM rights — security — Resolved
+- Q-047 — Fields a player client receives — security — Resolved
+- Q-048 — Ruler with two points only — scope — Resolved
+- Q-049 — Keeping the MVP wrapper-compatible — scope — Resolved
+- Q-050 — Undo for setup edits on the live scene — scope — Resolved
+- Q-051 — Where settings are changed — scope — Resolved
+- Q-052 — Which view sits at the server root — ux — Resolved
+- Q-053 — Which LAN address the connect panel highlights — ux — Resolved
+- Q-054 — How hidden tokens look to the DM and whether the TV view has controls — ux — Resolved
+- Q-055 — Who creates entity identifiers — data — Resolved
+- Q-056 — Live version counter after a restart — data — Resolved
+- Q-057 — Image URLs built from the content hash — security — Resolved
+- Q-058 — Signing a browser out of the DM view — security — Resolved
+- Q-059 — Placing a token off the grid — scope — Resolved
+- Q-060 — Load the MVP is accepted against — scope — Resolved
+- Q-061 — How MVP acceptance is defined — scope — Resolved
+- Q-062 — Which MUSTs are part of MVP acceptance — scope — Resolved
+- Q-063 — Token numbering rule on the TV — ux — Resolved
+- Q-064 — Tag filter matching in the library and picker — ux — Resolved
+- Q-065 — The set of critical journeys — ux — Resolved
+- Q-066 — Code host and CI service — external — Resolved
+- Q-067 — A test that records everything the player view receives — security — Resolved
+- Q-068 — A test that player commands are rejected — security — Resolved
+- Q-069 — Security over convenience in conflicts — security — Resolved
+- Q-070 — What "Future" means — scope — Resolved
+- Q-071 — Material ambiguities go to you before code — scope — Resolved
+- Q-072 — What changing a locked decision requires — scope — Resolved
+- Q-073 — Small implementation details decided locally — scope — Resolved
+- Q-074 — New product promises go through the matrix first — scope — Resolved
+- Q-075 — Automatic database migration on start — data — Resolved
+- Q-076 — Firewall scope the DM is told to allow — security — Resolved
+- Q-077 — The register over detailed statements — scope — Resolved
+- Q-078 — What the MVP label means — scope — Resolved
+- Q-079 — What Out of Scope means — scope — Resolved
+- Q-080 — Steering the TV camera with the frame — ux — Resolved
+- Q-081 — How schema changes treat existing data — data — Resolved
+- Q-082 — What data migrations are tested on — data — Resolved
+- Q-083 — Hiding and deleting look the same to players — security — Resolved
+- Q-084 — Internal sequential keys beside UUIDs — data — Resolved
+- Q-085 — What `/api/auth` tells a browser without a session — security — Resolved
+- Q-086 — Measurements on scenes that are not live — security — Resolved
+- Q-087 — Ruler scale from the scene's feet per square — scope — Resolved
+- Q-088 — Test art is generated, not third-party — external — Resolved
+- Q-089 — Reordering by dragging in the sidebar — ux — Resolved
 
 ## Blocking
 
@@ -448,5 +504,623 @@ None.
   - A) They end immediately; those devices return to the PIN screen; the device that made the change stays signed in → effect on security: changing the PIN revokes anyone who learnt the old one, at once.
   - B) They continue until the server restarts; only new sign-ins need the new PIN → effect on security: a device signed in with a leaked PIN keeps DM access for the rest of the night.
 - Recommendation: A, because the usual reason to change a PIN is that someone else learnt it, and B would leave them in.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-034 — Map-less scene default extent and attaching a map later
+- Surface: data
+- Source: Raised by the assumption review: `03-domain-model.md` §6: "The default extent is 30 × 20 on a neutral dark background; a map MAY be attached later, after which the grid is calibrated to it." (was D-016)
+- Question: Should a map-less scene default to 30 × 20 squares and allow a map to be attached later?
+- Options:
+  - A) 30 × 20 default on a dark background; a map can be attached later and the grid is then calibrated to it → effect on data: every new map-less scene stores 30 × 20 until edited; a scene can turn from map-less into mapped.
+  - B) The DM enters the extent when creating the scene, and a map-less scene stays map-less → effect on data: no stored default; converting means creating a new scene.
+- Recommendation: A, because a default makes creating a scene one click and attaching a map later avoids re-placing tokens; can be deferred to SRV-01.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-035 — Rejected uploads leave nothing behind
+- Surface: data
+- Source: Raised by the assumption review: `05-assets-and-images.md` §6: "A rejected upload MUST return an error that names the reason (type or size) and store nothing." (was D-032)
+- Question: Should a rejected upload leave nothing in the data directory?
+- Options:
+  - A) Store nothing; the error names the reason → effect on data: the images folder and database hold only accepted images.
+  - B) Keep rejected files in a quarantine folder for diagnosis → effect on data: files that are not images of record, needing a clean-up rule.
+- Recommendation: A, because a rejected file has no use to the DM and quarantine needs its own retention rule; can be deferred to SRV-04.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-036 — Image variant format, sizes and regeneration
+- Surface: data
+- Source: Raised by the assumption review: `05-assets-and-images.md` §7: "The display version's long edge is at most the display-size setting (default 4096 px, never upscaled); the thumbnail is 256 px; both are WebP; changing the setting regenerates display versions in the background …" (was D-021)
+- Question: Should display versions and thumbnails be WebP (display default 4096 px, thumbnail 256 px) and be regenerated when the setting changes?
+- Options:
+  - A) As written → effect on data: two extra WebP files per image; changing the setting rewrites every display version.
+  - B) Keep the original format for the variants and leave existing variants untouched when the setting changes → effect on data: larger files; only new uploads follow a changed setting.
+- Recommendation: A, because smaller files help the TV browser and regeneration lets the LG TV test tune the size for existing maps too; can be deferred to SRV-04.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-037 — Scope of the diagonal-rule setting
+- Surface: data
+- Source: Raised by the assumption review: `06-grid-and-measurement.md` §5: "The diagonal rule is one server-wide setting, default PHB; a new scene's feet per square defaults to 5." (was D-024)
+- Question: Should the PHB/DMG diagonal rule be one server-wide setting or stored per campaign?
+- Options:
+  - A) One server-wide setting, default PHB → effect on data: stored once in Settings; every campaign measures the same way.
+  - B) Per campaign → effect on data: a new Campaign field; two campaigns on one server can use different rules.
+- Recommendation: A, because the input calls it "a setting" and one server hosts one game; can be deferred to SRV-01.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-038 — Player camera kept in memory and reset on activation
+- Surface: data
+- Source: Raised by the assumption review: `04-live-sync.md` §9: "The player camera is held in server memory and resets to fit-to-map on every activation." (was D-018); also `08-ux-journeys.md` §4: "When a scene goes live the player view MUST switch to it, fitted to the map" — the input says only that the player view starts fitted.
+- Question: Should the player camera live only in memory and reset to fit-to-map on every activation, or be saved per scene?
+- Options:
+  - A) Memory only, reset to fit-to-map on every activation and restart → effect on data: nothing stored; every scene goes live showing the whole map.
+  - B) Saved per scene → effect on data: a stored camera per Scene; the DM can frame the TV view during prep and going live restores it.
+- Recommendation: A, because it matches "the player view starts fitted to the map" with nothing new stored; can be deferred to LIV-06.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-039 — Default data directory location
+- Surface: data
+- Source: Raised by the assumption review: `09-operations.md` §5: "The default location is the per-user application data folder of each system, holding `emberglass.db`, `images/` and `logs/` …" (was D-034)
+- Question: Should the data directory default to the per-user application-data folder, or live inside the repository checkout?
+- Options:
+  - A) Per-user application-data folder, with logs inside it → effect on data: survives a re-clone or `git clean`; the DM must find a hidden system folder to back it up (the start-up output prints its path).
+  - B) A `data/` folder inside the checkout → effect on data: easy to find, but deleting or re-cloning the checkout deletes every campaign.
+- Recommendation: A, because losing every campaign to a re-clone is the worse failure; can be deferred to REL-01.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-040 — Log file on disk
+- Surface: data
+- Source: Raised by the assumption review: `09-operations.md` §6: "Logs follow `07` §8 and go to the console and to a rotating file in the data directory." (was D-035)
+- Question: Should logs also be written to a rotating file in the data directory?
+- Options:
+  - A) Console plus a file rotated at 5 MB, three old files kept → effect on data: a bounded log history, including client addresses, stays on disk and in backups.
+  - B) Console only → effect on data: nothing kept on disk; no history to diagnose a problem after the window closes.
+- Recommendation: A, because a game-night problem is usually investigated afterwards; can be deferred to FND-03.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-041 — Client addresses in logs
+- Surface: data
+- Source: Raised by the assumption review: `07-security-and-access.md` §8: "Logs record start-up, the LAN addresses served, connections by role, failed PIN attempts with the client address, lockouts and errors" (was D-029)
+- Question: Should logs record connections by role and failed PIN attempts with the client's IP address?
+- Options:
+  - A) Yes, with client addresses → effect on data: household device IP addresses and a connection history are stored on disk; a guessing attempt can be traced to a device.
+  - B) Only start-up, lockouts and errors, without client addresses → effect on data: no device addresses stored; guessing attempts cannot be traced.
+- Recommendation: A, because on a home LAN the address is what tells the DM which device was guessing the PIN; can be deferred to FND-03.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-042 — PIN stored only as a slow hash
+- Surface: security
+- Source: Raised by the assumption review: `07-security-and-access.md` §1: "The PIN is stored only as a salted scrypt hash." (was D-027)
+- Question: Should the PIN be stored only as a salted slow hash, or in a recoverable form?
+- Options:
+  - A) Salted scrypt hash only → effect on security: the PIN cannot be read from the data directory or a backup; a forgotten PIN is reset, never shown.
+  - B) Reversible (plain or encrypted) → effect on security: the PIN can be shown again, and anyone with a copy of the data directory can read it.
+- Recommendation: A, because the data directory is copied around as the backup; can be deferred to SRV-02.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-043 — DM session cookie and origin checks
+- Surface: security
+- Source: Raised by the assumption review: `07-security-and-access.md` §2: "The session is a random 256-bit identifier in an HttpOnly, SameSite=Strict cookie, also read by the WebSocket handshake; REST writes and handshakes whose Origin does not match the server's host are refused." (was D-027)
+- Question: Should the DM session be an HttpOnly, SameSite=Strict cookie with Origin checks on REST writes and WebSocket handshakes?
+- Options:
+  - A) HttpOnly SameSite=Strict cookie plus Origin checks → effect on security: page scripts cannot read the session and other web pages cannot drive the API; a DM view opened under a different host name or address than the request's own is refused.
+  - B) A token kept by the page and sent explicitly, no Origin check → effect on security: works under any address, but any script in the page can read it and cross-site requests are not refused.
+- Recommendation: A, because the DM's browser also visits other sites while the server is running; can be deferred to SRV-02.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-044 — Credentials never in logs
+- Surface: security
+- Source: Raised by the assumption review: `07-security-and-access.md` §8: "Logs MUST NOT contain a PIN, a session identifier or a cookie." (was D-029)
+- Question: Should logs be barred from ever containing the PIN, a session identifier or a cookie?
+- Options:
+  - A) Never logged, at any level → effect on security: log files and backups carry no credential.
+  - B) Allowed at a debug level → effect on security: easier troubleshooting, but a debug log or its backup lets its reader take over the DM view.
+- Recommendation: A, because log files travel with backups; can be deferred to FND-03.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-045 — Default visibility of npc and object assets
+- Surface: security
+- Source: Raised by the assumption review: `05-assets-and-images.md` §4: "A new `npc` or `object` asset defaults to visible; the DM can change `default_hidden` per asset." (was D-020)
+- Question: Should new npc and object assets default to visible or to hidden?
+- Options:
+  - A) Visible → effect on security: an npc or object token added to the live scene appears on the TV at once unless its asset is set hidden.
+  - B) Hidden → effect on security: only pc tokens reach the TV until the DM reveals them; nothing leaks by accident, at the cost of more reveals.
+- Recommendation: A, because npcs and objects are usually shown openly and the per-asset flag covers the exceptions; can be deferred to SRV-05.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-046 — The DM session as the only source of DM rights
+- Surface: security
+- Source: Raised by the input audit: `02-architecture.md` §5 "Every `/api` route except `/api/auth` (PIN entry) and `/api/setup` MUST require a DM session", `04-live-sync.md` §1 "A socket MUST join `dm` only when it carries a valid DM session", `07-security-and-access.md` §7 "The server MUST derive a socket's or request's role only from its DM session" and the register's matching bullet were tagged [input], but the input says only «PIN για το DM view» and «έλεγχος ρόλου».
+- Question: Is the DM session obtained with the PIN the only thing that grants DM rights — every REST route, the `dm` WebSocket room — with the server never trusting a role the client declares?
+- Options:
+  - A) Yes: every REST route except PIN entry and first-run setup, and the `dm` room, require the DM session; nothing the client declares grants a role → effect on security: without the PIN a LAN device can see only the player view.
+  - B) Read-only REST routes (library, campaigns, scenes) are open to any LAN device; only writes and the `dm` room need the session → effect on security: anyone on the Wi-Fi can browse prepared scenes, including hidden tokens and future maps.
+- Recommendation: A, because B would expose exactly the hidden content the player view is built to withhold.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-047 — Fields a player client receives
+- Surface: security
+- Source: Raised by the input audit: `04-live-sync.md` §4 "A player-room token MUST carry only what rendering needs: ID, position, size, image reference, stacking order and label; asset notes and defaults are never sent." was tagged [input, Q-032], but the input says only «οι παίκτες μόνο τα ορατά».
+- Question: Should a player client receive only an allowlist of rendering fields for each visible token?
+- Options:
+  - A) Only ID, position, size, image reference, stacking order and label → effect on security: DM notes and asset defaults never reach a player device.
+  - B) The full token and asset objects of visible tokens → effect on security: DM notes on a visible asset are readable by anyone who opens the player view.
+- Recommendation: A, because DM notes are private and the player view needs nothing else; can be deferred to LIV-02.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-048 — Ruler with two points only
+- Surface: scope
+- Source: Raised by the assumption review: `06-grid-and-measurement.md` §5: "The ruler measures a straight path between two square centres, without waypoints." (was D-025)
+- Question: Should the MVP ruler measure only a straight two-point path?
+- Options:
+  - A) Two points, no waypoints → effect on scope: the smallest ruler; a path around a wall is measured in two goes.
+  - B) Waypoints (multi-segment path) → effect on scope: more MVP work in the ruler, its live events and TV rendering.
+- Recommendation: A, because the input names a ruler, not a path tool; can be deferred to LIV-07.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-049 — Keeping the MVP wrapper-compatible
+- Surface: scope
+- Source: Raised by the assumption review: `02-architecture.md` §8: "Nothing in the MVP may assume a browser-only deployment in a way that such a wrapper could not host, but no packaging work is done now." (untagged prose)
+- Question: Should the MVP be constrained now so that a later Tauri or Electron wrapper can host it unchanged?
+- Options:
+  - A) Yes, as a design constraint with no packaging work → effect on scope: paths, data directory and networking stay wrapper-friendly; Phase 3 packaging should need no architectural change, as the input promises.
+  - B) No constraint; Phase 3 adapts the code → effect on scope: the MVP may assume a browser freely; the adaptation cost moves to Phase 3.
+- Recommendation: A, because the input says packaging comes later "without changing the architecture"; can be deferred to FND-01.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-050 — Undo for setup edits on the live scene
+- Surface: scope
+- Source: Raised by the input audit: `04-live-sync.md` §8 "Setup edits to the live scene are not undoable." was tagged [input]; the input's undo list (move, add, delete, visibility) predates Q-015, which made live setup edits possible.
+- Question: Should undo on the live scene also cover setup edits (map image, grid calibration, grid visibility)?
+- Options:
+  - A) No; undo covers only the input's list: move, add, delete, visibility → effect on scope: a live calibration mistake is fixed by calibrating again.
+  - B) Yes; setup edits join the undo history → effect on scope: inverse operations for map and grid changes, each re-sending a snapshot.
+- Recommendation: A, because the input lists what undo covers and calibration has its own fine-tuning step; can be deferred to LIV-05.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-051 — Where settings are changed
+- Surface: scope
+- Source: Raised by the input audit: `09-operations.md` §7 "The upload size limit, the display-version size and the ruler rule MUST be settings the DM changes from the DM view without restarting" was tagged [input]; the input says only «ρυθμιζόμενο» and «ως ρύθμιση».
+- Question: How does the DM change the upload limit, display-version size and diagonal rule?
+- Options:
+  - A) A settings screen in the DM view, applied without restarting → effect on scope: a settings screen joins the MVP.
+  - B) Environment variables read at start → effect on scope: no settings screen; a change needs a restart and a terminal.
+- Recommendation: A, because the display size is meant to be tuned by trial on the TV, which a restart per try makes slow; can be deferred to REL-01.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-052 — Which view sits at the server root
+- Surface: ux
+- Source: Raised by the assumption review: `02-architecture.md` §2: "… the player view is served at `/` and the DM view at `/dm`." (was D-014)
+- Question: Should the player view be at the server root and the DM view at `/dm`, or the reverse?
+- Options:
+  - A) Player view at `/`, DM view at `/dm` → effect on ux: the URL typed on the TV is just address and port; the DM uses `/dm`.
+  - B) DM view at `/`, player view at `/tv` → effect on ux: a longer URL on the TV; opening the bare address lands on the PIN screen.
+- Recommendation: A, because the TV has the worst keyboard; can be deferred to FND-04.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-053 — Which LAN address the connect panel highlights
+- Surface: ux
+- Source: Raised by the assumption review: `08-ux-journeys.md` §5: "All non-internal IPv4 addresses are listed, the first private-range one shown prominently." (was D-030)
+- Question: Should the connect panel list every LAN address and highlight the first private-range one?
+- Options:
+  - A) List all, highlight the first private-range one → effect on ux: works in the common case; with a VPN or virtual adapters the DM may need to pick another from the list.
+  - B) One address the DM picks once and the server remembers → effect on ux: one unambiguous URL and QR, after a first-run choice.
+- Recommendation: A, because it needs no setup step and still shows the alternatives; can be deferred to LIV-03.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-054 — How hidden tokens look to the DM and whether the TV view has controls
+- Surface: ux
+- Source: Raised by the assumption review: `08-ux-journeys.md` §9: "A hidden token is drawn semi-transparent with a hidden marker in the DM view; the player view has no controls and hides the cursor after two seconds." (was D-031)
+- Question: Should hidden tokens be semi-transparent with a marker in the DM view, and the player view have no on-screen controls?
+- Options:
+  - A) As written → effect on ux: the TV shows only the scene; the DM spots hidden tokens by transparency and marker.
+  - B) A fullscreen button on the player view and a different hidden-token cue (outline or toggleable layer) → effect on ux: easier TV setup; a different look for hidden tokens during play.
+- Recommendation: A, because nobody operates the TV during play and browsers already offer fullscreen; can be deferred to PRP-04.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-055 — Who creates entity identifiers
+- Surface: data
+- Source: Raised by the second assumption review: `03-domain-model.md` §3: "UUIDs are generated by the server." (D-038)
+- Question: Should new entities receive their UUID only from the server, or may a client supply the UUID of an entity it creates?
+- Options:
+  - A) Only the server generates UUIDs → effect on data: every identifier originates in one place; a client can never create a record under an identifier of its choosing.
+  - B) Clients generate the UUID and send it; the server checks format and uniqueness → effect on data: the server stores identifiers it did not create and must guard against collisions and reuse.
+- Recommendation: A, because the input chose UUIDs for moving data between PCs, not for client-side creation, and A keeps the trust boundary simple; can be deferred to SRV-01.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-056 — Live version counter after a restart
+- Surface: data
+- Source: Raised by the second assumption review: `04-live-sync.md` §5: "The version counter is one per server process, starting at 1 on start-up." (D-017)
+- Question: Should the live-event version counter restart at 1 on every server start, or be stored so it keeps ascending?
+- Options:
+  - A) In memory, restarting at 1 → effect on data: nothing stored; after a restart every client resynchronises from a fresh snapshot.
+  - B) Stored in SQLite and ascending forever → effect on data: a value written on every live event.
+- Recommendation: A, because every client takes a fresh snapshot after a restart anyway; can be deferred to LIV-01.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-057 — Image URLs built from the content hash
+- Surface: security
+- Source: Raised by the second assumption review: `05-assets-and-images.md` §7: "files are served at `/images/<sha256>/<variant>` subject to `07` §5" (D-021)
+- Question: Should image URLs carry the sha256 of the original upload, or an opaque identifier?
+- Options:
+  - A) `/images/<sha256>/<variant>`, with the entitlement check of `07` §5 → effect on security: a URL reveals which file it is (the same map has the same hash everywhere); access still depends on entitlement.
+  - B) An opaque random identifier mapped to the hash on the server → effect on security: URLs reveal nothing about the file; an extra stored mapping per image.
+- Recommendation: A, because entitlement (Q-012) already decides who may fetch a file, and a published battlemap's hash identifies nothing secret; can be deferred to SRV-04.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-058 — Signing a browser out of the DM view
+- Surface: security
+- Source: Raised by the second assumption review: `02-architecture.md` §5 lists "leave" on `/api/auth`, while `07` §2 says a DM session lasts until the server restarts or the PIN changes.
+- Question: Should the DM be able to sign a browser out of the DM view explicitly?
+- Options:
+  - A) Yes, a "Leave DM view" action ends that browser's session → effect on security: a borrowed or shared device can be signed out on the spot.
+  - B) No; sessions end only on restart or a PIN change → effect on security: a borrowed browser stays a DM device for the rest of the night unless the PIN is changed.
+- Recommendation: A, because at a table laptops get passed around and changing the PIN to sign one device out is heavy; can be deferred to SRV-02.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-059 — Placing a token off the grid
+- Surface: scope
+- Source: Raised by the second assumption review: `06-grid-and-measurement.md` §4: "Snapping is on by default …; holding Alt while dropping places freely." (D-023); the input says only that tokens snap.
+- Question: Should the MVP allow placing a token off the grid by holding Alt while dropping it?
+- Options:
+  - A) Yes: snap by default, Alt places freely → effect on scope: a free-placement capability beyond the input's snap-to-grid.
+  - B) No: every drop snaps → effect on scope: tokens always sit on the grid; no override.
+- Recommendation: A, because objects and scenery tokens often sit between squares and positions are already stored as decimals; can be deferred to PRP-04.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-060 — Load the MVP is accepted against
+- Surface: scope
+- Source: Raised by the second assumption review: `10-testing-acceptance.md` §3: "The large-scene fixture is a generated 10,000 × 7,000 px map with 50 tokens, plus a map-less scene." (D-036)
+- Question: What scene load must the MVP be accepted against, including on the LG TV?
+- Options:
+  - A) A 10,000 × 7,000 px map with 50 tokens → effect on scope: the release promises to handle the top of the input's 5,000–10,000 px range with a busy encounter.
+  - B) A lighter bar, e.g. a 5,000 px map with 20 tokens → effect on scope: easier to pass on a weak TV; large battlemaps are not promised.
+- Recommendation: A, because the input names 10,000 px battlemaps as the case that breaks TV browsers; can be deferred to REL-02.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-061 — How MVP acceptance is defined
+- Surface: scope
+- Source: Raised by the second assumption review: `10-testing-acceptance.md` §5: "The MVP is accepted when each critical journey of `08` §10 passes end to end" (D-042)
+- Question: Is the MVP accepted when the five critical journeys pass end to end, or must each MVP capability also be demonstrated on its own?
+- Options:
+  - A) The five journeys, with the automated suites of `10` §1–§3 covering everything else → effect on scope: the release gate is the journeys plus the test gates.
+  - B) The journeys plus a manual per-capability checklist over `01` §3 → effect on scope: every listed capability is demonstrated by hand before release.
+- Recommendation: A, because the automated gates already cover each capability and a manual checklist would duplicate them; can be deferred to REL-02.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-062 — Which MUSTs are part of MVP acceptance
+- Surface: scope
+- Source: Raised by the second assumption review: `specs/README.md` §Requirement language: "Unless explicitly labeled Future, every `MUST` requirement is part of MVP acceptance." (untagged regime text)
+- Question: Is every MUST in the pack that is not labelled Future part of MVP acceptance?
+- Options:
+  - A) Yes, every non-Future MUST, including those from your cards and from recorded defaults → effect on scope: the release content is exactly what the specs state.
+  - B) Only the capability list of `01` §3 plus the card additions; other MUSTs are guidance → effect on scope: a smaller release boundary, and an implementation may skip a MUST outside it.
+- Recommendation: A, because a MUST that may be skipped is not a requirement, and every MUST is tagged so its origin is visible.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-063 — Token numbering rule on the TV
+- Surface: ux
+- Source: Raised by the second assumption review: `05-assets-and-images.md` §3: "Numbering is per scene, a single token keeps the bare name, and freed numbers are not reused." (D-019); labels are shown on the TV (Q-032).
+- Question: Which numbering rule should token labels follow?
+- Options:
+  - A) Per scene; a lone token keeps the bare name until a second is added; freed numbers are not reused → effect on ux: after a deletion the TV may show Goblin 1, 2, 4, but a number never changes meaning.
+  - B) Per scene, always numbered from 1, freed numbers reused → effect on ux: contiguous labels, but a new token can take the label players associated with a removed one.
+- Recommendation: A, because players refer to tokens by number and a reused number would silently point at a different creature; can be deferred to PRP-04.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-064 — Tag filter matching in the library and picker
+- Surface: ux
+- Source: Raised by the second assumption review: `05-assets-and-images.md` §1: "filters by category and by tags (all selected tags must match), sorted by name" (D-022)
+- Question: When several tags are selected, must an asset carry all of them or any of them, and are results sorted by name?
+- Options:
+  - A) All selected tags (AND), sorted by name → effect on ux: each tag narrows the picker; alphabetical results.
+  - B) Any selected tag (OR), sorted by recent use → effect on ux: each tag widens the picker; recently used assets first.
+- Recommendation: A, because a filter is for narrowing and alphabetical order is predictable mid-game; can be deferred to SRV-05.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-065 — The set of critical journeys
+- Surface: ux
+- Source: Raised by the second assumption review: `08-ux-journeys.md` §10 table: First run, Prepare, Connect TV, Run, Recover (untagged).
+- Question: Are First run, Prepare, Connect TV, Run and Recover the complete set of critical journeys?
+- Options:
+  - A) These five → effect on ux: design and acceptance prioritise them; building the library, settings and backup are ordinary flows.
+  - B) Add "Build the asset library" (upload, tag, set defaults) as a sixth → effect on ux: the library flow is designed and accepted end to end as well.
+- Recommendation: A, because asset creation is already exercised inside Prepare; can be deferred to REL-02.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-066 — Code host and CI service
+- Surface: external
+- Source: Raised by the third assumption review: `13-implementation-plan.md` §3 FND-02: "A pipeline on the project's remote, running on every merge request and every push to the default branch, on Linux and Windows runners" (untagged); the inputs name no code host or CI service, and the repository has no remote yet.
+- Question: Where is the repository hosted and where does CI run?
+- Options:
+  - A) A public GitHub repository with GitHub Actions on Linux and Windows runners → effect on external: a third-party host and CI provider; free for public repositories; the AGPL source is published there.
+  - B) A public GitLab repository with GitLab CI → effect on external: a different third party; Windows runners are more limited on the free tier.
+  - C) No hosted CI: gates run locally with `make verify`, Windows verified by hand before release → effect on external: no third party; FND-02 becomes a local script and per-merge assurance on Windows is lost.
+- Recommendation: A, because the name and licence you chose point to a public release, and free Windows runners make the Windows verification of `09` §3 automatic; can be deferred to FND-02.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-067 — A test that records everything the player view receives
+- Surface: security
+- Source: Raised by the third assumption review: `10-testing-acceptance.md` §3: "A test MUST record every message and image response a player view receives across a scripted session … and assert that no hidden token's ID, asset, image or count appears in it" (D-042)
+- Question: Should the release be gated on a test that records all player-view traffic across a scripted session and fails on any trace of a hidden token?
+- Options:
+  - A) Yes, a release gate → effect on security: a leak through any event, field or image, including ones added later, fails the build.
+  - B) No; unit tests of the filtering code only → effect on security: a leak through a new event type or field could ship unnoticed.
+- Recommendation: A, because hidden information never reaching the TV is the product's one non-negotiable property, and only an end-to-end recording catches leaks nobody anticipated; can be deferred to REL-02.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-068 — A test that player commands are rejected
+- Surface: security
+- Source: Raised by the third assumption review: `10-testing-acceptance.md` §3: "A test MUST assert that every command sent from the players room is rejected and changes nothing" (D-042)
+- Question: Should a test prove that every command sent from a player view is rejected and changes nothing?
+- Options:
+  - A) Yes → effect on security: the read-only player view (Q-010) is verified on every build, not assumed.
+  - B) No; rely on code review → effect on security: a handler that forgets the role check could let any device on the Wi-Fi move or reveal tokens.
+- Recommendation: A, because the player view is open to any device on the Wi-Fi, so its being read-only must be tested; can be deferred to LIV-02.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-069 — Security over convenience in conflicts
+- Surface: security
+- Source: Raised by the third assumption review: `specs/README.md` §Conflict resolution rule 2: "Security and hidden-information isolation requirements override convenience." (untagged)
+- Question: When a security or hidden-information requirement conflicts with convenience, does security always win?
+- Options:
+  - A) Yes, always → effect on security: an implementer never trades a security or hiding rule for ease of use without an ADR you approve.
+  - B) Case by case, decided by the implementer → effect on security: convenience may win silently where the implementer judges the risk small.
+- Recommendation: A, because the alternative lets security rules erode one small trade-off at a time without you seeing it.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-070 — What "Future" means
+- Surface: scope
+- Source: Raised by the third assumption review: `specs/README.md` §Scope labels: "**Future:** anticipated in architecture, but not implemented in MVP." (untagged)
+- Question: Must the MVP architecture anticipate Future items, or only avoid implementing them?
+- Options:
+  - A) Anticipated but not implemented: the MVP keeps the hooks the specs name (e.g. `character_id`, `grid.type`) and avoids choices that block Future items → effect on scope: small preparatory fields and constraints in the MVP, no Future features.
+  - B) Only not implemented; Phase 2 adapts the code as needed → effect on scope: the MVP may drop the preparatory hooks; later phases may need migrations.
+- Recommendation: A, because the input itself asks for these hooks (character_id, grid.type) so that Phase 2 needs no painful migration.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-071 — Material ambiguities go to you before code
+- Surface: scope
+- Source: Raised by the third assumption review: `specs/README.md` §Conflict resolution rule 4: "Ambiguities that materially affect data, security or scope become an Architecture Decision Record before implementation." (untagged)
+- Question: When an implementer finds an ambiguity that affects data, security or scope, must it become an ADR awaiting your approval before code?
+- Options:
+  - A) Yes → effect on scope: nothing touching the five areas is decided in code without your sign-off; work on that item pauses until you answer.
+  - B) No; the implementer decides and records it → effect on scope: faster, but data, security and scope decisions can be made without you.
+- Recommendation: A, because it is the same rule this whole pack was built on: decisions that change the product are yours.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-072 — What changing a locked decision requires
+- Surface: scope
+- Source: Raised by the third assumption review: `12-decision-register.md` §6: "A proposed change requires: 1. a short ADR describing the problem; 2. alternatives and security/data/scope impact; 3. migration and testing implications; 4. Product Owner approval before code changes." (untagged)
+- Question: Must every change to a locked decision go through an ADR with alternatives and impact, and your approval before code?
+- Options:
+  - A) Yes, all four steps → effect on scope: no locked decision changes without a written case and your approval.
+  - B) Your approval only, no written ADR → effect on scope: lighter, but the reasoning and alternatives behind the change are not recorded.
+- Recommendation: A, because the written ADR is the only record of why a locked decision changed.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-073 — Small implementation details decided locally
+- Surface: scope
+- Source: Raised by the third assumption review: `12-decision-register.md` §6: "Agents MUST NOT reopen decisions merely because a different framework or pattern is familiar. Small implementation details may be decided locally if they preserve the locked behavior and are recorded in `DECISIONS.md`." (D-002)
+- Question: May implementers decide small details themselves, provided the locked behaviour is kept and the decision is recorded in DECISIONS.md?
+- Options:
+  - A) Yes, recorded in DECISIONS.md with alternatives → effect on scope: implementation proceeds without asking you about details; every such decision stays reviewable.
+  - B) No; every decision not in the specs comes to you → effect on scope: you are asked about libraries, names and internals; work stalls on questions that change nothing you own.
+- Recommendation: A, because it is how the pack already works: details are recorded decisions, product changes are your cards.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-074 — New product promises go through the matrix first
+- Surface: scope
+- Source: Raised by the third assumption review: `11-traceability.md` §Coverage rule: "Any future commercial promise MUST be added here before implementation and classified as MVP, Future or Out of Scope; a code change alone does not change product scope." (D-043)
+- Question: Must any new product promise be classified in the traceability matrix before it is implemented?
+- Options:
+  - A) Yes, classified MVP, Future or Out of Scope in the matrix first → effect on scope: scope only grows through a recorded classification.
+  - B) No; new features may be added in code and recorded afterwards → effect on scope: scope can grow silently through implementation.
+- Recommendation: A, because the matrix is the one place where the product's scope is read.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-075 — Automatic database migration on start
+- Surface: data
+- Source: Raised by the fourth assumption review: `09-operations.md` §2 "The server MUST apply pending SQLite migrations before accepting connections." (D-009) and §1 "`npm start`, which builds the client if needed, applies pending migrations and starts the server" (D-033).
+- Question: After an update, should the server migrate the DM's database automatically on start, or only after the DM runs an explicit command?
+- Options:
+  - A) Automatically, after first copying the database file to a dated backup in the data directory → effect on data: an update just works; each migration leaves a restorable copy of the previous database.
+  - B) Automatically, with no backup → effect on data: an update just works; a faulty migration can damage the DM's only copy.
+  - C) The server refuses to start while migrations are pending and tells the DM to back up and run `npm run migrate` → effect on data: nothing changes without a deliberate step; one more command after every update.
+- Recommendation: A, because DMs running from source will just run `npm start` after pulling, and an automatic backup protects their campaigns without an extra step; can be deferred to REL-01.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-076 — Firewall scope the DM is told to allow
+- Surface: security
+- Source: Raised by the fourth assumption review: `08-ux-journeys.md` §5 and `09-operations.md` §4: the console and README "MUST tell the DM to allow private networks" (D-041).
+- Question: When Windows asks about the firewall, should the DM be told to allow private networks only, or all networks?
+- Options:
+  - A) Private networks only → effect on security: the unencrypted server is closed on networks Windows marks public (cafés, hotels); on such a network the TV cannot connect until the DM changes the profile.
+  - B) Private and public networks → effect on security: connecting works anywhere, but the plain-HTTP server and PIN entry are exposed on public Wi-Fi.
+- Recommendation: A, because you chose plain HTTP for a trusted home network (Q-011); can be deferred to LIV-03.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-077 — The register over detailed statements
+- Surface: scope
+- Source: Raised by the fourth assumption review: `specs/README.md` §Conflict resolution rule 1: "`12-decision-register.md` and the product statement override inferred behavior." (untagged)
+- Question: If a detailed statement in the specs conflicts with a register bullet or the product statement, which wins?
+- Options:
+  - A) The register and the product statement win; the conflicting detail is corrected under the amendment rules → effect on scope: your recorded decisions cannot be narrowed or widened by a detail elsewhere.
+  - B) The more specific statement wins → effect on scope: a detail in `01`–`10` can change what the register says without an ADR.
+- Recommendation: A, because the register holds only your own decisions and B would let them change without you.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-078 — What the MVP label means
+- Surface: scope
+- Source: Raised by the fourth assumption review: `specs/README.md` §Scope labels: "**MVP:** required for the first production release." (untagged)
+- Question: Does MVP mean everything required before the first release, or a smaller first cut with the rest following?
+- Options:
+  - A) Everything labelled MVP is required before the first release → effect on scope: one release, gated on all MVP items and journeys.
+  - B) A first usable cut may ship earlier, with some MVP items following → effect on scope: an earlier, smaller release and a tracked follow-up.
+- Recommendation: A, because your definition of done (prepare and run a session alone) needs the whole MVP list; the phase plan already delivers usable steps internally.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-079 — What Out of Scope means
+- Surface: scope
+- Source: Raised by the fourth assumption review: `specs/README.md` §Scope labels: "**Out of Scope:** intentionally excluded; implementation agents must not add it." (untagged)
+- Question: Are Out of Scope items (custom maps, remote play, full effects engine, dynamic lighting, hex grids) permanently excluded, or only unplanned?
+- Options:
+  - A) Intentionally excluded; never built unless you reclassify them through the traceability matrix → effect on scope: no architecture anticipates them and agents never add them.
+  - B) Only unplanned, treated like unscheduled Future items → effect on scope: the architecture should leave room for them.
+- Recommendation: A, because the input lists them under «Εκτός scope», separate from its Future lists.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-080 — Steering the TV camera with the frame
+- Surface: ux
+- Source: Raised by the fourth assumption review: `08-ux-journeys.md` §2: "… the frame of what the TV sees, which the DM can move and resize to steer the player camera" (D-046)
+- Question: Should the DM steer the TV camera by dragging and resizing the TV frame, or through a separate control?
+- Options:
+  - A) Drag the frame to pan, resize it to zoom → effect on ux: steering the TV is direct manipulation on the DM canvas, no extra buttons.
+  - B) The frame only shows; a "send my view to the TV" button sets the player camera to the DM's own view → effect on ux: one click to frame the TV, but the DM must move their own camera to do it.
+- Recommendation: A, because the input gives the frame as the way the DM sets the TV camera, and B would move the DM's own view every time; can be deferred to LIV-06.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-081 — How schema changes treat existing data
+- Surface: data
+- Source: Raised by the fifth assumption review: `14-agent-playbook.md` §8: "Prefer additive nullable columns and tables, backfill, enforce, then later cleanup (expand, migrate, contract)." (untagged)
+- Question: Should schema changes to the DM's database be additive first (add, backfill, enforce, clean up later) rather than rewriting or dropping data in one step?
+- Options:
+  - A) Additive first; destructive steps only in a later release and never without an approved plan → effect on data: an update never loses campaign data, and an older copy of the app can still read the database for a while.
+  - B) Direct changes, dropping or rewriting columns in one migration → effect on data: simpler migrations; a faulty one can lose data, recoverable only from the pre-migration backup (Q-075).
+- Recommendation: A, because the DM's database is their only copy of their campaigns; can be deferred to SRV-01.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-082 — What data migrations are tested on
+- Surface: data
+- Source: Raised by the fifth assumption review: `14-agent-playbook.md` §8: "Test migrations on a realistic anonymized dataset before production." (untagged); the product has no production server, and each DM's data stays on their PC.
+- Question: What data should every migration be tested on before a release?
+- Options:
+  - A) A generated fixture database with campaigns, sessions, scenes, tokens, assets and images of every kind, built by a script in the repository → effect on data: no real campaign data ever enters the repository or CI.
+  - B) A copy of a real campaign database the owner provides → effect on data: realistic data, but a DM's campaign (names, notes, purchased maps) is stored in the repository or CI.
+- Recommendation: A, because there is no production dataset to anonymize and real campaigns may contain purchased maps; can be deferred to SRV-01.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-083 — Hiding and deleting look the same to players
+- Surface: security
+- Source: Raised by the fifth assumption review: `04-live-sync.md` §3: a deletion reaches players as `token.removed`, the same event as hiding (D-049).
+- Question: Should a player client receive the same event whether a token was hidden or deleted?
+- Options:
+  - A) Yes, both are `token.removed` → effect on security: a player client cannot tell that a token was hidden rather than removed, so it cannot learn that hidden tokens exist.
+  - B) Separate events (`token.hidden`, `token.deleted`) → effect on security: a player client learns which tokens are hidden but still on the scene.
+- Recommendation: A, because the input requires that the player client not know hidden tokens exist, and B would tell it; can be deferred to FND-03.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-084 — Internal sequential keys beside UUIDs
+- Surface: data
+- Source: Raised by the seventh assumption review: `14-agent-playbook.md` §8: "Never expose sequential IDs because internal keys exist." (untagged); `03` §3 fixes UUIDs as identifiers.
+- Question: May the database use internal sequential keys alongside the UUIDs, or must the UUIDs (sha256 for Image) be the only keys?
+- Options:
+  - A) UUIDs (sha256 for Image) are the only primary and foreign keys → effect on data: one identifier per entity everywhere; copying data between PCs needs no key remapping.
+  - B) Internal integer keys may exist for joins, never exposed outside the server → effect on data: two identifiers per entity; moving data between PCs relies on the UUID column and a remapping step.
+- Recommendation: A, because the input chose UUIDs precisely so data from another PC never collides, and a second key would reintroduce remapping; can be deferred to SRV-01.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-085 — What `/api/auth` tells a browser without a session
+- Surface: security
+- Source: Raised by the seventh assumption review: `02-architecture.md` §5: `/api/auth` offers "current role" without a DM session (D-048).
+- Question: Should any browser be able to ask `/api/auth` whether it itself holds a DM session?
+- Options:
+  - A) Yes; the answer concerns only the calling browser and reveals nothing about other sessions → effect on security: one more unauthenticated read, which tells a browser only what its own cookie already implies.
+  - B) No; the client probes a protected route and treats a refusal as "not signed in" → effect on security: the unauthenticated surface stays PIN entry, leave and setup; errors and state become harder to tell apart.
+- Recommendation: A, because the answer tells a browser nothing it could not learn by trying a protected route; can be deferred to SRV-02.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-086 — Measurements on scenes that are not live
+- Surface: security
+- Source: Raised by the seventh input audit: `04-live-sync.md` §11: "A measurement made on a scene that is not live MUST NOT be sent to players." was tagged [input, Q-027]; Q-027 covers the live scene only and the input only implies the rest («Αλλαγές σε μη ενεργές σκηνές δεν στέλνονται πουθενά»).
+- Question: Should measurements the DM makes on a scene that is not live stay in the DM view?
+- Options:
+  - A) Yes, they never leave the DM view → effect on security: nothing about a prepared scene (distances, positions) reaches the TV.
+  - B) The TV shows every measurement, whatever scene it is made on → effect on security: measuring in prep mode would show lines from a scene the players have not seen.
+- Recommendation: A, because prep mode must never reach the TV (Q-024).
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-087 — Ruler scale from the scene's feet per square
+- Surface: scope
+- Source: Raised by the seventh assumption review: `06-grid-and-measurement.md` §5: "Distances MUST scale with the scene's feet per square." (D-045)
+- Question: Should the ruler multiply squares by each scene's feet per square, or always count 5 ft per square?
+- Options:
+  - A) Multiply by the scene's feet per square → effect on scope: the MVP ruler supports other scales (e.g. 10 ft or overland maps); feet per square is an editable scene field.
+  - B) Always 5 ft per square → effect on scope: feet per square is stored but unused in the MVP; other scales become Future.
+- Recommendation: A, because the input stores feet per square on every scene, which only matters if the ruler uses it; can be deferred to LIV-07.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-088 — Test art is generated, not third-party
+- Surface: external
+- Source: Raised by the seventh assumption review: `10-testing-acceptance.md` §3: "The large-scene fixture MUST be a generated 10,000 × 7,000 px map with 50 tokens" (D-036); the repository is public under AGPL-3.0 (Q-021, Q-066).
+- Question: Should test maps and token images be generated by a script, or real third-party art committed to the repository?
+- Options:
+  - A) Generated by a script; no third-party art in the repository → effect on external: no licence or attribution obligations for test assets in the public repository.
+  - B) Real battlemaps and tokens committed as fixtures → effect on external: each image's licence must allow redistribution under AGPL-3.0, with attribution tracked.
+- Recommendation: A, because most battlemap licences forbid redistribution, and a public repository would redistribute them; can be deferred to REL-02.
+- Blocks: specification
+- Answer: A (2026-09-23; recommendation accepted)
+
+### Q-089 — Reordering by dragging in the sidebar
+- Surface: ux
+- Source: Raised by the seventh assumption review: `08-ux-journeys.md` §1: campaigns, sessions and scenes are reorderable from the sidebar (D-050: by dragging).
+- Question: Should sessions and scenes be reordered by dragging them in the sidebar tree, or through buttons or a separate screen?
+- Options:
+  - A) Drag in the sidebar tree, with a keyboard alternative (move up/down) for `08` §8 → effect on ux: all structure management stays in the primary navigation.
+  - B) Up/down buttons or a separate ordering dialog → effect on ux: a plain tree; ordering takes more clicks or another view.
+- Recommendation: A, because the sidebar is where the DM already sees the order; can be deferred to PRP-01.
 - Blocks: specification
 - Answer: A (2026-09-23; recommendation accepted)
