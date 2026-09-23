@@ -44,7 +44,16 @@ async function serveVite(app: FastifyInstance, root: string): Promise<SendIndex>
   });
   await app.register(middie);
   app.use(vite.middlewares);
-  app.addHook('onClose', () => vite.close());
+  app.addHook('onClose', async () => {
+    // Vite's close cancels a dependency optimization in progress, and requests
+    // already waiting on it then never settle, so close waits for them forever.
+    // On a slow machine the first optimization is still running when a short
+    // session closes; let it finish first.
+    await vite.waitForRequestsIdle();
+    const discovered = Object.values(vite.environments.client.depsOptimizer?.metadata.discovered ?? {});
+    await Promise.allSettled(discovered.flatMap((dep) => (dep.processing ? [dep.processing] : [])));
+    await vite.close();
+  });
   return async (request, reply) => {
     const html = await readFile(path.join(root, 'index.html'), 'utf8');
     return reply.type('text/html').send(await vite.transformIndexHtml(request.url, html));
