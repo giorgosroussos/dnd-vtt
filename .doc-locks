@@ -1,0 +1,76 @@
+# Documentation lock manifest.
+#
+# One rule per line, `tier: glob`. The LAST matching rule wins, so promoting a
+# file is a line appended at the end and this file is its own history of
+# promotions. A path that matches no rule is `free`.
+#
+#   hard-locked  may not change at all; `make unlock PATH=... REASON="..."` is
+#                the only way through, and it leaves a record in UNLOCKS.md
+#   append-only  existing lines may never be removed or modified; additions are
+#                allowed anywhere in the file, including under an existing entry
+#   free         mutable by design; listed explicitly so that mutability reads as
+#                a decision rather than an oversight
+#
+# Enforced by scripts/lock-guard.py over the diff, from .githooks/pre-commit
+# locally and from the pre-receive hook on the remote. `make install-hooks`
+# activates the local ones; `make check-locks` runs the same check by hand.
+# Tiers are promoted as the pack matures; each promotion is a committed change,
+# and this file is hard-locked, so each is a `make unlock PATH=.doc-locks` with
+# its reason in UNLOCKS.md. Tiers never go down: the guard compares the manifest
+# before and after a change and refuses any path whose tier would be lowered,
+# whichever glob does it (demotion rule). The change that judges a commit is
+# always read from HEAD (or, on the remote, from the revision being replaced),
+# never from the working tree, so a commit cannot relax a lock for itself.
+
+version: 1
+
+# --- free: the living documents. Changing is what they are for. ---------------
+# PLAN.md drops completed items, GAPS.md retires closed rows, TRACEABILITY.md
+# rewrites a status when evidence arrives. A lock here would be a lie.
+free: PLAN.md
+free: GAPS.md
+free: TRACEABILITY.md
+free: AGENTS.md
+free: CLAUDE.md
+free: README.md
+free: Makefile
+free: scripts/**
+free: .githooks/**
+
+
+# specs/ stays free until the baseline is stamped: review rounds still rewrite
+# statements and their provenance tags. The freeze promotes it to hard-locked.
+free: specs/**
+
+# --- append-only: the record of what happened ---------------------------------
+# The event log is the source of truth for the streams that use it. Removing a
+# line is caught here; changing one is caught by the hash chain, which is what
+# `make verify-chain` and the `chain-intact` rule of check-docs walk.
+append-only: .log/events.jsonl
+append-only: UNLOCKS.md
+
+# DECISIONS.md and QUESTIONS.md are free because they are generated, not
+# authored: each is the projection of a stream of the log. Free does not mean
+# unguarded. The `projection-fresh` rule of check-docs rebuilds both and compares
+# byte for byte, so a hand edit fails the gate rather than becoming the record,
+# and the rebuild scripts have to be able to write the files, which a lock would
+# prevent. A card that moves between Blocking, Open and Resolved moves because an
+# event says so, not because someone edited a section.
+free: DECISIONS.md
+free: QUESTIONS.md
+
+# The lock layer guards itself. The guard, the ceremony script, the hooks and
+# this manifest are hard-locked from the first commit: a guard that the diff it
+# judges may rewrite is no guard. Updating any of them is a ceremony.
+hard-locked: scripts/lock-guard.py
+hard-locked: scripts/unlock.sh
+hard-locked: .githooks/**
+hard-locked: .doc-locks
+
+# --- hard-locked: the raw material -------------------------------------------
+# What the owner actually said. Nothing in the pack ever edits it; a new or
+# corrected input is a deliberate, recorded act.
+hard-locked: docs/inputs/**
+
+# --- promoted at the freeze (appended by the freeze, not written here) --------
+#   hard-locked: specs/**

@@ -1,0 +1,7 @@
+#!/bin/sh
+# Transport only. The policy is scripts/lock-guard.py; nothing is decided here.
+#
+# Fast local feedback, and bypassable with `git commit --no-verify`. The same
+# guard runs as pre-receive on the remote, where it cannot be bypassed.
+# See .githooks/README.md.
+exec python3 scripts/lock-guard.py --staged --quiet

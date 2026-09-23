@@ -1,0 +1,21 @@
+#!/bin/sh
+# Transport only. Consumes the single-use unlock token: one ceremony, one commit.
+#
+# The token is removed first and unconditionally. Re-locking is best effort: the
+# unlocked path may have been deleted or renamed in the very commit the token
+# authorized, and a missing path must not leave the token behind, because a
+# surviving token would authorize the next commit as well.
+set -u
+token=".doc-unlock"
+[ -f "$token" ] || exit 0
+paths="$(sed -n 's/^path: *//p' "$token")"
+rm -f -- "$token"
+printf '%s\n' "$paths" | while IFS= read -r path; do
+    [ -n "$path" ] && [ -e "$path" ] && chmod a-w -- "$path" || true
+done
+# Then re-lock from the manifest rather than from the token alone: the token
+# names what this ceremony authorized, the manifest names everything that must
+# be read-only, so a path left writable by any earlier ceremony is closed here
+# too. Best effort, like the loop above; the hooks are transport.
+[ -f scripts/lock-guard.py ] && python3 scripts/lock-guard.py --relock --quiet 2>/dev/null || true
+echo "lock-guard: unlock token consumed; every hard-locked path is read-only again."

@@ -1,0 +1,42 @@
+#!/bin/sh
+# Server-side mirror of .githooks/pre-commit. Not installed by `make install-hooks`:
+# copy it into the remote repository as `hooks/pre-receive` and make it executable.
+# This is the enforcement. `--no-verify` is a client-side flag and cannot reach here. It
+# checks that every locked change carries a recorded reason, not who wrote the reason.
+#
+# Manifest and guard are read from the revision being replaced, not from the one
+# being pushed, so a push cannot relax a lock and break it in the same breath. The
+# pushed manifest is handed to the guard as well, so a push that only relaxes a
+# lock, to use the relaxation in a later push, is refused by the demotion rule. A
+# brand-new ref has nothing to be replaced, so it falls back to what it pushes.
+set -eu
+
+EMPTY_TREE=4b825dc642cb6eb9a060e54bf8d69288fbee4904
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+status=0
+
+extract() { git show "$1:$2" > "$3" 2>/dev/null; }
+
+while read -r old new ref; do
+    case "$new" in *[!0]*) ;; *) continue ;; esac          # ref deletion: nothing to check
+    base="$old"
+    case "$old" in *[!0]*) ;; *) base="$EMPTY_TREE" ;; esac
+
+    extract "$base" .doc-locks "$work/manifest" ||
+        extract "$new" .doc-locks "$work/manifest" || continue
+    extract "$base" scripts/lock-guard.py "$work/guard.py" ||
+        extract "$new" scripts/lock-guard.py "$work/guard.py" || continue
+
+    newman=""
+    if extract "$new" .doc-locks "$work/manifest.new"; then newman="--new-manifest $work/manifest.new"; fi
+
+    # shellcheck disable=SC2086
+    if ! git diff --no-color --no-renames --unified=0 "$base" "$new" |
+         python3 "$work/guard.py" --manifest "$work/manifest" $newman --no-token --quiet; then
+        echo "lock-guard: rejected $ref" >&2
+        status=1
+    fi
+done
+
+exit $status
