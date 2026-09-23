@@ -1,4 +1,4 @@
-# Emberglass CI (FND-02, specs/13-implementation-plan.md §3; D-058, D-059).
+# Emberglass CI (FND-02, specs/13-implementation-plan.md §3; D-060, D-061).
 #
 # Every gate job runs exactly one root Makefile target, so "CI is green" and
 # "`make verify` is green" are the same statement (specs/10-testing-acceptance.md §1).
@@ -40,6 +40,9 @@ jobs:
       SETUP_BROWSERS: ${{ matrix.target == 'e2e' && '--with-deps chromium' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing after checkout needs the token; npm install scripts should not see it.
+          persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         if: matrix.target != 'check-docs'
         with:
@@ -84,6 +87,9 @@ jobs:
         shell: msys2 {0}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing after checkout needs the token; npm install scripts should not see it.
+          persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         if: matrix.target != 'check-docs'
         with:
@@ -133,6 +139,9 @@ jobs:
         gate: [hidden-information, player-command-rejection, image-revocation, offline-e2e, external-url-build]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing after checkout needs the token; npm install scripts should not see it.
+          persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc

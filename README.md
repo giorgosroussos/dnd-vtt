@@ -21,7 +21,7 @@ make help         # the full command contract
 
 ## Continuous integration
 
-GitHub Actions, `.github/workflows/ci.yml` (FND-02, `specs/13-implementation-plan.md` §3; D-058, D-059), on every pull request, every push to `main` and on demand. Every job runs exactly one root `Makefile` target, so a gate cannot pass in CI and fail locally: to reproduce a red job, run its command. Before it, a job only provisions the machine (checkout, Node from `.nvmrc`, `make setup`; on Windows also MSYS2 for `make` and bash). No job retries.
+GitHub Actions, `.github/workflows/ci.yml` (FND-02, `specs/13-implementation-plan.md` §3; D-060, D-061), on every pull request, every push to `main` and on demand. Every job runs exactly one root `Makefile` target, so a gate cannot pass in CI and fail locally: to reproduce a red job, run its command. Before it, a job only provisions the machine (checkout, Node from `.nvmrc`, `make setup`; on Windows also MSYS2 for `make` and bash). No job retries.
 
 | Job | Runners | Command |
 | --- | --- | --- |
