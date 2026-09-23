@@ -40,7 +40,8 @@ describe('parsePort', () => {
 describe('loadConfig', () => {
   it('uses EMBERGLASS_DATA_DIR and EMBERGLASS_PORT when set', () => {
     const config = loadConfig({ EMBERGLASS_DATA_DIR: '/srv/emberglass', EMBERGLASS_PORT: '4000' }, 'linux', '/home/dm');
-    expect(config).toEqual({ dataDir: '/srv/emberglass', port: 4000 });
+    // An absolute path is kept as the host's absolute form of it (D:\srv\… on Windows).
+    expect(config).toEqual({ dataDir: path.resolve('/srv/emberglass'), port: 4000 });
   });
 
   it('resolves a relative data directory from where the command was typed', () => {
