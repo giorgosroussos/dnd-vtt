@@ -1,3 +1,16 @@
 .doc-unlock
 __pycache__/
 .claude/settings.local.json
+
+# dependencies and build output
+node_modules/
+dist/
+*.tsbuildinfo
+
+# local development environment (make setup copies .env.example)
+.env
+.dev-data/
+
+# Playwright output
+e2e/test-results/
+e2e/playwright-report/

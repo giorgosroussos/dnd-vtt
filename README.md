@@ -2,10 +2,15 @@
 
 A free, self-hosted virtual tabletop for in-person play, compatible with 5th edition (SRD 5.1): the DM prepares sessions as series of scenes and runs them on a TV or projector from a server on their own PC. It is not a remote-play platform, a character manager or a map maker. Licensed under AGPL-3.0.
 
-Status: **documentation pack complete, Phase 0 not started.** No code exists yet. The first work package is the command contract (FND-01, `PLAN.md`). Until it lands, every `make` target except `make check-docs` fails with a message naming the package that delivers it.
+Status: **Phase 0 in progress.** The command contract and repository scaffold (FND-01) are done: every `make` target runs, and the server serves two empty views. No product feature exists yet; the next work package is in `PLAN.md`.
+
+Development needs Node.js 24 or newer (`nvm use` reads `.nvmrc`) and Python 3 for the documentation gates.
 
 ```bash
-make check-docs   # the only target that runs today
+make setup        # npm ci, Playwright's Chromium, .env from .env.example
+make verify       # lint, format-check, typecheck, test, e2e, build, check-docs
+make dev          # the server with Vite on http://localhost:3000 (player view /, DM view /dm)
+make smoke        # checks a running server
 make help         # the full command contract
 ```
 

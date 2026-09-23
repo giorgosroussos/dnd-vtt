@@ -1,0 +1,26 @@
+{
+  "name": "@emberglass/server",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "tsx watch --clear-screen=false --exclude \"../client/**\" --conditions=development src/main.ts --dev",
+    "migrate": "tsx --conditions=development src/db/migrate-cli.ts"
+  },
+  "dependencies": {
+    "@emberglass/shared": "0.0.0",
+    "@fastify/static": "^10.1.4",
+    "better-sqlite3": "^13.0.3",
+    "fastify": "^5.12.5"
+  },
+  "devDependencies": {
+    "@fastify/middie": "^9.3.4",
+    "@types/better-sqlite3": "^9.6.0",
+    "tsx": "^4.23.15",
+    "vite": "^8.3.0"
+  }
+}

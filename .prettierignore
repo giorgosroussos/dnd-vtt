@@ -1,0 +1,12 @@
+# The documentation pack has its own format and gate (make check-docs); several
+# of its files are generated or locked. Prettier formats code and configuration only.
+*.md
+.log/
+specs/
+docs/
+.githooks/
+package-lock.json
+dist/
+.dev-data/
+e2e/test-results/
+e2e/playwright-report/

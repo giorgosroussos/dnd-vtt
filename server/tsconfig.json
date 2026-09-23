@@ -1,0 +1,10 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+    "tsBuildInfoFile": "../node_modules/.tmp/server.tsbuildinfo"
+  },
+  "include": ["src", "vitest.config.ts"],
+  "references": [{ "path": "../shared/tsconfig.build.json" }]
+}

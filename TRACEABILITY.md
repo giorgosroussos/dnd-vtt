@@ -6,7 +6,7 @@ Implementation status and evidence per work package (`specs/13-implementation-pl
 
 | Package | Phase | Outcome | Key specs | Status | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| FND-01 | 0 | Command contract and repository scaffold | `02` §1, `09` §1 | not started | — |
+| FND-01 | 0 | Command contract and repository scaffold | `02` §1, `09` §1 | done | 2026-09-23, Linux (WSL2), Node 24.11.0. `make clean-start` exit 0: a copy of the working tree with an empty temporary data directory ran setup (`npm ci`), infra-up, migrate, verify, then `make smoke` against `make dev`, and was removed. `make verify` exit 0: lint, format-check, typecheck, `make test` (51 Vitest tests, among them `server/src/db/migrate.test.ts` "migrateDataDirectory against a real SQLite file" in a temporary data directory, and `server/src/http/app.test.ts` "answers 404 at /api/…"), `make e2e` (2 Playwright tests in `e2e/tests/views.spec.ts`: a DM context and a player context against the production build), build, check-docs. `make smoke` exit 0 against `make dev` and against `npm start`. `make audit` found 0 vulnerabilities. `make scan-secrets` exit 0, and exit 1 with a planted GitHub token. `make help` lists all 25 targets of AGENTS.md "Commands"; `make infra-up`, `infra-status` and `infra-down` exit 0. `npm start` and `make test` refuse Node 22 and Node 12 with a message. |
 | FND-02 | 0 | CI baseline | `10` §4, `10` §2 | not started | — |
 | FND-03 | 0 | API and WebSocket conventions | `02` §5, `04` §2, `04` §3, `04` §5 | not started | — |
 | FND-04 | 0 | Design, accessibility and localization foundation | `02` §2, `08` §6, `08` §8, `02` §6 | not started | — |
@@ -46,17 +46,18 @@ Phase exit criteria are in `specs/13-implementation-plan.md` §3–7. A phase is
 
 ## Reproducing the evidence
 
-From a clone, once FND-01 has delivered the command contract:
+From a clone, with Node 24 or newer on PATH (`nvm use` reads `.nvmrc`):
 
 ```bash
 make setup        # dependencies from lockfiles, env examples
 make infra-up     # no local services; succeeds and says so
 make migrate
 make verify       # lint, format-check, typecheck, test, e2e, build, check-docs
+make dev          # in another terminal; then:
 make smoke
 make audit        # the CI dependency-scan gate
 make scan-secrets # the CI secret-scan gate
-make check-docs   # runs today, before any code exists
+make check-docs   # needs Python 3 only
 ```
 
 `make clean-start` runs the same sequence from a fresh environment and tears it down afterwards. Evidence recorded in this file names the command, the date and what it proved; a reviewer must be able to repeat it from this section.

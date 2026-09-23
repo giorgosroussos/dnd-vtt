@@ -67,6 +67,13 @@ Affected specs: …
 - D-048 — Current role on the auth resource — implementation
 - D-049 — Event names for moves, deletions and the camera — implementation
 - D-050 — Reordering in the sidebar — implementation
+- D-051 — Static analysis and formatting — implementation
+- D-052 — TypeScript builds and type checking of the workspaces — implementation
+- D-053 — Development server on one port — implementation
+- D-054 — Migration runner mechanics — implementation
+- D-055 — Test runner layout — implementation
+- D-056 — Dependency and secret scanning — implementation
+- D-057 — Development environment, smoke check and clean start — implementation
 
 ## D-001 (2026-09-23) — Repository documentation regime
 Type: implementation
@@ -417,3 +424,52 @@ Decision: The DM changes the order of sessions within a campaign and of scenes w
 Why: the input stores an `order` on sessions and scenes; the sidebar (Q-023) is where they are listed, so it is where they are reordered.
 Alternatives: up/down buttons (rejected: slower for long lists); a separate ordering dialog (rejected: another screen for a one-step action).
 Affected specs: `specs/08-ux-journeys.md` §1.
+
+## D-051 (2026-09-23) — Static analysis and formatting
+Type: implementation
+Decision: `make lint` runs ESLint with typescript-eslint's type-aware recommended rules over every workspace and the repository scripts, plus the React hooks rules in the client, with zero warnings allowed. `make format` and `make format-check` run Prettier over code and configuration only; Markdown, the event log, `specs/`, `docs/` and `.githooks/` are excluded because the documentation pack has its own gate and several of its files are generated or hard-locked. TypeScript is pinned to the 6.0 line (`~6.0.3`).
+Why: Type-aware rules such as floating-promise detection catch the async mistakes a Fastify and Socket.io server invites; Prettier ends formatting review. TypeScript 7 (the native compiler) is the current release, but typescript-eslint supports TypeScript below 6.1 only, so the newest TypeScript the linter can read is the one pinned.
+Alternatives: Biome for both lint and format (rejected: no type-aware rules); oxlint (rejected: same gap); TypeScript 7 with linting of syntax only (rejected: gives up the type-aware rules for compiler speed the project does not need at its size); Prettier over Markdown too (rejected: it would rewrite generated and locked documents).
+Affected specs: `10` §1.
+
+## D-052 (2026-09-23) — TypeScript builds and type checking of the workspaces
+Type: implementation
+Decision: `make typecheck` is `tsc -b` over a solution `tsconfig.json` referencing `shared`, `server`, `client` and `e2e`; each workspace's `tsconfig.json` checks sources, tests and tool configs without emitting. `shared` also has a composite `tsconfig.build.json` that emits JavaScript and declarations to `shared/dist`, referenced by server and client. The server is compiled by `tsc` (`server/tsconfig.build.json`, tests excluded) to `server/dist` and run by Node; the client is built by Vite. `shared` exports its source under the `development` condition and its build otherwise, so Vite, Vitest and the development server (`tsx --conditions=development`) use the source with no build step while production uses `dist`.
+Why: Project references make the contract types in `shared` one compiled unit that both sides depend on, which is the reason the workspace exists (D-007). Plain `tsc` output keeps the production server free of a TypeScript runtime.
+Alternatives: Bundling the server with esbuild or tsup (rejected: an extra tool for a server that needs no bundling); running TypeScript in production through tsx (rejected: a transpiler as a runtime dependency on the DM's PC); Node's built-in type stripping (rejected: it refuses files reached through `node_modules`, which is how workspaces link `shared`); path aliases instead of package exports (rejected: every tool would need the aliases repeated).
+Affected specs: `02` §1, `10` §1.
+
+## D-053 (2026-09-23) — Development server on one port
+Type: implementation
+Decision: `npm run dev` (and `make dev`) runs the Fastify server under `tsx watch` with Vite in middleware mode inside it, so the client, its hot reload and the API share one origin on the configured port, exactly as in production. The client tree is excluded from tsx's watcher; Vite reloads client changes itself.
+Why: The DM session cookie is SameSite=Strict and REST writes and the WebSocket handshake check the Origin (`07` §2): a separate Vite port would make development differ from production on exactly the checks that matter, and a TV on the LAN would need a different URL in development. One port also keeps the Windows firewall to one prompt (D-014).
+Alternatives: Vite's own dev server on a second port proxying `/api` and `/socket.io` to the server (rejected: two origins, so the Origin and cookie behaviour under test is not the one that ships); serving a watched client build from the server (rejected: no hot reload).
+Affected specs: `09` §1, `02` §2.
+
+## D-054 (2026-09-23) — Migration runner mechanics
+Type: implementation
+Decision: Migrations are files `server/migrations/NNNN_name.sql`, numbered from 0001 without gaps. The applied version is SQLite's `PRAGMA user_version`; each migration runs in one transaction with its version bump. The runner refuses a database whose version is newer than the code. When an existing, non-empty database has pending migrations, it first writes `emberglass-backup-<UTC time to the millisecond>-v<version>.db` in the data directory with `VACUUM INTO`. The server runs the runner before it listens, and `make migrate` runs it against the configured data directory.
+Why: The locked data model has exactly eight entities (`03` §1), so the runner keeps its state in the database header instead of adding a ninth table. `VACUUM INTO` produces a consistent copy that includes pages still in a write-ahead log, which a plain file copy can miss. Refusing a newer database stops an older checkout from damaging a DM's data.
+Alternatives: A migrations bookkeeping table (rejected: a table outside the eight entities); a third-party runner such as umzug or node-pg-migrate (rejected: a dependency for about forty lines); copying the file with the file system (rejected: misses a write-ahead log); a `backups/` subfolder (rejected: `09` §5 lists what the data directory holds, and a dated copy beside the database is what `09` §2 asks for).
+Affected specs: `09` §2, `09` §5, `03` §1.
+
+## D-055 (2026-09-23) — Test runner layout
+Type: implementation
+Decision: `make test` runs Vitest once from the root over the projects `shared`, `server` and `client`, each with its own `vitest.config.ts`. Integration tests create a temporary data directory with a real SQLite file and remove it afterwards. `make e2e` runs Playwright from the `e2e` workspace; its web server builds the product and starts it with `npm start` on port 3107 (`EMBERGLASS_E2E_PORT`) with a fresh temporary data directory that a global teardown removes, so end-to-end tests exercise the build a DM runs. Chromium only until the browser matrix of `10` §4 arrives with REL-02.
+Why: One Vitest run gives one pass/fail for `make test`; testing the production build rather than the development server is what the TV will load.
+Alternatives: One Vitest invocation per workspace (rejected: three reports for one gate); end-to-end tests against the development server (rejected: tests a different client than the one shipped); every browser from the start (rejected: the matrix is REL-02's scope and needs runners FND-02 provides).
+Affected specs: `10` §1, `10` §2, `10` §4.
+
+## D-056 (2026-09-23) — Dependency and secret scanning
+Type: implementation
+Decision: `make audit` is `npm audit --audit-level=high` over the whole lockfile, development dependencies included. `make scan-secrets` runs secretlint with its recommended preset over every file Git tracks plus untracked files that are not ignored.
+Why: High and critical advisories block; moderate ones in a LAN-only app's tooling would stop work for issues that rarely apply. Development dependencies are audited because they build what ships. Scanning untracked files too catches a secret before its first commit, not after. secretlint installs from the lockfile like every other tool, on Linux and Windows alike.
+Alternatives: gitleaks (rejected: a separate binary outside the lockfile, with its own install per OS); `--audit-level=moderate` or low (rejected: noise without a matching risk); auditing production dependencies only (rejected: the build toolchain produces the shipped files); scanning tracked files only (rejected: a secret would be caught only once committed).
+Affected specs: `13` §3.
+
+## D-057 (2026-09-23) — Development environment, smoke check and clean start
+Type: implementation
+Decision: `make setup` runs `npm ci`, installs Playwright's Chromium and copies `.env.example` to `.env` when missing. `.env` is read by the Makefile only and points `EMBERGLASS_DATA_DIR` at `.dev-data/` in the clone; a value already in the environment wins, and the product reads only real environment variables. Node 24 is enforced by `engines` with `engine-strict`, `.nvmrc`, a Makefile check before every Node target, `scripts/start.mjs` (in syntax an old Node can parse) and the server entry. `make smoke` has no health route: it loads `/` and `/dm` and their entry scripts and expects a 404 from an unknown `/api` path, retrying for `SMOKE_WAIT` seconds. `make clean-start` copies the files Git tracks plus untracked unignored files into a temporary directory, writes a `.env` with an empty temporary data directory and port 3207, runs setup, infra-up, migrate and verify, starts `make dev`, runs `make smoke` against it, and removes both directories.
+Why: The owner is both developer and DM: without a development data directory, `make dev` would open the real campaigns. A health route under `/api` would be reachable without a DM session, which `02` §5 forbids for every route but PIN entry and setup, and loading the two views is what a TV and a DM do anyway. Copying the working tree lets clean-start judge the change about to be committed, not only the last commit.
+Alternatives: The per-user default data directory in development (rejected: development would touch real campaign data); `/api/health` (rejected: an unauthenticated route `02` §5 does not allow); a health route outside `/api` (rejected: a public endpoint with no product purpose); `git clone` of HEAD for clean-start (rejected: it cannot verify uncommitted work).
+Affected specs: `09` §1, `09` §7, `02` §5, `13` §3.

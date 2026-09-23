@@ -4,23 +4,22 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
 
 ## Now
 
-### FND-01 — Command contract and repository scaffold
+### FND-02 — CI baseline
 
-- **Outcome:** every target in the root `Makefile` is real, a fresh clone boots and verifies with one command, and the repository layout of the architecture spec exists.
-- **Specs:** `13` §3 FND-01, `02` §1 (layout), `10` §1–2 (test layers and gates the contract must expose).
-- **Dependencies:** none. This is the first package.
-- **Scope:** Create the `server`, `client` and `shared` npm workspaces, the `e2e` Playwright project and the layout of `02` §1, with Node 24 pinned (`09` §1). There is no local infrastructure: `infra-up`, `infra-status` and `infra-down` succeed and say so. Replace every failing placeholder body in the `Makefile` with the real command; keep `make check-docs` as it is. Record tooling choices (test runner, formatter, static analysis, generators) as `decision-added` events with alternatives, then `make rebuild-decisions`.
-- **Non-goals:** CI (FND-02); any domain code; any endpoint beyond what `make smoke` needs to prove the processes start.
+- **Outcome:** a GitHub Actions pipeline in which every job runs exactly one root `Makefile` target, on Linux and Windows runners, so "CI is green" and "`make verify` is green" are the same statement.
+- **Specs:** `13` §3 FND-02, `10` §1 (gates), `10` §2 (real SQLite file), `10` §4 (Windows and Linux), `12` §4 (GitHub and GitHub Actions, Q-066).
+- **Dependencies:** FND-01 (done). The public GitHub repository of Q-066 must exist and be the `origin` remote; none is configured in this clone yet, and creating it is the owner's act.
+- **Scope:** a workflow triggered on every pull request and every push to the default branch; one job per target (`lint`, `format-check`, `typecheck`, `test`, `e2e`, `build`, `check-docs`, `audit`, `scan-secrets`) on `ubuntu-latest` and `windows-latest`, `check-docs` as its own job; npm and Playwright caches keyed on the lockfile; no job retries. Failing-forward tripwires for the gates `10` §3 and `10` §6 require and nothing implements yet (hidden-information suite, player-command rejection, offline end-to-end run, external-URL build check): each passes only while its gate is provably absent and fails with promotion instructions once it becomes runnable. `README.md` maps job to command. Close or narrow G-003 by making the Windows jobs run the targets.
+- **Non-goals:** any product code; the browser matrix of `10` §4 (REL-02); branch protection settings on the remote beyond recording what is required.
 - **Acceptance (executable):**
-  - `make help` lists every target of `AGENTS.md` "Commands" and none exits with the "not implemented" message.
-  - `make setup && make infra-up && make migrate && make verify` exit 0 from a fresh clone; `make verify` runs lint, format-check, typecheck, test, e2e, build and check-docs.
-  - `make test` runs integration tests against a real SQLite file in a temporary data directory (`10` §2), never a mock; a test proves it.
-  - `make smoke` exit 0 against the processes `make dev` starts.
-  - `make clean-start` exit 0 from an empty data directory to teardown.
-  - `make check-docs` exit 0; `TRACEABILITY.md` FND-01 row set to `done` with the commands and their results as evidence; G-001 narrowed accordingly.
+  - The pipeline runs green on a pull request on both runners; each job's command is a single `make <target>`.
+  - A deliberately failing test on a branch turns the `test` job red.
+  - Each tripwire job passes today and its promotion condition is stated in the job.
+  - `make check-docs` exit 0; `README.md` "Continuous integration" maps every job; `TRACEABILITY.md` FND-02 row `done` with the run URLs as evidence.
+- **Review:** `Touches red line: yes`, so prompt 2 (review) runs after implementation.
 
 ## Next
 
-1. **FND-02 — CI baseline.** Every job runs one `Makefile` target on Linux and Windows runners, `check-docs` as its own job, tripwires for gates not yet implemented (`13` §3, `10` §1, `10` §4).
-2. **FND-03 — API and WebSocket conventions.** `/api` base path with schema validation and one error envelope, typed Socket.io envelopes with versions in `shared`, structured logging with its exclusions (`13` §3, `02` §5, `04` §5, `07` §8).
-3. **FND-04 — Design, localization and keyboard foundation.** View shells at `/dm` and `/`, English message catalogue, keyboard smoke gate, bundled fonts and icons (`13` §3, `08` §6, `08` §8, `02` §6).
+1. **FND-03 — API and WebSocket conventions.** `/api` base path with schema validation and one error envelope, typed Socket.io envelopes with versions in `shared`, structured logging with its exclusions (`13` §3, `02` §5, `04` §5, `07` §8).
+2. **FND-04 — Design, localization and keyboard foundation.** View shells at `/dm` and `/`, English message catalogue, keyboard smoke gate, bundled fonts and icons (`13` §3, `08` §6, `08` §8, `02` §6).
+3. **SRV-01 — Schema and migrations.** The eight entities as the first numbered migrations through the FND-01 runner (`13` §4, `03` §1, `03` §3, `03` §6).

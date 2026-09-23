@@ -72,7 +72,7 @@ There is one host, the DM's PC; the player view is served at `/` and the DM view
 
 ## Commands
 
-Root command contract, implemented by the root `Makefile` (FND-01, D-001) with helpers in `scripts/`. Every target below exists. A target whose work package has not been delivered yet fails with a message naming that package instead of passing, so a missing gate and a passing gate never look alike; `make check-docs` is real from the first commit and asserts that this list and the `Makefile` agree. `make test` and `make smoke` need `make infra-up` first when the product has local infrastructure (none: the infra targets succeed and say so).
+Root command contract, implemented by the root `Makefile` (FND-01, D-001) with helpers in `scripts/`. Every target below exists and is real. Node targets need Node 24 or newer on PATH (`nvm use` reads `.nvmrc`) and check it before running; the documentation targets need only Python 3. `make check-docs` asserts that this list and the `Makefile` agree. There is no local infrastructure: the infra targets succeed and say so. `make smoke` checks a running server (`make dev` or `npm start`). `make setup` copies `.env.example` to `.env`, which points development at `.dev-data/` inside the clone so that it never opens a DM's real data directory (D-057).
 
 ```bash
 make setup          # install dependencies from lockfiles, copy env examples
@@ -102,7 +102,7 @@ make unlock         # ceremonial unlock of one hard-locked path: PATH=<path> REA
 make clean-start    # fresh isolated environment: setup, infra-up, migrate, verify, smoke, teardown
 ```
 
-`check-docs`, `check-locks`, `verify-chain`, the two `rebuild-*` targets, `install-hooks` and `unlock` are real from the first commit; the rest arrive with FND-01.
+The tooling behind the targets is recorded in D-051 to D-057.
 
 CI (FND-02) runs on every merge request and every push to the default branch. Each job runs exactly one of the targets above, so a gate cannot pass in CI and fail locally; `README.md` maps job to command. Gates the testing specification requires that nothing implements yet run as failing-forward tripwires that pass only while the gate is provably absent (`13` §3).
 

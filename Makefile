@@ -1,73 +1,90 @@
-# Emberglass root command contract (AGENTS.md "Commands").
+# Emberglass root command contract (AGENTS.md "Commands", FND-01).
 #
-# `check-docs`, `check-locks`, `verify-chain`, the two `rebuild-*` targets,
-# `install-hooks` and `unlock` are real from the first commit. Every other target is delivered by
-# the work package named in its recipe and, until then, fails with that message
-# instead of passing: a missing gate and a passing gate must never look alike.
-# FND-01 replaces the placeholder bodies with the real commands; the target list
-# itself is the contract and does not change without a DECISIONS.md entry.
+# Every target is real. Node targets need Node 24 or newer on PATH (`nvm use`
+# reads .nvmrc); they check it first and say so instead of failing obscurely.
+# The target list itself is the contract and does not change without a
+# DECISIONS.md entry.
+#
+# `.env` (copied from `.env.example` by `make setup`) sets the development data
+# directory and port for `make dev`, `make migrate` and `make smoke`. A value
+# already in the environment wins over the file. The product itself never reads
+# `.env` (specs/09-operations.md §7).
 
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
-define not_yet
-	@echo "make $(1): not implemented yet. Delivered by work package $(2); see PLAN.md and specs/13-implementation-plan.md §3." >&2; exit 1
-endef
+ENV_FILE_VARS := EMBERGLASS_DATA_DIR EMBERGLASS_PORT
+$(foreach v,$(ENV_FILE_VARS),$(if $(filter environment,$(origin $v)),$(eval _env_$v := $($v))))
+-include .env
+$(foreach v,$(ENV_FILE_VARS),$(if $(_env_$v),$(eval $v := $(_env_$v))))
+export EMBERGLASS_DATA_DIR EMBERGLASS_PORT
 
-.PHONY: help setup infra-up infra-status infra-down migrate dev test lint format format-check typecheck e2e build verify smoke audit scan-secrets check-docs check-locks verify-chain rebuild-decisions rebuild-questions install-hooks unlock clean-start
+NODE_MIN_MAJOR := 24
+NODE_MAJOR = $(shell node -p "process.versions.node.split('.')[0]" 2>/dev/null)
+SMOKE_WAIT ?= 0
+
+.PHONY: help node-check setup infra-up infra-status infra-down migrate dev test lint format format-check typecheck e2e build verify smoke audit scan-secrets check-docs check-locks verify-chain rebuild-decisions rebuild-questions install-hooks unlock clean-start
 
 help: ## List targets
-	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
+	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
 
-setup: ## Install dependencies from lockfiles, copy env examples
-	$(call not_yet,setup,FND-01)
+node-check:
+	@major='$(NODE_MAJOR)'; \
+	 if [ -z "$$major" ] || [ "$$major" -lt $(NODE_MIN_MAJOR) ]; then \
+	   echo "Node.js $(NODE_MIN_MAJOR) or newer is required on PATH (found: $$(node --version 2>/dev/null || echo none)). Run \`nvm use\`, which reads .nvmrc." >&2; exit 1; \
+	 fi
+
+setup: node-check ## Install dependencies from lockfiles, copy env examples
+	npm ci
+	npx playwright install chromium
+	@if [ -f .env ]; then echo ".env exists; left as it is."; else cp .env.example .env && echo "Copied .env.example to .env."; fi
 
 infra-up: ## Start local infrastructure and wait for health
-	$(call not_yet,infra-up,FND-01)
+	@echo "No local infrastructure: Emberglass is one Node process with an SQLite file (specs/02-architecture.md §2). Nothing to start."
 
 infra-status: ## Show infrastructure status
-	$(call not_yet,infra-status,FND-01)
+	@echo "No local infrastructure: there are no services to report on."
 
 infra-down: ## Stop local infrastructure (data kept)
-	$(call not_yet,infra-down,FND-01)
+	@echo "No local infrastructure: nothing to stop."
 
-migrate: ## Apply database migrations locally
-	$(call not_yet,migrate,FND-01)
+migrate: node-check ## Apply database migrations locally
+	npm run migrate
 
-dev: ## Run every application process for local development
-	$(call not_yet,dev,FND-01)
+dev: node-check ## Run every application process for local development
+	npm run dev
 
-test: ## All automated tests against the real database engine
-	$(call not_yet,test,FND-01)
+test: node-check ## All automated tests against the real database engine
+	npm test
 
-lint: ## Linters
-	$(call not_yet,lint,FND-01)
+lint: node-check ## Linters
+	npm run lint
 
-format: ## Apply formatting
-	$(call not_yet,format,FND-01)
+format: node-check ## Apply formatting
+	npm run format
 
-format-check: ## Verify formatting without changing files
-	$(call not_yet,format-check,FND-01)
+format-check: node-check ## Verify formatting without changing files
+	npm run format:check
 
-typecheck: ## Static analysis and type checks
-	$(call not_yet,typecheck,FND-01)
+typecheck: node-check ## Static analysis and type checks
+	npm run typecheck
 
-e2e: ## End-to-end tests driving a DM view and a player view against a running server
-	$(call not_yet,e2e,FND-01)
+e2e: node-check ## End-to-end tests driving a DM view and a player view against a running server
+	npm run e2e
 
-build: ## Production builds
-	$(call not_yet,build,FND-01)
+build: node-check ## Production builds
+	npm run build
 
 verify: lint format-check typecheck test e2e build check-docs ## All quality gates
 
-smoke: ## Health of the running system through its public entry points
-	$(call not_yet,smoke,FND-01)
+smoke: node-check ## Health of the running system through its public entry points
+	node scripts/smoke.mjs --wait $(SMOKE_WAIT)
 
-audit: ## Dependency advisories
-	$(call not_yet,audit,FND-01)
+audit: node-check ## Dependency advisories
+	npm audit --audit-level=high
 
-scan-secrets: ## Secret scan of everything Git tracks
-	$(call not_yet,scan-secrets,FND-01)
+scan-secrets: node-check ## Secret scan of everything Git tracks
+	node scripts/scan-secrets.mjs
 
 verify-chain: ## Recompute every hash and link in the event log
 	python3 scripts/verify-chain.py
@@ -99,5 +116,5 @@ unlock: ## Ceremonial unlock of one hard-locked path: make unlock PATH=<path> RE
 	 PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'; export PATH; \
 	 sh scripts/unlock.sh "$$target" "$(REASON)"
 
-clean-start: ## Fresh isolated environment: setup, infra-up, migrate, verify, smoke, teardown
-	$(call not_yet,clean-start,FND-01)
+clean-start: node-check ## Fresh isolated environment: setup, infra-up, migrate, verify, smoke, teardown
+	bash scripts/clean-start.sh
