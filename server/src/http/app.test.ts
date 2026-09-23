@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CLIENT_ROOT } from '../paths.js';
-import { buildApp } from './app.js';
+import { buildApp, within } from './app.js';
 
 const INDEX =
   '<!doctype html><html><body><div id="root"></div><script type="module" src="/assets/app.js"></script></body></html>';
@@ -91,5 +91,19 @@ describe('buildApp in development', () => {
 
   it('does not let Vite answer under /api', async () => {
     expect((await app.inject({ method: 'GET', url: '/api/health' })).statusCode).toBe(404);
+  });
+});
+
+describe('within', () => {
+  it('stops waiting for work that never settles once the limit passes', async () => {
+    const started = Date.now();
+    await within(50, () => new Promise(() => {}));
+    expect(Date.now() - started).toBeGreaterThanOrEqual(45);
+  });
+
+  it('returns as soon as the work settles, and swallows its failure', async () => {
+    const started = Date.now();
+    await within(5_000, () => Promise.reject(new Error('closed already')));
+    expect(Date.now() - started).toBeLessThan(1_000);
   });
 });

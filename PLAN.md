@@ -4,22 +4,22 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
 
 ## Now
 
-### FND-02 — CI baseline
+### FND-03 — API and WebSocket conventions
 
-- **Outcome:** a GitHub Actions pipeline in which every job runs exactly one root `Makefile` target, on Linux and Windows runners, so "CI is green" and "`make verify` is green" are the same statement.
-- **Specs:** `13` §3 FND-02, `10` §1 (gates), `10` §2 (real SQLite file), `10` §4 (Windows and Linux), `12` §4 (GitHub and GitHub Actions, Q-066).
-- **Dependencies:** FND-01 (done). The public GitHub repository of Q-066 must exist and be the `origin` remote; none is configured in this clone yet, and creating it is the owner's act.
-- **Scope:** a workflow triggered on every pull request and every push to the default branch; one job per target (`lint`, `format-check`, `typecheck`, `test`, `e2e`, `build`, `check-docs`, `audit`, `scan-secrets`) on `ubuntu-latest` and `windows-latest`, `check-docs` as its own job; npm and Playwright caches keyed on the lockfile; no job retries. Failing-forward tripwires for the gates `10` §3 and `10` §6 require and nothing implements yet (hidden-information suite, player-command rejection, offline end-to-end run, external-URL build check): each passes only while its gate is provably absent and fails with promotion instructions once it becomes runnable. `README.md` maps job to command. Close or narrow G-003 by making the Windows jobs run the targets.
-- **Non-goals:** any product code; the browser matrix of `10` §4 (REL-02); branch protection settings on the remote beyond recording what is required.
+- **Outcome:** the conventions every later package builds on: REST under `/api` with bodies validated against schemas derived from `shared` and one error envelope, typed and versioned Socket.io command and event envelopes in `shared`, and structured logging that never records a credential.
+- **Specs:** `13` §3 FND-03, `02` §5 (REST base path, schemas, DM session on every route but PIN entry and setup), `04` §2 (commands, rejection outside `dm`), `04` §3 (events), `04` §5 (version counter), `07` §8 and `09` §6 (logging); decisions D-015, D-029, D-035, D-047.
+- **Dependencies:** FND-02, PR #1 merged after its review pass (prompt 2), which has not run yet.
+- **Scope:** the error envelope and schema derivation as shared types plus a Fastify error handler; command and event envelope types with a version field and a per-process counter starting at 1; a validation function that rejects an invalid command in the envelope and changes nothing; the logger writing console lines and `logs/emberglass.log` in the data directory (JSON lines, 5 MB rotation, three old files) with PIN, session identifier and cookie redacted. No REST resource, no Socket.io room or command handler yet (SRV and LIV packages).
 - **Acceptance (executable):**
-  - The pipeline runs green on a pull request on both runners; each job's command is a single `make <target>`.
-  - A deliberately failing test on a branch turns the `test` job red.
-  - Each tripwire job passes today and its promotion condition is stated in the job.
-  - `make check-docs` exit 0; `README.md` "Continuous integration" maps every job; `TRACEABILITY.md` FND-02 row `done` with the run URLs as evidence.
-- **Review:** `Touches red line: yes`, so prompt 2 (review) runs after implementation.
+  - Vitest: an unknown `/api` path and a body failing its schema both answer in the one error envelope with the right status; the envelope type is exported from `shared` and used by server and tests.
+  - Vitest: a command envelope failing its schema is rejected in the error envelope and the state it targets is unchanged; the version counter starts at 1 and strictly ascends.
+  - Vitest against a real temporary data directory: log lines reach console and the rotating file; a request carrying a PIN body field, a session cookie and a session identifier leaves none of them in either output.
+  - `make verify` exit 0 on both CI runners; `TRACEABILITY.md` FND-03 row with test names.
+- **Non-goals:** DM session and PIN logic (SRV-02), rooms, role projection and reconnection (LIV-01, LIV-02), any REST resource of `02` §5.
+- **Review:** `Touches red line: yes` and `Contract change: yes`, so prompt 2 (review) runs after implementation.
 
 ## Next
 
-1. **FND-03 — API and WebSocket conventions.** `/api` base path with schema validation and one error envelope, typed Socket.io envelopes with versions in `shared`, structured logging with its exclusions (`13` §3, `02` §5, `04` §5, `07` §8).
-2. **FND-04 — Design, localization and keyboard foundation.** View shells at `/dm` and `/`, English message catalogue, keyboard smoke gate, bundled fonts and icons (`13` §3, `08` §6, `08` §8, `02` §6).
-3. **SRV-01 — Schema and migrations.** The eight entities as the first numbered migrations through the FND-01 runner (`13` §4, `03` §1, `03` §3, `03` §6).
+1. **FND-04 — Design, localization and keyboard foundation.** View shells at `/dm` and `/`, English message catalogue, keyboard smoke gate, bundled fonts and icons (`13` §3, `08` §6, `08` §8, `02` §6).
+2. **SRV-01 — Schema and migrations.** The eight entities as the first numbered migrations through the FND-01 runner (`13` §4, `03` §1, `03` §3, `03` §6).
+3. **SRV-02 — PIN, DM session and guessing protection.** Loopback-only first-run setup, PIN change ending other sessions, `npm run reset-pin`, per-client lockout, Origin checks, a DM session on every `/api` route but PIN entry and setup (`13` §4, `07` §1, `07` §2, `07` §6, `07` §7, `02` §5).

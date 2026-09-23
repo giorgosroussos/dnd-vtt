@@ -1,0 +1,9 @@
+# One line ending everywhere (D-060). A Windows checkout with core.autocrlf would
+# otherwise turn every text file to CRLF, which Prettier's format-check rejects
+# and which changes the bytes the event log's hash chain is computed over.
+* text=auto eol=lf
+*.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary

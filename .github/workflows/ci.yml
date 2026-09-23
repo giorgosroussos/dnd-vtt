@@ -1,0 +1,149 @@
+# Emberglass CI (FND-02, specs/13-implementation-plan.md §3; D-060, D-061).
+#
+# Every gate job runs exactly one root Makefile target, so "CI is green" and
+# "`make verify` is green" are the same statement (specs/10-testing-acceptance.md §1).
+# The steps before it only provision the machine: checkout, Node from .nvmrc,
+# `make setup`, and on Windows the MSYS2 shell that provides make and bash.
+# Nothing retries: a flaky gate is a red gate. README.md "Continuous integration"
+# maps every job to its command.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Colour codes make the logs unreadable in the browser; CI output is plain text.
+  FORCE_COLOR: '0'
+
+jobs:
+  linux:
+    name: ${{ matrix.target }} · linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [lint, format-check, typecheck, test, e2e, build, check-docs, audit, scan-secrets]
+    env:
+      # Only the e2e job runs a browser; on Linux it also needs the system libraries.
+      SETUP_BROWSERS: ${{ matrix.target == 'e2e' && '--with-deps chromium' || '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing after checkout needs the token; npm install scripts should not see it.
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: matrix.target != 'check-docs'
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Playwright browser cache
+        if: matrix.target == 'e2e'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: make setup
+        if: matrix.target != 'check-docs'
+        run: make setup
+      - name: make ${{ matrix.target }}
+        run: make ${{ matrix.target }}
+      - name: Keep Playwright output of a failed run
+        if: failure() && matrix.target == 'e2e'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-results-linux
+          path: e2e/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  windows:
+    name: ${{ matrix.target }} · windows
+    runs-on: windows-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [lint, format-check, typecheck, test, e2e, build, check-docs, audit, scan-secrets]
+    env:
+      SETUP_BROWSERS: ${{ matrix.target == 'e2e' && 'chromium' || '' }}
+    defaults:
+      run:
+        # The image has no make. MSYS2 (preinstalled, off PATH) supplies make,
+        # bash and python3; `inherit` keeps the Windows PATH, so node, npm and git
+        # are the native Windows ones and the product runs as it does for a DM.
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing after checkout needs the token; npm install scripts should not see it.
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: matrix.target != 'check-docs'
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
+        with:
+          msystem: MSYS
+          release: false
+          update: false
+          path-type: inherit
+          install: make python
+      - name: Playwright browser cache
+        if: matrix.target == 'e2e'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~\AppData\Local\ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: make setup
+        if: matrix.target != 'check-docs'
+        run: make setup
+      - name: make ${{ matrix.target }}
+        run: make ${{ matrix.target }}
+      - name: Keep Playwright output of a failed run
+        if: failure() && matrix.target == 'e2e'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-results-windows
+          path: e2e/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Failing-forward tripwires (specs/13-implementation-plan.md §3 FND-02): one job
+  # per gate that specs/10-testing-acceptance.md §3 and §6 require and nothing
+  # implements yet. Each passes only while its gate is provably absent (no code
+  # file carries `@gate:<id>`) and fails with promotion instructions once one does.
+  # Promotion: the gate runs inside a real gate target above, and its entry here
+  # and in scripts/tripwire.mjs is removed. They scan text, so Linux suffices.
+  tripwire:
+    name: tripwire · ${{ matrix.gate }} (absent)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        gate: [hidden-information, player-command-rejection, image-revocation, offline-e2e, external-url-build]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing after checkout needs the token; npm install scripts should not see it.
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+      - name: make tripwire GATE=${{ matrix.gate }}
+        run: make tripwire GATE=${{ matrix.gate }}

@@ -92,6 +92,7 @@ make verify         # lint + format-check + typecheck + test + e2e + build + che
 make smoke          # health of the running system through its public entry points
 make audit          # dependency advisories
 make scan-secrets   # secret scan of everything Git tracks
+make tripwire       # failing-forward tripwires for missing gates: GATE=<id>, or all
 make check-docs     # mechanical consistency of the documentation layer (scripts/check-docs.py)
 make check-locks    # lock manifest check of the staged change (scripts/lock-guard.py)
 make verify-chain   # recompute every hash and link in .log/events.jsonl
@@ -102,9 +103,9 @@ make unlock         # ceremonial unlock of one hard-locked path: PATH=<path> REA
 make clean-start    # fresh isolated environment: setup, infra-up, migrate, verify, smoke, teardown
 ```
 
-The tooling behind the targets is recorded in D-051 to D-057.
+The tooling behind the targets is recorded in D-051 to D-057; the pipeline and the tripwires in D-060 and D-061.
 
-CI (FND-02) runs on every merge request and every push to the default branch. Each job runs exactly one of the targets above, so a gate cannot pass in CI and fail locally; `README.md` maps job to command. Gates the testing specification requires that nothing implements yet run as failing-forward tripwires that pass only while the gate is provably absent (`13` §3).
+CI (FND-02) runs on every merge request and every push to the default branch. Each job runs exactly one of the targets above, so a gate cannot pass in CI and fail locally; `README.md` maps job to command. Gates the testing specification requires that nothing implements yet run as failing-forward tripwires (`make tripwire`) that pass only while the gate is provably absent (`13` §3): a gate's implementing test carries the marker `@gate:<id>`, and the first one turns its tripwire red with promotion steps.
 
 ## Working method and definition of done
 

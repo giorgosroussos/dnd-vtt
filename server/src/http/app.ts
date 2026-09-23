@@ -34,6 +34,20 @@ async function serveBuild(app: FastifyInstance, dist: string): Promise<SendIndex
   return async (_request, reply) => reply.header('cache-control', 'no-cache').sendFile('index.html');
 }
 
+// Longest wait for each step of closing Vite in development; two steps stay
+// under the 10 s hook timeout of the tests.
+const VITE_CLOSE_STEP_MS = 4_000;
+
+/** Run `work`, but stop waiting for it after `ms`; it keeps running unobserved. */
+export async function within(ms: number, work: () => Promise<unknown>): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  const limit = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, ms);
+  });
+  await Promise.race([work().catch(() => undefined), limit]);
+  clearTimeout(timer);
+}
+
 async function serveVite(app: FastifyInstance, root: string): Promise<SendIndex> {
   const [{ createServer }, { default: middie }] = await Promise.all([import('vite'), import('@fastify/middie')]);
   const vite = await createServer({
@@ -44,7 +58,19 @@ async function serveVite(app: FastifyInstance, root: string): Promise<SendIndex>
   });
   await app.register(middie);
   app.use(vite.middlewares);
-  app.addHook('onClose', () => vite.close());
+  app.addHook('onClose', async () => {
+    // Vite's close cancels a dependency optimization in progress, and requests
+    // already waiting on it then never settle, so close waits for them forever.
+    // On a slow machine the first optimization is still running when a short
+    // session closes; let it finish first. Each step is bounded, so closing the
+    // app, and a Ctrl-C of `make dev` (server.ts), always gets through.
+    await within(VITE_CLOSE_STEP_MS, async () => {
+      await vite.waitForRequestsIdle();
+      const discovered = Object.values(vite.environments.client.depsOptimizer?.metadata.discovered ?? {});
+      await Promise.allSettled(discovered.flatMap((dep) => (dep.processing ? [dep.processing] : [])));
+    });
+    await within(VITE_CLOSE_STEP_MS, () => vite.close());
+  });
   return async (request, reply) => {
     const html = await readFile(path.join(root, 'index.html'), 'utf8');
     return reply.type('text/html').send(await vite.transformIndexHtml(request.url, html));

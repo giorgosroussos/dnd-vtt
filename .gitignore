@@ -14,3 +14,7 @@ dist/
 # Playwright output
 e2e/test-results/
 e2e/playwright-report/
+
+# Windows download metadata that WSL shows as a file; ':' is not a legal Windows
+# file name character, so a tracked one breaks every Windows checkout.
+*:Zone.Identifier
