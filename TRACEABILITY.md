@@ -7,7 +7,7 @@ Implementation status and evidence per work package (`specs/13-implementation-pl
 | Package | Phase | Outcome | Key specs | Status | Evidence |
 | --- | --- | --- | --- | --- | --- |
 | FND-01 | 0 | Command contract and repository scaffold | `02` §1, `09` §1 | done | 2026-09-23, Linux (WSL2), Node 24.11.0. `make clean-start` exit 0: a copy of the working tree with an empty temporary data directory ran setup (`npm ci`), infra-up, migrate, verify, then `make smoke` against `make dev`, and was removed. `make verify` exit 0: lint, format-check, typecheck, `make test` (51 Vitest tests, among them `server/src/db/migrate.test.ts` "migrateDataDirectory against a real SQLite file" in a temporary data directory, and `server/src/http/app.test.ts` "answers 404 at /api/…"), `make e2e` (2 Playwright tests in `e2e/tests/views.spec.ts`: a DM context and a player context against the production build), build, check-docs. `make smoke` exit 0 against `make dev` and against `npm start`. `make audit` found 0 vulnerabilities. `make scan-secrets` exit 0, and exit 1 with a planted GitHub token. `make help` lists all 25 targets of AGENTS.md "Commands"; `make infra-up`, `infra-status` and `infra-down` exit 0. `npm start` and `make test` refuse Node 22 and Node 12 with a message. |
-| FND-02 | 0 | CI baseline | `10` §4, `10` §2 | not started | — |
+| FND-02 | 0 | CI baseline | `10` §4, `10` §2 | in progress | Local evidence only, 2026-09-23, Linux (WSL2), Node 24.11.0; no run on GitHub yet, so not `done`. `.github/workflows/ci.yml` passes actionlint 1.x with shellcheck (`docker run rhysd/actionlint`, exit 0). `make verify` exit 0: `make test` 67 Vitest tests, among them 16 in `scripts/tripwire.test.mjs` (each of the five gates passes while absent and turns red with promotion steps once its marker appears; a scan without the test roots refuses to pass; "passes on this repository today, for every gate"), `make e2e` 2 Playwright tests, check-docs 0 failures. `make audit` 0 vulnerabilities; `make scan-secrets` exit 0 (112 files, batched and quoted for Windows); `make tripwire` exit 0 for all five gates. A planted `e2e/tests/planted.spec.ts` carrying `@gate:hidden-information` made `make tripwire GATE=hidden-information` exit non-zero with promotion steps while `GATE=offline-e2e` stayed at 0; the file was removed. Pending: the green pull-request run on both runners, the deliberately failing test turning `test` red, and the run URLs. |
 | FND-03 | 0 | API and WebSocket conventions | `02` §5, `04` §2, `04` §3, `04` §5 | not started | — |
 | FND-04 | 0 | Design, accessibility and localization foundation | `02` §2, `08` §6, `08` §8, `02` §6 | not started | — |
 | SRV-01 | 1 | Schema and migrations | `03` §1, `03` §2, `03` §3, `03` §6 | not started | — |
@@ -57,6 +57,7 @@ make dev          # in another terminal; then:
 make smoke
 make audit        # the CI dependency-scan gate
 make scan-secrets # the CI secret-scan gate
+make tripwire     # the CI tripwire jobs, all five gates
 make check-docs   # needs Python 3 only
 ```
 

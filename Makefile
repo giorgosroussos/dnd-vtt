@@ -22,8 +22,10 @@ export EMBERGLASS_DATA_DIR EMBERGLASS_PORT
 NODE_MIN_MAJOR := 24
 NODE_MAJOR = $(shell node -p "process.versions.node.split('.')[0]" 2>/dev/null)
 SMOKE_WAIT ?= 0
+# Browsers `make setup` installs for Playwright; CI sets it empty on jobs that run no browser.
+SETUP_BROWSERS ?= chromium
 
-.PHONY: help node-check setup infra-up infra-status infra-down migrate dev test lint format format-check typecheck e2e build verify smoke audit scan-secrets check-docs check-locks verify-chain rebuild-decisions rebuild-questions install-hooks unlock clean-start
+.PHONY: help node-check setup infra-up infra-status infra-down migrate dev test lint format format-check typecheck e2e build verify smoke audit scan-secrets tripwire check-docs check-locks verify-chain rebuild-decisions rebuild-questions install-hooks unlock clean-start
 
 help: ## List targets
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
@@ -36,7 +38,7 @@ node-check:
 
 setup: node-check ## Install dependencies from lockfiles, copy env examples
 	npm ci
-	npx playwright install chromium
+	@if [ -n "$(SETUP_BROWSERS)" ]; then npx playwright install $(SETUP_BROWSERS); else echo "SETUP_BROWSERS is empty: no Playwright browser installed."; fi
 	@if [ -f .env ]; then echo ".env exists; left as it is."; else cp .env.example .env && echo "Copied .env.example to .env."; fi
 
 infra-up: ## Start local infrastructure and wait for health
@@ -85,6 +87,9 @@ audit: node-check ## Dependency advisories
 
 scan-secrets: node-check ## Secret scan of everything Git tracks
 	node scripts/scan-secrets.mjs
+
+tripwire: node-check ## Failing-forward tripwire for a missing gate: make tripwire [GATE=<id>]; no GATE runs all
+	node scripts/tripwire.mjs $(GATE)
 
 verify-chain: ## Recompute every hash and link in the event log
 	python3 scripts/verify-chain.py
