@@ -6,7 +6,7 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
 
 ### FND-03 — Review before merge (prompt 2)
 
-- **Outcome:** the FND-03 pull request (branch `fnd-03-api-ws-conventions`) reviewed and merged. Implementation and acceptance evidence are complete: `TRACEABILITY.md` FND-03 is `done` with CI run 35927265858 green on Linux and Windows.
+- **Outcome:** the FND-03 pull request (branch `fnd-03-api-ws-conventions`) reviewed and merged. Implementation and acceptance evidence are complete (CI run 35927265858 green on Linux and Windows); `TRACEABILITY.md` FND-03 moves from `in progress` to `done` when the review passes.
 - **Specs:** `14` §7 (review passes), `13` §3 FND-03, `07` §7, `07` §8; decisions D-062 to D-065.
 - **Why a review:** `Touches red line: yes` and `Contract change: yes` (`AGENTS.md` "Prompt selection").
 - **Acceptance (executable):**
