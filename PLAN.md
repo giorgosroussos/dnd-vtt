@@ -4,19 +4,15 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
 
 ## Now
 
-### FND-03 — API and WebSocket conventions
+### FND-03 — API and WebSocket conventions (implemented; CI evidence and review remaining)
 
 - **Outcome:** the conventions every later package builds on: REST under `/api` with bodies validated against schemas derived from `shared` and one error envelope, typed and versioned Socket.io command and event envelopes in `shared`, and structured logging that never records a credential.
-- **Specs:** `13` §3 FND-03, `02` §5 (REST base path, schemas, DM session on every route but PIN entry and setup), `04` §2 (commands, rejection outside `dm`), `04` §3 (events), `04` §5 (version counter), `07` §8 and `09` §6 (logging); decisions D-015, D-029, D-035, D-047.
-- **Dependencies:** FND-02, PR #1 merged after its review pass (prompt 2), which has not run yet.
-- **Scope:** the error envelope and schema derivation as shared types plus a Fastify error handler; command and event envelope types with a version field and a per-process counter starting at 1; a validation function that rejects an invalid command in the envelope and changes nothing; the logger writing console lines and `logs/emberglass.log` in the data directory (JSON lines, 5 MB rotation, three old files) with PIN, session identifier and cookie redacted. No REST resource, no Socket.io room or command handler yet (SRV and LIV packages).
-- **Acceptance (executable):**
-  - Vitest: an unknown `/api` path and a body failing its schema both answer in the one error envelope with the right status; the envelope type is exported from `shared` and used by server and tests.
-  - Vitest: a command envelope failing its schema is rejected in the error envelope and the state it targets is unchanged; the version counter starts at 1 and strictly ascends.
-  - Vitest against a real temporary data directory: log lines reach console and the rotating file; a request carrying a PIN body field, a session cookie and a session identifier leaves none of them in either output.
-  - `make verify` exit 0 on both CI runners; `TRACEABILITY.md` FND-03 row with test names.
-- **Non-goals:** DM session and PIN logic (SRV-02), rooms, role projection and reconnection (LIV-01, LIV-02), any REST resource of `02` §5.
-- **Review:** `Touches red line: yes` and `Contract change: yes`, so prompt 2 (review) runs after implementation.
+- **Specs:** `13` §3 FND-03, `02` §5, `04` §2, `04` §3, `04` §5, `07` §7, `07` §8, `09` §6; decisions D-015, D-017, D-029, D-035, D-047, and D-062 to D-065 which record the implementation.
+- **State:** implemented and green locally on 2026-09-24 (`make verify`, `make audit`, `make scan-secrets`, `make tripwire`, `make smoke` against `make dev` and against the production build); evidence and test names in the `TRACEABILITY.md` FND-03 row. Not yet pushed.
+- **Remaining acceptance (executable):**
+  - `make verify` exit 0 on both CI runners: push the branch, open a pull request, and record the green run (Linux and Windows) in `TRACEABILITY.md`, which then moves FND-03 to `done`.
+  - Review (prompt 2), required because `Touches red line: yes` and `Contract change: yes`: bounded passes for correctness, security and isolation (redaction, envelope messages, fail-closed command validation) and tests; no critical or high finding open at merge.
+- **Non-goals:** DM session and PIN logic (SRV-02), rooms, role projection and reconnection (LIV-01, LIV-02), any REST resource of `02` §5, command payload schemas and handlers (LIV packages).
 
 ## Next
 

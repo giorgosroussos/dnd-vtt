@@ -3,8 +3,12 @@ import os from 'node:os';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { ErrorEnvelope } from '@emberglass/shared';
+import type { Logger } from '../log/logger.js';
 import { CLIENT_ROOT } from '../paths.js';
 import { buildApp, within } from './app.js';
+
+const quiet: Logger = { info: () => {}, warn: () => {}, error: () => {} };
 
 const INDEX =
   '<!doctype html><html><body><div id="root"></div><script type="module" src="/assets/app.js"></script></body></html>';
@@ -18,7 +22,7 @@ describe('buildApp serving a client build', () => {
     mkdirSync(path.join(dist, 'assets'));
     writeFileSync(path.join(dist, 'index.html'), INDEX);
     writeFileSync(path.join(dist, 'assets', 'app.js'), 'export {};');
-    app = await buildApp({ kind: 'static', dist });
+    app = await buildApp({ client: { kind: 'static', dist }, logger: quiet });
   });
 
   afterAll(async () => {
@@ -41,24 +45,31 @@ describe('buildApp serving a client build', () => {
 
   // No REST resource exists yet, so no /api path answers: nothing is reachable
   // without a DM session (specs/02-architecture.md §5).
-  it.each(['/api', '/api/health', '/api/campaigns', '/api/scenes/x'])('answers 404 at %s', async (url) => {
-    for (const method of ['GET', 'POST'] as const) {
-      const response = await app.inject({ method, url });
-      expect(response.statusCode).toBe(404);
-      expect(response.body).not.toContain('id="root"');
-    }
-  });
+  it.each(['/api', '/api/health', '/api/campaigns', '/api/scenes/x'])(
+    'answers 404 at %s in the error envelope',
+    async (url) => {
+      for (const method of ['GET', 'POST'] as const) {
+        const response = await app.inject({ method, url });
+        expect(response.statusCode).toBe(404);
+        expect(response.json<ErrorEnvelope>()).toEqual({ error: { code: 'not_found', message: 'No such resource.' } });
+      }
+    },
+  );
 
-  it('answers 404 for a path outside the two views and the build, including traversal attempts', async () => {
+  it('answers 404 in the error envelope for a path outside the two views and the build, including traversal attempts', async () => {
     for (const url of ['/dmx', '/assets/missing.js', '/../package.json', '/%2e%2e/package.json', '/assets/../../x']) {
-      expect((await app.inject({ method: 'GET', url })).statusCode).toBe(404);
+      const response = await app.inject({ method: 'GET', url });
+      expect(response.statusCode).toBe(404);
+      expect(response.json<ErrorEnvelope>().error.code).toBe('not_found');
     }
   });
 
   it('refuses to start without a build, and says how to make one', async () => {
     const empty = mkdtempSync(path.join(os.tmpdir(), 'emberglass-nodist-'));
     try {
-      await expect(buildApp({ kind: 'static', dist: empty })).rejects.toThrow(/npm run build/);
+      await expect(buildApp({ client: { kind: 'static', dist: empty }, logger: quiet })).rejects.toThrow(
+        /npm run build/,
+      );
     } finally {
       rmSync(empty, { recursive: true, force: true });
     }
@@ -69,7 +80,7 @@ describe('buildApp in development', () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
-    app = await buildApp({ kind: 'dev', root: CLIENT_ROOT });
+    app = await buildApp({ client: { kind: 'dev', root: CLIENT_ROOT }, logger: quiet });
   });
 
   afterAll(async () => {
@@ -90,7 +101,9 @@ describe('buildApp in development', () => {
   });
 
   it('does not let Vite answer under /api', async () => {
-    expect((await app.inject({ method: 'GET', url: '/api/health' })).statusCode).toBe(404);
+    const response = await app.inject({ method: 'GET', url: '/api/health' });
+    expect(response.statusCode).toBe(404);
+    expect(response.json<ErrorEnvelope>().error.code).toBe('not_found');
   });
 });
 
