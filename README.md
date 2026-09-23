@@ -2,7 +2,7 @@
 
 A free, self-hosted virtual tabletop for in-person play, compatible with 5th edition (SRD 5.1): the DM prepares sessions as series of scenes and runs them on a TV or projector from a server on their own PC. It is not a remote-play platform, a character manager or a map maker. Licensed under AGPL-3.0.
 
-Status: **Phase 0 in progress.** The command contract and repository scaffold (FND-01) are done: every `make` target runs, and the server serves two empty views. The CI pipeline (FND-02) is written and passes locally; its first runs on GitHub are pending. No product feature exists yet; the next work package is in `PLAN.md`.
+Status: **Phase 0 in progress.** The command contract and repository scaffold (FND-01) are done: every `make` target runs, and the server serves two empty views. The CI pipeline (FND-02) runs every gate on Linux and Windows. No product feature exists yet; the next work package is in `PLAN.md`.
 
 Development needs Node.js 24 or newer (`nvm use` reads `.nvmrc`) and Python 3 for the documentation gates.
 
