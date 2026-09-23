@@ -4,15 +4,15 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
 
 ## Now
 
-### FND-03 — API and WebSocket conventions (implemented; CI evidence and review remaining)
+### FND-03 — Review before merge (prompt 2)
 
-- **Outcome:** the conventions every later package builds on: REST under `/api` with bodies validated against schemas derived from `shared` and one error envelope, typed and versioned Socket.io command and event envelopes in `shared`, and structured logging that never records a credential.
-- **Specs:** `13` §3 FND-03, `02` §5, `04` §2, `04` §3, `04` §5, `07` §7, `07` §8, `09` §6; decisions D-015, D-017, D-029, D-035, D-047, and D-062 to D-065 which record the implementation.
-- **State:** implemented and green locally on 2026-09-24 (`make verify`, `make audit`, `make scan-secrets`, `make tripwire`, `make smoke` against `make dev` and against the production build); evidence and test names in the `TRACEABILITY.md` FND-03 row. Not yet pushed.
-- **Remaining acceptance (executable):**
-  - `make verify` exit 0 on both CI runners: push the branch, open a pull request, and record the green run (Linux and Windows) in `TRACEABILITY.md`, which then moves FND-03 to `done`.
-  - Review (prompt 2), required because `Touches red line: yes` and `Contract change: yes`: bounded passes for correctness, security and isolation (redaction, envelope messages, fail-closed command validation) and tests; no critical or high finding open at merge.
-- **Non-goals:** DM session and PIN logic (SRV-02), rooms, role projection and reconnection (LIV-01, LIV-02), any REST resource of `02` §5, command payload schemas and handlers (LIV packages).
+- **Outcome:** the FND-03 pull request (branch `fnd-03-api-ws-conventions`) reviewed and merged. Implementation and acceptance evidence are complete: `TRACEABILITY.md` FND-03 is `done` with CI run 35927265858 green on Linux and Windows.
+- **Specs:** `14` §7 (review passes), `13` §3 FND-03, `07` §7, `07` §8; decisions D-062 to D-065.
+- **Why a review:** `Touches red line: yes` and `Contract change: yes` (`AGENTS.md` "Prompt selection").
+- **Acceptance (executable):**
+  - Bounded passes for correctness, security and isolation (redaction in `server/src/log/redact.ts`, generic envelope messages, fail-closed command validation) and tests; findings recorded, no critical or high finding open.
+  - Any fix lands with its test, CI green on the pull request again, then merge to `main`.
+- **Non-goals:** new behaviour beyond fixes to findings.
 
 ## Next
 
