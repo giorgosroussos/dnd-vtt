@@ -6,5 +6,8 @@ Numbered SQL migrations, applied in order by `src/db/migrate.ts` before the serv
 - Each file runs in one transaction together with the bump of `PRAGMA user_version`, which is how the runner knows what is applied. Do not put `BEGIN` or `COMMIT` in a file.
 - Changes are additive first; a destructive step needs an approved plan (`specs/14-agent-playbook.md` §8).
 - When an existing database has pending migrations, the runner first writes a dated copy, `emberglass-backup-<UTC time>-v<version>.db`, next to it in the data directory.
+- Foreign keys are off while migrations run, following SQLite's procedure for changing a table's schema, so rebuilding a parent table does not cascade-delete its children. Before each migration commits, the runner runs `PRAGMA foreign_key_check` and rolls back a migration that leaves a dangling reference (D-074).
+- Every table is `STRICT, WITHOUT ROWID`, keyed by a text `id`. A CHECK constraint whose expression is NULL passes, so write it to refuse NULL explicitly (with `coalesce(…, 0)` or `IS NOT NULL`).
+- Every migration is tested on the generated fixture database (`src/db/testing/fixture.ts`), which is written at schema version 1 and migrated forward by `src/db/schema.test.ts` (`specs/14-agent-playbook.md` §8). A migration that reshapes a record updates `readEntities` there.
 
-The schema itself arrives with SRV-01; until then this folder holds no migration.
+`0001_initial_schema.sql` holds the eight entities of `specs/03-domain-model.md` §1 (SRV-01, D-074).

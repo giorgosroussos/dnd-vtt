@@ -51,8 +51,15 @@ export function backupFileName(now: Date, version: number): string {
   return `emberglass-backup-${stamp}-v${version}.db`;
 }
 
-export function migrateDataDirectory(dataDir: string, migrationsDir: string, now: Date = new Date()): MigrationResult {
-  const migrations = loadMigrations(migrationsDir);
+// `target` stops at an earlier version; the fixture database uses it to build
+// data at the version it was written for (D-074).
+export function migrateDataDirectory(
+  dataDir: string,
+  migrationsDir: string,
+  now: Date = new Date(),
+  target?: number,
+): MigrationResult {
+  const migrations = loadMigrations(migrationsDir).filter((m) => target === undefined || m.version <= target);
   const database = databasePath(dataDir);
   const existed = existsSync(database) && statSync(database).size > 0;
   const db = openDatabase(dataDir);
@@ -75,9 +82,19 @@ export function migrateDataDirectory(dataDir: string, migrationsDir: string, now
       db.prepare('VACUUM INTO ?').run(backup);
     }
 
+    // Foreign keys are off while migrations run, as SQLite's procedure for
+    // changing a table's schema requires: rebuilding a parent table would
+    // otherwise cascade-delete its children. Each migration is checked instead,
+    // and one that leaves a dangling reference is rolled back.
+    db.pragma('foreign_keys = OFF');
     for (const migration of pending) {
       db.transaction(() => {
         db.exec(migration.sql);
+        const dangling = db.pragma('foreign_key_check') as { table: string }[];
+        if (dangling.length > 0) {
+          const tables = [...new Set(dangling.map((row) => row.table))].join(', ');
+          throw new Error(`Migration ${migration.name} leaves rows with a missing parent in: ${tables}.`);
+        }
         db.pragma(`user_version = ${migration.version}`);
       })();
     }

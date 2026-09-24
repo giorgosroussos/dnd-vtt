@@ -16,6 +16,7 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
   - Migrations run on the generated fixture database; `make verify` exit 0 on both CI runners; `TRACEABILITY.md` SRV-01 row with test names.
 - **Non-goals:** REST resources (SRV-03, SRV-05), PIN storage behaviour (SRV-02), upload pipeline (SRV-04).
 - **Review:** `Surfaces: data`, `Touches red line: yes`, `Contract change: yes`, so prompt 2 (review) runs after implementation.
+- **Remaining (2026-09-24):** implemented and verified locally (`TRACEABILITY.md` SRV-01, D-074), not yet committed. Still open: CI green on both runners for the pull request, then the review (prompt 2), whose critical and high findings block `done`.
 
 ## Next
 

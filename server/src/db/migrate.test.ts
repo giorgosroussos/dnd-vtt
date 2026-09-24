@@ -4,7 +4,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MIGRATIONS_DIR } from '../paths.js';
-import { DATABASE_FILE } from './database.js';
+import { DATABASE_FILE, openDatabase } from './database.js';
 import { backupFileName, loadMigrations, migrateDataDirectory } from './migrate.js';
 
 // Integration tests: a real SQLite file in a temporary data directory, never a
@@ -124,6 +124,55 @@ describe('migrateDataDirectory against a real SQLite file', () => {
     inspect((db) => expect(db.pragma('user_version', { simple: true })).toBe(1));
   });
 
+  it('rolls back a migration that leaves a row without its parent', () => {
+    addMigration(
+      '0001_first.sql',
+      'CREATE TABLE parent (id TEXT PRIMARY KEY); CREATE TABLE child (id TEXT PRIMARY KEY, parent_id TEXT REFERENCES parent (id));',
+    );
+    addMigration('0002_dangling.sql', "INSERT INTO child VALUES ('c', 'missing');");
+
+    expect(() => migrateDataDirectory(dataDir, migrationsDir)).toThrow(
+      /0002_dangling\.sql leaves rows with a missing parent in: child/,
+    );
+    inspect((db) => {
+      expect(db.pragma('user_version', { simple: true })).toBe(1);
+      expect(db.prepare('SELECT count(*) FROM child').pluck().get()).toBe(0);
+    });
+  });
+
+  it("rebuilds a parent table without cascading to its children, as SQLite's procedure requires", () => {
+    addMigration(
+      '0001_first.sql',
+      'CREATE TABLE parent (id TEXT PRIMARY KEY);' +
+        'CREATE TABLE child (id TEXT PRIMARY KEY, parent_id TEXT REFERENCES parent (id) ON DELETE CASCADE);' +
+        "INSERT INTO parent VALUES ('p'); INSERT INTO child VALUES ('c', 'p');",
+    );
+    addMigration(
+      '0002_rebuild.sql',
+      "CREATE TABLE parent_new (id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '');" +
+        'INSERT INTO parent_new (id) SELECT id FROM parent; DROP TABLE parent; ALTER TABLE parent_new RENAME TO parent;',
+    );
+
+    migrateDataDirectory(dataDir, migrationsDir);
+
+    inspect((db) => {
+      expect(db.prepare('SELECT id, parent_id FROM child').all()).toEqual([{ id: 'c', parent_id: 'p' }]);
+      expect(db.pragma('foreign_key_check')).toEqual([]);
+    });
+  });
+
+  it('stops at a target version when asked', () => {
+    addMigration('0001_first.sql', 'CREATE TABLE a (id TEXT PRIMARY KEY);');
+    addMigration('0002_second.sql', 'CREATE TABLE b (id TEXT PRIMARY KEY);');
+
+    expect(migrateDataDirectory(dataDir, migrationsDir, new Date(), 1)).toMatchObject({ from: 0, to: 1 });
+    expect(migrateDataDirectory(dataDir, migrationsDir)).toMatchObject({
+      from: 1,
+      to: 2,
+      applied: ['0002_second.sql'],
+    });
+  });
+
   it('applies the repository migrations to an empty data directory', () => {
     const result = migrateDataDirectory(dataDir, MIGRATIONS_DIR);
     expect(result.to).toBe(loadMigrations(MIGRATIONS_DIR).length);
@@ -157,5 +206,16 @@ describe('loadMigrations', () => {
 describe('backupFileName', () => {
   it('carries the UTC time to the millisecond and the version it holds', () => {
     expect(backupFileName(new Date('2026-01-02T03:04:05.006Z'), 7)).toBe('emberglass-backup-20260102T030405006Z-v7.db');
+  });
+});
+
+describe('openDatabase', () => {
+  it('enforces foreign keys on every connection it opens', () => {
+    const db = openDatabase(dataDir);
+    try {
+      expect(db.pragma('foreign_keys', { simple: true })).toBe(1);
+    } finally {
+      db.close();
+    }
   });
 });
