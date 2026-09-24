@@ -149,6 +149,26 @@ describe('listing, search and filters (specs/05-assets-and-images.md §1, D-022)
   });
 });
 
+describe('failures', () => {
+  it('keeps saying the tags could not be read when the results could (review L-2)', async () => {
+    library();
+    // The tag list fails at once; the results answer later, as they did when their
+    // success cleared the tag list's message.
+    let seen = 0;
+    server.before = (call) => {
+      if (call.path !== '/api/assets') return undefined;
+      seen += 1;
+      if (seen === 1) return { status: 500, body: { error: { code: 'internal_error', message: 'x' } } };
+      return new Promise<Reply | undefined>((resolve) => setTimeout(() => resolve(undefined), 30));
+    };
+    rendered = render(createElement(Library, { uploadLimit: 50 * MiB }));
+    await pause(60);
+    const view = rendered.container;
+    expect(names(view)).toEqual(['Chest', 'Goblin', 'goblin archer', 'Innkeeper']);
+    expect(view.querySelector('[role="alert"]')!.textContent).toBe(t('error.code.internal_error'));
+  });
+});
+
 describe('creating and editing (specs/05-assets-and-images.md §4, §5, §6)', () => {
   it('uploads the image and then creates the asset, leaving default visibility to the category (D-020)', async () => {
     const view = await open();
@@ -290,6 +310,14 @@ describe('deleting (specs/03-domain-model.md §7, D-083)', () => {
     await click(button(dialog(view)!, t('assetDelete.confirm')));
     expect(dialog(view)).toBeNull();
     expect(names(view)).toEqual(['Goblin', 'goblin archer', 'Innkeeper']);
+  });
+
+  it('moves focus to New asset once the asset it was on is deleted (review L-1)', async () => {
+    library();
+    const view = await open();
+    await click(button(view, t('library.deleteOf', { name: 'Chest' })));
+    await click(button(dialog(view)!, t('assetDelete.confirm')));
+    expect(document.activeElement).toBe(button(view, t('library.new')));
   });
 
   it('lists every scene that uses an asset in use, deletes nothing and offers only Close', async () => {

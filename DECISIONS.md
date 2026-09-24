@@ -105,6 +105,7 @@ Affected specs: …
 - D-086 — End-to-end tests share one server in a known order; the keyboard gate walks the signed-in workspace — implementation
 - D-087 — Sign-out shows the PIN form only once the server ended the session; focus after a deletion (PRP-01 part 1 review) — implementation
 - D-088 — DM view: the library panel, upload then create, the live bar; keyboard gate for fields; G-014 residuals accepted (PRP-01 part 2) — implementation
+- D-089 — Library review fixes: focus after deleting an asset, and each request keeps its own failure (PRP-01 part 2 review) — implementation
 
 ## D-001 (2026-09-23) — Repository documentation regime
 Type: implementation
@@ -727,3 +728,10 @@ Decision: The workspace is the live bar on top of three columns: the tree, the s
 Why: PRP-01 part 2 (`13` §5) completes `08` §1 and the library of `05` §1. Filtering on the server keeps one rule for the library, the picker (PRP-04) and the tests. Checking the size before sending is what G-017 asks, and naming both numbers tells the DM what to do. Upload-then-create is one action for the DM without a multipart route (D-080). Every control the gate walks has to be operable its own way: a text field is not activated by Enter. For G-014: the only UI that creates holds its button off while pending, and a changed tree with equal counts needs a concurrent edit from a second DM browser, which the MVP's one-DM table makes rare, while a per-row confirmation would put server state or long lists in every dialog.
 Alternatives: Filtering the whole library in the browser (rejected: a second copy of D-083's rules to keep in step); searching on every keystroke (rejected: a request per letter); a tag filter as a free-text field (rejected: typos match nothing; the known tags are few); a thumbnail with the asset's name as alt text (rejected: the name would be read twice); showing the size in bytes (rejected: not what the DM sees in the file manager); a combined multipart create (rejected in D-080); a live bar that polls settings (rejected: LIV-01's `dm` room is the way changes arrive); leaving G-014 open until a server-side idempotency key (rejected: a contract change for a double submit the UI already prevents).
 Affected specs: `08` §1, `08` §8, `05` §1, `05` §4, `05` §5, `05` §6, `03` §7, `10` §2.
+
+## D-089 (2026-09-25) — Library review fixes: focus after deleting an asset, and each request keeps its own failure (PRP-01 part 2 review)
+Type: implementation
+Decision: Refines D-088. After an asset is deleted, keyboard focus moves to the library's New asset button, since the button that opened the dialog went with the asset (as D-087 does in the tree). The library's two requests, the whole library for the tags and the filtered results, each keep their own failure message, so one answering does not hide that the other failed.
+Why: The PRP-01 part 2 review (2026-09-25) found both (low, accessibility and correctness): `client/src/dm/library/Library.test.tsx` "moves focus to New asset once the asset it was on is deleted (review L-1)" and "keeps saying the tags could not be read when the results could (review L-2)" are each red against the old code. A third low, no progress shown while an upload is sent, is deferred to PRP-02's map upload (G-017), where files are large.
+Alternatives: Focusing the search field (rejected: the DM was acting on the list, and New asset is the next likely action); retrying the tag list automatically (rejected: hides a failing server); a progress bar now (rejected: `fetch` reports no upload progress, so it needs XMLHttpRequest, which belongs with the large maps of PRP-02).
+Affected specs: `08` §8, `05` §1.

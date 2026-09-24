@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import {
   API_ASSET_PATHS,
   ASSET_CATEGORIES,
@@ -35,8 +35,11 @@ export function Library({ uploadLimit }: { uploadLimit: number }) {
   const [category, setCategory] = useState<AssetCategory | ''>('');
   const [tags, setTags] = useState<readonly string[]>([]);
   const [version, setVersion] = useState(0);
+  // Each request keeps its own failure, so one answering does not hide the other's.
+  const [tagsFailure, setTagsFailure] = useState<string>();
   const [failure, setFailure] = useState<string>();
   const [open, setOpen] = useState<Open>();
+  const newButton = useRef<HTMLDivElement>(null);
 
   // The search is sent once typing pauses.
   useEffect(() => {
@@ -46,8 +49,12 @@ export function Library({ uploadLimit }: { uploadLimit: number }) {
 
   // The whole library, for the tags to pick from.
   useEffect(() => {
-    request<LibraryAsset[]>('GET', API_ASSET_PATHS.assets).then(setAll, (error: unknown) =>
-      setFailure(errorMessage(errorCode(error))),
+    request<LibraryAsset[]>('GET', API_ASSET_PATHS.assets).then(
+      (list) => {
+        setAll(list);
+        setTagsFailure(undefined);
+      },
+      (error: unknown) => setTagsFailure(errorMessage(errorCode(error))),
     );
   }, [version]);
 
@@ -86,10 +93,17 @@ export function Library({ uploadLimit }: { uploadLimit: number }) {
     setVersion((each) => each + 1);
   };
 
+  // A deleted asset takes the button that opened its dialog with it; the keyboard
+  // goes to New asset instead of the page body (as D-087 does in the tree).
+  const deleted = () => {
+    changed();
+    newButton.current?.querySelector('button')?.focus();
+  };
+
   return (
     <div className="eg-library">
       <h2 className="eg-library__heading">{t('library.heading')}</h2>
-      <div>
+      <div ref={newButton}>
         <Button onClick={() => setOpen({ kind: 'create' })}>{t('library.new')}</Button>
       </div>
       <TextField
@@ -129,6 +143,7 @@ export function Library({ uploadLimit }: { uploadLimit: number }) {
           ))}
         </div>
       ) : null}
+      {tagsFailure ? <Notice>{tagsFailure}</Notice> : null}
       {failure ? <Notice>{failure}</Notice> : null}
       {results === undefined ? (
         failure ? null : (
@@ -181,7 +196,7 @@ export function Library({ uploadLimit }: { uploadLimit: number }) {
         />
       ) : null}
       {open?.kind === 'delete' ? (
-        <AssetDeleteDialog asset={open.asset} onDeleted={changed} onClose={() => setOpen(undefined)} />
+        <AssetDeleteDialog asset={open.asset} onDeleted={deleted} onClose={() => setOpen(undefined)} />
       ) : null}
     </div>
   );

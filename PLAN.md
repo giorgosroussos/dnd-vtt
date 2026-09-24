@@ -11,7 +11,7 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
 - **Dependencies:** part 1 (merged, pull request #9: sign-in, the workspace, the tree, `dm/api.ts`, `ui/errorMessage.ts`, D-085 to D-087); SRV-04, SRV-05.
 - **Acceptance (executable):** component tests of search, category and tag filters, create with upload, edit, delete and the in-use refusal; the size check before sending with the limit named (G-017); the live bar with and without a live scene; a Playwright run creating an asset from a generated image; `make verify` exit 0 on both CI runners.
 - **Review:** as part 1.
-- **Status:** implemented on branch `prp-01-library-livebar` with every acceptance test green locally (D-088, `TRACEABILITY.md`); G-014 closed, G-017 and G-018 narrowed; remaining: CI green on both runners, then the review pass.
+- **Status:** implemented, CI green on both runners (run 36047778005) and reviewed (D-088, D-089, `TRACEABILITY.md`); G-014 closed, G-017 and G-018 narrowed; leaves `Now` once the review fixes are green in CI.
 
 ## Next
 
