@@ -84,6 +84,7 @@ Affected specs: …
 - D-065 — Logger mechanics and redaction — implementation — superseded by D-066
 - D-066 — Logger mechanics and redaction (after review) — implementation
 - D-067 — Contract schemas in shared and one strict validator (after review) — implementation
+- D-068 — Phase 0 evidence for a rejected WebSocket command — implementation
 
 ## D-001 (2026-09-23) — Repository documentation regime
 Type: implementation
@@ -557,3 +558,10 @@ Decision: As D-062: every REST body and WebSocket envelope is a TypeBox schema i
 Why: The FND-03 review (2026-09-24) found: - an inherited property satisfied `required`; - a registered payload schema without `additionalProperties: false` would accept a JSON-parsed `__proto__` key and a Buffer, which REST's parser rejects, contrary to D-062's promise that REST and WebSocket reject the same input; - unescaped property names made detail paths ambiguous; - the strict compiler would reject every numeric `params` or `querystring` value unless someone knows to plan for it.
 Alternatives: Coercing `params` and `querystring` now (rejected: no route declares one yet, and coercion is a choice for the package that needs it); checking payload strictness only in tests (rejected: a mistake would reach the server); stripping unknown keys instead of refusing them (rejected by D-062).
 Affected specs: `02` §5, `07` §7, `13` §3.
+
+## D-068 (2026-09-24) — Phase 0 evidence for a rejected WebSocket command
+Type: implementation
+Decision: For the Phase 0 exit criterion of `13` §3 ("A REST error and a rejected WebSocket command both arrive in the shared envelope"), the owner accepts in-process evidence for the WebSocket half: `server/src/domain/commands.test.ts` shows that `dispatchCommand` answers every invalid command with the shared error envelope, the acknowledgement Socket.io will return (D-064), and changes nothing. The over-the-wire proof, a rejected command arriving at a real Socket.io client in the envelope, belongs to LIV-01, which creates the Socket.io server and its rooms.
+Why: No Socket.io server exists before LIV-01 (Phase 3). A transport built only for this criterion would anticipate LIV-01's rooms and handshake, which must check the DM session and Origin (`07` §2), before SRV-02 provides them. Decided by the owner on 2026-09-24 when asked.
+Alternatives: A minimal Socket.io transport test in Phase 0 (rejected by the owner: it would build a room-less server that LIV-01 replaces); leaving Phase 0 unexited until LIV-01 (rejected: it would block the phase on work planned for Phase 3).
+Affected specs: `13` §3, `04` §2, `07` §7.

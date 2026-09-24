@@ -16,7 +16,7 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
   - `make verify` exit 0 on both CI runners; `TRACEABILITY.md` FND-04 row with test names.
 - **Non-goals:** DM workspace layout and navigation (PRP-01), canvas (PRP-02), any REST or WebSocket use, the Connect-a-screen panel (LIV-03).
 - **Review:** `Touches red line: yes`, so prompt 2 (review) runs after implementation.
-- **Phase 0 exit, open point:** `13` §3 requires "a rejected WebSocket command ... arrive[s] in the shared envelope", but no Socket.io server exists until LIV-01 (Phase 3), so FND-03 proves it in-process only. Before Phase 0 is declared exited, settle it with the owner: accept the in-process evidence, or add a minimal transport test. Record the outcome as a card or decision.
+- **Phase 0 exit:** the owner accepted in-process evidence for "a rejected WebSocket command arrives in the shared envelope" (D-068); the over-the-wire proof belongs to LIV-01.
 
 ## Next
 
