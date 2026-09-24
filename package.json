@@ -19,6 +19,7 @@
     "dev": "npm run dev -w @emberglass/server",
     "build": "tsc -b server/tsconfig.build.json && npm run build -w @emberglass/client",
     "migrate": "npm run migrate -w @emberglass/server",
+    "reset-pin": "npm run reset-pin -w @emberglass/server",
     "typecheck": "tsc -b",
     "test": "vitest run",
     "e2e": "npm test -w @emberglass/e2e",

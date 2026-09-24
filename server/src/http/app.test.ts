@@ -1,33 +1,35 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ErrorEnvelope } from '@emberglass/shared';
-import type { Logger } from '../log/logger.js';
 import { CLIENT_ROOT } from '../paths.js';
 import { buildApp, within } from './app.js';
-
-const quiet: Logger = { info: () => {}, warn: () => {}, error: () => {} };
-
-const INDEX =
-  '<!doctype html><html><body><div id="root"></div><script type="module" src="/assets/app.js"></script></body></html>';
+import {
+  buildTestApp,
+  createTestData,
+  INDEX,
+  quiet,
+  setUpPin,
+  TEST_PIN_HASH_PARAMS,
+  type TestData,
+} from './testing/app.js';
 
 describe('buildApp serving a client build', () => {
-  let dist: string;
+  let data: TestData;
   let app: FastifyInstance;
+  let cookie: string;
 
   beforeAll(async () => {
-    dist = mkdtempSync(path.join(os.tmpdir(), 'emberglass-dist-'));
-    mkdirSync(path.join(dist, 'assets'));
-    writeFileSync(path.join(dist, 'index.html'), INDEX);
-    writeFileSync(path.join(dist, 'assets', 'app.js'), 'export {};');
-    app = await buildApp({ client: { kind: 'static', dist }, logger: quiet });
+    data = createTestData();
+    app = await buildTestApp(data);
+    cookie = await setUpPin(app, '2468');
   });
 
   afterAll(async () => {
     await app.close();
-    rmSync(dist, { recursive: true, force: true });
+    data.remove();
   });
 
   it.each(['/', '/dm', '/dm/anything'])('serves the client shell at %s', async (url) => {
@@ -43,13 +45,18 @@ describe('buildApp serving a client build', () => {
     expect(response.body).toBe('export {};');
   });
 
-  // No REST resource exists yet, so no /api path answers: nothing is reachable
-  // without a DM session (specs/02-architecture.md §5).
+  // Nothing under /api is reachable without a DM session, and with one an
+  // unknown path is a 404 (specs/02-architecture.md §5).
   it.each(['/api', '/api/health', '/api/campaigns', '/api/scenes/x'])(
-    'answers 404 at %s in the error envelope',
+    'answers 401 at %s without a DM session and 404 with one, in the error envelope',
     async (url) => {
       for (const method of ['GET', 'POST'] as const) {
-        const response = await app.inject({ method, url });
+        const refused = await app.inject({ method, url });
+        expect(refused.statusCode).toBe(401);
+        expect(refused.json<ErrorEnvelope>()).toEqual({
+          error: { code: 'unauthorized', message: 'A DM session is required.' },
+        });
+        const response = await app.inject({ method, url, headers: { cookie } });
         expect(response.statusCode).toBe(404);
         expect(response.json<ErrorEnvelope>()).toEqual({ error: { code: 'not_found', message: 'No such resource.' } });
       }
@@ -67,7 +74,7 @@ describe('buildApp serving a client build', () => {
   it('refuses to start without a build, and says how to make one', async () => {
     const empty = mkdtempSync(path.join(os.tmpdir(), 'emberglass-nodist-'));
     try {
-      await expect(buildApp({ client: { kind: 'static', dist: empty }, logger: quiet })).rejects.toThrow(
+      await expect(buildApp({ client: { kind: 'static', dist: empty }, logger: quiet, db: data.db })).rejects.toThrow(
         /npm run build/,
       );
     } finally {
@@ -77,14 +84,22 @@ describe('buildApp serving a client build', () => {
 });
 
 describe('buildApp in development', () => {
+  let data: TestData;
   let app: FastifyInstance;
 
   beforeAll(async () => {
-    app = await buildApp({ client: { kind: 'dev', root: CLIENT_ROOT }, logger: quiet });
+    data = createTestData();
+    app = await buildApp({
+      client: { kind: 'dev', root: CLIENT_ROOT },
+      logger: quiet,
+      db: data.db,
+      pinHashParams: TEST_PIN_HASH_PARAMS,
+    });
   });
 
   afterAll(async () => {
     await app.close();
+    data.remove();
   });
 
   it.each(['/', '/dm'])('serves the client shell through Vite at %s', async (url) => {
@@ -102,8 +117,12 @@ describe('buildApp in development', () => {
 
   it('does not let Vite answer under /api', async () => {
     const response = await app.inject({ method: 'GET', url: '/api/health' });
-    expect(response.statusCode).toBe(404);
-    expect(response.json<ErrorEnvelope>().error.code).toBe('not_found');
+    expect(response.statusCode).toBe(401);
+    expect(response.json<ErrorEnvelope>().error.code).toBe('unauthorized');
+    const cookie = await setUpPin(app, '2468');
+    const signedIn = await app.inject({ method: 'GET', url: '/api/health', headers: { cookie } });
+    expect(signedIn.statusCode).toBe(404);
+    expect(signedIn.json<ErrorEnvelope>().error.code).toBe('not_found');
   });
 });
 

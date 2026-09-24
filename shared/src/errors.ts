@@ -13,6 +13,13 @@ export const ERROR_CODES = [
   'payload_too_large',
   'command_unsupported',
   'internal_error',
+  // SRV-02 (specs/07-security-and-access.md §1, §2, §6):
+  'unauthorized',
+  'forbidden',
+  'pin_incorrect',
+  'locked_out',
+  'pin_not_set',
+  'pin_already_set',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

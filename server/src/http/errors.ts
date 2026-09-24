@@ -1,5 +1,7 @@
 import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { errorEnvelope, type ErrorEnvelope } from '@emberglass/shared';
+import { errorEnvelope, type ErrorCode, type ErrorEnvelope } from '@emberglass/shared';
+import { normalizeAddress } from '../auth/lockout.js';
+import { createLineLimiter, type LineLimiter, type LineLimiterOptions } from '../log/limiter.js';
 import type { Logger } from '../log/logger.js';
 import { formatAjvErrors } from '../validation.js';
 
@@ -19,7 +21,25 @@ const internal = (): HttpFailure => ({
   envelope: errorEnvelope('internal_error', 'Something went wrong on the server.'),
 });
 
+/**
+ * A refusal a route or hook decides on, with its own code. `message` is fixed
+ * text, never request data. A `quiet` failure is not logged as a rejected
+ * request, because its route already logged it in its own words (a failed PIN).
+ */
+export class ApiFailure extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: ErrorCode,
+    message: string,
+    readonly options: { quiet?: boolean; headers?: Record<string, string> } = {},
+  ) {
+    super(message);
+  }
+}
+
 export function toFailure(thrown: unknown): HttpFailure {
+  if (thrown instanceof ApiFailure)
+    return { status: thrown.status, envelope: errorEnvelope(thrown.code, thrown.message) };
   if (typeof thrown !== 'object' || thrown === null) return internal();
   const error = thrown as Thrown;
   if (Array.isArray(error.validation)) {
@@ -56,11 +76,31 @@ export function requestContext(request: FastifyRequest): { method: string; path:
   return { method: request.method, path: request.url.split('?', 1)[0] ?? '' };
 }
 
-export function installErrorHandling(app: FastifyInstance, logger: Logger): void {
+/** Where failures are logged: the logger, and the limit on rejected-request lines (G-006). */
+export interface FailureLog {
+  logger: Logger;
+  limiter: LineLimiter;
+}
+
+export type RejectedLineLimits = Omit<LineLimiterOptions, 'onDropped'>;
+
+export function createFailureLog(logger: Logger, limits: RejectedLineLimits = {}): FailureLog {
+  const limiter = createLineLimiter({
+    ...limits,
+    onDropped: (dropped, addresses) =>
+      logger.warn('http.rejected.dropped', `${dropped} rejected requests were not logged in the last window.`, {
+        dropped,
+        addresses,
+      }),
+  });
+  return { logger, limiter };
+}
+
+export function installErrorHandling(app: FastifyInstance, log: FailureLog): void {
   app.setNotFoundHandler(async (_request, reply) =>
     reply.code(404).send(errorEnvelope('not_found', 'No such resource.')),
   );
-  app.setErrorHandler(async (error: unknown, request, reply) => sendFailure(error, request, reply, logger));
+  app.setErrorHandler(async (error: unknown, request, reply) => sendFailure(error, request, reply, log));
 }
 
 /** Also passed as Fastify's `frameworkErrors`, so router errors such as a bad URL use the envelope. */
@@ -68,13 +108,14 @@ export function sendFailure(
   error: unknown,
   request: FastifyRequest,
   reply: FastifyReply,
-  logger: Logger,
+  { logger, limiter }: FailureLog,
 ): FastifyReply {
   const { status, envelope } = toFailure(error);
-  const fields = { ...requestContext(request), status, code: envelope.error.code };
+  const address = normalizeAddress(request.socket.remoteAddress);
+  const fields = { ...requestContext(request), address, status, code: envelope.error.code };
   if (status >= 500) {
     logger.error('http.error', 'Request failed on the server.', { ...fields, error });
-  } else if (status !== 404) {
+  } else if (status !== 404 && !(error instanceof ApiFailure && error.options.quiet) && limiter.admit(address)) {
     // Fastify's code, never its message: a bad-URL message quotes the raw URL,
     // query string included (D-066). 404s are routine (a TV browser asks for
     // /favicon.ico) and would bury the rest.
@@ -84,5 +125,6 @@ export function sendFailure(
       reason: typeof reason === 'string' ? reason : null,
     });
   }
+  if (error instanceof ApiFailure && error.options.headers) reply.headers(error.options.headers);
   return reply.code(status).send(envelope);
 }

@@ -61,3 +61,17 @@ export {
   type Token,
   type TokenSize,
 } from './entities.js';
+export {
+  API_PATHS,
+  AuthStateSchema,
+  PIN_PATTERN,
+  PUBLIC_API_ROUTES,
+  PinBodySchema,
+  PinChangeBodySchema,
+  PinSchema,
+  SetupStateSchema,
+  type AuthState,
+  type PinBody,
+  type PinChangeBody,
+  type SetupState,
+} from './auth.js';
