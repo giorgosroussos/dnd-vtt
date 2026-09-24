@@ -4,18 +4,22 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
 
 ## Now
 
-### FND-03 — Review before merge (prompt 2)
+### FND-04 — Design, accessibility and localization foundation
 
-- **Outcome:** the FND-03 pull request (branch `fnd-03-api-ws-conventions`) reviewed and merged. Implementation and acceptance evidence are complete (CI run 35927265858 green on Linux and Windows); `TRACEABILITY.md` FND-03 moves from `in progress` to `done` when the review passes.
-- **Specs:** `14` §7 (review passes), `13` §3 FND-03, `07` §7, `07` §8; decisions D-063, D-064, D-066, D-067.
-- **Why a review:** `Touches red line: yes` and `Contract change: yes` (`AGENTS.md` "Prompt selection").
+- **Outcome:** the DM view at `/dm` and the player view at `/` as real shells built from shared tokens and base components, with focus and error patterns; every UI string in one English message catalogue; a keyboard-operability smoke test wired as a real gate; every font and icon bundled locally.
+- **Specs:** `13` §3 FND-04, `02` §2 (views and routes), `08` §6 (language and catalogue), `08` §8 (keyboard and contrast), `02` §6 (offline, bundled assets); decisions D-014, D-031, D-053.
+- **Dependencies:** FND-03 (merged after the pull request from `fnd-03-api-ws-conventions`).
 - **Acceptance (executable):**
-  - Done 2026-09-24: bounded passes for correctness, security and isolation, and tests; both high findings and the medium and local low ones fixed with tests (D-066, D-067); two deferred to SRV-02 (G-005, G-006). No critical or high finding open.
-  - Remaining: CI green on the pull request for the fix commit, recorded in `TRACEABILITY.md` (FND-03 moves to `done` and leaves this plan), then merge to `main`.
-- **Non-goals:** new behaviour beyond fixes to findings.
+  - Vitest: the message catalogue is the only source of UI text; a test fails on a string literal rendered as UI text outside it.
+  - Playwright: both shells load from the production build; the keyboard smoke test reaches and operates every interactive element of the DM shell by keyboard alone, with a visible focus indicator. It runs inside `make e2e`, so CI blocks on it.
+  - Playwright: loading both views requests nothing but the local origin. This is not the `offline-e2e` or `external-url-build` gate of REL-02, which stay tripwires.
+  - `make verify` exit 0 on both CI runners; `TRACEABILITY.md` FND-04 row with test names.
+- **Non-goals:** DM workspace layout and navigation (PRP-01), canvas (PRP-02), any REST or WebSocket use, the Connect-a-screen panel (LIV-03).
+- **Review:** `Touches red line: yes`, so prompt 2 (review) runs after implementation.
+- **Phase 0 exit, open point:** `13` §3 requires "a rejected WebSocket command ... arrive[s] in the shared envelope", but no Socket.io server exists until LIV-01 (Phase 3), so FND-03 proves it in-process only. Before Phase 0 is declared exited, settle it with the owner: accept the in-process evidence, or add a minimal transport test. Record the outcome as a card or decision.
 
 ## Next
 
-1. **FND-04 — Design, localization and keyboard foundation.** View shells at `/dm` and `/`, English message catalogue, keyboard smoke gate, bundled fonts and icons (`13` §3, `08` §6, `08` §8, `02` §6).
-2. **SRV-01 — Schema and migrations.** The eight entities as the first numbered migrations through the FND-01 runner (`13` §4, `03` §1, `03` §3, `03` §6).
-3. **SRV-02 — PIN, DM session and guessing protection.** Loopback-only first-run setup, PIN change ending other sessions, `npm run reset-pin`, per-client lockout, Origin checks, a DM session on every `/api` route but PIN entry and setup (`13` §4, `07` §1, `07` §2, `07` §6, `07` §7, `02` §5).
+1. **SRV-01 — Schema and migrations.** The eight entities as the first numbered migrations through the FND-01 runner (`13` §4, `03` §1, `03` §3, `03` §6).
+2. **SRV-02 — PIN, DM session and guessing protection.** Loopback-only first-run setup, PIN change ending other sessions, `npm run reset-pin`, per-client lockout, Origin checks, a DM session on every `/api` route but PIN entry and setup, checked in `onRequest` before parsing (G-005), rejected-request log lines limited per client (G-006) (`13` §4, `07` §1, `07` §2, `07` §6, `07` §7, `02` §5).
+3. **SRV-03 — Campaigns, sessions and scenes over REST.** CRUD, ordering, duplication and cascading deletion with confirmation (`13` §4, `02` §5, `03` §5, `03` §7).
