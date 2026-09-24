@@ -1,13 +1,11 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
+import { readFileSync } from 'node:fs';
 import type { FastifyInstance } from 'fastify';
 import { Type } from 'typebox';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ErrorEnvelopeSchema, type ErrorEnvelope } from '@emberglass/shared';
 import { createLogger, logFilePath, type TextSink } from '../log/logger.js';
 import { compileSchema } from '../validation.js';
-import { buildApp } from './app.js';
+import { buildTestApp, createTestData, setUpPin, type TestData } from './testing/app.js';
 
 // A body schema built the way every REST resource builds its own: in TypeBox,
 // from which both the JSON Schema and the TypeScript type come (D-067).
@@ -32,22 +30,23 @@ class Capture implements TextSink {
   }
 }
 
+// Every request here carries a DM session, so that it reaches the route and its
+// body parser; what a request without one gets is in auth.test.ts.
 describe('REST error envelope and logging', () => {
-  let root: string;
+  let data: TestData;
   let dataDir: string;
   let app: FastifyInstance;
+  let dm: string;
   const stdout = new Capture();
   const stderr = new Capture();
   const received: unknown[] = [];
 
   beforeAll(async () => {
-    root = mkdtempSync(path.join(os.tmpdir(), 'emberglass-http-'));
-    dataDir = path.join(root, 'data');
-    const dist = path.join(root, 'dist');
-    mkdirSync(dist);
-    writeFileSync(path.join(dist, 'index.html'), '<!doctype html><div id="root"></div>');
+    data = createTestData('emberglass-http-');
+    dataDir = data.dataDir;
     const logger = createLogger({ dataDir, stdout, stderr });
-    app = await buildApp({ client: { kind: 'static', dist }, logger });
+    // Every rejection here must reach the log; the limit has its own tests.
+    app = await buildTestApp(data, { logger, rejectedLines: { perAddress: 1_000_000, total: 1_000_000 } });
     // Test routes standing in for the REST resources of the SRV packages.
     app.post('/api/_probe', { schema: { body: ProbeBodySchema } }, (request, reply) => {
       received.push(request.body);
@@ -70,15 +69,22 @@ describe('REST error envelope and logging', () => {
       if (kind === 'string-status') throw Object.assign(new Error('odd'), { statusCode: '418' });
       throw Object.assign(new Error('unavailable'), { statusCode: 503 });
     });
+    dm = await setUpPin(app, '97531');
   });
 
   afterAll(async () => {
     await app.close();
-    rmSync(root, { recursive: true, force: true });
+    data.remove();
   });
 
   const post = (url: string, payload: string, headers: Record<string, string> = {}) =>
-    app.inject({ method: 'POST', url, payload, headers: { 'content-type': 'application/json', ...headers } });
+    app.inject({
+      method: 'POST',
+      url,
+      payload,
+      headers: { 'content-type': 'application/json', cookie: dm, ...headers },
+    });
+  const get = (url: string) => app.inject({ method: 'GET', url, headers: { cookie: dm } });
 
   const expectEnvelope = (body: unknown, code: ErrorEnvelope['error']['code']): ErrorEnvelope => {
     expect(isEnvelope(body), JSON.stringify(isEnvelope.errors)).toBe(true);
@@ -88,7 +94,7 @@ describe('REST error envelope and logging', () => {
   };
 
   it('answers an unknown /api path with 404 in the envelope', async () => {
-    const response = await app.inject({ method: 'GET', url: '/api/no-such-thing?x=1' });
+    const response = await get('/api/no-such-thing?x=1');
     expect(response.statusCode).toBe(404);
     expectEnvelope(response.json(), 'not_found');
   });
@@ -145,7 +151,8 @@ describe('REST error envelope and logging', () => {
   it('keeps a PIN, a session cookie and a session identifier out of the console and the log file', async () => {
     const pin = '48213';
     const sessionId = 's3ss10n-7f1c9a2e4b6d8f0a1c3e5a7b9d1f3e5a';
-    const cookie = `emberglass_session=${sessionId}; theme=dark`;
+    const cookie = `${dm}; emberglass_session=${sessionId}; theme=dark`;
+    const dmSessionId = dm.split('=')[1]!;
     const headers = { cookie, 'x-session-id': sessionId };
     stdout.text = '';
     stderr.text = '';
@@ -179,6 +186,7 @@ describe('REST error envelope and logging', () => {
       expect(output).not.toContain(sessionId);
       expect(output).not.toContain(cookie);
       expect(output).not.toContain('emberglass_session=s3ss');
+      expect(output).not.toContain(dmSessionId);
     }
     expect(file).toContain('[redacted]');
   });
@@ -198,7 +206,7 @@ describe('REST error envelope and logging', () => {
   });
 
   it("answers a malformed URL in the envelope and logs Fastify's code, never the raw URL", async () => {
-    const response = await app.inject({ method: 'GET', url: '/api/%E0%A4%A?code=secret-value&p%69n=1234' });
+    const response = await get('/api/%E0%A4%A?code=secret-value&p%69n=1234');
     expect(response.statusCode).toBe(400);
     expectEnvelope(response.json(), 'bad_request');
     const line = logLines().at(-1)!;
@@ -214,7 +222,7 @@ describe('REST error envelope and logging', () => {
     stdout.text = '';
     stderr.text = '';
     expect((await app.inject({ method: 'GET', url: '/favicon.ico' })).statusCode).toBe(404);
-    expect((await app.inject({ method: 'GET', url: '/api/nope' })).statusCode).toBe(404);
+    expect((await get('/api/nope')).statusCode).toBe(404);
     expect(readFileSync(logFilePath(dataDir), 'utf8')).toBe(before);
     expect(stdout.text + stderr.text).toBe('');
   });
@@ -232,7 +240,7 @@ describe('REST error envelope and logging', () => {
     ['string-status', 500, 'internal_error'],
     ['unavailable', 500, 'internal_error'],
   ] as const)('answers a handler that throws %s in the envelope with %i', async (kind, status, code) => {
-    const response = await app.inject({ method: 'GET', url: `/api/_throw/${kind}` });
+    const response = await get(`/api/_throw/${kind}`);
     expect(response.statusCode).toBe(status);
     const envelope = expectEnvelope(response.json(), code);
     expect(response.body).not.toMatch(/4321|plain string|odd|unavailable/);

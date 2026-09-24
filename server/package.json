@@ -9,7 +9,8 @@
   },
   "scripts": {
     "dev": "tsx watch --clear-screen=false --exclude \"../client/**\" --conditions=development src/main.ts --dev",
-    "migrate": "tsx --conditions=development src/db/migrate-cli.ts"
+    "migrate": "tsx --conditions=development src/db/migrate-cli.ts",
+    "reset-pin": "tsx --conditions=development src/auth/reset-pin-cli.ts"
   },
   "dependencies": {
     "@emberglass/shared": "0.0.0",
