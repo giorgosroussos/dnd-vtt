@@ -4,6 +4,9 @@ import path from 'node:path';
 import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { VIEW_PATHS } from '@emberglass/shared';
+import type { Logger } from '../log/logger.js';
+import { compileSchema } from '../validation.js';
+import { installErrorHandling, sendFailure } from './errors.js';
 
 // Where the client comes from: the production build, or Vite in middleware mode
 // on the same port during development (D-014, D-033).
@@ -11,11 +14,27 @@ export type ClientSource = { kind: 'static'; dist: string } | { kind: 'dev'; roo
 
 type SendIndex = (request: FastifyRequest, reply: FastifyReply) => Promise<FastifyReply>;
 
-// The REST API arrives under /api with FND-03 and later packages. Until then no
-// /api route exists, so every /api path is a 404 and nothing is reachable
-// without a DM session (specs/02-architecture.md §5).
-export async function buildApp(client: ClientSource): Promise<FastifyInstance> {
-  const app = Fastify({ logger: false });
+export interface AppOptions {
+  client: ClientSource;
+  logger: Logger;
+}
+
+// The REST conventions of FND-03 (specs/02-architecture.md §5, D-015, D-063, D-067):
+// bodies are validated by the one strict validator against schemas from shared,
+// and every error, an unknown path included, answers in the shared envelope.
+// No REST resource exists yet (SRV packages), so every /api path is a 404 and
+// nothing is reachable without a DM session. Fastify's request logging stays
+// off (D-029); failures are logged by the error handler, without query strings,
+// headers or bodies.
+export async function buildApp({ client, logger }: AppOptions): Promise<FastifyInstance> {
+  const app = Fastify({
+    logger: false,
+    frameworkErrors: (error, request, reply) => {
+      sendFailure(error, request, reply, logger);
+    },
+  });
+  app.setValidatorCompiler(({ schema }) => compileSchema(schema));
+  installErrorHandling(app, logger);
   const sendIndex = client.kind === 'static' ? await serveBuild(app, client.dist) : await serveVite(app, client.root);
 
   // Both views come from one client build: the player view at /, the DM view at /dm.
