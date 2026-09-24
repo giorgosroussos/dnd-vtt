@@ -1,4 +1,4 @@
-import type { ErrorCode, ErrorEnvelope } from '@emberglass/shared';
+import { API_IMAGE_PATHS, type AssetUsage, type ErrorCode, type ErrorEnvelope, type Image } from '@emberglass/shared';
 
 // The DM view's REST client (specs/02-architecture.md §5, D-085). Same origin and
 // JSON only; the session is the HttpOnly cookie the browser sends by itself, which
@@ -14,6 +14,8 @@ export class ApiError extends Error {
     readonly code: ClientErrorCode,
     /** Seconds from `Retry-After`, sent with `locked_out`. */
     readonly retryAfter: number | undefined = undefined,
+    /** The scenes that use an asset, sent with `asset_in_use` (D-083). */
+    readonly usages: readonly AssetUsage[] = [],
   ) {
     super(`request failed: ${code}`);
   }
@@ -36,27 +38,51 @@ export async function request<T>(
   path: string,
   body?: unknown,
 ): Promise<T> {
-  let response: Response;
-  try {
-    response = await fetch(path, {
+  return answer<T>(
+    send(path, {
       method,
-      credentials: 'same-origin',
       headers:
         body === undefined
           ? { accept: 'application/json' }
           : { accept: 'application/json', 'content-type': 'application/json' },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    });
+    }),
+  );
+}
+
+/**
+ * Uploads a file's bytes as the whole body (D-080). The server judges the type by
+ * content; the browser's own Content-Type for the file is sent as it is.
+ */
+export function upload(file: Blob): Promise<Image> {
+  return answer<Image>(
+    send(API_IMAGE_PATHS.images, { method: 'POST', headers: { accept: 'application/json' }, body: file }),
+  );
+}
+
+async function send(path: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(path, { ...init, credentials: 'same-origin' });
   } catch {
     throw new ApiError(0, 'network');
   }
+}
+
+async function answer<T>(pending: Promise<Response>): Promise<T> {
+  const response = await pending;
   if (response.ok) {
     return (response.status === 204 ? undefined : await response.json()) as T;
   }
   const payload: unknown = await response.json().catch(() => undefined);
-  const code: ClientErrorCode = isEnvelope(payload) ? payload.error.code : 'internal_error';
+  const envelope = isEnvelope(payload) ? payload.error : undefined;
+  const code: ClientErrorCode = envelope?.code ?? 'internal_error';
   const seconds = Number(response.headers.get('retry-after'));
-  const error = new ApiError(response.status, code, Number.isFinite(seconds) && seconds > 0 ? seconds : undefined);
+  const error = new ApiError(
+    response.status,
+    code,
+    Number.isFinite(seconds) && seconds > 0 ? seconds : undefined,
+    envelope?.usages ?? [],
+  );
   if (code === 'unauthorized') onUnauthorized?.();
   throw error;
 }
