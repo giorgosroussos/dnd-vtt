@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { openWorkspace, seedCampaign } from './dm.js';
 
 // Keyboard-operability smoke test of the DM view (FND-04, specs/08-ux-journeys.md
 // §8, D-072). It is generic: every element sequential navigation can reach in the
@@ -10,10 +11,21 @@ import { expect, test, type Page } from '@playwright/test';
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"]), [contenteditable="true"]';
 
+// The walk covers the signed-in workspace, where the DM's controls are (D-086).
+// Operating Sign out ends the session, so every opening signs in again first.
 async function openDm(page: Page): Promise<void> {
-  await page.goto('/dm');
+  await openWorkspace(page);
   await expect(page.locator('main[data-view="dm"]')).toBeVisible();
 }
+
+// One campaign, so the walk reaches a tree item's controls as well as the
+// workspace's own.
+test.beforeAll(async ({ browser }) => {
+  const page = await browser.newPage();
+  await openWorkspace(page);
+  await seedCampaign(page, 'Keyboard campaign', ['Keyboard session']);
+  await page.close();
+});
 
 interface Ring {
   outline: string;
@@ -151,9 +163,20 @@ async function contrastFailures(page: Page): Promise<string[]> {
 }
 
 test('every text in both views keeps readable contrast', async ({ page }) => {
+  // The PIN form, as a browser without a session sees it.
   for (const path of ['/dm', '/']) {
     await page.goto(path);
     await page.waitForLoadState('networkidle');
     expect(await contrastFailures(page), path).toEqual([]);
   }
+  // The workspace with a campaign open, a create form and the delete dialog.
+  await openWorkspace(page);
+  const tree = page.getByRole('navigation', { name: 'Campaigns, sessions and scenes' });
+  await tree.getByRole('button', { name: 'Keyboard campaign', exact: true }).click();
+  await expect(tree.getByRole('button', { name: 'Keyboard session', exact: true })).toBeVisible();
+  await tree.getByRole('button', { name: 'New session' }).click();
+  expect(await contrastFailures(page), 'workspace').toEqual([]);
+  await tree.getByRole('button', { name: 'Delete Keyboard session' }).click();
+  await expect(page.getByRole('dialog')).toContainText('Scenes: 0');
+  expect(await contrastFailures(page), 'delete dialog').toEqual([]);
 });

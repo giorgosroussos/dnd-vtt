@@ -1,23 +1,104 @@
+import { useCallback, useEffect, useState } from 'react';
+import { API_PATHS, type AuthState, type SetupState } from '@emberglass/shared';
+import { Button } from '../ui/Button.js';
+import { Notice } from '../ui/Notice.js';
 import { SkipLink } from '../ui/SkipLink.js';
+import { errorMessage } from '../ui/errorMessage.js';
 import { t } from '../ui/messages.js';
+import { errorCode, request, setUnauthorizedHandler, type ClientErrorCode } from './api.js';
+import { PinEntry, SetupElsewhere, SetupScreen } from './SignIn.js';
+import { Workspace } from './Workspace.js';
+import './dm.css';
 
-const MAIN_ID = 'main';
+export const MAIN_ID = 'main';
 
-// DM view shell at /dm (FND-04). The workspace itself, sidebar, canvas, library
-// and live bar, arrives with PRP-01 (specs/08-ux-journeys.md §1).
+type Screen =
+  | { kind: 'loading' }
+  | { kind: 'failed'; code: ClientErrorCode }
+  | { kind: 'setup' }
+  | { kind: 'setupElsewhere' }
+  | { kind: 'signIn' }
+  | { kind: 'workspace' };
+
+// The DM view at /dm (specs/08-ux-journeys.md §1, specs/07-security-and-access.md
+// §1, §2, D-085). It asks the server whether a PIN exists, whether this browser is
+// on the server PC and whether it holds a DM session, and shows the one screen
+// that follows: setup, setup elsewhere, PIN entry or the workspace. The server
+// decides every one of these; the view only reflects its answers.
+async function screenFromServer(): Promise<Screen> {
+  const [setup, auth] = await Promise.all([
+    request<SetupState>('GET', API_PATHS.setup),
+    request<AuthState>('GET', API_PATHS.auth),
+  ]);
+  if (auth.dm) return { kind: 'workspace' };
+  if (setup.pin_set) return { kind: 'signIn' };
+  return { kind: setup.local ? 'setup' : 'setupElsewhere' };
+}
+
 export function DmView() {
-  const appName = t('app.name');
+  const [screen, setScreen] = useState<Screen>({ kind: 'loading' });
+
+  const load = useCallback(() => {
+    screenFromServer().then(setScreen, (error: unknown) => setScreen({ kind: 'failed', code: errorCode(error) }));
+  }, []);
+
+  useEffect(() => {
+    load();
+    // A session the server no longer knows sends the DM back to the PIN form.
+    setUnauthorizedHandler(() => setScreen({ kind: 'signIn' }));
+    return () => setUnauthorizedHandler(undefined);
+  }, [load]);
+
+  const retry = () => {
+    setScreen({ kind: 'loading' });
+    load();
+  };
+
+  const signedIn = () => setScreen({ kind: 'workspace' });
+
+  async function signOut() {
+    try {
+      await request('DELETE', API_PATHS.auth);
+    } finally {
+      setScreen({ kind: 'signIn' });
+    }
+  }
+
   return (
     <div className="eg-dm">
       <SkipLink targetId={MAIN_ID} label={t('dm.skipToMain')} />
       <header className="eg-dm__banner">
-        <span className="eg-dm__product">{appName}</span>
+        <span className="eg-dm__product">{t('app.name')}</span>
         <span className="eg-dm__role">{t('dm.role')}</span>
+        {screen.kind === 'workspace' ? (
+          <span className="eg-dm__actions">
+            <Button onClick={() => void signOut()}>{t('dm.signOut')}</Button>
+          </span>
+        ) : null}
       </header>
-      <main id={MAIN_ID} tabIndex={-1} className="eg-dm__main" data-view="dm">
-        <h1 className="eg-dm__heading">{t('dm.heading', { appName })}</h1>
-        <p className="eg-dm__status">{t('dm.status')}</p>
-      </main>
+      {screen.kind === 'workspace' ? (
+        <Workspace mainId={MAIN_ID} />
+      ) : (
+        <main id={MAIN_ID} tabIndex={-1} className="eg-dm__main" data-view="dm">
+          {screen.kind === 'loading' ? <p className="eg-dm__status">{t('dm.loading')}</p> : null}
+          {screen.kind === 'failed' ? (
+            <>
+              <Notice>
+                <p>{t('dm.loadFailed')}</p>
+                <p>{errorMessage(screen.code)}</p>
+              </Notice>
+              <div>
+                <Button variant="primary" onClick={retry}>
+                  {t('dm.retry')}
+                </Button>
+              </div>
+            </>
+          ) : null}
+          {screen.kind === 'setup' ? <SetupScreen onDone={signedIn} onPinAlreadySet={retry} /> : null}
+          {screen.kind === 'setupElsewhere' ? <SetupElsewhere /> : null}
+          {screen.kind === 'signIn' ? <PinEntry onDone={signedIn} /> : null}
+        </main>
+      )}
     </div>
   );
 }

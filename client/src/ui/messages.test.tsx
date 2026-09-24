@@ -9,6 +9,7 @@ import { PlayerView } from '../player/PlayerView.js';
 import { DmErrorScreen } from './ErrorScreen.js';
 import { IdleScreen } from './IdleScreen.js';
 import { catalogue, t } from './messages.js';
+import { FakeServer, settle } from './testing/fakeServer.js';
 import { render } from './testing/render.js';
 import { TEXT_ATTRIBUTES, scanIndexHtml, scanSource } from './testing/uiTextScan.js';
 
@@ -118,8 +119,10 @@ describe('the catalogue', () => {
   });
 
   it('fills placeholders and leaves unknown ones visible', () => {
-    expect(t('dm.heading', { appName: 'Emberglass' })).toBe('Welcome to Emberglass');
-    expect(t('dm.heading')).toBe('Welcome to {appName}');
+    expect(t('signIn.lockedOut', { seconds: 30 })).toBe(
+      'Too many wrong PINs from this device. Try again in 30 seconds.',
+    );
+    expect(t('signIn.lockedOut')).toBe('Too many wrong PINs from this device. Try again in {seconds} seconds.');
     expect(t('app.name')).toBe('Emberglass');
   });
 });
@@ -153,19 +156,43 @@ function uiTexts(container: HTMLElement): string[] {
 
 describe('the rendered views', () => {
   it.each<[string, ComponentType]>([
-    ['the DM view', DmView],
+    ['the DM view while it loads', DmView],
     ['the player view', PlayerView],
     ['the DM error screen', () => createElement(DmErrorScreen, { reload: () => undefined })],
     ['the player error screen', IdleScreen],
   ])('show only catalogue text: %s', (_name, View) => {
     const { container, unmount } = render(View);
-    const texts = uiTexts(container);
-    expect(texts.length).toBeGreaterThan(0);
-    for (const text of texts)
-      expect(
-        patterns.some((pattern) => pattern.test(text)),
-        text,
-      ).toBe(true);
+    expectCatalogueOnly(container);
     unmount();
   });
+
+  // Each screen the DM view can show once the server has answered (PRP-01, D-085).
+  it.each<[string, (server: FakeServer) => void]>([
+    ['setup on the server PC', (server) => Object.assign(server, { pinSet: false, signedIn: false })],
+    ['setup elsewhere', (server) => Object.assign(server, { pinSet: false, local: false, signedIn: false })],
+    ['PIN entry', (server) => Object.assign(server, { signedIn: false })],
+    ['the empty workspace', () => undefined],
+  ])('show only catalogue text: the DM view, %s', async (_name, arrange) => {
+    const server = new FakeServer();
+    arrange(server);
+    server.install();
+    try {
+      const { container, unmount } = render(DmView);
+      await settle();
+      expectCatalogueOnly(container);
+      unmount();
+    } finally {
+      server.uninstall();
+    }
+  });
 });
+
+function expectCatalogueOnly(container: HTMLElement): void {
+  const texts = uiTexts(container);
+  expect(texts.length).toBeGreaterThan(0);
+  for (const text of texts)
+    expect(
+      patterns.some((pattern) => pattern.test(text)),
+      text,
+    ).toBe(true);
+}
