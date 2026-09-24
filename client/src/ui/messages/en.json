@@ -6,6 +6,7 @@
   "dm.loadFailed": "The DM view could not reach the server.",
   "dm.retry": "Try again",
   "dm.signOut": "Sign out",
+  "dm.signOutFailed": "This browser is still signed in. {reason}",
   "setup.heading": "Set the DM PIN",
   "setup.intro": "The PIN protects the DM view. You set it once, here on the server PC, and enter it on any browser you run the game from.",
   "setup.pin": "PIN, 4 to 8 digits",

@@ -308,6 +308,21 @@ describe('deletion with its confirmation (specs/03-domain-model.md §7, D-078)',
     expect(view.textContent).toContain(t('tree.empty'));
   });
 
+  it('moves focus to the parent after a deletion, and to New campaign after a campaign goes (review L-1)', async () => {
+    const { mine, one, cave } = tree();
+    const view = await open();
+    await expandAll(view, [mine.id, one.id]);
+    await click(item(view, cave.id).querySelector('[data-action="delete"]'));
+    await click(button(dialog(view)!, t('delete.confirm')));
+    expect(document.activeElement).toBe(nameButton(view, one.id));
+    await click(item(view, one.id).querySelector('[data-action="delete"]'));
+    await click(button(dialog(view)!, t('delete.confirm')));
+    expect(document.activeElement).toBe(nameButton(view, mine.id));
+    await click(item(view, mine.id).querySelector('[data-action="delete"]'));
+    await click(button(dialog(view)!, t('delete.confirm')));
+    expect(document.activeElement).toBe(button(view, t('tree.newCampaign')));
+  });
+
   it('cancels without deleting and returns focus to the item', async () => {
     const { mine } = tree();
     const view = await open();

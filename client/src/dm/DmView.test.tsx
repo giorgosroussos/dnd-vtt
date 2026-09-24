@@ -130,6 +130,20 @@ describe('PIN entry and sign-out (specs/07-security-and-access.md §2, §6)', ()
     expect(heading(view)).toBe(t('signIn.heading'));
   });
 
+  it('stays signed in and says so when sign-out fails, so a shared laptop is not left looking signed out (review M-1)', async () => {
+    server.signedIn = true;
+    const view = await open();
+    server.before = (call) => (call.method === 'DELETE' ? Promise.reject(new TypeError('offline')) : undefined);
+    await click(button(view, t('dm.signOut')));
+    expect(view.querySelector('nav')).not.toBeNull();
+    expect(view.querySelector('[role="alert"]')!.textContent).toBe(
+      t('dm.signOutFailed', { reason: t('error.code.network') }),
+    );
+    server.before = undefined;
+    await click(button(view, t('dm.signOut')));
+    expect(heading(view)).toBe(t('signIn.heading'));
+  });
+
   it('returns to the PIN form when the server no longer knows the session', async () => {
     server.signedIn = true;
     const view = await open();

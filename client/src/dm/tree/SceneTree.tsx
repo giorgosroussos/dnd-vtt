@@ -192,20 +192,24 @@ export function SceneTree({ selectedSceneId, onSelectScene, onScenesRemoved, onS
     }
   }
 
+  // The deleted item's focus goes to its parent, or for a campaign to New campaign,
+  // so the keyboard is not left on the page body.
   function deleted(target: DeleteTarget) {
     setDeleting(undefined);
     if (target.kind === 'campaign') {
       const removed = (sessions[target.id] ?? []).flatMap((session) => (scenes[session.id] ?? []).map((s) => s.id));
       onScenesRemoved(removed);
-      void loadCampaigns();
+      void loadCampaigns().then(() =>
+        root.current?.querySelector<HTMLButtonElement>('[data-action="new-campaign"]')?.focus(),
+      );
     } else if (target.kind === 'session') {
       onScenesRemoved((scenes[target.id] ?? []).map((scene) => scene.id));
       const parent = Object.keys(sessions).find((id) => sessions[id]!.some((session) => session.id === target.id));
-      if (parent) void loadSessions(parent);
+      if (parent) void loadSessions(parent).then(() => setFocusNext({ id: parent, action: 'name' }));
     } else {
       onScenesRemoved([target.id]);
       const parent = Object.keys(scenes).find((id) => scenes[id]!.some((scene) => scene.id === target.id));
-      if (parent) void loadScenes(parent);
+      if (parent) void loadScenes(parent).then(() => setFocusNext({ id: parent, action: 'name' }));
     }
   }
 
@@ -344,7 +348,11 @@ export function SceneTree({ selectedSceneId, onSelectScene, onScenesRemoved, onS
       />
     ) : (
       <div className="eg-tree__create">
-        <Button size="small" onClick={() => setCreating(parentId)}>
+        <Button
+          size="small"
+          data-action={parentId === '' ? 'new-campaign' : undefined}
+          onClick={() => setCreating(parentId)}
+        >
           {t(open)}
         </Button>
       </div>

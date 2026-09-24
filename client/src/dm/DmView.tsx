@@ -37,6 +37,7 @@ async function screenFromServer(): Promise<Screen> {
 
 export function DmView() {
   const [screen, setScreen] = useState<Screen>({ kind: 'loading' });
+  const [signOutFailure, setSignOutFailure] = useState<string>();
 
   const load = useCallback(() => {
     screenFromServer().then(setScreen, (error: unknown) => setScreen({ kind: 'failed', code: errorCode(error) }));
@@ -56,11 +57,16 @@ export function DmView() {
 
   const signedIn = () => setScreen({ kind: 'workspace' });
 
+  // Only once the server has ended the session: a sign-out that failed must not
+  // look like one on a shared laptop, whose session would still be valid.
   async function signOut() {
+    setSignOutFailure(undefined);
     try {
       await request('DELETE', API_PATHS.auth);
-    } finally {
       setScreen({ kind: 'signIn' });
+    } catch (error) {
+      if (errorCode(error) === 'unauthorized') return;
+      setSignOutFailure(t('dm.signOutFailed', { reason: errorMessage(errorCode(error)) }));
     }
   }
 
@@ -76,6 +82,7 @@ export function DmView() {
           </span>
         ) : null}
       </header>
+      {screen.kind === 'workspace' && signOutFailure ? <Notice>{signOutFailure}</Notice> : null}
       {screen.kind === 'workspace' ? (
         <Workspace mainId={MAIN_ID} />
       ) : (

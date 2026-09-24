@@ -17,7 +17,7 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
   - `make verify` exit 0 on both CI runners; `TRACEABILITY.md` PRP-01 row with test names.
 - **Non-goals:** the library panel and the live bar (part 2), the canvas (PRP-02), PIN change (REL-01 settings screen), the view loading and reconnecting states beyond what sign-in needs (G-007).
 - **Review:** `Surfaces: security, ux`, `Touches red line: yes`, so prompt 2 (review) runs after implementation.
-- **Status:** implemented on branch `prp-01-signin-tree` with every acceptance test green locally (D-085, D-086, `TRACEABILITY.md`); remaining: CI green on both runners, then the review pass.
+- **Status:** implemented, CI green on both runners (run 36037604454) and reviewed (D-085 to D-087, G-018, `TRACEABILITY.md`); leaves `Now` when the review fixes are green in CI and the PR is merged.
 
 ### PRP-01 — DM workspace shell, part 2: the library panel and the live bar
 

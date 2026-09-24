@@ -103,6 +103,7 @@ Affected specs: …
 - D-084 — Images nothing references are removed when the server starts (G-016) — implementation
 - D-085 — DM view: sign-in screens, the REST client and the scene tree (PRP-01 part 1) — implementation
 - D-086 — End-to-end tests share one server in a known order; the keyboard gate walks the signed-in workspace — implementation
+- D-087 — Sign-out shows the PIN form only once the server ended the session; focus after a deletion (PRP-01 part 1 review) — implementation
 
 ## D-001 (2026-09-23) — Repository documentation regime
 Type: implementation
@@ -711,3 +712,10 @@ Decision: Refines D-072. `e2e/playwright.config.ts` runs one worker, not fully p
 Why: Every test uses the one server that `webServer` starts, so parallel workers would race on the one PIN and on shared data; the PIN can be set only once per data directory, so the journey that sets it must run first. A gate that walked only the PIN form would miss every control the DM uses.
 Alternatives: A server per test file (rejected: the build and start take most of the run, and `webServer` starts one); resetting the data directory between tests (rejected: needs a server restart the harness does not offer); signing in through the form in every test (rejected: slower and tests the form many times over); leaving the gate on the signed-out view (rejected: covers two controls).
 Affected specs: `10` §2, `08` §8, `08` §10.
+
+## D-087 (2026-09-24) — Sign-out shows the PIN form only once the server ended the session; focus after a deletion (PRP-01 part 1 review)
+Type: implementation
+Decision: Refines D-085. Sign out switches to the PIN form only when `DELETE /api/auth` succeeded, or answered `unauthorized` (the session had already ended, and the 401 handler shows the form); any other failure keeps the workspace and shows, under the banner, that this browser is still signed in, with the reason (`dm.signOutFailed`). After a confirmed deletion, keyboard focus moves to the deleted item's parent: a scene's session, a session's campaign, and for a campaign the New campaign button.
+Why: The PRP-01 part 1 review (2026-09-24) found that sign-out showed the PIN form in a `finally`, so a request that never reached the server left a valid session on a laptop that looked signed out (medium, security; `client/src/dm/DmView.test.tsx` "stays signed in and says so when sign-out fails, so a shared laptop is not left looking signed out (review M-1)" is red against the old code), and that a confirmed deletion left keyboard focus on the page body (low, accessibility; `client/src/dm/tree/SceneTree.test.tsx` "moves focus to the parent after a deletion, and to New campaign after a campaign goes (review L-1)" is red against the old code).
+Alternatives: Clearing the view on any failure and relying on the next request's 401 (rejected: the DM leaves believing the device is signed out); retrying the sign-out automatically (rejected: hides a server that is down); focusing the tree heading after a deletion (rejected: not operable, and farther from where the DM was working).
+Affected specs: `07` §2, `08` §8.
