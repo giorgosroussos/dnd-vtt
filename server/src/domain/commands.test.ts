@@ -100,6 +100,52 @@ describe('command validation and dispatch', () => {
     expect(counter.current()).toBe(0);
   });
 
+  it.each([
+    [
+      'an own __proto__ key in the envelope, as JSON.parse delivers it',
+      JSON.parse('{"type":"token.move","payload":{"tokenId":"t1","x":0,"y":0},"__proto__":{"role":"dm"}}') as unknown,
+      '/__proto__',
+    ],
+    [
+      'an own __proto__ key in the payload',
+      JSON.parse('{"type":"token.move","payload":{"tokenId":"t1","x":0,"y":0,"__proto__":{"x":1}}}') as unknown,
+      '/payload/__proto__',
+    ],
+    [
+      'a Buffer payload, as a Socket.io binary attachment arrives',
+      { type: 'token.move', payload: Buffer.from('{}') },
+      '/payload',
+    ],
+    [
+      'a payload inheriting its fields',
+      { type: 'token.move', payload: Object.create({ tokenId: 't1', x: 0, y: 0 }) as object },
+      '/payload',
+    ],
+    [
+      'a class instance as the envelope',
+      new (class Command {
+        type = 'token.move';
+        payload = { tokenId: 't1', x: 0, y: 0 };
+      })(),
+      '',
+    ],
+  ])('rejects %s', (_case, raw, pointer) => {
+    const { board, apply, send } = harness(validate);
+    const before = structuredClone(board);
+    const ack = send(raw) as ErrorEnvelope;
+    expect(ack.error.code).toBe('validation_failed');
+    expect(ack.error.details?.map((detail) => detail.path)).toContain(pointer);
+    expect(apply).not.toHaveBeenCalled();
+    expect(board).toEqual(before);
+  });
+
+  it('refuses to register a payload schema that is not a closed object', () => {
+    expect(() => createCommandValidator({ 'token.move': Type.Object({ tokenId: Type.String() }) })).toThrow(
+      /additionalProperties: false/,
+    );
+    expect(() => createCommandValidator({ undo: Type.String() })).toThrow(/object schema/);
+  });
+
   it('never trusts a role the client declares inside the payload', () => {
     const { apply, send } = harness(validate);
     const ack = send({ type: 'token.move', payload: { tokenId: 't1', x: 0, y: 0, role: 'dm' } });

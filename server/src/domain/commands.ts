@@ -9,7 +9,7 @@ import {
 import { compileSchema, formatAjvErrors } from '../validation.js';
 
 // Command validation (specs/07-security-and-access.md §7, specs/04-live-sync.md §2,
-// D-047, D-064): every WebSocket command is checked against the shared envelope
+// D-047, D-064, D-067): every WebSocket command is checked against the shared envelope
 // schema and then against its own payload schema, with the same validator as REST
 // bodies, before anything is applied. A command whose type has no payload schema
 // is refused: until the package that implements it registers one, it cannot run.
@@ -25,11 +25,41 @@ export type CommandValidator = (raw: unknown) => CommandValidation;
 
 const validateEnvelope = compileSchema<CommandEnvelope>(CommandEnvelopeSchema);
 
+// A payload schema must describe a closed object: a loose one would accept keys
+// such as `__proto__`, which Socket.io's JSON.parse delivers as own properties
+// (D-067). Checked when a schema is registered, so a mistake fails at start-up.
+function assertClosedObject(type: string, schema: object): void {
+  const { type: schemaType, additionalProperties } = schema as { type?: unknown; additionalProperties?: unknown };
+  if (schemaType !== 'object' || additionalProperties !== false) {
+    throw new Error(`The payload schema of ${type} must be an object schema with additionalProperties: false.`);
+  }
+}
+
+// Only what JSON can produce: a plain object. A Buffer (a Socket.io binary
+// attachment) or a class instance never reaches the validator.
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null) return false;
+  const prototype = Object.getPrototypeOf(value) as unknown;
+  return prototype === Object.prototype || prototype === null;
+}
+
+const notPlain = (path: string): CommandValidation => ({
+  ok: false,
+  error: errorEnvelope('validation_failed', 'The command envelope does not match its schema.', [
+    { path, message: 'must be a plain JSON object' },
+  ]),
+});
+
 export function createCommandValidator(payloadSchemas: CommandPayloadSchemas): CommandValidator {
   const payloadValidators = new Map(
-    Object.entries(payloadSchemas).map(([type, schema]) => [type, compileSchema(schema)] as const),
+    Object.entries(payloadSchemas).map(([type, schema]) => {
+      assertClosedObject(type, schema);
+      return [type, compileSchema(schema)] as const;
+    }),
   );
   return (raw) => {
+    if (!isPlainObject(raw)) return notPlain('');
+    if ('payload' in raw && !isPlainObject(raw.payload)) return notPlain('/payload');
     if (!validateEnvelope(raw)) {
       return {
         ok: false,

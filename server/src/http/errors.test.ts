@@ -10,9 +10,15 @@ import { compileSchema } from '../validation.js';
 import { buildApp } from './app.js';
 
 // A body schema built the way every REST resource builds its own: in TypeBox,
-// from which both the JSON Schema and the TypeScript type come (D-062).
+// from which both the JSON Schema and the TypeScript type come (D-067).
 const ProbeBodySchema = Type.Object(
   { name: Type.String({ minLength: 1 }), size: Type.Integer({ minimum: 1 }) },
+  { additionalProperties: false },
+);
+
+// A schema with a default, to prove the validator never fills one in (D-067).
+const DefaultsBodySchema = Type.Object(
+  { name: Type.String(), note: Type.Optional(Type.String({ default: 'filled in' })) },
   { additionalProperties: false },
 );
 
@@ -50,6 +56,19 @@ describe('REST error envelope and logging', () => {
     app.post('/api/_explode', (request) => {
       // A bug that puts request data into an error message.
       throw new Error(`could not handle cookie=${request.headers.cookie ?? ''}; body=${JSON.stringify(request.body)}`);
+    });
+    app.post('/api/_defaults', { schema: { body: DefaultsBodySchema } }, (request, reply) => {
+      received.push(request.body);
+      return reply.send({ ok: true });
+    });
+    // Handlers may throw anything; each of these must still answer in the envelope.
+    app.get('/api/_throw/:kind', (request) => {
+      const { kind } = request.params as { kind: string };
+      if (kind === 'null') throw null; // eslint-disable-line @typescript-eslint/only-throw-error
+      if (kind === 'string') throw 'plain string'; // eslint-disable-line @typescript-eslint/only-throw-error
+      if (kind === 'conflict') throw Object.assign(new Error('taken by pin=4321'), { statusCode: 409 });
+      if (kind === 'string-status') throw Object.assign(new Error('odd'), { statusCode: '418' });
+      throw Object.assign(new Error('unavailable'), { statusCode: 503 });
     });
   });
 
@@ -162,5 +181,77 @@ describe('REST error envelope and logging', () => {
       expect(output).not.toContain('emberglass_session=s3ss');
     }
     expect(file).toContain('[redacted]');
+  });
+  const logLines = () =>
+    readFileSync(logFilePath(dataDir), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+
+  it('logs the path of a rejected request without its query string', async () => {
+    const response = await post('/api/_probe?note=visible-marker', JSON.stringify({ name: 'x' }));
+    expect(response.statusCode).toBe(400);
+    const line = logLines().at(-1)!;
+    expect(line).toMatchObject({ event: 'http.rejected', method: 'POST', path: '/api/_probe', status: 400 });
+    expect(readFileSync(logFilePath(dataDir), 'utf8')).not.toContain('visible-marker');
+    expect(stdout.text + stderr.text).not.toContain('visible-marker');
+  });
+
+  it("answers a malformed URL in the envelope and logs Fastify's code, never the raw URL", async () => {
+    const response = await app.inject({ method: 'GET', url: '/api/%E0%A4%A?code=secret-value&p%69n=1234' });
+    expect(response.statusCode).toBe(400);
+    expectEnvelope(response.json(), 'bad_request');
+    const line = logLines().at(-1)!;
+    expect(line).toMatchObject({ event: 'http.rejected', status: 400, code: 'bad_request', reason: 'FST_ERR_BAD_URL' });
+    for (const output of [readFileSync(logFilePath(dataDir), 'utf8'), stdout.text + stderr.text]) {
+      expect(output).not.toContain('secret-value');
+      expect(output).not.toContain('1234');
+    }
+  });
+
+  it('does not log a 404', async () => {
+    const before = readFileSync(logFilePath(dataDir), 'utf8');
+    stdout.text = '';
+    stderr.text = '';
+    expect((await app.inject({ method: 'GET', url: '/favicon.ico' })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'GET', url: '/api/nope' })).statusCode).toBe(404);
+    expect(readFileSync(logFilePath(dataDir), 'utf8')).toBe(before);
+    expect(stdout.text + stderr.text).toBe('');
+  });
+
+  it('answers a body over the size limit with 413 payload_too_large', async () => {
+    const response = await post('/api/_probe', JSON.stringify({ name: 'x'.repeat(1_100_000), size: 1 }));
+    expect(response.statusCode).toBe(413);
+    expectEnvelope(response.json(), 'payload_too_large');
+  });
+
+  it.each([
+    ['null', 500, 'internal_error'],
+    ['string', 500, 'internal_error'],
+    ['conflict', 409, 'bad_request'],
+    ['string-status', 500, 'internal_error'],
+    ['unavailable', 500, 'internal_error'],
+  ] as const)('answers a handler that throws %s in the envelope with %i', async (kind, status, code) => {
+    const response = await app.inject({ method: 'GET', url: `/api/_throw/${kind}` });
+    expect(response.statusCode).toBe(status);
+    const envelope = expectEnvelope(response.json(), code);
+    expect(response.body).not.toMatch(/4321|plain string|odd|unavailable/);
+    expect(envelope.error.message).toMatch(/^(The request is invalid\.|Something went wrong on the server\.)$/);
+  });
+
+  it('logs a request with a long adversarial path quickly and cut short', async () => {
+    const started = performance.now();
+    const response = await post(`/api/${'pin'.repeat(5_000)}`, '{');
+    expect(response.statusCode).toBe(400);
+    expect(performance.now() - started).toBeLessThan(1_000);
+    const line = logLines().at(-1)!;
+    expect(String(line.path)).toContain('…[truncated');
+    expect(String(line.path).length).toBeLessThan(2_200);
+  });
+
+  it('never fills in a default the client left out', async () => {
+    const response = await post('/api/_defaults', JSON.stringify({ name: 'Goblin' }));
+    expect(response.statusCode).toBe(200);
+    expect(received.at(-1)).toEqual({ name: 'Goblin' });
   });
 });

@@ -1,9 +1,18 @@
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { LOG_KEEP, LOG_MAX_BYTES, createLogger, logFilePath, type TextSink } from './logger.js';
-import { REDACTED, redact, scrub } from './redact.js';
+import { MAX_LOG_STRING, REDACTED, redact, scrub } from './redact.js';
 
 class Capture implements TextSink {
   text = '';
@@ -72,6 +81,24 @@ describe('createLogger against a real data directory', () => {
     });
   });
 
+  it('keeps a field whose name is also an Object.prototype member', () => {
+    createLogger({ dataDir, stdout, stderr }).info('a.b', 'm', { constructor: 'c', toString: 't' });
+    expect(JSON.parse(readFileSync(logFilePath(dataDir), 'utf8'))).toMatchObject({ constructor: 'c', toString: 't' });
+  });
+
+  it('escapes control characters on the console, so a message cannot forge a line or drive the terminal', () => {
+    const logger = createLogger({ dataDir, stdout, stderr, now: fixedTime });
+    logger.warn('x', 'bad\n2026-01-01T00:00:00.000Z INFO  forged \u001b[31mred');
+    const error = new Error('boom\nERROR forged');
+    logger.error('y', 'failed', { error });
+    expect(stdout.text.split('\n').filter(Boolean)).toHaveLength(1);
+    expect(stdout.text).toContain('bad\\u000a2026');
+    expect(stdout.text).toContain('\\u001b[31m');
+    expect(stdout.text).not.toContain('\u001b');
+    // Every stack line, the forged one included, is indented under its entry.
+    for (const line of stderr.text.split('\n').slice(1).filter(Boolean)) expect(line.startsWith('    ')).toBe(true);
+  });
+
   it('appends to an existing log file across restarts', () => {
     createLogger({ dataDir, stdout, stderr }).info('one', 'first run');
     createLogger({ dataDir, stdout, stderr }).info('two', 'second run');
@@ -101,6 +128,23 @@ describe('createLogger against a real data directory', () => {
     expect(existsSync(`${file}.4`)).toBe(false);
   });
 
+  it('counts an existing file toward the limit after a restart', () => {
+    const file = logFilePath(dataDir);
+    createLogger({ dataDir, stdout, stderr }).info('before', 'x'.repeat(300));
+    createLogger({ dataDir, stdout, stderr, maxBytes: 200 }).info('after', 'y');
+    expect(readFileSync(`${file}.1`, 'utf8')).toContain('"event":"before"');
+    expect(readFileSync(file, 'utf8')).not.toContain('"event":"before"');
+    expect(readFileSync(file, 'utf8')).toContain('"event":"after"');
+  });
+
+  it('writes a first line longer than the limit into a fresh file without rotating', () => {
+    createLogger({ dataDir, stdout, stderr, maxBytes: 100 }).info('long', 'z'.repeat(500));
+    const file = logFilePath(dataDir);
+    expect(readdirSync(path.dirname(file))).toEqual(['emberglass.log']);
+    expect(readFileSync(file, 'utf8')).toContain('z'.repeat(500));
+    expect(stderr.text).toBe('');
+  });
+
   it('writes a line longer than the limit whole, into a file of its own', () => {
     const logger = createLogger({ dataDir, stdout, stderr, maxBytes: 100 });
     logger.info('short', 'a');
@@ -120,6 +164,24 @@ describe('createLogger against a real data directory', () => {
     expect(stdout.text).toContain('first');
     expect(stdout.text).toContain('second');
     expect(stderr.text.match(/could not be written/g)).toHaveLength(1);
+  });
+
+  it('announces a second outage after the file recovered from the first', () => {
+    const logger = createLogger({ dataDir, stdout, stderr });
+    const folder = path.dirname(logFilePath(dataDir));
+    const breakFolder = () => {
+      rmSync(folder, { recursive: true, force: true });
+      writeFileSync(folder, 'not a folder');
+    };
+    breakFolder();
+    logger.info('one', 'lost');
+    rmSync(folder);
+    mkdirSync(folder);
+    logger.info('two', 'kept');
+    breakFolder();
+    logger.info('three', 'lost again');
+    expect(stderr.text.match(/could not be written/g)).toHaveLength(2);
+    rmSync(folder);
   });
 
   it('redacts sensitive fields and scrubs messages in both outputs', () => {
@@ -157,6 +219,11 @@ describe('redact and scrub', () => {
         authorization: '8',
         password: '9',
         sid: '10',
+        dmPIN: '12',
+        'connect.sid': '13',
+        sessid: '14',
+        enteredpin: '15',
+        'x.pin': '16',
         nested: [{ deeper: { emberglass_session: '11' } }],
       }),
     ).toEqual({
@@ -171,15 +238,21 @@ describe('redact and scrub', () => {
       authorization: REDACTED,
       password: REDACTED,
       sid: REDACTED,
+      dmPIN: REDACTED,
+      'connect.sid': REDACTED,
+      sessid: REDACTED,
+      enteredpin: REDACTED,
+      'x.pin': REDACTED,
       nested: [{ deeper: { emberglass_session: REDACTED } }],
     });
   });
 
   it('leaves game words alone: a token is a game piece here', () => {
-    expect(redact({ tokenId: 't1', token: 'goblin', spin: 2, label: 'Goblin 3' })).toEqual({
+    expect(redact({ tokenId: 't1', token: 'goblin', spin: 2, pinned: true, label: 'Goblin 3' })).toEqual({
       tokenId: 't1',
       token: 'goblin',
       spin: 2,
+      pinned: true,
       label: 'Goblin 3',
     });
   });
@@ -188,15 +261,61 @@ describe('redact and scrub', () => {
     ['a query string', '/api/auth?pin=1234&x=1', '/api/auth?pin=[redacted]&x=1'],
     ['a JSON body', '{"pin":"1234","name":"a"}', '{"pin":[redacted],"name":"a"}'],
     ['a truncated JSON body', 'Unexpected end: {"pin":"12', 'Unexpected end: {"pin":[redacted]'],
-    ['a Cookie header', 'Cookie: emberglass_session=abc; theme=dark', 'Cookie: [redacted] theme=dark'],
-    [
-      'a session cookie that is not first',
-      'Cookie: theme=dark; emberglass_session=abc',
-      'Cookie: [redacted] emberglass_session=[redacted]',
-    ],
+    ['a Cookie header, whole', 'Cookie: emberglass_session=abc; theme=dark', 'Cookie: [redacted]'],
+    ['a session cookie that is not first', 'Cookie: theme=dark; emberglass=abc', 'Cookie: [redacted]'],
+    ['a Set-Cookie header', 'set-cookie: sid=abc; HttpOnly\nnext', 'set-cookie: [redacted]\nnext'],
+    ['a bearer credential', 'Authorization: Bearer abc.def', 'Authorization: [redacted]'],
     ['a key with a colon', 'sessionId: abc123 expired', 'sessionId: [redacted] expired'],
+    ['an array value', '{"pins":["1234","5678"]}', '{"pins":[redacted]}'],
+    ['an escaped quote in a value', '{"pin":"12\\"34"}', '{"pin":[redacted]}'],
+    ['single-quoted pairs', "{'pin': '1234'}", "{'pin': [redacted]}"],
+    ['a URL-encoded pair', 'pin%3D1234&code=5', 'pin%3D[redacted]&code=5'],
+    ['a pair nested in an object value', '{"a":{"pin":"1"}}', '{"a":{"pin":[redacted]}}'],
+    ['a pair nested in an array value', '{"a":[{"sessionId":"x"}]}', '{"a":[{"sessionId":[redacted]}]}'],
+    ['an object under a sensitive key', '{"session":{"id":"xyz"}}', '{"session":[redacted]}'],
+    ['a dotted session cookie name', 'connect.sid=s%3Aabc', 'connect.sid=[redacted]'],
+    ['nothing sensitive', 'spin=3 token=goblin label: Goblin 2', 'spin=3 token=goblin label: Goblin 2'],
   ])('scrubs credentials out of %s', (_case, input, expected) => {
     expect(scrub(input)).toBe(expected);
+  });
+
+  // The patterns see text a client chose; the first version took 9 s on 4,000
+  // characters of "pinpin…" (FND-03 review). Generous bound for a slow CI runner.
+  it.each([
+    ['pin'.repeat(6_000)],
+    ['a'.repeat(20_000)],
+    ['a:'.repeat(10_000)],
+    ['a:{'.repeat(7_000)],
+    ['a=['.repeat(7_000)],
+    ['"a":'.repeat(5_000)],
+    ['x.pin='.repeat(3_000)],
+  ])('scrubs adversarial text in linear time (%#)', (input) => {
+    const started = performance.now();
+    for (let run = 0; run < 10; run++) scrub(input);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
+  it('cuts a long string before scrubbing it', () => {
+    const output = scrub(`${'a'.repeat(MAX_LOG_STRING)}pin=1234`);
+    expect(output).toBe(`${'a'.repeat(MAX_LOG_STRING)}…[truncated 8 chars]`);
+  });
+
+  it('never writes raw bytes, and summarises collections', () => {
+    expect(
+      redact({
+        body: Buffer.from('pin=1234'),
+        bytes: new Uint8Array([49, 50, 51, 52]),
+        map: new Map([['pin', '1234']]),
+        set: new Set(['1234']),
+        at: new Date(0),
+      }),
+    ).toEqual({
+      body: '[binary 8 bytes]',
+      bytes: '[binary 4 bytes]',
+      map: '[Map of 1]',
+      set: '[Set of 1]',
+      at: '1970-01-01T00:00:00.000Z',
+    });
   });
 
   it('flattens errors, scrubbing message and stack', () => {

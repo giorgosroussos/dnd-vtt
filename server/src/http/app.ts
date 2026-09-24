@@ -19,7 +19,7 @@ export interface AppOptions {
   logger: Logger;
 }
 
-// The REST conventions of FND-03 (specs/02-architecture.md §5, D-015, D-062, D-063):
+// The REST conventions of FND-03 (specs/02-architecture.md §5, D-015, D-063, D-067):
 // bodies are validated by the one strict validator against schemas from shared,
 // and every error, an unknown path included, answers in the shared envelope.
 // No REST resource exists yet (SRV packages), so every /api path is a 404 and
