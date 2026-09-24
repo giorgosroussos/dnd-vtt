@@ -4,17 +4,24 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
 
 ## Now
 
-### SRV-03 — Campaigns, sessions and scenes over REST: review and CI
+### SRV-04 — Image upload pipeline
 
-- **Outcome:** the SRV-03 implementation (D-078), which passes `make verify` locally, is reviewed and green on both CI runners, and the row in `TRACEABILITY.md` moves to `done`.
-- **Specs:** `13` §4 SRV-03, `02` §5, `03` §2, `03` §3, `03` §5, `03` §6, `03` §7; D-075, D-078.
-- **Remaining acceptance (executable):**
-  - Prompt 2 (review) run on the SRV-03 change (`Surfaces: data`, `Touches red line: yes`, `Contract change: yes`); critical and high findings fixed with tests.
-  - `make verify` exit 0 on both CI runners, read back from the pipeline; `TRACEABILITY.md` SRV-03 row `done` with the run.
-- **Open card:** Q-090 (campaign order, `08` §1 against `03` §1) is for the owner to answer or defer to PRP-01; campaigns are listed by name meanwhile.
-- **Non-goals:** as before: scene setup and tokens while not live (PRP-02 to PRP-04), image upload (SRV-04), the sidebar UI (PRP-01), live-scene activation (LIV-04).
+- **Outcome:** with a DM session, the DM uploads a PNG, JPEG or WebP image and the server stores it once under the sha256 of its bytes, with a WebP display version and thumbnail; anything else, or anything over the limit, is refused with its reason and stores nothing. An image nothing references any more is removed with its files.
+- **Specs:** `13` §4 SRV-04, `02` §5 (`/api/images`), `02` §7, `03` §3 (sha256 identity, reuse), `03` §7 (removal of unreferenced images), `05` §6, `05` §7, `07` §5 (DM fetches every version; players are LIV-02); D-021, D-032, D-044, D-075, D-078; G-009, G-013.
+- **Dependencies:** SRV-01 (schema), SRV-02 (session guard), SRV-03 (scene deletion paths, `deleteEntity`).
+- **Acceptance (executable):**
+  - Vitest against a real SQLite file and images folder: PNG, JPEG and WebP judged by content are accepted; a renamed or forged file (wrong magic bytes, a PNG extension on a GIF, truncated data) is refused with 415 and the type named; nothing is written to the database or the images folder.
+  - An upload over `upload_limit_bytes` is refused with 413 while it is received, before processing (D-044), and stores nothing; the limit is read from settings, so a lowered limit takes effect without a restart.
+  - The image id is the lowercase sha256 of the original bytes; uploading the same bytes again returns the existing image and its grid preset and writes no second file.
+  - The display version's long edge is at most `display_variant_size` and never upscaled, the thumbnail's is 256 px, both WebP; `image.variants` validates against `ImageVariantsSchema` (G-009); regenerating display versions after a setting change is a function with its own test.
+  - Files are received into a temporary location and moved into place only after validation and processing succeed (D-032); a failure midway leaves no file and no row.
+  - `GET /api/images/:id` returns metadata and the grid preset; `PUT` updates the preset. With a DM session every version is fetchable at `/images/<sha256>/<variant>`; without one every image request answers not found until LIV-02 adds player entitlement (`07` §5).
+  - Deleting a scene, session or campaign (SRV-03) removes each image no asset or scene references any more, its files and its preset (G-013), with a test per deletion path; an image still referenced stays.
+  - Every route answers 401 without a DM session (the identical-answer test picks it up from `app.declaredRoutes`); `make verify` exit 0 on both CI runners; `TRACEABILITY.md` SRV-04 row with test names.
+- **Non-goals:** player image entitlement following the live scene (LIV-02), the settings screen that changes the display size (REL-01), the library UI (PRP-01), acceptance of the display size on the owner's TV (REL-03, G-002).
+- **Review:** `Surfaces: data, security, scope`, `Touches red line: yes`, `Contract change: yes`, so prompt 2 (review) runs after implementation.
 
 ## Next
 
-1. **SRV-04 — Image upload pipeline.** PNG, JPEG and WebP judged by content under the configurable limit, a rejection storing nothing, sha256 identity with duplicate reuse, WebP display and thumbnail variants that validate against `ImageVariantsSchema` (G-009), and removal of an image nobody references on every SRV-03 deletion path (G-013) (`13` §4, `05` §6, `05` §7, `03` §7).
-2. **SRV-05 — Asset library over REST.** Search and tag filter, create, update, delete refused while in use with the scenes listed, tag case decided (G-009) (`13` §4, `05` §1, `05` §2, `05` §4, `05` §5).
+1. **SRV-05 — Asset library over REST.** Search and tag filter, create, update, delete refused while in use with the scenes listed, tag case decided (G-009) (`13` §4, `05` §1, `05` §2, `05` §4, `05` §5).
+2. **PRP-01 — DM workspace shell.** The sidebar tree over the SRV-03 routes with the deletion dialog and error-code messages of G-014; Q-090 (campaign order) answered or deferred first (`13` §5, `08` §1, `07` §1).
