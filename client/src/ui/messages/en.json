@@ -1,0 +1,10 @@
+{
+  "app.name": "Emberglass",
+  "dm.role": "DM view",
+  "dm.skipToMain": "Skip to main content",
+  "dm.heading": "Welcome to {appName}",
+  "dm.status": "Campaigns, sessions and scenes will appear here.",
+  "error.heading": "Something went wrong",
+  "error.body": "This view stopped working. Reloading it keeps everything the server has saved.",
+  "error.reload": "Reload"
+}
