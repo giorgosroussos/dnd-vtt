@@ -76,7 +76,15 @@ function checkDate(date: string | null | undefined): void {
 
 const params = { params: IdParamsSchema };
 
-export function registerCampaigns(app: FastifyInstance, db: Database.Database): void {
+/**
+ * `removeImages` removes the files of the map images a deletion left unreferenced, once the
+ * deletion has committed (specs/03-domain-model.md §7, Q-002).
+ */
+export function registerCampaigns(
+  app: FastifyInstance,
+  db: Database.Database,
+  removeImages: (ids: readonly string[]) => void,
+): void {
   const requireCampaign = (id: string) => readCampaign(db, id) ?? raise(notFound());
   const requireSession = (id: string) => readSession(db, id) ?? raise(notFound());
   const requireScene = (id: string) => readScene(db, id) ?? raise(notFound());
@@ -211,9 +219,10 @@ export function registerCampaigns(app: FastifyInstance, db: Database.Database): 
       entityPath,
       { schema: { ...params, body: DeleteBodySchema } },
       async (request, reply) => {
-        const outcome = deleteEntity(db, target, request.params.id, request.body.confirm);
-        if (outcome === 'not_found') throw notFound();
-        if (outcome === 'mismatch') throw confirmationMismatch();
+        const result = deleteEntity(db, target, request.params.id, request.body.confirm);
+        if (result.outcome === 'not_found') throw notFound();
+        if (result.outcome === 'mismatch') throw confirmationMismatch();
+        removeImages(result.removedImages);
         return reply.code(204).send();
       },
     );

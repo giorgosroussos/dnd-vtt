@@ -17,7 +17,8 @@
     "@fastify/static": "^10.1.4",
     "ajv": "^8.20.0",
     "better-sqlite3": "^13.0.3",
-    "fastify": "^5.12.5"
+    "fastify": "^5.12.5",
+    "sharp": "^0.35.4"
   },
   "devDependencies": {
     "@fastify/middie": "^9.3.4",

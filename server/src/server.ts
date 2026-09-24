@@ -23,6 +23,7 @@ export async function start({ dev }: { dev: boolean }): Promise<void> {
       client: dev ? { kind: 'dev', root: CLIENT_ROOT } : { kind: 'static', dist: CLIENT_DIST },
       logger,
       db,
+      dataDir: config.dataDir,
     });
     app.addHook('onClose', () => db.close());
     await app.listen({ port: config.port, host: '0.0.0.0' });

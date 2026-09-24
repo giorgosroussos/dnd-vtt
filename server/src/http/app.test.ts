@@ -75,9 +75,9 @@ describe('buildApp serving a client build', () => {
   it('refuses to start without a build, and says how to make one', async () => {
     const empty = mkdtempSync(path.join(os.tmpdir(), 'emberglass-nodist-'));
     try {
-      await expect(buildApp({ client: { kind: 'static', dist: empty }, logger: quiet, db: data.db })).rejects.toThrow(
-        /npm run build/,
-      );
+      await expect(
+        buildApp({ client: { kind: 'static', dist: empty }, logger: quiet, db: data.db, dataDir: data.dataDir }),
+      ).rejects.toThrow(/npm run build/);
     } finally {
       rmSync(empty, { recursive: true, force: true });
     }
@@ -94,6 +94,7 @@ describe('buildApp in development', () => {
       client: { kind: 'dev', root: CLIENT_ROOT },
       logger: quiet,
       db: data.db,
+      dataDir: data.dataDir,
       pinHashParams: TEST_PIN_HASH_PARAMS,
     });
   });

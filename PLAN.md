@@ -4,24 +4,22 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
 
 ## Now
 
-### SRV-04 — Image upload pipeline
+### SRV-05 — Asset library over REST
 
-- **Outcome:** with a DM session, the DM uploads a PNG, JPEG or WebP image and the server stores it once under the sha256 of its bytes, with a WebP display version and thumbnail; anything else, or anything over the limit, is refused with its reason and stores nothing. An image nothing references any more is removed with its files.
-- **Specs:** `13` §4 SRV-04, `02` §5 (`/api/images`), `02` §7, `03` §3 (sha256 identity, reuse), `03` §7 (removal of unreferenced images), `05` §6, `05` §7, `07` §5 (DM fetches every version; players are LIV-02); D-021, D-032, D-044, D-075, D-078; G-009, G-013.
-- **Dependencies:** SRV-01 (schema), SRV-02 (session guard), SRV-03 (scene deletion paths, `deleteEntity`).
+- **Outcome:** with a DM session, the DM creates, lists, updates and deletes assets of the shared library: name, image, category, size, tags and notes, with default visibility from the category; the list searches name and tags and filters by category and by tags; an asset in use cannot be deleted and the refusal names the scenes that use it; changing an asset's image changes every token of it.
+- **Specs:** `13` §4 SRV-05, `02` §5 (`/api/assets`), `03` §2, `03` §7, `05` §1, `05` §2, `05` §4, `05` §5; D-020, D-022, D-075, D-080; G-009, G-016.
+- **Dependencies:** SRV-01 (schema), SRV-02 (session guard), SRV-04 (images, `deleteUnreferencedImages`).
 - **Acceptance (executable):**
-  - Vitest against a real SQLite file and images folder: PNG, JPEG and WebP judged by content are accepted; a renamed or forged file (wrong magic bytes, a PNG extension on a GIF, truncated data) is refused with 415 and the type named; nothing is written to the database or the images folder.
-  - An upload over `upload_limit_bytes` is refused with 413 while it is received, before processing (D-044), and stores nothing; the limit is read from settings, so a lowered limit takes effect without a restart.
-  - The image id is the lowercase sha256 of the original bytes; uploading the same bytes again returns the existing image and its grid preset and writes no second file.
-  - The display version's long edge is at most `display_variant_size` and never upscaled, the thumbnail's is 256 px, both WebP; `image.variants` validates against `ImageVariantsSchema` (G-009); regenerating display versions after a setting change is a function with its own test.
-  - Files are received into a temporary location and moved into place only after validation and processing succeed (D-032); a failure midway leaves no file and no row.
-  - `GET /api/images/:id` returns metadata and the grid preset; `PUT` updates the preset. With a DM session every version is fetchable at `/images/<sha256>/<variant>`; without one every image request answers not found until LIV-02 adds player entitlement (`07` §5).
-  - Deleting a scene, session or campaign (SRV-03) removes each image no asset or scene references any more, its files and its preset (G-013), with a test per deletion path; an image still referenced stays.
-  - Every route answers 401 without a DM session (the identical-answer test picks it up from `app.declaredRoutes`); `make verify` exit 0 on both CI runners; `TRACEABILITY.md` SRV-04 row with test names.
-- **Non-goals:** player image entitlement following the live scene (LIV-02), the settings screen that changes the display size (REL-01), the library UI (PRP-01), acceptance of the display size on the owner's TV (REL-03, G-002).
-- **Review:** `Surfaces: data, security, scope`, `Touches red line: yes`, `Contract change: yes`, so prompt 2 (review) runs after implementation.
+  - Vitest against a real SQLite file: create, read, update and list assets with server-generated lowercase UUIDs; a body naming its own id or an unknown field is refused and stores nothing; an image that does not exist is refused and stores nothing.
+  - A new `monster` asset defaults to hidden and `pc`, `npc` and `object` to visible, and `default_hidden` can be changed per asset (`05` §4, D-020).
+  - Search is a substring match over name and tags; the category filter and the tag filter narrow (every selected tag must match); results are sorted by name (`05` §1, D-022, Q-064), each with a test.
+  - Tag case is decided and recorded, with a test (G-009).
+  - Deleting an asset used by a token is refused and names every scene that uses it, changing nothing; deleting an unused asset removes it with its tags, and its image when nothing else references it, with its files (`03` §7, Q-002).
+  - Changing an asset's image changes the image of every token of that asset, and the old image is removed when nothing references it any more (`05` §5).
+  - Every route answers 401 without a DM session (the identical-answer test picks it up from `app.declaredRoutes`); `make verify` exit 0 on both CI runners; `TRACEABILITY.md` SRV-05 row with test names.
+- **Non-goals:** the library and picker UI (PRP-01 onward), tokens on a scene (PRP-04), propagating an image change to the live scene over WebSocket (LIV-04).
+- **Review:** `Surfaces: security, ux`, `Contract change: yes`, so prompt 2 (review) runs after implementation.
 
 ## Next
 
-1. **SRV-05 — Asset library over REST.** Search and tag filter, create, update, delete refused while in use with the scenes listed, tag case decided (G-009) (`13` §4, `05` §1, `05` §2, `05` §4, `05` §5).
-2. **PRP-01 — DM workspace shell.** The sidebar tree over the SRV-03 routes with the deletion dialog and error-code messages of G-014; sessions and scenes reorderable, campaigns listed by name (Q-090, D-079) (`13` §5, `08` §1, `07` §1).
+1. **PRP-01 — DM workspace shell.** The sidebar tree over the SRV-03 routes with the deletion dialog and error-code messages of G-014; sessions and scenes reorderable, campaigns listed by name (Q-090, D-079); uploads checked against `upload_limit_bytes` before sending (G-017) (`13` §5, `08` §1, `07` §1).

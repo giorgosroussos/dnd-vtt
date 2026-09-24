@@ -60,7 +60,8 @@ export const ImageVariantSchema = Type.Object(
   strict,
 );
 
-// Written by the upload pipeline (SRV-04, D-021); empty until then.
+// Written by the upload pipeline (SRV-04, D-021, D-080), which always writes both; a row
+// stored before it (the SRV-01 fixture) has neither.
 export const ImageVariantsSchema = Type.Object(
   { display: Type.Optional(ImageVariantSchema), thumbnail: Type.Optional(ImageVariantSchema) },
   strict,
