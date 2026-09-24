@@ -102,3 +102,13 @@ export {
   type SessionCreateBody,
   type SessionUpdateBody,
 } from './campaigns.js';
+export {
+  API_IMAGE_PATHS,
+  IMAGE_FILE_PATH,
+  IMAGE_VARIANTS,
+  ImageIdParamsSchema,
+  THUMBNAIL_SIZE,
+  imageFileUrl,
+  type ImageIdParams,
+  type ImageVariant,
+} from './images.js';

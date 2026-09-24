@@ -10,6 +10,8 @@ import { compileSchema } from '../validation.js';
 import type { ScryptParams } from '../auth/pin-hash.js';
 import { registerAuth, type Auth } from './auth.js';
 import { registerCampaigns } from './campaigns.js';
+import { imageFileRemover, registerImages } from './images.js';
+import { imagesDirOf, prepareImagesDir } from '../images/store.js';
 import { createFailureLog, installErrorHandling, sendFailure, type RejectedLineLimits } from './errors.js';
 
 // Where the client comes from: the production build, or Vite in middleware mode
@@ -23,6 +25,8 @@ export interface AppOptions {
   logger: Logger;
   /** The open database of the data directory, already migrated. */
   db: Database.Database;
+  /** The data directory, whose images folder holds the image files (specs/09-operations.md §5). */
+  dataDir: string;
   /** The lockout's clock, for tests. */
   now?: (() => number) | undefined;
   /** The cost of new PIN hashes; tests only lower it. */
@@ -52,6 +56,7 @@ export async function buildApp({
   client,
   logger,
   db,
+  dataDir,
   now,
   pinHashParams,
   rejectedLines,
@@ -70,7 +75,15 @@ export async function buildApp({
   app.setValidatorCompiler(({ schema }) => compileSchema(schema));
   installErrorHandling(app, failures);
   const auth = registerAuth(app, { db, logger, now, pinHashParams });
-  registerCampaigns(app, db);
+  const imagesDir = imagesDirOf(dataDir);
+  const orphans = prepareImagesDir(db, imagesDir);
+  if (orphans.length > 0) {
+    logger.info('images.orphans_removed', `Removed ${orphans.length} image folders without a database row.`, {
+      removed: orphans.length,
+    });
+  }
+  registerCampaigns(app, db, imageFileRemover(imagesDir, logger));
+  await registerImages(app, { db, imagesDir, auth });
   const sendIndex = client.kind === 'static' ? await serveBuild(app, client.dist) : await serveVite(app, client.root);
 
   // Both views come from one client build: the player view at /, the DM view at /dm.

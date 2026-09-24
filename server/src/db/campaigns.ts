@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import type { Campaign, DeletionSummary, Grid, Scene, Session } from '@emberglass/shared';
+import { deleteUnreferencedImages, PRESET_COLUMNS, toPreset, type PresetRow } from './images.js';
 
 // Campaigns, sessions and scenes in SQLite (specs/03-domain-model.md §2, §3, §5,
 // §6, §7, D-075, D-078). Every read and write names its columns. Identifiers are
@@ -14,8 +15,6 @@ const SESSION_COLUMNS = 'id, campaign_id, title, "order", date';
 const SCENE_COLUMNS = `id, session_id, name, "order", map_image_id, grid_type, grid_size, grid_offset_x,
   grid_offset_y, grid_visible, grid_feet_per_square, grid_columns, grid_rows`;
 const TOKEN_COLUMNS = 'id, scene_id, asset_id, label, x, y, hidden, z_order, character_id';
-const PRESET_COLUMNS = `grid_preset_type, grid_preset_size, grid_preset_offset_x, grid_preset_offset_y,
-  grid_preset_visible, grid_preset_feet_per_square, grid_preset_columns, grid_preset_rows`;
 
 interface SceneRow {
   id: string;
@@ -31,17 +30,6 @@ interface SceneRow {
   grid_feet_per_square: number;
   grid_columns: number;
   grid_rows: number;
-}
-
-interface PresetRow {
-  grid_preset_type: 'square' | null;
-  grid_preset_size: number | null;
-  grid_preset_offset_x: number | null;
-  grid_preset_offset_y: number | null;
-  grid_preset_visible: 0 | 1 | null;
-  grid_preset_feet_per_square: number | null;
-  grid_preset_columns: number | null;
-  grid_preset_rows: number | null;
 }
 
 interface TokenRow {
@@ -267,7 +255,8 @@ export function createScene(
     const preset = db.prepare(`SELECT ${PRESET_COLUMNS} FROM image WHERE id = ?`).get(mapImageId) as
       PresetRow | undefined;
     if (preset === undefined) return false;
-    if (preset.grid_preset_type === null) {
+    const grid = toPreset(preset);
+    if (grid === null) {
       db.prepare('INSERT INTO scene (id, session_id, name, "order", map_image_id) VALUES (?, ?, ?, ?, ?)').run(
         id,
         sessionId,
@@ -277,17 +266,7 @@ export function createScene(
       );
       return true;
     }
-    // A preset is wholly present or wholly absent (a CHECK of migration 0001).
-    insertScene(db, id, sessionId, fields.name, order, mapImageId, {
-      type: preset.grid_preset_type,
-      size: preset.grid_preset_size!,
-      offset_x: preset.grid_preset_offset_x!,
-      offset_y: preset.grid_preset_offset_y!,
-      visible: preset.grid_preset_visible === 1,
-      feet_per_square: preset.grid_preset_feet_per_square!,
-      columns: preset.grid_preset_columns!,
-      rows: preset.grid_preset_rows!,
-    });
+    insertScene(db, id, sessionId, fields.name, order, mapImageId, grid);
     return true;
   })();
   return created ? readScene(db, id) : undefined;
@@ -353,7 +332,9 @@ export function duplicateScene(db: Database.Database, id: string, name: string):
 
 // Deletion (specs/03-domain-model.md §7). The foreign keys of migration 0001
 // cascade to sessions, scenes and tokens and clear `settings.live_scene_id`;
-// what is removed is counted first, so that the DM confirms exactly that.
+// what is removed is counted first, so that the DM confirms exactly that. A map
+// image that no asset and no scene references afterwards goes in the same
+// transaction (Q-002, G-013); its files are the caller's to remove.
 
 const liveSceneId = (db: Database.Database): string | null =>
   db.prepare('SELECT live_scene_id FROM settings').pluck().get() as string | null;
@@ -395,7 +376,8 @@ export function deletionSummary(
   return { sessions, scenes: scenes.length, tokens, live: live !== null && scenes.includes(live) };
 }
 
-export type DeletionOutcome = 'deleted' | 'not_found' | 'mismatch';
+export type DeletionOutcome =
+  { outcome: 'deleted'; removedImages: string[] } | { outcome: 'not_found' } | { outcome: 'mismatch' };
 
 const sameSummary = (a: DeletionSummary, b: DeletionSummary): boolean =>
   a.sessions === b.sessions && a.scenes === b.scenes && a.tokens === b.tokens && a.live === b.live;
@@ -403,7 +385,8 @@ const sameSummary = (a: DeletionSummary, b: DeletionSummary): boolean =>
 /**
  * Deletes the entity and everything under it, only if `confirmed` is still what
  * the deletion removes; otherwise changes nothing. The siblings of a deleted
- * session or scene close the gap it leaves.
+ * session or scene close the gap it leaves. `removedImages` are the map images
+ * deleted with it because nothing references them any more.
  */
 export function deleteEntity(
   db: Database.Database,
@@ -413,8 +396,14 @@ export function deleteEntity(
 ): DeletionOutcome {
   return db.transaction((): DeletionOutcome => {
     const summary = deletionSummary(db, target, id);
-    if (summary === undefined) return 'not_found';
-    if (!sameSummary(summary, confirmed)) return 'mismatch';
+    if (summary === undefined) return { outcome: 'not_found' };
+    if (!sameSummary(summary, confirmed)) return { outcome: 'mismatch' };
+    const maps = db
+      .prepare(
+        `SELECT DISTINCT map_image_id FROM scene WHERE id IN (${SCENES_OF[target]}) AND map_image_id IS NOT NULL`,
+      )
+      .pluck()
+      .all(id) as string[];
     if (target === 'campaign') {
       db.prepare('DELETE FROM campaign WHERE id = ?').run(id);
     } else if (target === 'session') {
@@ -426,6 +415,6 @@ export function deleteEntity(
       db.prepare('DELETE FROM scene WHERE id = ?').run(id);
       writeOrder(db, SCENES, session_id, childIds(db, SCENES, session_id));
     }
-    return 'deleted';
+    return { outcome: 'deleted', removedImages: deleteUnreferencedImages(db, maps) };
   })();
 }

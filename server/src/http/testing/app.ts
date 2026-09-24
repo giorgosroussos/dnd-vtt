@@ -69,6 +69,7 @@ export function buildTestApp(
     client: { kind: 'static', dist: data.dist },
     logger: quiet,
     db: data.db,
+    dataDir: data.dataDir,
     pinHashParams: TEST_PIN_HASH_PARAMS,
     ...options,
   });
