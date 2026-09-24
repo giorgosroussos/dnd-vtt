@@ -16,6 +16,7 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
   - `make verify` exit 0 on both CI runners; `TRACEABILITY.md` FND-04 row with test names.
 - **Non-goals:** DM workspace layout and navigation (PRP-01), canvas (PRP-02), any REST or WebSocket use, the Connect-a-screen panel (LIV-03).
 - **Review:** `Touches red line: yes`, so prompt 2 (review) runs after implementation.
+- **Status (2026-09-24):** implemented on branch `fnd-04-design-foundation`, and every local acceptance runs and passes (`TRACEABILITY.md` FND-04, `in progress`). Reviewed (prompt 2) the same day: no critical or high finding, the local findings fixed, one deferred as G-007. Remaining: `make verify` green on both CI runners once the branch is pushed. Then the item is removed and SRV-01 becomes `Now`.
 - **Phase 0 exit:** the owner accepted in-process evidence for "a rejected WebSocket command arrives in the shared envelope" (D-068); the over-the-wire proof belongs to LIV-01.
 
 ## Next

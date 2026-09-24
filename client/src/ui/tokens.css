@@ -1,0 +1,209 @@
+/* Shared design tokens and base styles for both views (FND-04, D-069).
+ *
+ * One dark palette serves the DM view and the TV: the player view's idle screen
+ * is dark (specs/08-ux-journeys.md §4) and the DM works beside it at the table.
+ * Every text colour is checked against the backgrounds it is drawn on in
+ * tokens.test.ts, and the rendered pages again in e2e/tests/keyboard.spec.ts
+ * (specs/08-ux-journeys.md §8). The font is bundled, never fetched (D-071). */
+@import '@fontsource-variable/inter';
+
+:root {
+  --color-bg: #14110f;
+  --color-surface: #221c18;
+  --color-border: #4a3f37;
+  --color-text: #f2ece6;
+  --color-text-muted: #b9ada2;
+  --color-accent: #f0a04b;
+  --color-on-accent: #14110f;
+  --color-danger: #ff8f80;
+  --color-focus: #ffd27a;
+
+  --font-body: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-size-sm: 0.875rem;
+  --font-size-md: 1rem;
+  --font-size-lg: 1.25rem;
+  --font-size-xl: 2rem;
+  --font-size-display: clamp(3rem, 10vw, 8rem);
+  --line-height: 1.5;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+
+  --radius: 0.375rem;
+  --focus-ring-width: 3px;
+  --focus-ring-offset: 2px;
+
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: var(--font-size-md);
+  line-height: var(--line-height);
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+/* The one focus indicator: every interactive element shows it when reached by
+ * keyboard (specs/08-ux-journeys.md §8). Components never remove it. */
+:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* The main landmark, which receives focus from the skip link, shows no ring:
+ * it is not an operable control, and the ring would frame the whole page. Only
+ * the landmark: an item focused by arrow keys (tabindex=-1) keeps its ring. */
+main[tabindex='-1']:focus {
+  outline: none;
+}
+
+.eg-button {
+  font: inherit;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
+  cursor: pointer;
+}
+
+.eg-button--primary {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+.eg-button--secondary {
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.eg-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.eg-field__input {
+  font: inherit;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.eg-field__input[aria-invalid='true'] {
+  border-color: var(--color-danger);
+}
+
+.eg-field__error {
+  color: var(--color-danger);
+  font-size: var(--font-size-sm);
+}
+
+.eg-notice {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  border: 1px solid var(--color-danger);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+/* Off-screen until focused, then shown at the top left. */
+.eg-skip-link {
+  position: absolute;
+  left: var(--space-4);
+  top: -100vh;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.eg-skip-link:focus {
+  top: var(--space-4);
+}
+
+/* DM shell */
+.eg-dm {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.eg-dm__banner {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-6);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.eg-dm__product {
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+}
+
+.eg-dm__role {
+  color: var(--color-text-muted);
+}
+
+.eg-dm__main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-8) var(--space-6);
+}
+
+.eg-dm__heading {
+  font-size: var(--font-size-xl);
+}
+
+.eg-dm__status {
+  color: var(--color-text-muted);
+}
+
+/* Player view: the idle screen, dark with the product name only (specs/08-ux-journeys.md §4). */
+main[data-view='player'] {
+  height: 100%;
+}
+
+.eg-idle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  background: var(--color-bg);
+}
+
+.eg-idle__name {
+  font-size: var(--font-size-display);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--color-text);
+}
