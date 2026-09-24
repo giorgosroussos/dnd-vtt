@@ -4,22 +4,23 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
 
 ## Now
 
-### SRV-01 — Schema and migrations
+### SRV-02 — PIN, DM session and guessing protection
 
-- **Outcome:** the eight entities of `03` §1 as the first numbered SQL migrations, applied by the FND-01 runner at start-up and by `make migrate`, with their contract types in `shared`.
-- **Specs:** `13` §4 SRV-01, `03` §1 (entities), `03` §2 (relationships, nullable map, order), `03` §3 (UUIDs from the server, Image keyed by sha256), `03` §4 (positions in decimal grid units), `03` §6 (map-less extent, 30 × 20 default), `03` §8 (prepared fields), `09` §2 (migrations at start after a dated backup), `14` §8 (additive, UUID-only keys, fixture database).
-- **Dependencies:** Phase 0 (FND-01 to FND-04 done).
+- **Outcome:** a DM can set the PIN only from the server machine, enter it from any LAN browser to get a DM session that lasts until restart, change it (ending every other session), sign a browser out, and reset it with `npm run reset-pin`; every `/api` route but PIN entry and setup refuses a request without a DM session.
+- **Specs:** `13` §4 SRV-02, `07` §1 (loopback setup, change, reset, scrypt), `07` §2 (in-memory sessions, 256-bit HttpOnly SameSite=Strict cookie, Origin checks, sign-out, PIN change), `07` §6 (4–8 digits, lockout after 5 failures doubling), `07` §7 (role from the session only), `07` §8 (no PIN, session identifier or cookie in logs; failed attempts and lockouts logged), `02` §5 (`/api/auth`, `/api/setup`, session on every other route), `09` §2 (console hint when no PIN is set).
+- **Dependencies:** SRV-01 (settings row with `pin_hash`).
 - **Acceptance (executable):**
-  - Vitest against a real SQLite file in a temporary data directory: a fresh database migrates to the eight tables with the fields, foreign keys and orders of `03` §1–§2; a second run applies nothing and changes nothing.
-  - Constraints refuse what the specs forbid: a token without a scene or asset, a `grid.type` other than `square`, a `rules_version` other than `5e-2014`, a non-empty `character_id`; a scene without a map stores `columns` × `rows`, defaulting to 30 × 20; token `x`/`y` keep decimal grid units.
-  - Keys are UUIDs, with Image keyed by sha256; no sequential key column exists (`14` §8).
-  - Migrations run on the generated fixture database; `make verify` exit 0 on both CI runners; `TRACEABILITY.md` SRV-01 row with test names.
-- **Non-goals:** REST resources (SRV-03, SRV-05), PIN storage behaviour (SRV-02), upload pipeline (SRV-04).
-- **Review:** `Surfaces: data`, `Touches red line: yes`, `Contract change: yes`, so prompt 2 (review) runs after implementation.
-- **Remaining (2026-09-24):** CI green on the first commit (run 35984255365) and the review done (one high finding fixed, D-075, `TRACEABILITY.md` SRV-01); CI on the review-fix commit is the last condition.
+  - Vitest against a real SQLite file: setup succeeds from a loopback address and is refused from a LAN address and once a PIN is set; the stored value is a salted scrypt hash, never the PIN; a PIN outside 4–8 digits is refused.
+  - Correct PIN gives a cookie with HttpOnly and SameSite=Strict carrying a 256-bit random identifier; a wrong PIN five times locks that client address for 1 minute, doubling on each further run of five; another address is unaffected.
+  - Changing the PIN ends every other session and keeps the device that changed it; sign-out ends that browser's session; a restart ends all sessions; `npm run reset-pin` clears the hash so setup runs again from localhost.
+  - Every `/api` route except PIN entry and setup, and every unknown `/api` path, answers a request without a session identically, before body parsing (G-005); a REST write with a foreign Origin is refused.
+  - `settings` is read and written through explicit column lists and no `/api` response carries `pin_hash` (G-008); a flood of rejected requests from one address leaves earlier failed-PIN lines in the retained log files (G-006); log files and console never contain the PIN, the session identifier or the cookie.
+  - `make verify` exit 0 on both CI runners; `TRACEABILITY.md` SRV-02 row with test names.
+- **Non-goals:** the DM view screens for PIN entry and settings (PRP-01, REL-01), WebSocket handshake checks (LIV-01), README text on transport exposure and backups (REL-01).
+- **Review:** `Surfaces: data, security`, `Touches red line: yes`, `Contract change: yes`, so prompt 2 (review) runs after implementation.
 
 ## Next
 
-1. **SRV-02 — PIN, DM session and guessing protection.** Loopback-only first-run setup, PIN change ending other sessions, `npm run reset-pin`, per-client lockout, Origin checks, a DM session on every `/api` route but PIN entry and setup, checked in `onRequest` before parsing (G-005), rejected-request log lines limited per client (G-006) (`13` §4, `07` §1, `07` §2, `07` §6, `07` §7, `02` §5).
-2. **SRV-03 — Campaigns, sessions and scenes over REST.** CRUD, ordering, duplication and cascading deletion with confirmation (`13` §4, `02` §5, `03` §5, `03` §7).
-3. **SRV-04 — Image upload pipeline.** PNG, JPEG and WebP judged by content under the configurable limit, a rejection storing nothing, sha256 identity with duplicate reuse, WebP display and thumbnail variants (`13` §4, `05` §6, `05` §7, `03` §7).
+1. **SRV-03 — Campaigns, sessions and scenes over REST.** CRUD, ordering (two-step reorder under the unique order, D-075), duplication and cascading deletion with confirmation, reading and writing through explicit column lists (`13` §4, `02` §5, `03` §5, `03` §7).
+2. **SRV-04 — Image upload pipeline.** PNG, JPEG and WebP judged by content under the configurable limit, a rejection storing nothing, sha256 identity with duplicate reuse, WebP display and thumbnail variants that validate against `ImageVariantsSchema` (G-009) (`13` §4, `05` §6, `05` §7, `03` §7).
+3. **SRV-05 — Asset library over REST.** Search and tag filter, create, update, delete refused while in use with the scenes listed, tag case decided (G-009) (`13` §4, `05` §1, `05` §2, `05` §4, `05` §5).
