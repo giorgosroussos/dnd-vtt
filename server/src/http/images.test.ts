@@ -533,6 +533,8 @@ describe('staging and failure midway (D-032)', () => {
 
   it('empties the staging folder and removes image folders without a row when the server starts', async () => {
     const kept = await uploaded(await picture('png'));
+    // Referenced, so that the start-up removal of images nothing references (D-084) keeps it.
+    ok(await post('/api/assets', { name: 'Kept', image_id: kept.id, category: 'object', size: 'medium' }), 201);
     const orphan = sha256(Buffer.from('an orphan'));
     mkdirSync(path.join(imagesDir, orphan));
     writeFileSync(path.join(imagesDir, orphan, 'original'), 'left by a crash');

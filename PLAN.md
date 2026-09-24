@@ -7,7 +7,8 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
 ### SRV-05 — Asset library over REST
 
 - **Outcome:** with a DM session, the DM creates, lists, updates and deletes assets of the shared library: name, image, category, size, tags and notes, with default visibility from the category; the list searches name and tags and filters by category and by tags; an asset in use cannot be deleted and the refusal names the scenes that use it; changing an asset's image changes every token of it.
-- **Specs:** `13` §4 SRV-05, `02` §5 (`/api/assets`), `03` §2, `03` §7, `05` §1, `05` §2, `05` §4, `05` §5; D-020, D-022, D-075, D-080; G-009, G-016.
+- **Specs:** `13` §4 SRV-05, `02` §5 (`/api/assets`), `03` §2, `03` §7, `05` §1, `05` §2, `05` §4, `05` §5; D-020, D-022, D-075, D-080, D-083, D-084; G-009 and G-016 (closed by D-083 and D-084).
+- **Status:** implemented on branch `srv-05-asset-library` with every acceptance test green locally (`TRACEABILITY.md`); remaining: CI green on both runners, then the review pass.
 - **Dependencies:** SRV-01 (schema), SRV-02 (session guard), SRV-04 (images, `deleteUnreferencedImages`).
 - **Acceptance (executable):**
   - Vitest against a real SQLite file: create, read, update and list assets with server-generated lowercase UUIDs; a body naming its own id or an unknown field is refused and stores nothing; an image that does not exist is refused and stores nothing.

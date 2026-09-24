@@ -112,3 +112,19 @@ export {
   type ImageIdParams,
   type ImageVariant,
 } from './images.js';
+export {
+  API_ASSET_PATHS,
+  AssetCreateBodySchema,
+  AssetListQuerySchema,
+  AssetUpdateBodySchema,
+  AssetUsageSchema,
+  AssetUsagesSchema,
+  LibraryAssetSchema,
+  TOKEN_FOOTPRINT,
+  normalizeTag,
+  type AssetCreateBody,
+  type AssetListQuery,
+  type AssetUpdateBody,
+  type AssetUsage,
+  type LibraryAsset,
+} from './assets.js';
