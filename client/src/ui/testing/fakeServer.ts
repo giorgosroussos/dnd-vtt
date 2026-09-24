@@ -1,5 +1,14 @@
 import { act } from 'react';
-import type { Campaign, DeletionSummary, Scene, Session } from '@emberglass/shared';
+import {
+  normalizeTag,
+  type AssetUsage,
+  type Campaign,
+  type DeletionSummary,
+  type Image,
+  type LibraryAsset,
+  type Scene,
+  type Session,
+} from '@emberglass/shared';
 
 // Test tooling only, never bundled: a scripted stand-in for the server behind
 // `fetch`, for the DM view's component tests (D-085). It keeps a small tree the
@@ -45,6 +54,13 @@ export class FakeServer {
   scenes: Scene[] = [];
   tokens: Record<string, number> = {};
   liveSceneId: string | null = null;
+  uploadLimit = 50 * 1024 * 1024;
+  assets: LibraryAsset[] = [];
+  images: Image[] = [];
+  /** Scenes whose tokens use an asset, which refuse its deletion (D-083). */
+  usages: Record<string, AssetUsage[]> = {};
+  /** What each upload sent as its body. */
+  uploads: unknown[] = [];
   calls: Call[] = [];
   before: Interceptor | undefined;
   private restore: (() => void) | undefined;
@@ -86,12 +102,40 @@ export class FakeServer {
     return scene;
   }
 
+  addAsset(fields: Partial<LibraryAsset> & { name: string }): LibraryAsset {
+    const asset: LibraryAsset = {
+      id: uuid(),
+      category: 'monster',
+      image_id: this.addImage().id,
+      size: 'medium',
+      default_hidden: fields.category === undefined || fields.category === 'monster',
+      notes: '',
+      tags: [],
+      ...fields,
+    };
+    this.assets.push(asset);
+    return asset;
+  }
+
+  addImage(): Image {
+    const image: Image = {
+      id: (++counter).toString(16).padStart(64, '0'),
+      mime: 'image/png',
+      width: 64,
+      height: 64,
+      variants: { display: { width: 64, height: 64 }, thumbnail: { width: 64, height: 64 } },
+      grid_preset: null,
+    };
+    this.images.push(image);
+    return image;
+  }
+
   /** Replaces `fetch` until `uninstall`. */
   install(): this {
     const original = globalThis.fetch;
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url;
-      const body: unknown = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
+      const body: unknown = typeof init?.body === 'string' ? JSON.parse(init.body) : init?.body;
       const call = { method: init?.method ?? 'GET', path, body };
       this.calls.push(call);
       const reply = (await this.before?.(call)) ?? this.handle(call);
@@ -140,7 +184,10 @@ export class FakeServer {
     };
   }
 
+  // As migration 0001's foreign keys do, deleting the live scene or an ancestor
+  // clears the live scene (specs/03-domain-model.md §7).
   private remove(kind: string, id: string): void {
+    if (this.summary(kind, id).live) this.liveSceneId = null;
     const summaryScenes = (sessionIds: string[]) => this.scenes.filter((s) => sessionIds.includes(s.session_id));
     if (kind === 'campaign') {
       const ids = this.sessionsOf(id).map((s) => s.id);
@@ -160,8 +207,65 @@ export class FakeServer {
     }
   }
 
-  private handle({ method, path, body }: Call): Reply {
+  private sortedAssets(): LibraryAsset[] {
+    return [...this.assets].sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }));
+  }
+
+  // The library's list, as D-083 filters it.
+  private listAssets(query: URLSearchParams): LibraryAsset[] {
+    const search = normalizeTag(query.get('q') ?? '');
+    const category = query.get('category');
+    const tags = query.getAll('tag').map(normalizeTag);
+    return this.sortedAssets().filter(
+      (asset) =>
+        (category === null || asset.category === category) &&
+        tags.every((tag) => asset.tags.includes(tag)) &&
+        (search === '' || normalizeTag(asset.name).includes(search) || asset.tags.some((tag) => tag.includes(search))),
+    );
+  }
+
+  private handleAssets(
+    method: string,
+    id: string | undefined,
+    query: URLSearchParams,
+    b: Record<string, unknown>,
+  ): Reply {
+    const tags = (list: unknown) => [...new Set(((list as string[] | undefined) ?? []).map(normalizeTag))].sort();
+    if (id === undefined) {
+      if (method === 'GET') return json(200, this.listAssets(query));
+      if (!this.images.some((image) => image.id === b.image_id)) return failure(400, 'reference_not_found');
+      const category = b.category as LibraryAsset['category'];
+      const asset = this.addAsset({
+        name: String(b.name),
+        category,
+        image_id: String(b.image_id),
+        size: b.size as LibraryAsset['size'],
+        default_hidden: typeof b.default_hidden === 'boolean' ? b.default_hidden : category === 'monster',
+        notes: typeof b.notes === 'string' ? b.notes : '',
+        tags: tags(b.tags),
+      });
+      return json(201, asset);
+    }
+    const asset = this.assets.find((each) => each.id === id);
+    if (!asset) return failure(404, 'not_found');
+    if (method === 'GET') return json(200, asset);
+    if (method === 'PATCH') {
+      if (b.image_id !== undefined && !this.images.some((image) => image.id === b.image_id)) {
+        return failure(400, 'reference_not_found');
+      }
+      Object.assign(asset, { ...b, ...(b.tags === undefined ? {} : { tags: tags(b.tags) }) });
+      return json(200, asset);
+    }
+    const usages = this.usages[id] ?? [];
+    if (usages.length > 0) return json(409, { error: { code: 'asset_in_use', message: 'test', usages } });
+    this.assets = this.assets.filter((each) => each.id !== id);
+    return json(204);
+  }
+
+  private handle({ method, path: url, body }: Call): Reply {
     const b = (body ?? {}) as Record<string, unknown>;
+    const [path = '', search = ''] = url.split('?', 2);
+    const query = new URLSearchParams(search);
     if (path === '/api/setup') {
       if (method === 'GET') return json(200, { pin_set: this.pinSet, local: this.local });
       if (this.pinSet) return failure(409, 'pin_already_set');
@@ -182,6 +286,21 @@ export class FakeServer {
       return json(200, { dm: true });
     }
     if (!this.signedIn) return failure(401, 'unauthorized');
+    if (path === '/api/settings') {
+      return json(200, {
+        id: '00000000-0000-4000-8000-00000000ffff',
+        live_scene_id: this.liveSceneId,
+        ruler_rule: 'phb',
+        upload_limit_bytes: this.uploadLimit,
+        display_variant_size: 4096,
+      });
+    }
+    if (path === '/api/images' && method === 'POST') {
+      this.uploads.push(body);
+      return json(201, this.addImage());
+    }
+    const asset = /^\/api\/assets(?:\/([^/]+))?$/.exec(path);
+    if (asset) return this.handleAssets(method, asset[1], query, b);
 
     const match =
       /^\/api\/(campaigns|sessions|scenes)(?:\/([^/]+))?(?:\/(sessions|scenes|deletion|order))?(?:\/(order))?$/.exec(
@@ -219,6 +338,15 @@ export class FakeServer {
         201,
         child === 'sessions' ? this.addSession(id!, String(b.title)) : this.addScene(id!, String(b.name)),
       );
+    }
+    if (method === 'GET') {
+      const found =
+        kind === 'campaign'
+          ? this.campaigns.find((c) => c.id === id)
+          : kind === 'session'
+            ? this.sessions.find((s) => s.id === id)
+            : this.scenes.find((s) => s.id === id);
+      return json(200, found);
     }
     if (method === 'PATCH') {
       const item =

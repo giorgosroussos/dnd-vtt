@@ -80,9 +80,27 @@ test('every interactive element of the DM view is reached, shown and operated by
     expect(focused, `${name} looks the same focused and unfocused`).not.toEqual(unfocused);
     await expect(element, `${name} is not visible when focused`).toBeInViewport();
 
-    // Operated by keyboard: Enter activates links and buttons, Space buttons too.
+    // A field is operated by typing into it and a select by the arrow keys: the value
+    // changes (D-088). A checkbox is a control Space toggles, like a button.
+    const kind = await element.evaluate((e) => {
+      if (e instanceof HTMLSelectElement) return 'select';
+      if (e instanceof HTMLTextAreaElement) return 'text';
+      if (e instanceof HTMLInputElement) {
+        if (e.type === 'checkbox' || e.type === 'radio') return 'toggle';
+        if (!['button', 'submit', 'reset', 'file', 'image'].includes(e.type)) return 'text';
+      }
+      return 'control';
+    });
+    if (kind === 'text' || kind === 'select') {
+      const before = await element.inputValue();
+      await page.keyboard.press(kind === 'text' ? 'x' : 'ArrowDown');
+      await expect(element, `the keyboard did not change ${name}`).not.toHaveValue(before);
+      continue;
+    }
+
+    // Operated by keyboard: Enter activates links and buttons, Space buttons and checkboxes too.
     const tag = await element.evaluate((e) => e.tagName.toLowerCase());
-    const keys = tag === 'button' ? ['Enter', 'Space'] : ['Enter'];
+    const keys = kind === 'toggle' ? ['Space'] : tag === 'button' ? ['Enter', 'Space'] : ['Enter'];
     for (const key of keys) {
       if (key !== keys[0]) {
         await openDm(page);
@@ -179,4 +197,8 @@ test('every text in both views keeps readable contrast', async ({ page }) => {
   await tree.getByRole('button', { name: 'Delete Keyboard session' }).click();
   await expect(page.getByRole('dialog')).toContainText('Scenes: 0');
   expect(await contrastFailures(page), 'delete dialog').toEqual([]);
+  await page.keyboard.press('Escape');
+  await page.getByRole('complementary', { name: 'Asset library' }).getByRole('button', { name: 'New asset' }).click();
+  await expect(page.getByRole('dialog', { name: 'New asset' })).toBeVisible();
+  expect(await contrastFailures(page), 'asset dialog').toEqual([]);
 });

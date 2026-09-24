@@ -1,31 +1,63 @@
-import { useState } from 'react';
-import type { Scene } from '@emberglass/shared';
+import { useEffect, useState } from 'react';
+import { API_PATHS, DEFAULT_SETTINGS, type Scene, type Settings } from '@emberglass/shared';
+import { Notice } from '../ui/Notice.js';
+import { errorMessage } from '../ui/errorMessage.js';
 import { t } from '../ui/messages.js';
+import { errorCode, request } from './api.js';
+import { LiveBar } from './LiveBar.js';
+import { Library } from './library/Library.js';
 import { SceneTree } from './tree/SceneTree.js';
 
-// The DM workspace (specs/08-ux-journeys.md §1, Q-023): the Campaign → Session →
-// Scene tree on the left and the selected scene in the centre. The canvas is
-// PRP-02; the library panel and the live bar arrive with the second part of PRP-01.
+// The DM workspace (specs/08-ux-journeys.md §1, Q-023): the live bar on top, the
+// Campaign → Session → Scene tree on the left, the selected scene in the centre and
+// the asset library on the right. The canvas is PRP-02. Settings give the live scene
+// and the upload limit; they are read again after a change in the tree, since
+// deleting the live scene clears it (specs/03-domain-model.md §7).
 export function Workspace({ mainId }: { mainId: string }) {
   const [selected, setSelected] = useState<Scene>();
+  const [settings, setSettings] = useState<Settings>();
+  const [failure, setFailure] = useState<string>();
+  const [treeVersion, setTreeVersion] = useState(0);
+
+  useEffect(() => {
+    request<Settings>('GET', API_PATHS.settings).then(
+      (value) => {
+        setSettings(value);
+        setFailure(undefined);
+      },
+      (error: unknown) => setFailure(errorMessage(errorCode(error))),
+    );
+  }, [treeVersion]);
+
+  const treeChanged = () => setTreeVersion((each) => each + 1);
+
   return (
     <div className="eg-workspace">
-      <nav className="eg-workspace__sidebar" aria-label={t('tree.label')}>
-        <SceneTree
-          selectedSceneId={selected?.id}
-          onSelectScene={setSelected}
-          onScenesRemoved={(ids) => {
-            if (selected && ids.includes(selected.id)) setSelected(undefined);
-          }}
-          onSceneRenamed={(scene) => {
-            if (selected?.id === scene.id) setSelected(scene);
-          }}
-        />
-      </nav>
-      <main id={mainId} tabIndex={-1} className="eg-workspace__main" data-view="dm">
-        <h1 className="eg-dm__heading">{selected ? selected.name : t('workspace.noScene')}</h1>
-        <p className="eg-dm__status">{selected ? t('workspace.sceneHint') : t('workspace.noSceneHint')}</p>
-      </main>
+      <LiveBar liveSceneId={settings?.live_scene_id} refreshKey={treeVersion} />
+      {failure ? <Notice>{failure}</Notice> : null}
+      <div className="eg-workspace__columns">
+        <nav className="eg-workspace__sidebar" aria-label={t('tree.label')}>
+          <SceneTree
+            selectedSceneId={selected?.id}
+            onSelectScene={setSelected}
+            onScenesRemoved={(ids) => {
+              if (selected && ids.includes(selected.id)) setSelected(undefined);
+              treeChanged();
+            }}
+            onSceneRenamed={(scene) => {
+              if (selected?.id === scene.id) setSelected(scene);
+              treeChanged();
+            }}
+          />
+        </nav>
+        <main id={mainId} tabIndex={-1} className="eg-workspace__main" data-view="dm">
+          <h1 className="eg-dm__heading">{selected ? selected.name : t('workspace.noScene')}</h1>
+          <p className="eg-dm__status">{selected ? t('workspace.sceneHint') : t('workspace.noSceneHint')}</p>
+        </main>
+        <aside className="eg-workspace__library" aria-label={t('library.label')}>
+          <Library uploadLimit={settings?.upload_limit_bytes ?? DEFAULT_SETTINGS.upload_limit_bytes} />
+        </aside>
+      </div>
     </div>
   );
 }

@@ -1,6 +1,7 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { DeletionSummary } from '@emberglass/shared';
 import { Button } from '../../ui/Button.js';
+import { Dialog } from '../../ui/Dialog.js';
 import { Notice } from '../../ui/Notice.js';
 import { errorMessage } from '../../ui/errorMessage.js';
 import { t } from '../../ui/messages.js';
@@ -35,21 +36,11 @@ export function DeleteDialog({
   onDeleted: () => void;
   onClose: () => void;
 }) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  const headingId = useId();
   const [summary, setSummary] = useState<DeletionSummary>();
   const [changed, setChanged] = useState(false);
   const [failure, setFailure] = useState<string>();
   const [pending, setPending] = useState(false);
   const path = entityPath(target.kind, target.id);
-
-  useEffect(() => {
-    const element = dialog.current!;
-    element.showModal();
-    return () => {
-      if (element.open) element.close();
-    };
-  }, []);
 
   useEffect(() => {
     request<DeletionSummary>('GET', `${path}/deletion`).then(setSummary, (error: unknown) =>
@@ -79,18 +70,7 @@ export function DeleteDialog({
   }
 
   return (
-    <dialog
-      ref={dialog}
-      className="eg-dialog"
-      aria-labelledby={headingId}
-      onCancel={(event) => {
-        event.preventDefault();
-        onClose();
-      }}
-    >
-      <h2 id={headingId} className="eg-dialog__heading">
-        {t('delete.heading', { name: target.name })}
-      </h2>
+    <Dialog heading={t('delete.heading', { name: target.name })} onClose={onClose}>
       {changed ? <Notice>{t('delete.changed')}</Notice> : null}
       {failure ? <Notice>{failure}</Notice> : null}
       {summary ? (
@@ -112,6 +92,6 @@ export function DeleteDialog({
           {t('delete.confirm')}
         </Button>
       </div>
-    </dialog>
+    </Dialog>
   );
 }

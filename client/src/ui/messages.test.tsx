@@ -9,7 +9,7 @@ import { PlayerView } from '../player/PlayerView.js';
 import { DmErrorScreen } from './ErrorScreen.js';
 import { IdleScreen } from './IdleScreen.js';
 import { catalogue, t } from './messages.js';
-import { FakeServer, settle } from './testing/fakeServer.js';
+import { button, click, FakeServer, installDialog, settle } from './testing/fakeServer.js';
 import { render } from './testing/render.js';
 import { TEXT_ATTRIBUTES, scanIndexHtml, scanSource } from './testing/uiTextScan.js';
 
@@ -172,6 +172,14 @@ describe('the rendered views', () => {
     ['setup elsewhere', (server) => Object.assign(server, { pinSet: false, local: false, signedIn: false })],
     ['PIN entry', (server) => Object.assign(server, { signedIn: false })],
     ['the empty workspace', () => undefined],
+    [
+      'the workspace with a live scene and an asset whose texts are catalogue texts',
+      (server) => {
+        const session = server.addSession(server.addCampaign(t('app.name')).id, t('app.name'));
+        server.liveSceneId = server.addScene(session.id, t('app.name')).id;
+        server.addAsset({ name: t('app.name'), tags: [] });
+      },
+    ],
   ])('show only catalogue text: the DM view, %s', async (_name, arrange) => {
     const server = new FakeServer();
     arrange(server);
@@ -185,6 +193,39 @@ describe('the rendered views', () => {
       server.uninstall();
     }
   });
+});
+
+// The dialogs of the workspace, opened as the DM opens them.
+it('show only catalogue text: the new-asset dialog, and a refused asset deletion with its scenes', async () => {
+  installDialog();
+  const server = new FakeServer();
+  const asset = server.addAsset({ name: t('app.name') });
+  server.usages[asset.id] = [
+    {
+      scene_id: '00000000-0000-4000-8000-0000000000a1',
+      scene_name: t('app.name'),
+      session_id: '00000000-0000-4000-8000-0000000000a2',
+      session_title: t('app.name'),
+      campaign_id: '00000000-0000-4000-8000-0000000000a3',
+      campaign_name: t('app.name'),
+      tokens: 2,
+    },
+  ];
+  server.install();
+  try {
+    const { container, unmount } = render(DmView);
+    await settle();
+    await click(button(container, t('library.new')));
+    expectCatalogueOnly(container.querySelector('dialog')!);
+    await click(button(container.querySelector('dialog')!, t('assetForm.cancel')));
+    await click(button(container, t('library.deleteOf', { name: t('app.name') })));
+    await click(button(container.querySelector('dialog')!, t('assetDelete.confirm')));
+    expect(container.querySelector('dialog')!.textContent).toContain(t('assetDelete.close'));
+    expectCatalogueOnly(container.querySelector('dialog')!);
+    unmount();
+  } finally {
+    server.uninstall();
+  }
 });
 
 function expectCatalogueOnly(container: HTMLElement): void {

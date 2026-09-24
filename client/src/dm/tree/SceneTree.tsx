@@ -54,6 +54,11 @@ export function SceneTree({ selectedSceneId, onSelectScene, onScenesRemoved, onS
   const [renaming, setRenaming] = useState<string>();
   const [deleting, setDeleting] = useState<DeleteTarget>();
   const [dragging, setDragging] = useState<Dragging>();
+  // The row a drag is over, drawn as where the dragged one will land (G-018).
+  const [over, setOver] = useState<string>();
+  // The parent whose order is being sent: its Move buttons wait for the answer, so a
+  // second press moves from the new order, not the old one (G-018).
+  const [reordering, setReordering] = useState<string>();
   const [focusNext, setFocusNext] = useState<{ id: string; action: Action }>();
 
   // Runs a request; its failure is shown above the tree, by its catalogue message.
@@ -165,6 +170,7 @@ export function SceneTree({ selectedSceneId, onSelectScene, onScenesRemoved, onS
   }
 
   async function reorder(kind: Ordered, parentId: string, ids: string[], focus?: { id: string; action: Action }) {
+    setReordering(parentId);
     const ok = await attempt(async () => {
       if (kind === 'session') {
         const list = await request<Session[]>('PUT', sessionOrderPath(parentId), { ids });
@@ -175,6 +181,7 @@ export function SceneTree({ selectedSceneId, onSelectScene, onScenesRemoved, onS
       }
       if (focus) setFocusNext(focus);
     });
+    setReordering(undefined);
     // Another browser changed the list meanwhile: show what the server has now,
     // keeping the message that says why the move did not happen.
     if (!ok) {
@@ -235,9 +242,14 @@ export function SceneTree({ selectedSceneId, onSelectScene, onScenesRemoved, onS
             onDragOver: (event: DragEvent) => {
               event.preventDefault();
               event.dataTransfer.dropEffect = 'move';
+              if (over !== item.id) setOver(item.id);
+            },
+            onDragLeave: () => {
+              if (over === item.id) setOver(undefined);
             },
             onDrop: (event: DragEvent) => {
               event.preventDefault();
+              setOver(undefined);
               if (dragging.id !== item.id) {
                 void reorder(kind, options.parentId!, moved(options.siblings!, dragging.id, item.id));
               }
@@ -266,7 +278,9 @@ export function SceneTree({ selectedSceneId, onSelectScene, onScenesRemoved, onS
           />
         ) : (
           <div
-            className={`eg-tree__row${kind === 'scene' && item.id === selectedSceneId ? ' eg-tree__row--selected' : ''}`}
+            className={`eg-tree__row${kind === 'scene' && item.id === selectedSceneId ? ' eg-tree__row--selected' : ''}${
+              over === item.id && dragging?.id !== item.id ? ' eg-tree__row--drop' : ''
+            }`}
             draggable={orderable}
             onDragStart={
               orderable
@@ -277,7 +291,10 @@ export function SceneTree({ selectedSceneId, onSelectScene, onScenesRemoved, onS
                   }
                 : undefined
             }
-            onDragEnd={() => setDragging(undefined)}
+            onDragEnd={() => {
+              setDragging(undefined);
+              setOver(undefined);
+            }}
             {...drop}
           >
             <button
@@ -297,7 +314,7 @@ export function SceneTree({ selectedSceneId, onSelectScene, onScenesRemoved, onS
                     size="small"
                     data-action="up"
                     aria-label={t('tree.moveUpOf', { name })}
-                    disabled={index <= 0}
+                    disabled={index <= 0 || reordering === options.parentId}
                     onClick={() => move(-1)}
                   >
                     {t('tree.moveUp')}
@@ -306,7 +323,7 @@ export function SceneTree({ selectedSceneId, onSelectScene, onScenesRemoved, onS
                     size="small"
                     data-action="down"
                     aria-label={t('tree.moveDownOf', { name })}
-                    disabled={index < 0 || index >= options.siblings!.length - 1}
+                    disabled={index < 0 || index >= options.siblings!.length - 1 || reordering === options.parentId}
                     onClick={() => move(1)}
                   >
                     {t('tree.moveDown')}

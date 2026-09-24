@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { createElement } from 'react';
+import { act, createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Scene } from '@emberglass/shared';
 import { t } from '../../ui/messages.js';
@@ -231,7 +231,6 @@ describe('reordering (Q-089)', () => {
       target.dispatchEvent(event);
       return event;
     };
-    const { act } = await import('react');
     act(() => {
       drag(row(bridge.id), 'dragstart');
     });
@@ -244,6 +243,49 @@ describe('reordering (Q-089)', () => {
     await settle();
     expect(names(view, 'scene')).toEqual(['Bridge', 'Cave', 'Hall']);
     expect(server.calls.at(-1)?.body).toEqual({ ids: [bridge.id, cave.id, hall.id] });
+  });
+
+  it('marks the row a scene is dragged over, and clears it on drop (G-018)', async () => {
+    const { mine, one, cave, bridge } = tree();
+    const view = await open();
+    await expandAll(view, [mine.id, one.id]);
+    const row = (id: string) => item(view, id).querySelector('.eg-tree__row')!;
+    const data = { effectAllowed: '', dropEffect: '', setData: () => undefined };
+    const drag = (target: Element, name: string) => {
+      const event = new Event(name, { bubbles: true, cancelable: true });
+      Object.assign(event, { dataTransfer: data });
+      act(() => {
+        target.dispatchEvent(event);
+      });
+    };
+    drag(row(bridge.id), 'dragstart');
+    drag(row(cave.id), 'dragover');
+    expect(row(cave.id).classList.contains('eg-tree__row--drop')).toBe(true);
+    expect(row(bridge.id).classList.contains('eg-tree__row--drop')).toBe(false);
+    drag(row(cave.id), 'drop');
+    await settle();
+    expect(view.querySelector('.eg-tree__row--drop')).toBeNull();
+  });
+
+  it('keeps Move off in a list while its reorder is sent, so a second press moves from the new order (G-018)', async () => {
+    const { mine, one, cave } = tree();
+    let release: (reply: Reply | undefined) => void = () => undefined;
+    server.before = (call) =>
+      call.method === 'PUT' ? new Promise<Reply | undefined>((resolve) => (release = resolve)) : undefined;
+    const view = await open();
+    await expandAll(view, [mine.id, one.id]);
+    await click(item(view, cave.id).querySelector('[data-action="down"]'));
+    const moves = [
+      ...view.querySelectorAll<HTMLButtonElement>(
+        '.eg-tree__item--scene [data-action="up"], .eg-tree__item--scene [data-action="down"]',
+      ),
+    ];
+    expect(moves.every((each) => each.disabled)).toBe(true);
+    server.before = undefined;
+    release(undefined);
+    await settle();
+    expect(item(view, cave.id).querySelector<HTMLButtonElement>('[data-action="down"]')!.disabled).toBe(false);
+    expect(names(view, 'scene')).toEqual(['Hall', 'Cave', 'Bridge']);
   });
 
   it('shows the server order and a message when another browser changed the list meanwhile', async () => {
