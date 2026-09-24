@@ -5,12 +5,14 @@ import { errorMessage } from '../ui/errorMessage.js';
 import { t } from '../ui/messages.js';
 import { errorCode, request } from './api.js';
 import { LiveBar } from './LiveBar.js';
+import { ScenePanel } from './ScenePanel.js';
 import { Library } from './library/Library.js';
 import { SceneTree } from './tree/SceneTree.js';
 
 // The DM workspace (specs/08-ux-journeys.md §1, Q-023): the live bar on top, the
 // Campaign → Session → Scene tree on the left, the selected scene in the centre and
-// the asset library on the right. The canvas is PRP-02. Settings give the live scene
+// the asset library on the right. The centre is the selected scene's setup and canvas
+// (ScenePanel, PRP-02). Settings give the live scene
 // and the upload limit; they are read again after a change in the tree, since
 // deleting the live scene clears it (specs/03-domain-model.md §7).
 export function Workspace({ mainId }: { mainId: string }) {
@@ -51,8 +53,19 @@ export function Workspace({ mainId }: { mainId: string }) {
           />
         </nav>
         <main id={mainId} tabIndex={-1} className="eg-workspace__main" data-view="dm">
-          <h1 className="eg-dm__heading">{selected ? selected.name : t('workspace.noScene')}</h1>
-          <p className="eg-dm__status">{selected ? t('workspace.sceneHint') : t('workspace.noSceneHint')}</p>
+          {selected ? (
+            <ScenePanel
+              key={selected.id}
+              sceneId={selected.id}
+              name={selected.name}
+              uploadLimit={settings?.upload_limit_bytes ?? DEFAULT_SETTINGS.upload_limit_bytes}
+            />
+          ) : (
+            <>
+              <h1 className="eg-dm__heading">{t('workspace.noScene')}</h1>
+              <p className="eg-dm__status">{t('workspace.noSceneHint')}</p>
+            </>
+          )}
         </main>
         <aside className="eg-workspace__library" aria-label={t('library.label')}>
           <Library uploadLimit={settings?.upload_limit_bytes ?? DEFAULT_SETTINGS.upload_limit_bytes} />

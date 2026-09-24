@@ -40,6 +40,17 @@ const json = (status: number, body?: unknown, headers: Record<string, string> = 
 const failure = (status: number, code: string, headers: Record<string, string> = {}): Reply =>
   json(status, { error: { code, message: 'test' } }, headers);
 
+const DEFAULT_GRID: Scene['grid'] = {
+  type: 'square',
+  size: null,
+  offset_x: 0,
+  offset_y: 0,
+  visible: true,
+  feet_per_square: 5,
+  columns: 30,
+  rows: 20,
+};
+
 let counter = 0;
 const uuid = (): string => `00000000-0000-4000-8000-${String(++counter).padStart(12, '0')}`;
 
@@ -61,6 +72,8 @@ export class FakeServer {
   usages: Record<string, AssetUsage[]> = {};
   /** What each upload sent as its body. */
   uploads: unknown[] = [];
+  /** Fields of the image the next uploads store. */
+  uploadedImage: Partial<Image> = {};
   calls: Call[] = [];
   before: Interceptor | undefined;
   private restore: (() => void) | undefined;
@@ -86,16 +99,7 @@ export class FakeServer {
       name,
       order,
       map_image_id: null,
-      grid: {
-        type: 'square',
-        size: null,
-        offset_x: 0,
-        offset_y: 0,
-        visible: true,
-        feet_per_square: 5,
-        columns: 30,
-        rows: 20,
-      },
+      grid: { ...DEFAULT_GRID },
     };
     this.scenes.push(scene);
     this.tokens[scene.id] = tokens;
@@ -117,7 +121,7 @@ export class FakeServer {
     return asset;
   }
 
-  addImage(): Image {
+  addImage(fields: Partial<Image> = {}): Image {
     const image: Image = {
       id: (++counter).toString(16).padStart(64, '0'),
       mime: 'image/png',
@@ -125,30 +129,41 @@ export class FakeServer {
       height: 64,
       variants: { display: { width: 64, height: 64 }, thumbnail: { width: 64, height: 64 } },
       grid_preset: null,
+      ...fields,
     };
     this.images.push(image);
     return image;
   }
 
-  /** Replaces `fetch` until `uninstall`. */
+  /** Replaces `fetch` and `XMLHttpRequest` (uploads, D-090) until `uninstall`. */
   install(): this {
     const original = globalThis.fetch;
+    const originalXhr = globalThis.XMLHttpRequest;
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url;
       const body: unknown = typeof init?.body === 'string' ? JSON.parse(init.body) : init?.body;
-      const call = { method: init?.method ?? 'GET', path, body };
-      this.calls.push(call);
-      const reply = (await this.before?.(call)) ?? this.handle(call);
+      const reply = await this.reply({ method: init?.method ?? 'GET', path, body });
       return new Response(reply.body === undefined ? null : JSON.stringify(reply.body), {
         status: reply.status,
         headers: { 'content-type': 'application/json', ...reply.headers },
       });
     };
+    globalThis.XMLHttpRequest = fakeXhr(this) as unknown as typeof XMLHttpRequest;
     this.restore = () => {
       globalThis.fetch = original;
+      globalThis.XMLHttpRequest = originalXhr;
     };
     return this;
   }
+
+  /** Records the call and answers it, through `before` first. */
+  async reply(call: Call): Promise<Reply> {
+    this.calls.push(call);
+    return (await this.before?.(call)) ?? this.handle(call);
+  }
+
+  /** The fractions an upload reports as sent before its answer, as a browser's progress events do. */
+  uploadProgress: number[] = [];
 
   uninstall(): void {
     this.restore?.();
@@ -205,6 +220,23 @@ export class FakeServer {
       this.scenes = this.scenes.filter((s) => s.id !== id);
       this.scenesOf(parent).forEach((s, index) => (s.order = index));
     }
+  }
+
+  // As D-078 and D-090 do: a different map starts from its image's preset or the
+  // defaults, then grid.visible applies.
+  private updateScene(id: string, b: Record<string, unknown>): Reply {
+    const scene = this.scenes.find((s) => s.id === id)!;
+    const map = b.map_image_id as string | undefined;
+    if (map !== undefined && map !== scene.map_image_id) {
+      const image = this.images.find((each) => each.id === map);
+      if (!image) return failure(400, 'reference_not_found');
+      scene.map_image_id = map;
+      scene.grid = image.grid_preset ? { ...image.grid_preset } : { ...DEFAULT_GRID };
+    }
+    if (typeof b.name === 'string') scene.name = b.name;
+    const grid = b.grid as { visible: boolean } | undefined;
+    if (grid) scene.grid = { ...scene.grid, visible: grid.visible };
+    return json(200, { ...scene, grid: { ...scene.grid } });
   }
 
   private sortedAssets(): LibraryAsset[] {
@@ -297,7 +329,12 @@ export class FakeServer {
     }
     if (path === '/api/images' && method === 'POST') {
       this.uploads.push(body);
-      return json(201, this.addImage());
+      return json(201, this.addImage(this.uploadedImage));
+    }
+    const image = /^\/api\/images\/([0-9a-f]{64})$/.exec(path);
+    if (image && method === 'GET') {
+      const found = this.images.find((each) => each.id === image[1]);
+      return found ? json(200, found) : failure(404, 'not_found');
     }
     const asset = /^\/api\/assets(?:\/([^/]+))?$/.exec(path);
     if (asset) return this.handleAssets(method, asset[1], query, b);
@@ -348,6 +385,7 @@ export class FakeServer {
             : this.scenes.find((s) => s.id === id);
       return json(200, found);
     }
+    if (method === 'PATCH' && kind === 'scene') return this.updateScene(id!, b);
     if (method === 'PATCH') {
       const item =
         kind === 'campaign'
@@ -368,6 +406,56 @@ export class FakeServer {
     }
     return failure(404, 'not_found');
   }
+}
+
+// The part of XMLHttpRequest that `upload` in dm/api.ts uses, answered by the fake server.
+function fakeXhr(server: FakeServer) {
+  return class FakeXMLHttpRequest {
+    status = 0;
+    responseText = '';
+    upload: { onprogress: ((event: ProgressEvent) => void) | null } = { onprogress: null };
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    onabort: (() => void) | null = null;
+    private method = 'GET';
+    private path = '';
+    private headers: Record<string, string> = {};
+
+    open(method: string, path: string): void {
+      this.method = method;
+      this.path = path;
+    }
+
+    setRequestHeader(): void {}
+
+    getAllResponseHeaders(): string {
+      return Object.entries(this.headers)
+        .map(([name, value]) => `${name}: ${value}`)
+        .join('\r\n');
+    }
+
+    send(body: unknown): void {
+      void (async () => {
+        const total = body instanceof Blob ? body.size : 1;
+        for (const fraction of server.uploadProgress) {
+          this.upload.onprogress?.({ lengthComputable: true, loaded: fraction * total, total } as ProgressEvent);
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+        let reply: Reply;
+        try {
+          reply = await server.reply({ method: this.method, path: this.path, body });
+        } catch {
+          // As fetch rejects when `before` throws: the request got no answer.
+          this.onerror?.();
+          return;
+        }
+        this.status = reply.status;
+        this.responseText = reply.body === undefined ? '' : JSON.stringify(reply.body);
+        this.headers = { 'content-type': 'application/json', ...reply.headers };
+        this.onload?.();
+      })();
+    }
+  };
 }
 
 // Interaction helpers for jsdom, inside React's act.

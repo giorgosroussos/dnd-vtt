@@ -5,11 +5,13 @@ import { fileURLToPath } from 'node:url';
 import { createElement, type ComponentType } from 'react';
 import { describe, expect, it } from 'vitest';
 import { DmView } from '../dm/DmView.js';
+import { ScenePanel } from '../dm/ScenePanel.js';
 import { PlayerView } from '../player/PlayerView.js';
 import { DmErrorScreen } from './ErrorScreen.js';
 import { IdleScreen } from './IdleScreen.js';
 import { catalogue, t } from './messages.js';
 import { button, click, FakeServer, installDialog, settle } from './testing/fakeServer.js';
+import { installCanvas2d, installImageLoading, installResizeObserver } from './testing/canvas2d.js';
 import { render } from './testing/render.js';
 import { TEXT_ATTRIBUTES, scanIndexHtml, scanSource } from './testing/uiTextScan.js';
 
@@ -223,6 +225,46 @@ it('show only catalogue text: the new-asset dialog, and a refused asset deletion
     expect(container.querySelector('dialog')!.textContent).toContain(t('assetDelete.close'));
     expectCatalogueOnly(container.querySelector('dialog')!);
     unmount();
+  } finally {
+    server.uninstall();
+  }
+});
+
+// The selected scene with its setup, its canvas and an upload in progress (PRP-02).
+it('show only catalogue text: a selected scene with its map controls, its canvas and an upload in progress', async () => {
+  installCanvas2d();
+  installResizeObserver({ width: 800, height: 600 });
+  installImageLoading();
+  const server = new FakeServer();
+  const session = server.addSession(server.addCampaign(t('app.name')).id, t('app.name'));
+  const scene = server.addScene(session.id, t('app.name'));
+  server.uploadProgress = [0.5];
+  server.before = (call) => (call.path === '/api/images' ? new Promise(() => undefined) : undefined);
+  server.install();
+  try {
+    const { container, unmount } = render(
+      createElement(ScenePanel, { sceneId: scene.id, name: scene.name, uploadLimit: 1 }),
+    );
+    await settle();
+    expectCatalogueOnly(container);
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+    Object.defineProperty(input, 'files', { configurable: true, value: [new File(['xx'], 'map.png')] });
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(container.querySelector('.eg-field__error')).not.toBeNull();
+    expectCatalogueOnly(container);
+    unmount();
+    const big = render(createElement(ScenePanel, { sceneId: scene.id, name: scene.name, uploadLimit: 1024 }));
+    await settle();
+    const bigInput = big.container.querySelector<HTMLInputElement>('input[type="file"]')!;
+    Object.defineProperty(bigInput, 'files', { configurable: true, value: [new File(['xx'], 'map.png')] });
+    bigInput.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    big.container.querySelector('form')!.requestSubmit();
+    await settle();
+    expect(big.container.querySelector('progress')).not.toBeNull();
+    expectCatalogueOnly(big.container);
+    big.unmount();
   } finally {
     server.uninstall();
   }

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { contrastFailures } from './contrast.js';
 import { openWorkspace, seedCampaign } from './dm.js';
 
 // Keyboard-operability smoke test of the DM view (FND-04, specs/08-ux-journeys.md
@@ -12,10 +13,13 @@ const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"]), [contenteditable="true"]';
 
 // The walk covers the signed-in workspace, where the DM's controls are (D-086).
-// Operating Sign out ends the session, so every opening signs in again first.
+// Operating Sign out ends the session, so every opening signs in again first. It
+// waits until the tree and the library have loaded, so that the elements Tab walks
+// are those the walk counted, not the ones that happened to arrive first (D-092).
 async function openDm(page: Page): Promise<void> {
   await openWorkspace(page);
   await expect(page.locator('main[data-view="dm"]')).toBeVisible();
+  await expect(page.getByText('Loading…', { exact: true })).toHaveCount(0);
 }
 
 // One campaign, so the walk reaches a tree item's controls as well as the
@@ -105,6 +109,7 @@ test('every interactive element of the DM view is reached, shown and operated by
       if (key !== keys[0]) {
         await openDm(page);
         for (let presses = 0; presses <= index; presses++) await page.keyboard.press('Tab');
+        await expect(element, `Tab did not reach ${name} again`).toBeFocused();
       }
       await element.evaluate((e) => {
         e.addEventListener(
@@ -141,44 +146,6 @@ test('an element outside the Tab order still shows the focus ring when the keybo
   });
   expect(ring).toEqual({ visible: true, outline: 'solid' });
 });
-
-// Readable contrast of what is actually rendered (specs/08-ux-journeys.md §8):
-// every element with text of its own against its effective background.
-async function contrastFailures(page: Page): Promise<string[]> {
-  return page.evaluate(() => {
-    const parse = (value: string): number[] | null => {
-      const match = /rgba?\(([^)]+)\)/.exec(value);
-      if (!match) return null;
-      const parts = match[1]!
-        .split(/[\s,/]+/)
-        .filter(Boolean)
-        .map(Number);
-      return parts.length === 3 ? [...parts, 1] : parts;
-    };
-    const luminance = ([r, g, b]: number[]) =>
-      [r!, g!, b!]
-        .map((c) => c / 255)
-        .map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4))
-        .reduce((sum, c, i) => sum + c * [0.2126, 0.7152, 0.0722][i]!, 0);
-    const background = (element: Element | null): number[] => {
-      for (let node = element; node; node = node.parentElement) {
-        const colour = parse(getComputedStyle(node).backgroundColor);
-        if (colour && colour[3]! > 0) return colour;
-      }
-      return [255, 255, 255, 1];
-    };
-    const failures: string[] = [];
-    for (const element of document.body.querySelectorAll('*')) {
-      const ownText = [...element.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && n.textContent?.trim());
-      if (!ownText) continue;
-      const text = parse(getComputedStyle(element).color)!;
-      const [a, b] = [luminance(text), luminance(background(element))].sort((x, y) => y - x);
-      const ratio = (a! + 0.05) / (b! + 0.05);
-      if (ratio < 4.5) failures.push(`${element.tagName} "${element.textContent?.trim()}": ${ratio.toFixed(2)}:1`);
-    }
-    return failures;
-  });
-}
 
 test('every text in both views keeps readable contrast', async ({ page }) => {
   // The PIN form, as a browser without a session sees it.

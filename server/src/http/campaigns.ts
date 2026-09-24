@@ -42,10 +42,10 @@ import {
   readCampaign,
   readScene,
   readSession,
-  renameScene,
   reorderScenes,
   reorderSessions,
   updateCampaign,
+  updateScene,
   updateSession,
   type DeletionTarget,
 } from '../db/campaigns.js';
@@ -191,10 +191,21 @@ export function registerCampaigns(
     requireScene(request.params.id),
   );
 
+  // Rename and setup: the map and whether players see the grid (PRP-02). Calibration is PRP-03.
+  // The live scene's change is saved but reaches no player view until LIV-04 pushes it as a
+  // snapshot (specs/04-live-sync.md §10, G-019).
   app.patch<{ Params: IdParams; Body: SceneUpdateBody }>(
     PATHS.scene,
     { schema: { ...params, body: SceneUpdateBodySchema, response: { 200: SceneSchema } } },
-    (request) => renameScene(db, request.params.id, request.body.name) ?? raise(notFound()),
+    (request) => {
+      const result = updateScene(db, request.params.id, request.body);
+      if (result.outcome === 'not_found') throw notFound();
+      if (result.outcome === 'image_not_found') {
+        throw new ApiFailure(400, 'reference_not_found', 'The map image does not exist.');
+      }
+      removeImages(result.removedImages);
+      return result.scene;
+    },
   );
 
   app.post<{ Params: IdParams; Body: SceneDuplicateBody }>(

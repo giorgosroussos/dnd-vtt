@@ -66,6 +66,8 @@
   flex-direction: column;
   gap: var(--space-4);
   padding: var(--space-8) var(--space-6);
+  min-width: 0;
+  min-height: 0;
 }
 
 .eg-tree {
@@ -286,4 +288,34 @@
 
 textarea.eg-field__input {
   resize: vertical;
+}
+
+/* The selected scene: its setup above its canvas (PRP-02, D-090). */
+.eg-scene {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-height: 0;
+}
+
+.eg-scene__setup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-4) var(--space-8);
+}
+
+.eg-scene__map {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2) var(--space-3);
+}
+
+.eg-scene__progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-muted);
 }

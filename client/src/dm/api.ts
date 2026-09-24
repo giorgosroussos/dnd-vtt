@@ -52,12 +52,40 @@ export async function request<T>(
 
 /**
  * Uploads a file's bytes as the whole body (D-080). The server judges the type by
- * content; the browser's own Content-Type for the file is sent as it is.
+ * content; the browser's own Content-Type for the file is sent as it is. It goes by
+ * XMLHttpRequest, because `fetch` reports no upload progress: `onProgress` is told
+ * the fraction sent, from 0 to 1 (G-017, D-090).
  */
-export function upload(file: Blob): Promise<Image> {
-  return answer<Image>(
-    send(API_IMAGE_PATHS.images, { method: 'POST', headers: { accept: 'application/json' }, body: file }),
-  );
+export function upload(file: Blob, onProgress?: (fraction: number) => void): Promise<Image> {
+  return new Promise<Image>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', API_IMAGE_PATHS.images);
+    xhr.setRequestHeader('accept', 'application/json');
+    if (onProgress) {
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable && event.total > 0) onProgress(event.loaded / event.total);
+      };
+    }
+    xhr.onload = () => {
+      const response = new Response(xhr.status === 204 ? null : xhr.responseText, {
+        status: xhr.status,
+        headers: parseHeaders(xhr.getAllResponseHeaders()),
+      });
+      answer<Image>(Promise.resolve(response)).then(resolve, reject);
+    };
+    xhr.onerror = () => reject(new ApiError(0, 'network'));
+    xhr.onabort = () => reject(new ApiError(0, 'network'));
+    xhr.send(file);
+  });
+}
+
+function parseHeaders(raw: string): Headers {
+  const headers = new Headers();
+  for (const line of raw.trim().split(/[\r\n]+/)) {
+    const at = line.indexOf(':');
+    if (at > 0) headers.append(line.slice(0, at).trim(), line.slice(at + 1).trim());
+  }
+  return headers;
 }
 
 async function send(path: string, init: RequestInit): Promise<Response> {

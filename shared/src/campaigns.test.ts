@@ -53,4 +53,19 @@ describe('campaign, session and scene bodies (D-078)', () => {
     for (const date of ['2026-02-30', '2025-02-29', '2026-13-01', '2026-00-10', '2026-1-3', '03/10/2026', ''])
       expect(isCalendarDate(date), date).toBe(false);
   });
+
+  it('takes a scene map and grid.visible in an update, and refuses every other grid field until PRP-03', () => {
+    const map = 'a'.repeat(64);
+    expect(Value.Check(SceneUpdateBodySchema, { map_image_id: map })).toBe(true);
+    expect(Value.Check(SceneUpdateBodySchema, { grid: { visible: false } })).toBe(true);
+    expect(Value.Check(SceneUpdateBodySchema, { name: 'A', map_image_id: map, grid: { visible: true } })).toBe(true);
+    expect(Value.Check(SceneUpdateBodySchema, {})).toBe(false);
+    // A map is replaced, never removed; an id is the lowercase sha256.
+    expect(Value.Check(SceneUpdateBodySchema, { map_image_id: null })).toBe(false);
+    expect(Value.Check(SceneUpdateBodySchema, { map_image_id: 'A'.repeat(64) })).toBe(false);
+    expect(Value.Check(SceneUpdateBodySchema, { grid: {} })).toBe(false);
+    for (const field of ['size', 'offset_x', 'offset_y', 'feet_per_square', 'columns', 'rows', 'type']) {
+      expect(Value.Check(SceneUpdateBodySchema, { grid: { visible: true, [field]: 1 } }), field).toBe(false);
+    }
+  });
 });

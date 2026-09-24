@@ -7,6 +7,7 @@ import { createRoot } from 'react-dom/client';
 
 export interface Rendered {
   container: HTMLElement;
+  rerender: (element: ReactElement) => void;
   unmount: () => void;
 }
 
@@ -17,6 +18,7 @@ export function render(element: ReactElement | ComponentType): Rendered {
   act(() => root.render(typeof element === 'function' ? createElement(element) : element));
   return {
     container,
+    rerender: (next) => root.render(next),
     unmount: () => {
       act(() => root.unmount());
       container.remove();
