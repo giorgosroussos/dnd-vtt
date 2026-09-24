@@ -4,23 +4,21 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
 
 ## Now
 
-### SRV-05 — Asset library over REST
+### PRP-01 — DM workspace shell
 
-- **Outcome:** with a DM session, the DM creates, lists, updates and deletes assets of the shared library: name, image, category, size, tags and notes, with default visibility from the category; the list searches name and tags and filters by category and by tags; an asset in use cannot be deleted and the refusal names the scenes that use it; changing an asset's image changes every token of it.
-- **Specs:** `13` §4 SRV-05, `02` §5 (`/api/assets`), `03` §2, `03` §7, `05` §1, `05` §2, `05` §4, `05` §5; D-020, D-022, D-075, D-080, D-083, D-084; G-009 and G-016 (closed by D-083 and D-084).
-- **Status:** implemented on branch `srv-05-asset-library` with every acceptance test green locally (`TRACEABILITY.md`); remaining: CI green on both runners, then the review pass.
-- **Dependencies:** SRV-01 (schema), SRV-02 (session guard), SRV-04 (images, `deleteUnreferencedImages`).
+- **Outcome:** at `/dm` the DM sets the first PIN (on the server PC only), enters it and signs out, and works in one workspace: the Campaign → Session → Scene tree on the left (create, rename, delete with a confirmation that states what goes, reorder sessions and scenes by dragging or by keyboard, campaigns by name), the asset library on the right (search, filter, create with an upload, edit, delete, a refusal naming the scenes), and a live bar on top naming the live scene or saying that nothing is live.
+- **Specs:** `13` §5 PRP-01, `08` §1, `07` §1, `07` §2, `07` §6, `05` §1, `05` §4, `05` §6, `08` §6, `08` §7, `08` §8; D-078, D-079, D-083; G-007, G-014, G-017.
+- **Dependencies:** SRV-02 (PIN, sessions), SRV-03 (tree routes), SRV-04 (uploads), SRV-05 (library routes); FND-04 (catalogue, components).
 - **Acceptance (executable):**
-  - Vitest against a real SQLite file: create, read, update and list assets with server-generated lowercase UUIDs; a body naming its own id or an unknown field is refused and stores nothing; an image that does not exist is refused and stores nothing.
-  - A new `monster` asset defaults to hidden and `pc`, `npc` and `object` to visible, and `default_hidden` can be changed per asset (`05` §4, D-020).
-  - Search is a substring match over name and tags; the category filter and the tag filter narrow (every selected tag must match); results are sorted by name (`05` §1, D-022, Q-064), each with a test.
-  - Tag case is decided and recorded, with a test (G-009).
-  - Deleting an asset used by a token is refused and names every scene that uses it, changing nothing; deleting an unused asset removes it with its tags, and its image when nothing else references it, with its files (`03` §7, Q-002).
-  - Changing an asset's image changes the image of every token of that asset, and the old image is removed when nothing references it any more (`05` §5).
-  - Every route answers 401 without a DM session (the identical-answer test picks it up from `app.declaredRoutes`); `make verify` exit 0 on both CI runners; `TRACEABILITY.md` SRV-05 row with test names.
-- **Non-goals:** the library and picker UI (PRP-01 onward), tokens on a scene (PRP-04), propagating an image change to the live scene over WebSocket (LIV-04).
-- **Review:** `Surfaces: security, ux`, `Contract change: yes`, so prompt 2 (review) runs after implementation.
+  - Component or e2e test: before a PIN exists, a DM view on the server PC offers setup and one opened from the LAN says setup happens on the server PC and offers nothing else (`07` §1); with a PIN, the view asks for it, shows a wrong PIN and a lockout with their messages, and signs out (`07` §2, `07` §6).
+  - Every `ERROR_CODES` entry has a catalogue message, checked by a test (G-014); no raw code is ever shown.
+  - The tree creates, renames and deletes campaigns, sessions and scenes; the delete dialog shows the counts and the live warning of `GET …/deletion` and sends them back (D-078); a create button is disabled while its request runs (G-014); sessions and scenes reorder by dragging and by keyboard, each with a test (Q-089); campaigns are listed by name (Q-090, D-079).
+  - The library lists, searches and filters as `05` §1; creating an asset uploads its image and creates it in one action, and a file over `upload_limit_bytes` is refused before sending with the limit named (G-017); an `asset_in_use` refusal lists the scenes of `error.usages` (D-083).
+  - The live bar names the live scene, or says nothing is live.
+  - The core actions are keyboard-operable (`08` §8); an e2e test runs the whole shell against a real server; `make verify` exit 0 on both CI runners; `TRACEABILITY.md` PRP-01 row with test names.
+- **Non-goals:** the canvas and grid (PRP-02, PRP-03), tokens (PRP-04), going live and the TV frame (LIV-01 onward), the settings screen (REL-01).
+- **Review:** `Surfaces: security, ux`, `Touches red line: yes`, so prompt 2 (review) runs after implementation.
 
 ## Next
 
-1. **PRP-01 — DM workspace shell.** The sidebar tree over the SRV-03 routes with the deletion dialog and error-code messages of G-014; sessions and scenes reorderable, campaigns listed by name (Q-090, D-079); uploads checked against `upload_limit_bytes` before sending (G-017) (`13` §5, `08` §1, `07` §1).
+1. **PRP-02 — Canvas and grid overlay.** Map background with zoom and pan in both views, grid overlay with player visibility, map-less scenes (`13` §5, `08` §3, `06` §2, `03` §6).
