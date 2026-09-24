@@ -14,3 +14,4 @@ Never edit or remove a line here. The point of the file is that it cannot be tid
 
 ## Records
 - unlock 2026-09-23T14:50:45Z path=".doc-locks" by="Giorgos Roussos" reason="freeze 1.0: promote specs/** to hard-locked"
+- unlock 2026-09-24T12:42:27Z path="specs/08-ux-journeys.md" by="Giorgos Roussos" reason="Q-090 answered A: campaigns are listed by name, not reorderable; 08 §1 amended to sessions and scenes (D-079)"

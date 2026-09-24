@@ -9,6 +9,7 @@ import type { Logger } from '../log/logger.js';
 import { compileSchema } from '../validation.js';
 import type { ScryptParams } from '../auth/pin-hash.js';
 import { registerAuth, type Auth } from './auth.js';
+import { registerCampaigns } from './campaigns.js';
 import { createFailureLog, installErrorHandling, sendFailure, type RejectedLineLimits } from './errors.js';
 
 // Where the client comes from: the production build, or Vite in middleware mode
@@ -69,6 +70,7 @@ export async function buildApp({
   app.setValidatorCompiler(({ schema }) => compileSchema(schema));
   installErrorHandling(app, failures);
   const auth = registerAuth(app, { db, logger, now, pinHashParams });
+  registerCampaigns(app, db);
   const sendIndex = client.kind === 'static' ? await serveBuild(app, client.dist) : await serveVite(app, client.root);
 
   // Both views come from one client build: the player view at /, the DM view at /dm.

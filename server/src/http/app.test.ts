@@ -46,8 +46,9 @@ describe('buildApp serving a client build', () => {
   });
 
   // Nothing under /api is reachable without a DM session, and with one an
-  // unknown path is a 404 (specs/02-architecture.md §5).
-  it.each(['/api', '/api/health', '/api/campaigns', '/api/scenes/x'])(
+  // unknown path is a 404 (specs/02-architecture.md §5). The paths are unknown
+  // ones beside real resources (SRV-03 declared /api/campaigns and /api/scenes/:id).
+  it.each(['/api', '/api/health', '/api/campaign', '/api/scenes/x/unknown'])(
     'answers 401 at %s without a DM session and 404 with one, in the error envelope',
     async (url) => {
       for (const method of ['GET', 'POST'] as const) {

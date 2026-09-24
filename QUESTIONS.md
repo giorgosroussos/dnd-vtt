@@ -112,6 +112,7 @@ Every card opens `Blocking` and is answered before the specification proceeds. `
 - Q-087 — Ruler scale from the scene's feet per square — scope — Resolved
 - Q-088 — Test art is generated, not third-party — external — Resolved
 - Q-089 — Reordering by dragging in the sidebar — ux — Resolved
+- Q-090 — Ordering campaigns in the sidebar — data — Resolved
 
 ## Blocking
 
@@ -1124,3 +1125,14 @@ None.
 - Recommendation: A, because the sidebar is where the DM already sees the order; can be deferred to PRP-01.
 - Blocks: specification
 - Answer: A (2026-09-23; recommendation accepted)
+
+### Q-090 — Ordering campaigns in the sidebar
+- Surface: data
+- Source: Raised by SRV-03: `08-ux-journeys.md` §1 says campaigns, sessions and scenes are reorderable from the sidebar [input, Q-023, Q-089], but `03-domain-model.md` §1 gives Campaign no `order` field and §2 keeps an order only for sessions within a campaign and scenes within a session; D-050 and Q-089 name only sessions and scenes.
+- Question: Should the DM be able to put campaigns in an order of their own in the sidebar, or are campaigns listed in a fixed order?
+- Options:
+  - A) Campaigns are listed by name, case-insensitively; `08` §1's "reorderable" is amended to sessions and scenes → effect on data: no schema change; the sidebar cannot put a favourite campaign first except by renaming it.
+  - B) Campaigns get an `order` like sessions and scenes, reordered by dragging → effect on data: an additive migration adds `campaign.order` (unique, backfilled by name) and `03` §1 and §2 are amended; one more reorder route, `PUT /api/campaigns/order`.
+- Recommendation: A, because one game runs per server and a DM rarely has more than a few campaigns; B stays open later as an additive migration. Can be deferred to PRP-01, which builds the sidebar; SRV-03 lists by name meanwhile.
+- Blocks: specification
+- Answer: A (2026-09-24; recommendation accepted)

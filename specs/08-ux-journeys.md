@@ -5,7 +5,7 @@ How the DM prepares and runs a session, what the TV shows, and how screens get c
 ## 1. DM workspace
 
 - The DM view MUST be one workspace: a left sidebar with the Campaign → Session → Scene tree, the scene canvas in the centre, the asset library as a right-hand panel, and a live bar at the top that names the live scene. [Q-023]
-- Campaigns, sessions and scenes MUST be creatable, renamable, reorderable and deletable from the sidebar; reordering is by dragging in the tree, with a keyboard alternative. [input, Q-023, Q-089]
+- Campaigns, sessions and scenes MUST be creatable, renamable and deletable from the sidebar; sessions and scenes MUST also be reorderable, by dragging in the tree with a keyboard alternative, while campaigns are listed by name. [input, Q-023, Q-089, Q-090]
 
 ## 2. Live mode and prep mode
 
