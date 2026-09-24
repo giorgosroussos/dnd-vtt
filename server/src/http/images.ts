@@ -1,4 +1,5 @@
 import { open } from 'node:fs/promises';
+import type { IncomingMessage } from 'node:http';
 import { Readable } from 'node:stream';
 import type Database from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';
@@ -31,21 +32,31 @@ const notFound = (): ApiFailure => new ApiFailure(404, 'not_found', 'No such res
 const SHA256 = /^[0-9a-f]{64}$/;
 const isVariant = (value: string): value is ImageVariant => (IMAGE_VARIANTS as readonly string[]).includes(value);
 
-// A refused upload may be refused before its body is read to the end; closing the connection
-// after the answer is what stops the rest from arriving.
-const CLOSE = { connection: 'close' };
+// An upload may be refused before its body has arrived. The server answers at once but keeps
+// reading the rest and throwing it away, storing and processing none of it: closing the
+// connection instead would leave unread data behind, which makes the client's system reset the
+// connection (ECONNRESET), and a browser, which reads the answer only after sending its whole
+// body, would show a network error instead of the refusal. A body that has not ended after
+// DISCARD_MS is cut off (D-082).
+export const DISCARD_MS = 30_000;
+
+function discardRest(raw: IncomingMessage): void {
+  if (raw.readableEnded || raw.destroyed) return;
+  // Destroying the request destroys its connection.
+  const timer = setTimeout(() => raw.destroy(), DISCARD_MS);
+  timer.unref();
+  const done = (): void => clearTimeout(timer);
+  raw.once('end', done);
+  raw.once('close', done);
+  raw.on('data', () => {});
+  raw.resume();
+}
 
 function refusal(rejected: UploadRejected): ApiFailure {
   const details = [{ path: '', message: rejected.detail }];
   return rejected.reason === 'size'
-    ? new ApiFailure(413, 'payload_too_large', 'The upload is larger than the upload limit.', {
-        details,
-        headers: CLOSE,
-      })
-    : new ApiFailure(415, 'unsupported_media_type', 'Only PNG, JPEG and WebP images are accepted.', {
-        details,
-        headers: CLOSE,
-      });
+    ? new ApiFailure(413, 'payload_too_large', 'The upload is larger than the upload limit.', { details })
+    : new ApiFailure(415, 'unsupported_media_type', 'Only PNG, JPEG and WebP images are accepted.', { details });
 }
 
 export interface ImageRoutesOptions {
@@ -69,6 +80,7 @@ export async function registerImages(app: FastifyInstance, { db, imagesDir, auth
         const { upload_limit_bytes: limit, display_variant_size: displaySize } = readSettings(db);
         const declared = Number(request.headers['content-length']);
         if (Number.isFinite(declared) && declared > limit) {
+          discardRest(request.raw);
           throw refusal(new UploadRejected('size', `limit: ${limit} bytes`));
         }
         // No body at all is not an image either.
@@ -77,6 +89,7 @@ export async function registerImages(app: FastifyInstance, { db, imagesDir, auth
           const { image, created } = await storeUpload(db, imagesDir, body, { limit, displaySize });
           return reply.code(created ? 201 : 200).send(image);
         } catch (error) {
+          discardRest(request.raw);
           throw error instanceof UploadRejected ? refusal(error) : error;
         }
       },
@@ -112,7 +125,13 @@ export async function registerImages(app: FastifyInstance, { db, imagesDir, auth
     } catch {
       throw notFound();
     }
-    const { size } = await file.stat();
+    let size;
+    try {
+      ({ size } = await file.stat());
+    } catch {
+      await file.close();
+      throw notFound();
+    }
     return reply
       .type(variant === 'original' ? image.mime : 'image/webp')
       .header('content-length', size)

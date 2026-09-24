@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
+import zlib from 'node:zlib';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
+import net from 'node:net';
 import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 import type { FastifyInstance, InjectOptions, LightMyRequestResponse } from 'fastify';
@@ -26,7 +28,7 @@ import { countRows } from '../db/testing/fixture.js';
 import { imageFilePath, imagesDirOf, regenerateDisplayVersions } from '../images/store.js';
 import { compileSchema } from '../validation.js';
 import { DM_COOKIE } from './auth.js';
-import { buildTestApp, createTestData, setUpPin, type TestData } from './testing/app.js';
+import { buildTestApp, createTestData, dmCookie, setUpPin, type TestData } from './testing/app.js';
 
 // SRV-04: the image upload pipeline against a real SQLite file and a real images folder
 // (specs/02-architecture.md §5, §7, specs/03-domain-model.md §3, §7, specs/05-assets-and-images.md
@@ -217,42 +219,102 @@ describe('the upload limit (specs/05-assets-and-images.md §6, D-044)', () => {
     await uploaded(await picture('webp', 200, 200));
   });
 
-  it('stops receiving an oversized body while it arrives, before processing, and answers 413 over a real connection', async () => {
-    setSetting('upload_limit_bytes', 64 * 1024);
-    const before = countRows(data.db);
+  // Like a browser, the client sends its whole body whatever it hears meanwhile, and only then
+  // reads the answer. A server that closes the connection with unread body data makes the
+  // client's system reset it (ECONNRESET on Windows, EPIPE on Linux), and the DM would never see
+  // the 413. A raw socket, because Node's own HTTP client stops sending once an answer arrives.
+  async function sendLikeABrowser(
+    headers: Record<string, string>,
+    parts: Buffer[],
+  ): Promise<{ status: number; body: string; sentWhenAnswered: number; error?: string }> {
     await app.listen({ port: 0, host: '127.0.0.1' });
     const { port } = app.server.address() as AddressInfo;
-    const png = await picture('png', 64, 64);
-    const chunk = Buffer.alloc(64 * 1024, 7);
-    const total = 256; // 16 MiB if it were all sent
-    const outcome = await new Promise<{ status: number; body: string; sentChunks: number }>((resolve, reject) => {
-      let sentChunks = 0;
-      let answered = false;
-      // Chunked, with no Content-Length: only reading the body can find the size.
-      const request = http.request(
-        { port, host: '127.0.0.1', method: 'POST', path: '/api/images', headers: { cookie } },
-        (response) => {
-          answered = true;
-          let body = '';
-          response.setEncoding('utf8');
-          response.on('data', (text: string) => (body += text));
-          response.on('end', () => resolve({ status: response.statusCode ?? 0, body, sentChunks }));
-        },
-      );
-      request.on('error', (error) => (answered ? undefined : reject(error)));
-      const send = (): void => {
-        while (!answered && sentChunks < total) {
-          const buffer = sentChunks === 0 ? Buffer.concat([png, chunk]) : chunk;
-          sentChunks++;
-          if (!request.write(buffer)) return void request.once('drain', send);
-        }
-        if (!answered) request.end();
+    const chunked = headers['content-length'] === undefined;
+    const head = [
+      'POST /api/images HTTP/1.1',
+      `Host: 127.0.0.1:${port}`,
+      `Cookie: ${cookie}`,
+      'Content-Type: application/octet-stream',
+      ...(chunked ? ['Transfer-Encoding: chunked'] : []),
+      ...Object.entries(headers).map(([name, value]) => `${name}: ${value}`),
+      '',
+      '',
+    ].join('\r\n');
+    const frames = [
+      Buffer.from(head),
+      ...parts.map((part) =>
+        chunked ? Buffer.concat([Buffer.from(`${part.length.toString(16)}\r\n`), part, Buffer.from('\r\n')]) : part,
+      ),
+      ...(chunked ? [Buffer.from('0\r\n\r\n')] : []),
+    ];
+    return new Promise((resolve) => {
+      let sent = 0;
+      let sentWhenAnswered = -1;
+      let received = Buffer.alloc(0);
+      const socket = net.connect(port, '127.0.0.1');
+      const settle = (error?: string): void => {
+        clearTimeout(timer);
+        socket.destroy();
+        const text = received.toString('utf8');
+        const status = Number(/^HTTP\/1\.1 (\d{3})/.exec(text)?.[1] ?? 0);
+        const body = text.slice(text.indexOf('\r\n\r\n') + 4);
+        resolve({ status, body, sentWhenAnswered, ...(error ? { error } : {}) });
       };
-      send();
+      const timer = setTimeout(() => settle(`timed out after sending ${sent} of ${frames.length} parts`), 20_000);
+      // Complete once every part went out and the whole answer, by its Content-Length, came in.
+      const answered = (): boolean => {
+        const text = received.toString('latin1');
+        const split = text.indexOf('\r\n\r\n');
+        const length = Number(/\r\ncontent-length: (\d+)/i.exec(text)?.[1] ?? NaN);
+        return split >= 0 && received.length >= split + 4 + length;
+      };
+      const check = (): void => {
+        if (sent === frames.length && socket.writableLength === 0 && answered()) settle();
+      };
+      socket.on('data', (data: Buffer) => {
+        if (sentWhenAnswered < 0) sentWhenAnswered = sent;
+        received = Buffer.concat([received, data]);
+        check();
+      });
+      socket.on('end', () => settle(`the server ended the connection after ${sent} of ${frames.length} parts`));
+      socket.on('error', (error) => settle(String(error)));
+      const send = (): void => {
+        while (sent < frames.length) {
+          if (!socket.write(frames[sent++]!)) return void socket.once('drain', send);
+        }
+        socket.once('drain', check);
+        socket.write('', check);
+      };
+      socket.once('connect', send);
     });
+  }
+
+  it('answers 413 over a real connection while the oversized body still arrives, and stores nothing of it', async () => {
+    setSetting('upload_limit_bytes', 64 * 1024);
+    const before = countRows(data.db);
+    const png = await picture('png', 64, 64);
+    const parts = [png, ...Array.from({ length: 256 }, () => Buffer.alloc(64 * 1024, 7))]; // 16 MiB
+    // Chunked, with no Content-Length: only reading the body can find the size.
+    const outcome = await sendLikeABrowser({}, parts);
+    expect(outcome.error).toBeUndefined();
     expect(outcome.status, outcome.body).toBe(413);
     expect(JSON.parse(outcome.body)).toMatchObject({ error: { code: 'payload_too_large' } });
-    expect(outcome.sentChunks).toBeLessThan(total);
+    // The answer came while the body was still being sent, not after it.
+    expect(outcome.sentWhenAnswered).toBeGreaterThanOrEqual(0);
+    expect(outcome.sentWhenAnswered).toBeLessThan(parts.length);
+    expectNothingStored(before);
+    // The connection outlived the refusal: the next upload on the same server succeeds.
+    setSetting('upload_limit_bytes', DEFAULT_SETTINGS.upload_limit_bytes);
+    await uploaded(await picture('png'));
+  });
+
+  it('answers 413 for a declared Content-Length over the limit before the body arrives, over a real connection', async () => {
+    setSetting('upload_limit_bytes', 64 * 1024);
+    const before = countRows(data.db);
+    const parts = Array.from({ length: 64 }, () => Buffer.alloc(64 * 1024, 7));
+    const outcome = await sendLikeABrowser({ 'content-length': String(64 * 64 * 1024) }, parts);
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.status, outcome.body).toBe(413);
     expectNothingStored(before);
   });
 
@@ -266,7 +328,6 @@ describe('the upload limit (specs/05-assets-and-images.md §6, D-044)', () => {
       headers: { 'content-type': 'application/octet-stream' },
     });
     expectFailure(response, 413, 'payload_too_large');
-    expect(response.headers.connection).toBe('close');
     expectNothingStored(before);
   });
 });
@@ -403,11 +464,70 @@ describe('display version and thumbnail (specs/05-assets-and-images.md §7, D-02
   });
 });
 
+describe('regeneration that fails (specs/05-assets-and-images.md §7)', () => {
+  it('reports an image whose original no longer decodes and keeps its previous display version', async () => {
+    setSetting('display_variant_size', 600);
+    const good = await uploaded(await picture('png', 900, 900));
+    const broken = await uploaded(await picture('jpeg', 900, 900));
+    const display = readFileSync(imageFilePath(imagesDir, broken.id, 'display'));
+    writeFileSync(imageFilePath(imagesDir, broken.id, 'original'), 'no longer an image');
+    expect(await regenerateDisplayVersions(data.db, imagesDir, 300)).toEqual({
+      regenerated: [good.id],
+      failed: [broken.id],
+    });
+    expect(readFileSync(imageFilePath(imagesDir, broken.id, 'display')).equals(display)).toBe(true);
+    expect(ok<Image>(await inject({ method: 'GET', url: `/api/images/${broken.id}` })).variants.display).toEqual({
+      width: 600,
+      height: 600,
+    });
+    expect(imagesTree().filter((entry) => entry.startsWith('.incoming/'))).toEqual([]);
+  });
+});
+
 describe('staging and failure midway (D-032)', () => {
   it('leaves no file and no row when storing the row fails after processing', async () => {
     const before = countRows(data.db);
     data.db.exec("CREATE TRIGGER refuse_image BEFORE INSERT ON image BEGIN SELECT RAISE(ABORT, 'refused'); END");
     expectFailure(await upload(await picture('png', 300, 200)), 500, 'internal_error');
+    expectNothingStored(before);
+  });
+
+  it('answers 500, not a refusal of the file, when writing a version fails, and leaves no file and no row', async () => {
+    const before = countRows(data.db);
+    const toFile = vi
+      .spyOn(sharp.prototype, 'toFile')
+      .mockRejectedValueOnce(new Error('VipsForeignSave: write failed'));
+    try {
+      expectFailure(await upload(await picture('png', 300, 200)), 500, 'internal_error');
+    } finally {
+      toFile.mockRestore();
+    }
+    expectNothingStored(before);
+  });
+
+  it('refuses an image with more pixels than the server decodes as 413, storing nothing', async () => {
+    const before = countRows(data.db);
+    const chunk = (type: string, body: Buffer): Buffer => {
+      const length = Buffer.alloc(4);
+      length.writeUInt32BE(body.length);
+      const typed = Buffer.concat([Buffer.from(type), body]);
+      const crc = Buffer.alloc(4);
+      crc.writeUInt32BE(zlib.crc32(typed));
+      return Buffer.concat([length, typed, crc]);
+    };
+    // A valid header claiming 20,000 × 20,000: about 3 KB on the wire, 400 megapixels decoded.
+    const header = Buffer.alloc(13);
+    header.writeUInt32BE(20_000, 0);
+    header.writeUInt32BE(20_000, 4);
+    header[8] = 8;
+    const bomb = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      chunk('IHDR', header),
+      chunk('IDAT', zlib.deflateSync(Buffer.alloc(2048))),
+      chunk('IEND', Buffer.alloc(0)),
+    ]);
+    const body = expectFailure(await upload(bomb), 413, 'payload_too_large');
+    expect(body.error.details).toEqual([{ path: '', message: 'the image has more pixels than the server decodes' }]);
     expectNothingStored(before);
   });
 
@@ -560,9 +680,37 @@ describe('image files (specs/05-assets-and-images.md §7, specs/07-security-and-
         const response = await fetchFile(imageFileUrl(image.id, variant), headers);
         expect(comparable(response), `${variant} ${JSON.stringify(headers)}`).toEqual(reference);
         expect(response.body).not.toContain(image.id);
+        const head = await fetchFile(imageFileUrl(image.id, variant), headers, 'HEAD');
+        expect(head.statusCode).toBe(404);
+        expect(head.headers['content-type']).toBe(reference.headers['content-type']);
       }
       expect(comparable(await fetchFile(`/images/${image.id}/nope`, headers))).toEqual(reference);
     }
+  });
+});
+
+describe('image files after a DM session ends (specs/07-security-and-access.md §2, §5, Q-033, Q-058)', () => {
+  it('answers not found to a browser that signed out, and to every other browser after a PIN change', async () => {
+    const image = await uploaded(await picture('png', 100, 100));
+    const url = imageFileUrl(image.id, 'display');
+    const other = dmCookie(
+      await app.inject({ method: 'POST', url: '/api/auth', payload: { pin: '4826' }, remoteAddress: '192.168.1.20' }),
+    );
+    const third = dmCookie(await app.inject({ method: 'POST', url: '/api/auth', payload: { pin: '4826' } }));
+    for (const session of [cookie, other, third]) {
+      expect((await app.inject({ method: 'GET', url, headers: { cookie: session } })).statusCode).toBe(200);
+    }
+    expect((await app.inject({ method: 'DELETE', url: '/api/auth', headers: { cookie: third } })).statusCode).toBe(204);
+    expectFailure(await app.inject({ method: 'GET', url, headers: { cookie: third } }), 404, 'not_found');
+    const change = await app.inject({
+      method: 'PUT',
+      url: '/api/settings/pin',
+      headers: { cookie },
+      payload: { current_pin: '4826', new_pin: '7391' },
+    });
+    expect(change.statusCode, change.body).toBe(204);
+    expectFailure(await app.inject({ method: 'GET', url, headers: { cookie: other } }), 404, 'not_found');
+    expect((await app.inject({ method: 'GET', url, headers: { cookie } })).statusCode).toBe(200);
   });
 });
 

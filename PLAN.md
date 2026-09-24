@@ -20,7 +20,7 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
   - Every route answers 401 without a DM session (the identical-answer test picks it up from `app.declaredRoutes`); `make verify` exit 0 on both CI runners; `TRACEABILITY.md` SRV-04 row with test names.
 - **Non-goals:** player image entitlement following the live scene (LIV-02), the settings screen that changes the display size (REL-01), the library UI (PRP-01), acceptance of the display size on the owner's TV (REL-03, G-002).
 - **Review:** `Surfaces: data, security, scope`, `Touches red line: yes`, `Contract change: yes`, so prompt 2 (review) runs after implementation.
-- **Remaining (2026-09-24):** implemented and passing locally (`make verify` exit 0, D-080, `TRACEABILITY.md` SRV-04 row); still open are the commit and pull request, the green CI run on Linux and Windows, and the review of prompt 2. The item leaves `Now` once those pass.
+- **Remaining (2026-09-24):** implemented and reviewed (D-080 to D-082, `TRACEABILITY.md` SRV-04 row); CI run 36007512379 failed on `test · windows` (ECONNRESET, fixed by D-082). The item leaves `Now` once CI is green on Linux and Windows.
 
 ## Next
 

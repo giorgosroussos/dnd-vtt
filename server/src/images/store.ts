@@ -170,9 +170,11 @@ async function writeVersion(
 }
 
 /**
- * Checks that the whole file decodes as the type its first bytes claim and writes the display
- * version and the thumbnail beside it. Width and height are the image as shown, after its
- * orientation, which is what calibration measures.
+ * Checks that the whole file decodes as the type its first bytes claim, then writes the display
+ * version and the thumbnail beside it. Only the check can refuse the upload: a failure while
+ * writing the versions (a full disk) is the server's, and answers 500 rather than blaming the
+ * file. Width and height are the image as shown, after its orientation, which is what
+ * calibration measures.
  */
 async function processUpload(
   staged: string,
@@ -180,13 +182,13 @@ async function processUpload(
   displaySize: number,
 ): Promise<{ width: number; height: number; variants: Image['variants'] }> {
   const original = path.join(staged, VARIANT_FILES.original);
+  let shown: { width: number; height: number };
   try {
     const meta = await decoder(original).metadata();
     if (meta.format !== SHARP_FORMAT[mime]) throw corrupt(mime);
-    const shown = meta.autoOrient;
-    const display = await writeVersion(original, displayEdge(displaySize), path.join(staged, VARIANT_FILES.display));
-    const thumbnail = await writeVersion(original, THUMBNAIL_SIZE, path.join(staged, VARIANT_FILES.thumbnail));
-    return { width: shown.width, height: shown.height, variants: { display, thumbnail } };
+    // A full decode to a few numbers: what refuses a truncated file.
+    await decoder(original).stats();
+    shown = meta.autoOrient;
   } catch (error) {
     if (error instanceof UploadRejected) throw error;
     // sharp refuses an image above its pixel limit (about 16,384 × 16,384) before decoding it.
@@ -195,6 +197,9 @@ async function processUpload(
     }
     throw corrupt(mime);
   }
+  const display = await writeVersion(original, displayEdge(displaySize), path.join(staged, VARIANT_FILES.display));
+  const thumbnail = await writeVersion(original, THUMBNAIL_SIZE, path.join(staged, VARIANT_FILES.thumbnail));
+  return { ...shown, variants: { display, thumbnail } };
 }
 
 export interface StoredUpload {
