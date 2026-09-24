@@ -20,6 +20,10 @@ export const ERROR_CODES = [
   'locked_out',
   'pin_not_set',
   'pin_already_set',
+  // SRV-03 (specs/03-domain-model.md §2, §7):
+  'reference_not_found',
+  'order_mismatch',
+  'confirmation_mismatch',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
