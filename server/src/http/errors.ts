@@ -1,5 +1,11 @@
 import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { errorEnvelope, type ErrorCode, type ErrorDetail, type ErrorEnvelope } from '@emberglass/shared';
+import {
+  errorEnvelope,
+  type AssetUsage,
+  type ErrorCode,
+  type ErrorDetail,
+  type ErrorEnvelope,
+} from '@emberglass/shared';
 import { normalizeAddress } from '../auth/lockout.js';
 import { createLineLimiter, type LineLimiter, type LineLimiterOptions } from '../log/limiter.js';
 import type { Logger } from '../log/logger.js';
@@ -31,7 +37,12 @@ export class ApiFailure extends Error {
     readonly status: number,
     readonly code: ErrorCode,
     message: string,
-    readonly options: { quiet?: boolean; headers?: Record<string, string>; details?: ErrorDetail[] } = {},
+    readonly options: {
+      quiet?: boolean;
+      headers?: Record<string, string>;
+      details?: ErrorDetail[];
+      usages?: AssetUsage[];
+    } = {},
   ) {
     super(message);
   }
@@ -39,7 +50,10 @@ export class ApiFailure extends Error {
 
 export function toFailure(thrown: unknown): HttpFailure {
   if (thrown instanceof ApiFailure)
-    return { status: thrown.status, envelope: errorEnvelope(thrown.code, thrown.message, thrown.options.details) };
+    return {
+      status: thrown.status,
+      envelope: errorEnvelope(thrown.code, thrown.message, thrown.options.details, thrown.options.usages),
+    };
   if (typeof thrown !== 'object' || thrown === null) return internal();
   const error = thrown as Thrown;
   if (Array.isArray(error.validation)) {

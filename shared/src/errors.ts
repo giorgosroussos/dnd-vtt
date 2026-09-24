@@ -1,4 +1,5 @@
 import { Type, type Static } from 'typebox';
+import { AssetUsageSchema, type AssetUsage } from './assets.js';
 
 // The one error envelope every REST error response and every rejected WebSocket
 // command carries (specs/02-architecture.md §5, specs/07-security-and-access.md §7,
@@ -24,6 +25,8 @@ export const ERROR_CODES = [
   'reference_not_found',
   'order_mismatch',
   'confirmation_mismatch',
+  // SRV-05 (specs/03-domain-model.md §7, specs/05-assets-and-images.md §5):
+  'asset_in_use',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -44,6 +47,8 @@ export const ErrorEnvelopeSchema = Type.Object(
         code: Type.Enum(ERROR_CODES),
         message: Type.String(),
         details: Type.Optional(Type.Array(ErrorDetailSchema)),
+        // Only with `asset_in_use`: every scene whose tokens use the asset (D-083).
+        usages: Type.Optional(Type.Array(AssetUsageSchema)),
       },
       { additionalProperties: false },
     ),
@@ -54,6 +59,18 @@ export const ErrorEnvelopeSchema = Type.Object(
 export type ErrorDetail = Static<typeof ErrorDetailSchema>;
 export type ErrorEnvelope = Static<typeof ErrorEnvelopeSchema>;
 
-export function errorEnvelope(code: ErrorCode, message: string, details?: ErrorDetail[]): ErrorEnvelope {
-  return { error: details && details.length > 0 ? { code, message, details } : { code, message } };
+export function errorEnvelope(
+  code: ErrorCode,
+  message: string,
+  details?: ErrorDetail[],
+  usages?: AssetUsage[],
+): ErrorEnvelope {
+  return {
+    error: {
+      code,
+      message,
+      ...(details && details.length > 0 ? { details } : {}),
+      ...(usages ? { usages } : {}),
+    },
+  };
 }

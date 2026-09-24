@@ -127,3 +127,14 @@ export function deleteUnreferencedImages(db: Database.Database, ids: Iterable<st
   );
   return [...new Set(ids)].filter((id) => remove.run(id).changes === 1);
 }
+
+/**
+ * Deletes every image that no asset and no scene references, preset included: at start-up,
+ * before any upload can be in flight, this removes the uploads a DM abandoned before
+ * creating the asset or the scene they were for (G-016, D-084). Returns the ids deleted.
+ */
+export function deleteAllUnreferencedImages(db: Database.Database): string[] {
+  return db.transaction(() =>
+    deleteUnreferencedImages(db, db.prepare('SELECT id FROM image ORDER BY id').pluck().all() as string[]),
+  )();
+}

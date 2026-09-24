@@ -8,6 +8,7 @@ import { VIEW_PATHS } from '@emberglass/shared';
 import type { Logger } from '../log/logger.js';
 import { compileSchema } from '../validation.js';
 import type { ScryptParams } from '../auth/pin-hash.js';
+import { registerAssets } from './assets.js';
 import { registerAuth, type Auth } from './auth.js';
 import { registerCampaigns } from './campaigns.js';
 import { imageFileRemover, registerImages } from './images.js';
@@ -76,13 +77,20 @@ export async function buildApp({
   installErrorHandling(app, failures);
   const auth = registerAuth(app, { db, logger, now, pinHashParams });
   const imagesDir = imagesDirOf(dataDir);
-  const orphans = prepareImagesDir(db, imagesDir);
+  const { unreferenced, orphans } = prepareImagesDir(db, imagesDir);
+  if (unreferenced.length > 0) {
+    logger.info('images.unreferenced_removed', `Removed ${unreferenced.length} images that nothing references.`, {
+      removed: unreferenced.length,
+    });
+  }
   if (orphans.length > 0) {
     logger.info('images.orphans_removed', `Removed ${orphans.length} image folders without a database row.`, {
       removed: orphans.length,
     });
   }
-  registerCampaigns(app, db, imageFileRemover(imagesDir, logger));
+  const removeImages = imageFileRemover(imagesDir, logger);
+  registerCampaigns(app, db, removeImages);
+  registerAssets(app, db, removeImages);
   await registerImages(app, { db, imagesDir, auth });
   const sendIndex = client.kind === 'static' ? await serveBuild(app, client.dist) : await serveVite(app, client.root);
 

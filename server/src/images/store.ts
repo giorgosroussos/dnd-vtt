@@ -5,7 +5,14 @@ import type { Readable } from 'node:stream';
 import type Database from 'better-sqlite3';
 import sharp, { type Sharp } from 'sharp';
 import { THUMBNAIL_SIZE, type Image, type ImageMime, type ImageVariant } from '@emberglass/shared';
-import { imageExists, insertImage, listImageIds, readImage, setDisplayVariant } from '../db/images.js';
+import {
+  deleteAllUnreferencedImages,
+  imageExists,
+  insertImage,
+  listImageIds,
+  readImage,
+  setDisplayVariant,
+} from '../db/images.js';
 import { SHARP_FORMAT, SNIFF_BYTES, sniff, type Sniffed } from './detect.js';
 
 // The image upload pipeline (specs/05-assets-and-images.md §6, §7, specs/03-domain-model.md §3,
@@ -58,20 +65,27 @@ const overLimit = (limit: number): UploadRejected => new UploadRejected('size', 
 
 /**
  * Creates the images folder and empties `.incoming`, where uploads that a stop or a crash
- * interrupted are left; removes each image folder without a row, left by a crash between
- * removing a row and its files. Returns the ids of those folders.
+ * interrupted are left; deletes every image that nothing references, an upload abandoned
+ * before its asset or scene was created (G-016, D-084); then removes each image folder
+ * without a row, theirs and those a crash left between removing a row and its files.
+ * Returns the ids of the images deleted and of the other folders removed.
  */
-export function prepareImagesDir(db: Database.Database, imagesDir: string): string[] {
+export function prepareImagesDir(
+  db: Database.Database,
+  imagesDir: string,
+): { unreferenced: string[]; orphans: string[] } {
   mkdirSync(imagesDir, { recursive: true });
   rmSync(path.join(imagesDir, INCOMING_DIR), { recursive: true, force: true });
   mkdirSync(path.join(imagesDir, INCOMING_DIR));
+  const unreferenced = deleteAllUnreferencedImages(db);
+  const swept = new Set(unreferenced);
   const orphans: string[] = [];
   for (const entry of readdirSync(imagesDir, { withFileTypes: true })) {
     if (!entry.isDirectory() || !SHA256.test(entry.name) || imageExists(db, entry.name)) continue;
     rmSync(path.join(imagesDir, entry.name), { recursive: true, force: true });
-    orphans.push(entry.name);
+    if (!swept.has(entry.name)) orphans.push(entry.name);
   }
-  return orphans;
+  return { unreferenced, orphans };
 }
 
 /**
