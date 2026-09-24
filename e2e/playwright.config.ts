@@ -18,9 +18,23 @@ export default defineConfig({
   globalTeardown: './global-teardown.ts',
   forbidOnly: true,
   retries: 0,
+  // Every test shares the one server and its data directory, so they run one at
+  // a time, in a known order (D-086).
+  workers: 1,
+  fullyParallel: false,
   reporter: [['list']],
   use: { baseURL: `http://127.0.0.1:${port}` },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  // The First run journey needs the fresh data directory, before any other test
+  // sets the PIN; the rest depend on it (D-086).
+  projects: [
+    { name: 'first-run', testMatch: /first-run\.spec\.ts$/, use: { ...devices['Desktop Chrome'] } },
+    {
+      name: 'chromium',
+      testIgnore: /first-run\.spec\.ts$/,
+      dependencies: ['first-run'],
+      use: { ...devices['Desktop Chrome'] },
+    },
+  ],
   webServer: {
     command: 'npm run build && npm start',
     cwd: repoRoot,

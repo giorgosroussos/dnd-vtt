@@ -2,7 +2,7 @@ import { useId, type InputHTMLAttributes } from 'react';
 
 type TextFieldProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'id' | 'className' | 'aria-invalid'> & {
   label: string;
-  error?: string;
+  error?: string | undefined;
 };
 
 // The field error pattern (D-069): a visible label, and when the value is refused,

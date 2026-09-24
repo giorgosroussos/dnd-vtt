@@ -41,7 +41,8 @@ test('a DM view and a player view open side by side from one server', async ({ b
 
   await expect(dm.locator('main[data-view="dm"]')).toHaveCount(1);
   await expect(dm.locator('main[data-view="player"]')).toHaveCount(0);
-  await expect(dm.getByRole('heading', { level: 1 })).toHaveText('Welcome to Emberglass');
+  // A browser without a DM session gets the PIN form (first-run.spec.ts set the PIN).
+  await expect(dm.getByRole('heading', { level: 1 })).toHaveText('Enter the DM PIN');
   await expect(player.locator('main[data-view="player"]')).toHaveCount(1);
   await expect(player.locator('main[data-view="dm"]')).toHaveCount(0);
 

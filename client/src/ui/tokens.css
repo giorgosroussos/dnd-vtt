@@ -100,6 +100,27 @@ main[tabindex='-1']:focus {
   color: var(--color-text);
 }
 
+/* Confirms a permanent deletion; dark text on the danger colour. */
+.eg-button--danger {
+  background: var(--color-danger);
+  border-color: var(--color-danger);
+  color: var(--color-on-accent);
+}
+
+.eg-button--small {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-size-sm);
+}
+
+/* Not dimmed with opacity, which would lower the contrast the checks cannot see:
+ * muted text on the surface, a pair tokens.test.ts checks. */
+.eg-button:disabled {
+  cursor: not-allowed;
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  color: var(--color-text-muted);
+}
+
 .eg-field {
   display: flex;
   flex-direction: column;
