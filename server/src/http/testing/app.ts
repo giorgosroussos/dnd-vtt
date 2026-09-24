@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
+import type { ScryptParams } from '../../auth/pin-hash.js';
 import { openDatabase } from '../../db/database.js';
 import { migrateDataDirectory } from '../../db/migrate.js';
 import type { Logger } from '../../log/logger.js';
@@ -11,6 +12,12 @@ import { buildApp, type AppOptions } from '../app.js';
 import { DM_COOKIE } from '../auth.js';
 
 // A server against a real SQLite file in a temporary data directory (specs/10-testing-acceptance.md §2).
+
+// A cheap PIN hash for tests in which the cost is not under test: real scrypt at
+// the production cost is 32 MiB and 0.1 s a hash, and dozens of them in parallel
+// starve the other test files on a two-core CI runner. Tests of the stored
+// format, of parallel guesses and of races pass SCRYPT_PARAMS themselves.
+export const TEST_PIN_HASH_PARAMS: Readonly<ScryptParams> = { N: 2 ** 10, r: 8, p: 1 };
 
 export const quiet: Logger = { info: () => {}, warn: () => {}, error: () => {} };
 
@@ -58,7 +65,13 @@ export function buildTestApp(
   data: TestData,
   options: Partial<Omit<AppOptions, 'client'>> = {},
 ): Promise<FastifyInstance> {
-  return buildApp({ client: { kind: 'static', dist: data.dist }, logger: quiet, db: data.db, ...options });
+  return buildApp({
+    client: { kind: 'static', dist: data.dist },
+    logger: quiet,
+    db: data.db,
+    pinHashParams: TEST_PIN_HASH_PARAMS,
+    ...options,
+  });
 }
 
 /** The `name=value` of the DM cookie a response set, ready for a Cookie header. */

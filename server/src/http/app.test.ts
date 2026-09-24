@@ -6,7 +6,15 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ErrorEnvelope } from '@emberglass/shared';
 import { CLIENT_ROOT } from '../paths.js';
 import { buildApp, within } from './app.js';
-import { buildTestApp, createTestData, INDEX, quiet, setUpPin, type TestData } from './testing/app.js';
+import {
+  buildTestApp,
+  createTestData,
+  INDEX,
+  quiet,
+  setUpPin,
+  TEST_PIN_HASH_PARAMS,
+  type TestData,
+} from './testing/app.js';
 
 describe('buildApp serving a client build', () => {
   let data: TestData;
@@ -81,7 +89,12 @@ describe('buildApp in development', () => {
 
   beforeAll(async () => {
     data = createTestData();
-    app = await buildApp({ client: { kind: 'dev', root: CLIENT_ROOT }, logger: quiet, db: data.db });
+    app = await buildApp({
+      client: { kind: 'dev', root: CLIENT_ROOT },
+      logger: quiet,
+      db: data.db,
+      pinHashParams: TEST_PIN_HASH_PARAMS,
+    });
   });
 
   afterAll(async () => {

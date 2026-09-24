@@ -7,6 +7,7 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import { VIEW_PATHS } from '@emberglass/shared';
 import type { Logger } from '../log/logger.js';
 import { compileSchema } from '../validation.js';
+import type { ScryptParams } from '../auth/pin-hash.js';
 import { registerAuth, type Auth } from './auth.js';
 import { createFailureLog, installErrorHandling, sendFailure, type RejectedLineLimits } from './errors.js';
 
@@ -23,6 +24,8 @@ export interface AppOptions {
   db: Database.Database;
   /** The lockout's clock, for tests. */
   now?: (() => number) | undefined;
+  /** The cost of new PIN hashes; tests only lower it. */
+  pinHashParams?: Readonly<ScryptParams> | undefined;
   /** Limits on rejected-request log lines (G-006); the defaults suit production. */
   rejectedLines?: RejectedLineLimits | undefined;
 }
@@ -44,7 +47,14 @@ declare module 'fastify' {
 // specs/02-architecture.md §5). Fastify's request logging stays off (D-029);
 // failures are logged by the error handler, without query strings, headers or
 // bodies, and rejected requests at a bounded rate per client (G-006).
-export async function buildApp({ client, logger, db, now, rejectedLines }: AppOptions): Promise<FastifyInstance> {
+export async function buildApp({
+  client,
+  logger,
+  db,
+  now,
+  pinHashParams,
+  rejectedLines,
+}: AppOptions): Promise<FastifyInstance> {
   const failures = createFailureLog(logger, rejectedLines);
   const app = Fastify({
     logger: false,
@@ -58,7 +68,7 @@ export async function buildApp({ client, logger, db, now, rejectedLines }: AppOp
   });
   app.setValidatorCompiler(({ schema }) => compileSchema(schema));
   installErrorHandling(app, failures);
-  const auth = registerAuth(app, { db, logger, now });
+  const auth = registerAuth(app, { db, logger, now, pinHashParams });
   const sendIndex = client.kind === 'static' ? await serveBuild(app, client.dist) : await serveVite(app, client.root);
 
   // Both views come from one client build: the player view at /, the DM view at /dm.

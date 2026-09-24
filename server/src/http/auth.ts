@@ -15,7 +15,7 @@ import {
   type SetupState,
 } from '@emberglass/shared';
 import { createLockout, isLoopback, normalizeAddress, type Lockout } from '../auth/lockout.js';
-import { hashPin, verifyPin } from '../auth/pin-hash.js';
+import { hashPin, SCRYPT_PARAMS, verifyPin, type ScryptParams } from '../auth/pin-hash.js';
 import { createSessionStore, SESSION_ID_PATTERN, type SessionStore } from '../auth/sessions.js';
 import { readPinHash, readSettings, replacePinHash, setFirstPinHash } from '../db/settings.js';
 import type { Logger } from '../log/logger.js';
@@ -45,6 +45,8 @@ export interface AuthOptions {
   logger: Logger;
   /** Milliseconds since the epoch; the lockout's clock. */
   now?: (() => number) | undefined;
+  /** The cost of new PIN hashes; tests only lower it. */
+  pinHashParams?: Readonly<ScryptParams> | undefined;
 }
 
 export interface Auth {
@@ -84,11 +86,47 @@ export function isSameOrigin(request: FastifyRequest): boolean {
   }
 }
 
+const underApi = (path: string): boolean => path === '/api' || path.startsWith('/api/');
+
+/**
+ * A path as a server that decodes it might read it: dot segments resolved,
+ * percent-escapes decoded, repeated slashes collapsed. Null if it cannot be decoded.
+ */
+export function normalizedPath(raw: string): string | null {
+  try {
+    return decodeURIComponent(new URL(`http://host${raw}`).pathname).replace(/\/{2,}/g, '/');
+  } catch {
+    return null;
+  }
+}
+
+// A matched route decides by its pattern. An unmatched path is an API request if
+// it is under /api as sent or as normalised: otherwise `/%61pi/settings` (a real
+// route, 401) and `/%61pi/nope` (404) would tell routes apart without a session.
 function isApiRequest(request: FastifyRequest): boolean {
   const route = request.routeOptions.url;
-  if (route !== undefined) return route === '/api' || route.startsWith('/api/');
-  const path = request.url.split('?', 1)[0] ?? '';
-  return path === '/api' || path.startsWith('/api/');
+  if (route !== undefined) return underApi(route);
+  const raw = request.url.split('?', 1)[0] ?? '';
+  const normal = normalizedPath(raw);
+  return underApi(raw) || (normal !== null && underApi(normal));
+}
+
+/**
+ * The server machine itself, both by its address and by the name the browser
+ * used for it. The name matters for setup: a web page whose own host name was
+ * re-pointed at 127.0.0.1 (DNS rebinding) sends a loopback address and a
+ * matching Origin, but its Host is its own name.
+ */
+export function isServerMachine(request: FastifyRequest): boolean {
+  if (!isLoopback(clientAddress(request))) return false;
+  const host = request.headers.host;
+  if (!host) return false;
+  try {
+    const name = new URL(`http://${host}`).hostname;
+    return name === 'localhost' || name === '[::1]' || isLoopback(name);
+  } catch {
+    return false;
+  }
 }
 
 const setCookie = (reply: FastifyReply, id: string): FastifyReply =>
@@ -104,7 +142,10 @@ const pinIncorrect = (): ApiFailure => new ApiFailure(401, 'pin_incorrect', 'The
 const pinNotSet = (): ApiFailure => new ApiFailure(409, 'pin_not_set', 'No PIN is set yet.');
 const pinAlreadySet = (): ApiFailure => new ApiFailure(409, 'pin_already_set', 'A PIN is already set.');
 
-export function registerAuth(app: FastifyInstance, { db, logger, now = Date.now }: AuthOptions): Auth {
+export function registerAuth(
+  app: FastifyInstance,
+  { db, logger, now = Date.now, pinHashParams = SCRYPT_PARAMS }: AuthOptions,
+): Auth {
   const sessions = createSessionStore();
   const lockout = createLockout(now);
   const sessionOf = (request: FastifyRequest): string | undefined =>
@@ -160,6 +201,11 @@ export function registerAuth(app: FastifyInstance, { db, logger, now = Date.now 
       const stored = readPinHash(db);
       if (stored === null) throw pinNotSet();
       await checkPin(request, request.body.pin, stored);
+      // The PIN may have changed (or been reset and set again) while this one was
+      // being hashed. Checked after the hash, in the same synchronous step that
+      // creates the session, so a session made with the old PIN can never outlive
+      // the change that was meant to end it (Q-033).
+      if (readPinHash(db) !== stored) throw new ApiFailure(401, 'pin_incorrect', 'The PIN is not correct.');
       logger.info('auth.signed_in', 'A browser signed in to the DM view.', { address: clientAddress(request) });
       return signIn(request, reply);
     },
@@ -177,7 +223,7 @@ export function registerAuth(app: FastifyInstance, { db, logger, now = Date.now 
   app.get(API_PATHS.setup, { schema: { response: { 200: SetupStateSchema } } }, (request, reply) => {
     return reply.send({
       pin_set: readPinHash(db) !== null,
-      local: isLoopback(clientAddress(request)),
+      local: isServerMachine(request),
     } satisfies SetupState);
   });
 
@@ -187,13 +233,13 @@ export function registerAuth(app: FastifyInstance, { db, logger, now = Date.now 
       schema: { body: PinBodySchema, response: { 200: AuthStateSchema } },
       // Before the body is parsed: a browser on the LAN learns nothing about the body.
       onRequest: (request, _reply, done) => {
-        if (isLoopback(clientAddress(request))) done();
+        if (isServerMachine(request)) done();
         else done(new ApiFailure(403, 'forbidden', 'The PIN is set from the server machine only.'));
       },
     },
     async (request, reply) => {
       if (readPinHash(db) !== null) throw pinAlreadySet();
-      const hash = await hashPin(request.body.pin);
+      const hash = await hashPin(request.body.pin, pinHashParams);
       if (!setFirstPinHash(db, hash)) throw pinAlreadySet();
       // After `npm run reset-pin` sessions of the old PIN may still be open: a new PIN ends them.
       const ended = sessions.endAllExcept(undefined);
@@ -213,7 +259,7 @@ export function registerAuth(app: FastifyInstance, { db, logger, now = Date.now 
     const stored = readPinHash(db);
     if (stored === null) throw pinNotSet();
     await checkPin(request, request.body.current_pin, stored);
-    const hash = await hashPin(request.body.new_pin);
+    const hash = await hashPin(request.body.new_pin, pinHashParams);
     // Changed by another device while this one was hashing: its current PIN is no longer current.
     if (!replacePinHash(db, stored, hash)) throw new ApiFailure(401, 'pin_incorrect', 'The PIN is not correct.');
     const ended = sessions.endAllExcept(keep);

@@ -8,11 +8,10 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
 
 - **Outcome:** a DM can set the PIN only from the server machine, enter it from any LAN browser to get a DM session that lasts until restart, change it (ending every other session), sign a browser out, and reset it with `npm run reset-pin`; every `/api` route but PIN entry and setup refuses a request without a DM session.
 - **Specs:** `13` §4 SRV-02, `07` §1, `07` §2, `07` §6, `07` §7, `07` §8, `02` §5, `09` §2; D-076.
-- **State:** implemented; every local acceptance criterion ran and passed on 2026-09-24 (the SRV-02 row of `TRACEABILITY.md` names the tests, the mutations and the live run). G-005 and G-006 are closed; G-008 is left with its README half for REL-01.
+- **State:** implemented and reviewed (prompt 2, 2026-09-24): the high finding and two medium findings are fixed with tests (D-077), two items deferred as G-010 and G-011; `make verify` exit 0 locally. The first CI run (35990134838) was red on Windows only, `test` and `e2e`; both causes are fixed in the review-fix change, which has not run in CI yet.
 - **Acceptance still to run (executable):**
-  - `make verify` exit 0 on both CI runners, from a pull request of this change: all 23 jobs green on `ubuntu-latest` and `windows-latest`, the `test` job including `server/src/http/auth.test.ts` (it spawns `npm run reset-pin`, which on Windows goes through `shell: true`).
-  - Review (prompt 2), because `Surfaces: data, security`, `Touches red line: yes`, `Contract change: yes`: correctness, security and isolation, and tests passes; no critical or high finding left open.
-  - Then the SRV-02 row of `TRACEABILITY.md` moves to `done` with the run links, and this item leaves the plan.
+  - The review-fix change pushed to the pull request, and `make verify` green on both runners: all 23 jobs on `ubuntu-latest` and `windows-latest`, including `test · windows` and `e2e · windows`.
+  - Then the SRV-02 row of `TRACEABILITY.md` moves to `done` with the run link, and this item leaves the plan.
 - **Non-goals:** the DM view screens for PIN entry and settings (PRP-01, REL-01), changing the other settings over REST (REL-01), WebSocket handshake checks (LIV-01), README text on transport exposure and backups (REL-01).
 
 ## Next

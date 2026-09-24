@@ -12,14 +12,14 @@ import {
   SetupStateSchema,
   type ErrorEnvelope,
 } from '@emberglass/shared';
-import { verifyPin } from '../auth/pin-hash.js';
+import { SCRYPT_PARAMS, verifyPin } from '../auth/pin-hash.js';
 import { resetPin } from '../auth/reset-pin.js';
 import { readPinHash, readSettings } from '../db/settings.js';
 import { createLogger, logFilePath, type TextSink } from '../log/logger.js';
 import { MIGRATIONS_DIR } from '../paths.js';
 import { pinSetupHint } from '../server.js';
 import { compileSchema } from '../validation.js';
-import { DM_COOKIE } from './auth.js';
+import { DM_COOKIE, normalizedPath } from './auth.js';
 import { buildTestApp, createTestData, dmCookie, setUpPin, type TestData } from './testing/app.js';
 
 // SRV-02: the PIN, the DM session and guessing protection, against a real SQLite
@@ -125,6 +125,9 @@ describe('first-run PIN setup (specs/07-security-and-access.md §1)', () => {
   });
 
   it('succeeds from a loopback address, stores a salted scrypt hash and never the PIN, and signs that browser in', async () => {
+    // At the production cost: the stored format is what is under test.
+    await app.close();
+    app = await start({ pinHashParams: SCRYPT_PARAMS });
     const response = await inject({ method: 'POST', url: '/api/setup', payload: { pin: PIN } });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ dm: true });
@@ -164,6 +167,48 @@ describe('first-run PIN setup (specs/07-security-and-access.md §1)', () => {
       expect(readPinHash(data.db)).toBeNull();
     },
   );
+
+  it.each(['evil.example:3000', 'evil.example', '192.168.1.5:3000', 'localhost.evil.example'])(
+    'refuses setup from a loopback address whose Host is %s (DNS rebinding), with a matching Origin, and stores nothing',
+    async (host) => {
+      const headers = { host, origin: `http://${host}` };
+      const state = await inject({ method: 'GET', url: '/api/setup', headers });
+      expect(state.json()).toEqual({ pin_set: false, local: false });
+      expectFailure(
+        await inject({ method: 'POST', url: '/api/setup', payload: { pin: PIN }, headers }),
+        403,
+        'forbidden',
+      );
+      expect(readPinHash(data.db)).toBeNull();
+    },
+  );
+
+  it.each(['localhost:3000', '127.0.0.1:3000', '[::1]:3000', 'LOCALHOST'])(
+    'accepts setup from a loopback address whose Host is %s',
+    async (host) => {
+      const headers = { host, origin: `http://${host}` };
+      expect((await inject({ method: 'GET', url: '/api/setup', headers })).json()).toEqual({
+        pin_set: false,
+        local: true,
+      });
+      expect((await inject({ method: 'POST', url: '/api/setup', payload: { pin: PIN }, headers })).statusCode).toBe(
+        200,
+      );
+    },
+  );
+
+  // light-my-request always sends a Host, so the missing case is covered by one
+  // that cannot be parsed, which takes the same refusal.
+  it('refuses setup from a loopback address whose Host cannot be parsed', async () => {
+    const response = await inject({
+      method: 'POST',
+      url: '/api/setup',
+      payload: { pin: PIN },
+      headers: { host: 'bad host:x' },
+    });
+    expectFailure(response, 403, 'forbidden');
+    expect(readPinHash(data.db)).toBeNull();
+  });
 
   it('refuses setup once a PIN is set, from the server machine too, and keeps the hash', async () => {
     await setUpPin(app, PIN);
@@ -383,6 +428,12 @@ describe('guessing protection (specs/07-security-and-access.md §6)', () => {
   });
 
   it('checks no more than 5 PINs from one address when guesses arrive all at once', async () => {
+    // At the production cost, so that the guesses really overlap the hashing.
+    await app.close();
+    data.remove();
+    data = createTestData('emberglass-auth-');
+    app = await start({ pinHashParams: SCRYPT_PARAMS });
+    await setUpPin(app, PIN);
     const answers = await Promise.all(Array.from({ length: 20 }, () => enter(WRONG)));
     const statuses = answers.map((response) => response.statusCode);
     expect(statuses.filter((status) => status === 401)).toHaveLength(5);
@@ -416,6 +467,50 @@ describe('guessing protection (specs/07-security-and-access.md §6)', () => {
 describe('PIN change (specs/07-security-and-access.md §1, §2)', () => {
   beforeEach(async () => {
     await setUpPin(app, PIN);
+  });
+
+  it('lets no session made with the old PIN outlive a change, even one whose PIN check was still running', async () => {
+    // At the production cost, so that sign-ins with the old PIN are still being
+    // hashed when the change lands. One every 10 ms from its own address (so the
+    // lockout never refuses them) covers the whole change.
+    await app.close();
+    data.remove();
+    data = createTestData('emberglass-auth-');
+    app = await start({ pinHashParams: SCRYPT_PARAMS });
+    const changer = await setUpPin(app, PIN);
+    const signIns: Promise<LightMyRequestResponse>[] = [];
+    let done = false;
+    const change = changePin(changer, PIN, NEW_PIN).finally(() => (done = true));
+    for (let n = 0; !done && n < 200; n++) {
+      signIns.push(enter(PIN, `10.1.${n >> 8}.${n & 255}`));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect((await change).statusCode).toBe(204);
+    const answers = await Promise.all(signIns);
+    expect(answers.length).toBeGreaterThan(5);
+    const granted = answers.filter((response) => response.statusCode === 200);
+    // Some old-PIN sign-ins finished before the change and were granted, then ended by it.
+    expect(granted.length).toBeGreaterThan(0);
+    for (const response of granted) expectFailure(await settings(dmCookie(response)), 401, 'unauthorized');
+    for (const response of answers) expect([200, 401]).toContain(response.statusCode);
+    expect((await settings(changer)).statusCode).toBe(200);
+  });
+
+  it('lets exactly one of two PIN changes at the same moment win, and ends the other device', async () => {
+    const first = await signInFrom(LAN);
+    const second = await signInFrom(OTHER_LAN);
+    const [a, b] = await Promise.all([
+      changePin(first, PIN, '11112222', LAN),
+      changePin(second, PIN, '33334444', OTHER_LAN),
+    ]);
+    expect([a.statusCode, b.statusCode].sort()).toEqual([204, 401]);
+    const stored = readPinHash(data.db)!;
+    const [firstWon, secondWon] = await Promise.all([verifyPin('11112222', stored), verifyPin('33334444', stored)]);
+    expect(firstWon).toBe(a.statusCode === 204);
+    expect(secondWon).toBe(b.statusCode === 204);
+    const [winner, loser] = firstWon ? [first, second] : [second, first];
+    expect((await settings(winner)).statusCode).toBe(200);
+    expectFailure(await settings(loser), 401, 'unauthorized');
   });
 
   it('ends every other session at once and keeps the device that changed it', async () => {
@@ -488,11 +583,12 @@ describe('npm run reset-pin (specs/07-security-and-access.md §1, D-028)', () =>
 
   it('is the command npm run reset-pin', async () => {
     await setUpPin(app, PIN);
-    const run = spawnSync('npm', ['run', '--silent', 'reset-pin'], {
+    // One command line through the shell, which is how npm is found on Windows too.
+    const run = spawnSync('npm run --silent reset-pin', {
       cwd: REPO_ROOT,
       env: { ...process.env, EMBERGLASS_DATA_DIR: data.dataDir, EMBERGLASS_PORT: '3999' },
       encoding: 'utf8',
-      shell: process.platform === 'win32',
+      shell: true,
     });
     expect(run.status, run.stderr).toBe(0);
     expect(run.stdout).toContain('The DM PIN was cleared');
@@ -553,6 +649,15 @@ describe('the DM session guards every /api route but PIN entry and setup (specs/
       '/api/campaigns/0b7a4c52-9d1e-4f3a-8b6c-2e5d7f9a1c3b',
       '/api/auth/',
       '/api/settings/pin/x',
+      // Spellings a decoding server could read as /api paths (M-1 of the review).
+      '/%61pi/settings',
+      '/%61pi/nope',
+      '/api/%73ettingz',
+      '//api/settings',
+      '//api/nope',
+      '/./api/nope',
+      '/x/../api/nope',
+      '/%2e/api/nope',
     ];
     for (const shape of shapes) {
       for (const method of ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'] as const) {
@@ -794,5 +899,18 @@ describe('start-up hint (specs/09-operations.md §2)', () => {
     );
     await setUpPin(app, PIN);
     expect(pinSetupHint(readPinHash(data.db), 3000)).toBeNull();
+  });
+});
+
+describe('normalizedPath', () => {
+  it.each([
+    ['/%61pi/settings', '/api/settings'],
+    ['//api//nope', '/api/nope'],
+    ['/x/../api/nope', '/api/nope'],
+    ['/%2e/api', '/api'],
+    ['/dm', '/dm'],
+    ['/api/%E0%A4%A', null],
+  ])('reads %s as %s', (raw, normal) => {
+    expect(normalizedPath(raw)).toBe(normal);
   });
 });

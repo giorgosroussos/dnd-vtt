@@ -9,7 +9,13 @@ import { randomBytes, scrypt, timingSafeEqual, type ScryptOptions } from 'node:c
 // N = 2^15 costs about 0.1 s and 32 MiB per hash on a desktop, on libuv's thread
 // pool, so a verification never blocks the event loop.
 
-export const SCRYPT_PARAMS = { N: 2 ** 15, r: 8, p: 1 } as const;
+export interface ScryptParams {
+  N: number;
+  r: number;
+  p: number;
+}
+
+export const SCRYPT_PARAMS: Readonly<ScryptParams> = { N: 2 ** 15, r: 8, p: 1 };
 const SALT_BYTES = 16;
 const KEY_BYTES = 32;
 // scrypt needs 128 * N * r bytes; Node's default ceiling is exactly 32 MiB, one byte short.
@@ -23,8 +29,9 @@ function derive(pin: string, salt: Buffer, length: number, options: ScryptOption
   });
 }
 
-export async function hashPin(pin: string): Promise<string> {
-  const { N, r, p } = SCRYPT_PARAMS;
+/** `params` other than the default are for tests only, where the cost is not what is under test. */
+export async function hashPin(pin: string, params: Readonly<ScryptParams> = SCRYPT_PARAMS): Promise<string> {
+  const { N, r, p } = params;
   const salt = randomBytes(SALT_BYTES);
   const key = await derive(pin, salt, KEY_BYTES, { N, r, p, maxmem: maxmemFor(N, r) });
   return ['scrypt', N, r, p, salt.toString('base64url'), key.toString('base64url')].join('$');
