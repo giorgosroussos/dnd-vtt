@@ -96,8 +96,11 @@ function writeOrder(db: Database.Database, { table, parent }: Ordered, parentId:
   ids.forEach((id, index) => place.run(index, id, parentId));
 }
 
+// Above the highest order in use rather than the count, so that a gap left by
+// anything but these functions (a restored or hand-edited database) cannot make
+// a new row collide with an existing one.
 const nextOrder = (db: Database.Database, { table, parent }: Ordered, parentId: string): number =>
-  db.prepare(`SELECT count(*) FROM ${table} WHERE ${parent} = ?`).pluck().get(parentId) as number;
+  db.prepare(`SELECT coalesce(max("order") + 1, 0) FROM ${table} WHERE ${parent} = ?`).pluck().get(parentId) as number;
 
 /** Same members in any sequence: a reorder names every child once and nothing else. */
 const sameMembers = (current: readonly string[], ids: readonly string[]): boolean =>
@@ -315,8 +318,16 @@ export function duplicateScene(db: Database.Database, id: string, name: string):
     const original = readScene(db, id);
     if (original === undefined) return false;
     const siblings = childIds(db, SCENES, original.session_id);
-    insertScene(db, copyId, original.session_id, name, siblings.length, original.map_image_id, original.grid);
-    siblings.splice(original.order + 1, 0, copyId);
+    insertScene(
+      db,
+      copyId,
+      original.session_id,
+      name,
+      nextOrder(db, SCENES, original.session_id),
+      original.map_image_id,
+      original.grid,
+    );
+    siblings.splice(siblings.indexOf(id) + 1, 0, copyId);
     writeOrder(db, SCENES, original.session_id, siblings);
     const tokens = db
       .prepare(`SELECT ${TOKEN_COLUMNS} FROM token WHERE scene_id = ? ORDER BY z_order, id`)

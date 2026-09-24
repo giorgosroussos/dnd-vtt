@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { FastifyInstance, InjectOptions, LightMyRequestResponse } from 'fastify';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CampaignSchema,
   DeletionSummarySchema,
@@ -35,6 +35,11 @@ const isCampaign = compileSchema<Campaign>(CampaignSchema);
 const isSession = compileSchema<Session>(SessionSchema);
 const isScene = compileSchema<Scene>(SceneSchema);
 const isSummary = compileSchema<DeletionSummary>(DeletionSummarySchema);
+
+// Every write commits to a real SQLite file, and each test signs in with a real
+// (cheap) PIN hash; on the Windows runner a test that builds a campaign tree
+// takes several seconds (run of 2026-09-24: 5.7 s, over Vitest's 5 s default).
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
 let data: TestData;
 let app: FastifyInstance;
@@ -323,6 +328,64 @@ describe('order within the parent (specs/03-domain-model.md §2, D-050, D-075)',
   });
 });
 
+describe('robustness of the order and idempotency (SRV-03 review)', () => {
+  it('appends after a gap left outside these routes instead of colliding, and a later rewrite closes it', async () => {
+    const campaign = await newCampaign();
+    const session = await newSession(campaign.id);
+    const gap = randomUUID();
+    // As a restored or hand-edited database might hold it: one scene at order 2, none at 0 or 1.
+    data.db
+      .prepare('INSERT INTO scene (id, session_id, name, "order") VALUES (?, ?, ?, 2)')
+      .run(gap, session.id, 'Gap');
+    const created = await newScene(session.id, 'New');
+    expect(created.order).toBe(3);
+    const copy = ok<Scene>(await post(`/api/scenes/${gap}/duplicate`, { name: 'Gap copy' }), 201);
+    expect(
+      ok<Scene[]>(await get(`/api/sessions/${session.id}/scenes`)).map((scene) => [scene.id, scene.order]),
+    ).toEqual([
+      [gap, 0],
+      [copy.id, 1],
+      [created.id, 2],
+    ]);
+    data.db
+      .prepare('INSERT INTO session (id, campaign_id, title, "order") VALUES (?, ?, ?, 5)')
+      .run(randomUUID(), campaign.id, 'Far');
+    expect((await newSession(campaign.id, 'After')).order).toBe(6);
+  });
+
+  it('answers a repeated deletion with 404 and changes nothing more', async () => {
+    const session = await newSession((await newCampaign()).id);
+    const scene = await newScene(session.id, 'Once');
+    await newScene(session.id, 'Stays');
+    const url = `/api/scenes/${scene.id}`;
+    const summary = await summaryOf(url);
+    expect((await del(url, { confirm: summary })).statusCode).toBe(204);
+    const after = countRows(data.db);
+    expectFailure(await del(url, { confirm: summary }), 404, 'not_found');
+    expect(countRows(data.db)).toEqual(after);
+  });
+
+  it('gives the same result when the same reorder is sent twice', async () => {
+    const session = await newSession((await newCampaign()).id);
+    const ids = [];
+    for (const name of ['A', 'B', 'C']) ids.push((await newScene(session.id, name)).id);
+    const url = `/api/sessions/${session.id}/scenes/order`;
+    const wanted = [ids[1]!, ids[2]!, ids[0]!];
+    const first = ok<Scene[]>(await put(url, { ids: wanted }));
+    expect(ok<Scene[]>(await put(url, { ids: wanted }))).toEqual(first);
+    expect(orders(first)).toEqual([0, 1, 2]);
+  });
+
+  it('leaves the live scene live when it is duplicated, and the copy is not live', async () => {
+    const session = await newSession((await newCampaign()).id);
+    const live = await newScene(session.id, 'Live');
+    setLive(live.id);
+    const copy = ok<Scene>(await post(`/api/scenes/${live.id}/duplicate`, { name: 'Live copy' }), 201);
+    expect(liveSceneId()).toBe(live.id);
+    expect((await summaryOf(`/api/scenes/${copy.id}`)).live).toBe(false);
+  });
+});
+
 describe('the grid of a new scene (specs/03-domain-model.md §5, §6)', () => {
   it('copies the grid preset of its map image', async () => {
     const session = await newSession((await newCampaign()).id);
@@ -546,8 +609,9 @@ describe('deletion and its confirmation (specs/03-domain-model.md §7)', () => {
     expect(ok<Campaign[]>(await get('/api/campaigns')).map((c) => c.name)).toEqual(['Other']);
   });
 
-  it('warns that the live scene is among what goes, and clears the live scene when it, its session or its campaign is deleted', async () => {
-    for (const target of ['scene', 'session', 'campaign'] as const) {
+  it.each(['scene', 'session', 'campaign'] as const)(
+    'warns that the live scene is among what goes, and clears the live scene when its %s is deleted',
+    async (target) => {
       const { campaign, sessions, scenes } = await tree();
       const live = scenes[0]!;
       setLive(live.id);
@@ -565,8 +629,8 @@ describe('deletion and its confirmation (specs/03-domain-model.md §7)', () => {
       expect(liveSceneId()).toBe(live.id);
       expect((await del(url, { confirm: summary })).statusCode).toBe(204);
       expect(liveSceneId(), target).toBeNull();
-    }
-  });
+    },
+  );
 
   it('keeps the live scene when a scene outside it is deleted', async () => {
     const { scenes } = await tree();
