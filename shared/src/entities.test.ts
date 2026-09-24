@@ -51,7 +51,7 @@ const scene: Scene = {
   },
 };
 
-describe('entity contract (specs/03-domain-model.md §1, D-074)', () => {
+describe('entity contract (specs/03-domain-model.md §1, D-075)', () => {
   it('lists the asset categories and token sizes of specs/05-assets-and-images.md §1–§2', () => {
     const assets = spec('05-assets-and-images.md');
     const categories = /category \(([^)]+)\)/

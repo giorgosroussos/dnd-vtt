@@ -1,7 +1,7 @@
 import { Type, type Static } from 'typebox';
 
 // The eight stored entities of specs/03-domain-model.md §1, as the server reads
-// them from SQLite (server/migrations/0001_initial_schema.sql, D-074). Field
+// them from SQLite (server/migrations/0001_initial_schema.sql, D-075). Field
 // names are the specification's; booleans are booleans here and 0/1 in SQLite;
 // a scene's grid and an image's grid preset are nested here and `grid_*` and
 // `grid_preset_*` columns there. REST bodies (SRV-03 onward) are built from

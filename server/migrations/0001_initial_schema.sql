@@ -1,4 +1,4 @@
--- SRV-01: the eight entities of specs/03-domain-model.md §1 (D-074).
+-- SRV-01: the eight entities of specs/03-domain-model.md §1 (D-075).
 --
 -- Every table is STRICT, so a column holds only its declared type (a token's `x`
 -- is never text), and WITHOUT ROWID, so no implicit sequential key exists
@@ -7,7 +7,8 @@
 -- (specs/03-domain-model.md §3). The fields prepared for later phases
 -- (specs/03-domain-model.md §8) are held to their MVP values by triggers, not
 -- CHECK constraints, so that the phase that frees them drops a trigger instead
--- of rebuilding a table.
+-- of rebuilding a table. A REAL column refuses infinity, which JSON cannot
+-- carry: `abs(v) < 9e999` compares against infinity.
 
 -- Image: identified by content; `variants` is written by the upload pipeline
 -- (SRV-04). The grid preset has the shape of a scene's grid and is either wholly
@@ -19,11 +20,11 @@ CREATE TABLE image (
   height INTEGER NOT NULL CHECK (height > 0),
   variants TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(variants) AND json_type(variants) = 'object'),
   grid_preset_type TEXT,
-  grid_preset_size REAL,
-  grid_preset_offset_x REAL,
-  grid_preset_offset_y REAL,
+  grid_preset_size REAL CHECK (abs(grid_preset_size) < 9e999),
+  grid_preset_offset_x REAL CHECK (abs(grid_preset_offset_x) < 9e999),
+  grid_preset_offset_y REAL CHECK (abs(grid_preset_offset_y) < 9e999),
   grid_preset_visible INTEGER,
-  grid_preset_feet_per_square REAL,
+  grid_preset_feet_per_square REAL CHECK (abs(grid_preset_feet_per_square) < 9e999),
   grid_preset_columns INTEGER,
   grid_preset_rows INTEGER,
   -- coalesce: a CHECK whose expression is NULL passes, so a NULL in the second
@@ -93,13 +94,15 @@ CREATE TABLE scene (
   "order" INTEGER NOT NULL CHECK ("order" >= 0),
   map_image_id TEXT REFERENCES image (id) ON DELETE RESTRICT,
   grid_type TEXT NOT NULL DEFAULT 'square',
-  grid_size REAL CHECK (grid_size IS NULL OR grid_size > 0),
-  grid_offset_x REAL NOT NULL DEFAULT 0,
-  grid_offset_y REAL NOT NULL DEFAULT 0,
+  grid_size REAL CHECK (grid_size IS NULL OR (grid_size > 0 AND grid_size < 9e999)),
+  grid_offset_x REAL NOT NULL DEFAULT 0 CHECK (abs(grid_offset_x) < 9e999),
+  grid_offset_y REAL NOT NULL DEFAULT 0 CHECK (abs(grid_offset_y) < 9e999),
   grid_visible INTEGER NOT NULL DEFAULT 1 CHECK (grid_visible IN (0, 1)),
-  grid_feet_per_square REAL NOT NULL DEFAULT 5 CHECK (grid_feet_per_square > 0),
+  grid_feet_per_square REAL NOT NULL DEFAULT 5 CHECK (grid_feet_per_square > 0 AND grid_feet_per_square < 9e999),
   grid_columns INTEGER NOT NULL DEFAULT 30 CHECK (grid_columns > 0),
   grid_rows INTEGER NOT NULL DEFAULT 20 CHECK (grid_rows > 0),
+  -- Without a map there are no pixels to calibrate against.
+  CHECK (map_image_id IS NOT NULL OR grid_size IS NULL),
   UNIQUE (session_id, "order")
 ) STRICT, WITHOUT ROWID;
 
@@ -113,8 +116,8 @@ CREATE TABLE token (
   scene_id TEXT NOT NULL REFERENCES scene (id) ON DELETE CASCADE,
   asset_id TEXT NOT NULL REFERENCES asset (id) ON DELETE RESTRICT,
   label TEXT NOT NULL CHECK (label <> ''),
-  x REAL NOT NULL,
-  y REAL NOT NULL,
+  x REAL NOT NULL CHECK (abs(x) < 9e999),
+  y REAL NOT NULL CHECK (abs(y) < 9e999),
   hidden INTEGER NOT NULL CHECK (hidden IN (0, 1)),
   z_order INTEGER NOT NULL,
   character_id TEXT
@@ -141,7 +144,7 @@ CREATE INDEX settings_live_scene_id ON settings (live_scene_id);
 INSERT INTO settings (id) VALUES (
   lower(
     hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-'
-      || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))
+      || substr('89ab', 1 + (random() & 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))
   )
 );
 
@@ -153,6 +156,12 @@ END;
 CREATE TRIGGER settings_kept BEFORE DELETE ON settings
 BEGIN
   SELECT RAISE(ABORT, 'settings holds exactly one row');
+END;
+
+CREATE TRIGGER settings_id_fixed BEFORE UPDATE OF id ON settings
+WHEN NEW.id IS NOT OLD.id
+BEGIN
+  SELECT RAISE(ABORT, 'settings.id never changes');
 END;
 
 -- Prepared for later phases (specs/03-domain-model.md §8).

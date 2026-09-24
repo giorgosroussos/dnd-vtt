@@ -6,7 +6,7 @@ import { openDatabase } from '../database.js';
 import { migrateDataDirectory } from '../migrate.js';
 
 // The generated fixture database that every migration is tested on
-// (specs/14-agent-playbook.md §8, D-074). Everything in it is made up here; no
+// (specs/14-agent-playbook.md §8, D-075). Everything in it is made up here; no
 // real campaign data enters the repository or CI. The rows are written against
 // schema version FIXTURE_VERSION and never edited afterwards: a later migration
 // is tested by migrating this database from that version, so the rows keep
@@ -27,8 +27,8 @@ export function countRows(db: Database.Database): Record<Table, number> {
 }
 
 /** Migrate an empty data directory to FIXTURE_VERSION and fill every table. */
-export function createFixtureDatabase(dataDir: string): Record<Table, number> {
-  migrateDataDirectory(dataDir, MIGRATIONS_DIR, new Date(), FIXTURE_VERSION);
+export function createFixtureDatabase(dataDir: string, migrationsDir: string = MIGRATIONS_DIR): Record<Table, number> {
+  migrateDataDirectory(dataDir, migrationsDir, new Date(), FIXTURE_VERSION);
   const db = openDatabase(dataDir);
   try {
     db.transaction(() => seed(db))();
@@ -138,7 +138,7 @@ function seed(db: Database.Database): void {
   db.prepare('UPDATE settings SET live_scene_id = ?, ruler_rule = ?').run(liveScene, 'dmg');
 }
 
-// ---- Rows as the contract types of shared (D-074). ----
+// ---- Rows as the contract types of shared (D-075). ----
 
 type Row = Record<string, unknown>;
 

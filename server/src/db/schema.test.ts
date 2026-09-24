@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
@@ -138,6 +138,92 @@ describe('migration 0001 on a fresh database', () => {
     }
   });
 
+  // Types, nullability and defaults, reviewed against D-075: a changed type,
+  // a column that becomes nullable or a changed default fails here.
+  it('declares every column with the type, nullability and default of D-075', () => {
+    migrated();
+    const declared = (table: string): string[] =>
+      columns(table).map((c) =>
+        [c.name, c.type, c.notnull ? 'NOT NULL' : 'NULL', c.dflt_value === null ? '' : `DEFAULT ${c.dflt_value}`]
+          .filter(Boolean)
+          .join(' '),
+      );
+    expect(Object.fromEntries(TABLES.map((t) => [t, declared(t)]))).toEqual({
+      image: [
+        'id TEXT NOT NULL',
+        'mime TEXT NOT NULL',
+        'width INTEGER NOT NULL',
+        'height INTEGER NOT NULL',
+        "variants TEXT NOT NULL DEFAULT '{}'",
+        'grid_preset_type TEXT NULL',
+        'grid_preset_size REAL NULL',
+        'grid_preset_offset_x REAL NULL',
+        'grid_preset_offset_y REAL NULL',
+        'grid_preset_visible INTEGER NULL',
+        'grid_preset_feet_per_square REAL NULL',
+        'grid_preset_columns INTEGER NULL',
+        'grid_preset_rows INTEGER NULL',
+      ],
+      asset: [
+        'id TEXT NOT NULL',
+        'name TEXT NOT NULL',
+        'category TEXT NOT NULL',
+        'image_id TEXT NOT NULL',
+        'size TEXT NOT NULL',
+        'default_hidden INTEGER NOT NULL',
+        "notes TEXT NOT NULL DEFAULT ''",
+      ],
+      asset_tag: ['id TEXT NOT NULL', 'asset_id TEXT NOT NULL', 'tag TEXT NOT NULL'],
+      campaign: [
+        'id TEXT NOT NULL',
+        'name TEXT NOT NULL',
+        "description TEXT NOT NULL DEFAULT ''",
+        "rules_version TEXT NOT NULL DEFAULT '5e-2014'",
+      ],
+      session: [
+        'id TEXT NOT NULL',
+        'campaign_id TEXT NOT NULL',
+        'title TEXT NOT NULL',
+        'order INTEGER NOT NULL',
+        'date TEXT NULL',
+      ],
+      scene: [
+        'id TEXT NOT NULL',
+        'session_id TEXT NOT NULL',
+        'name TEXT NOT NULL',
+        'order INTEGER NOT NULL',
+        'map_image_id TEXT NULL',
+        "grid_type TEXT NOT NULL DEFAULT 'square'",
+        'grid_size REAL NULL',
+        'grid_offset_x REAL NOT NULL DEFAULT 0',
+        'grid_offset_y REAL NOT NULL DEFAULT 0',
+        'grid_visible INTEGER NOT NULL DEFAULT 1',
+        'grid_feet_per_square REAL NOT NULL DEFAULT 5',
+        'grid_columns INTEGER NOT NULL DEFAULT 30',
+        'grid_rows INTEGER NOT NULL DEFAULT 20',
+      ],
+      token: [
+        'id TEXT NOT NULL',
+        'scene_id TEXT NOT NULL',
+        'asset_id TEXT NOT NULL',
+        'label TEXT NOT NULL',
+        'x REAL NOT NULL',
+        'y REAL NOT NULL',
+        'hidden INTEGER NOT NULL',
+        'z_order INTEGER NOT NULL',
+        'character_id TEXT NULL',
+      ],
+      settings: [
+        'id TEXT NOT NULL',
+        'live_scene_id TEXT NULL',
+        "ruler_rule TEXT NOT NULL DEFAULT 'phb'",
+        'upload_limit_bytes INTEGER NOT NULL DEFAULT 52428800',
+        'display_variant_size INTEGER NOT NULL DEFAULT 4096',
+        'pin_hash TEXT NULL',
+      ],
+    });
+  });
+
   it('keeps sessions and scenes in an order unique within their parent (specs/03-domain-model.md §2)', () => {
     migrated();
     const unique = (table: string): string[][] =>
@@ -177,6 +263,8 @@ describe('migration 0001 on a fresh database', () => {
         expect(leading, `${table}.${String(fk)}`).toContain(fk);
       }
     }
+    // The tag filter's query path (specs/05-assets-and-images.md §1).
+    expect(db.prepare("SELECT count(*) FROM pragma_index_info('asset_tag_tag')").pluck().get()).toBe(1);
   });
 
   it('keys every table by one text id and has no sequential key (specs/14-agent-playbook.md §8)', () => {
@@ -451,7 +539,6 @@ describe('constraints refuse what the specifications forbid', () => {
           .run(id, IMAGE),
       () => db.prepare("INSERT INTO asset_tag (id, asset_id, tag) VALUES (?, ?, 'cave')").run(id, ASSET),
       () => insertToken({ id }),
-      () => db.prepare('UPDATE settings SET id = ?').run(id),
     ];
     for (const insert of inserts) expect(insert).toThrow(/CHECK constraint failed/);
   });
@@ -468,7 +555,22 @@ describe('constraints refuse what the specifications forbid', () => {
 
   it('refuses values outside the enumerations and flags of specs/05-assets-and-images.md §1–§2, §4', () => {
     withParents();
+    insertToken({});
+    db.prepare("INSERT INTO asset_tag (id, asset_id, tag) VALUES (?, ?, 'cave')").run(fixtureUuid(40), ASSET);
     const refused = [
+      "UPDATE token SET label = ''",
+      'UPDATE token SET hidden = 2',
+      "UPDATE asset SET name = ''",
+      "UPDATE asset_tag SET tag = ''",
+      'UPDATE image SET height = 0',
+      "UPDATE image SET variants = '[]'",
+      "UPDATE image SET variants = 'not json'",
+      "UPDATE settings SET pin_hash = ''",
+      'UPDATE scene SET grid_size = 0',
+      'UPDATE scene SET "order" = -1',
+      'UPDATE session SET "order" = -1',
+      "UPDATE session SET title = ''",
+      "UPDATE scene SET name = ''",
       "UPDATE asset SET category = 'villain'",
       "UPDATE asset SET size = 'colossal'",
       "UPDATE asset SET size = 'Medium'",
@@ -482,6 +584,67 @@ describe('constraints refuse what the specifications forbid', () => {
       "UPDATE campaign SET name = ''",
     ];
     for (const sql of refused) expect(() => db.prepare(sql).run(), sql).toThrow(/constraint failed/);
+  });
+
+  it('refuses an infinite number in every REAL column, which JSON cannot carry', () => {
+    withParents();
+    insertToken({});
+    db.prepare(
+      "UPDATE image SET grid_preset_type = 'square', grid_preset_size = 70, grid_preset_offset_x = 0, grid_preset_offset_y = 0, " +
+        'grid_preset_visible = 1, grid_preset_feet_per_square = 5, grid_preset_columns = 30, grid_preset_rows = 20',
+    ).run();
+    const real = TABLES.flatMap((table) =>
+      columns(table)
+        .filter((c) => c.type === 'REAL')
+        .map((c) => [table, c.name] as const),
+    );
+    expect(real.length).toBe(10);
+    for (const [table, column] of real) {
+      for (const value of [Infinity, -Infinity]) {
+        expect(() => db.prepare(`UPDATE ${table} SET ${column} = ?`).run(value), `${table}.${column}`).toThrow(
+          /CHECK constraint failed/,
+        );
+      }
+    }
+    expect(() => db.prepare('UPDATE token SET x = 9e999').run()).toThrow(/CHECK constraint failed/);
+  });
+
+  it('refuses a square size on a scene without a map (specs/06-grid-and-measurement.md §1)', () => {
+    withParents();
+    db.prepare('INSERT INTO scene (id, session_id, name, "order") VALUES (?, ?, \'Open\', 1)').run(
+      fixtureUuid(10),
+      SESSION,
+    );
+    expect(() => db.prepare('UPDATE scene SET grid_size = 70 WHERE id = ?').run(fixtureUuid(10))).toThrow(
+      /CHECK constraint failed/,
+    );
+    db.prepare('UPDATE scene SET grid_size = 70.4 WHERE id = ?').run(SCENE);
+    expect(() => db.prepare('UPDATE scene SET map_image_id = NULL WHERE id = ?').run(SCENE)).toThrow(
+      /CHECK constraint failed/,
+    );
+    db.prepare('UPDATE scene SET map_image_id = NULL, grid_size = NULL WHERE id = ?').run(SCENE);
+  });
+
+  it('refuses an image inserted with a non-square preset', () => {
+    migrated();
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO image (id, mime, width, height, grid_preset_type, grid_preset_size, grid_preset_offset_x,
+             grid_preset_offset_y, grid_preset_visible, grid_preset_feet_per_square, grid_preset_columns, grid_preset_rows)
+           VALUES (?, 'image/png', 100, 100, 'hex', 10, 0, 0, 1, 5, 10, 10)`,
+        )
+        .run(IMAGE),
+    ).toThrow(/grid_preset_type accepts only square/);
+  });
+
+  it('refuses the same tag twice on one asset', () => {
+    withParents();
+    const tag = db.prepare("INSERT INTO asset_tag (id, asset_id, tag) VALUES (?, ?, 'cave')");
+    tag.run(fixtureUuid(40), ASSET);
+    expect(() => tag.run(fixtureUuid(41), ASSET)).toThrow(
+      /UNIQUE constraint failed: asset_tag.asset_id, asset_tag.tag/,
+    );
   });
 
   it('refuses a session date that is not a calendar date', () => {
@@ -512,6 +675,10 @@ describe('constraints refuse what the specifications forbid', () => {
     migrated();
     expect(() => db.prepare('INSERT INTO settings (id) VALUES (?)').run(fixtureUuid(10))).toThrow(/exactly one row/);
     expect(() => db.prepare('DELETE FROM settings').run()).toThrow(/exactly one row/);
+    expect(() => db.prepare('UPDATE settings SET id = ?').run(fixtureUuid(10))).toThrow(/settings.id never changes/);
+    expect(() => db.prepare('INSERT OR REPLACE INTO settings (id) SELECT id FROM settings').run()).toThrow(
+      /exactly one row/,
+    );
     expect(countRows(db).settings).toBe(1);
   });
 });
@@ -639,6 +806,49 @@ describe('migrations on the generated fixture database (specs/14-agent-playbook.
     expect(entities.scene.some((s) => s.map_image_id === null)).toBe(true);
     expect(entities.token.some((t) => t.hidden) && entities.token.some((t) => !t.hidden)).toBe(true);
     expect(entities.token.some((t) => !Number.isInteger(t.x))).toBe(true);
+  });
+
+  it('a second run on the fixture database changes nothing', () => {
+    createFixtureDatabase(dataDir);
+    migrateDataDirectory(dataDir, MIGRATIONS_DIR);
+    const hash = (): string =>
+      createHash('sha256')
+        .update(readFileSync(databasePath(dataDir)))
+        .digest('hex');
+    const before = hash();
+    expect(migrateDataDirectory(dataDir, MIGRATIONS_DIR).applied).toEqual([]);
+    expect(hash()).toBe(before);
+  });
+
+  // While the repository has one migration the test below applies nothing; this
+  // one proves the path a later migration takes, with an additive probe migration.
+  it('migrates the fixture forward through a later migration, after a backup, keeping every row', () => {
+    const migrations = path.join(root, 'migrations');
+    mkdirSync(migrations);
+    for (const file of readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql'))) {
+      copyFileSync(path.join(MIGRATIONS_DIR, file), path.join(migrations, file));
+    }
+    const next = String(LATEST + 1).padStart(4, '0');
+    writeFileSync(
+      path.join(migrations, `${next}_probe.sql`),
+      "ALTER TABLE campaign ADD COLUMN probe TEXT NOT NULL DEFAULT '';",
+    );
+    const counts = createFixtureDatabase(dataDir, migrations);
+
+    const result = migrateDataDirectory(dataDir, migrations);
+
+    expect(result.applied).toEqual(
+      loadMigrations(migrations)
+        .filter((m) => m.version > FIXTURE_VERSION)
+        .map((m) => m.name),
+    );
+    expect(result.applied.length).toBeGreaterThan(0);
+    expect(result.backup).not.toBeNull();
+    db = openDatabase(dataDir);
+    expect(db.pragma('integrity_check', { simple: true })).toBe('ok');
+    expect(db.pragma('foreign_key_check')).toEqual([]);
+    expect(countRows(db)).toEqual(counts);
+    expect(db.prepare('SELECT DISTINCT probe FROM campaign').pluck().all()).toEqual(['']);
   });
 
   it('migrates the fixture to the latest version, keeping every row and every reference', () => {
