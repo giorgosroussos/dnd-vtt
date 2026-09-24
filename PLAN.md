@@ -24,4 +24,4 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
 ## Next
 
 1. **SRV-05 — Asset library over REST.** Search and tag filter, create, update, delete refused while in use with the scenes listed, tag case decided (G-009) (`13` §4, `05` §1, `05` §2, `05` §4, `05` §5).
-2. **PRP-01 — DM workspace shell.** The sidebar tree over the SRV-03 routes with the deletion dialog and error-code messages of G-014; Q-090 (campaign order) answered or deferred first (`13` §5, `08` §1, `07` §1).
+2. **PRP-01 — DM workspace shell.** The sidebar tree over the SRV-03 routes with the deletion dialog and error-code messages of G-014; sessions and scenes reorderable, campaigns listed by name (Q-090, D-079) (`13` §5, `08` §1, `07` §1).
