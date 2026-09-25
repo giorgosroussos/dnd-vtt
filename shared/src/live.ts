@@ -16,7 +16,7 @@ import { SceneTokenSchema } from './tokens.js';
 // A DM client sends every command on the Socket.io event `command` and receives
 // the outcome through the acknowledgement: `{ ok: true }` or the error envelope.
 // The server sends every event on the Socket.io event `event`, carrying the
-// process-wide version number that lets a client detect a gap. A client of either
+// version number of its room's counter that lets a client detect a gap (D-108). A client of either
 // room that sees a gap asks for a fresh snapshot on `snapshot` (LIV-01, D-104):
 // that request is not a command of §2, changes nothing, and is answered by a
 // `scene.snapshot` event to the asking socket alone.
@@ -83,7 +83,7 @@ export const CommandEnvelopeSchema = Type.Object(
 export const EventEnvelopeSchema = Type.Object(
   {
     type: Type.Enum(EVENT_TYPES),
-    // One counter per server process, starting at 1 (specs/04-live-sync.md §5, D-017).
+    // One counter per room per server process, starting at 1 (specs/04-live-sync.md §5, Q-093, D-108).
     version: Type.Integer({ minimum: 1 }),
     payload: Type.Object({}),
   },

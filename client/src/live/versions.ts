@@ -1,4 +1,4 @@
-// Gap detection for the live events (specs/04-live-sync.md §5, D-017, D-104). A snapshot sets
+// Gap detection for the live events (specs/04-live-sync.md §5, D-104, D-108). A snapshot sets
 // the version the client holds; an event applies only when it is exactly the next one. Anything
 // else, a version skipped or one lower than the last (the server restarted), is a gap: the client
 // asks for a fresh snapshot and ignores events until it arrives, since the snapshot contains them.

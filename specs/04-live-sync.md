@@ -57,7 +57,7 @@ Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-02
 - A client MUST receive a `scene.snapshot` for its role on connection. [input]
 - Activating a scene sends every client a fresh snapshot. [D-039]
 - Every event MUST carry an ascending version number; a client that sees a gap MUST request a new snapshot. [input]
-- The version counter MUST be one per server process, starting at 1 on start-up. [Q-056]
+- The version counter MUST be one per room per server process, each held in memory and starting at 1 on start-up; the `players` room's counts only the events players receive, so a player never sees a version skip that another room's event caused (`04` §4). [Q-056, Q-093]
 
 ## 6. Reconnection
 

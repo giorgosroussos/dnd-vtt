@@ -23,7 +23,7 @@ import {
   type SnapshotEvent,
   type TokenChange,
 } from '@emberglass/shared';
-import { createVersionCounter, type VersionCounter } from '../domain/version.js';
+import { createVersionCounters, type VersionCounters } from '../domain/version.js';
 import { buildTestApp, createTestData, dmCookie, setUpPin, type TestData } from '../http/testing/app.js';
 import { type LogFields, type Logger } from '../log/logger.js';
 import { compileSchema } from '../validation.js';
@@ -50,7 +50,7 @@ let data: TestData;
 let app: FastifyInstance;
 let cookie: string;
 let url: string;
-let version: VersionCounter;
+let versions: VersionCounters;
 let lines: Line[];
 const clients: ClientSocket[] = [];
 
@@ -62,8 +62,8 @@ const recording = (): Logger => ({
 
 async function start(options: Parameters<typeof buildTestApp>[1] = {}): Promise<void> {
   lines = [];
-  version = createVersionCounter();
-  app = await buildTestApp(data, { logger: recording(), version, ...options });
+  versions = createVersionCounters();
+  app = await buildTestApp(data, { logger: recording(), versions, ...options });
   // A restarted server on the same data directory already has its PIN: sign in with it.
   const { pin_set } = (await app.inject({ method: 'GET', url: '/api/setup' })).json<{ pin_set: boolean }>();
   cookie = pin_set
@@ -421,7 +421,7 @@ describe('snapshots for each role (specs/04-live-sync.md §3, §4, §5)', () => 
   });
 });
 
-describe('versions (specs/04-live-sync.md §5, D-017, Q-056)', () => {
+describe('versions (specs/04-live-sync.md §5, Q-056, Q-093, D-108)', () => {
   it('starts at 1 and gives other clients no gap when a screen connects or asks for a snapshot', async () => {
     const first = await connect();
     expect(first.first.version).toBe(1);
@@ -430,17 +430,26 @@ describe('versions (specs/04-live-sync.md §5, D-017, Q-056)', () => {
     expect(second.first.version).toBe(1);
     // The first client received nothing while the second connected and asked.
     expect(first.events).toHaveLength(1);
-    expect(version.current()).toBe(1);
+    expect([versions.dm.current(), versions.players.current()]).toEqual([1, 1]);
   });
 
   it('carries the version of the latest event in every snapshot, ascending with the counter', async () => {
     const client = await connect();
     const seen = [client.first.version];
     for (let i = 0; i < 3; i++) {
-      version.next(); // an event emitted for the live scene (LIV-02 onward)
+      versions.players.next(); // an event emitted to the players room (LIV-02 onward)
       seen.push((await requestSnapshot(client)).version);
     }
     expect(seen).toEqual([1, 2, 3, 4]);
+  });
+
+  it('counts each room apart: events the players room never received leave its version unchanged (Q-093)', async () => {
+    const player = await connect();
+    const dm = await connect({ cookie });
+    versions.dm.next(); // events about a hidden token, sent to dm only
+    versions.dm.next();
+    expect((await requestSnapshot(player)).version).toBe(1);
+    expect((await requestSnapshot(dm)).version).toBe(3);
   });
 });
 
@@ -665,7 +674,7 @@ describe('snapshot requests (review F2)', () => {
     await new Promise((resolve) => setTimeout(resolve, 1_200));
     // The connection's snapshot, the first request's, and one for everything merged after it.
     expect(flooding.events).toHaveLength(3);
-    expect(version.current()).toBe(1);
+    expect(versions.players.current()).toBe(1);
   });
 
   it('drops a socket that leaves its messages unread instead of buffering for it', async () => {
