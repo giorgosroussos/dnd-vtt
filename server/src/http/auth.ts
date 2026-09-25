@@ -1,3 +1,4 @@
+import type { IncomingHttpHeaders } from 'node:http';
 import type Database from 'better-sqlite3';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
@@ -54,6 +55,8 @@ export interface Auth {
   lockout: Lockout;
   /** The DM session the request carries, if it carries a valid one. */
   sessionOf(request: FastifyRequest): string | undefined;
+  /** The same from a Cookie header: the WebSocket handshake has no Fastify request (LIV-01). */
+  sessionOfCookie(header: string | undefined): string | undefined;
 }
 
 export function clientAddress(request: FastifyRequest): string {
@@ -73,9 +76,17 @@ export function dmCookieValues(header: string | undefined): string[] {
 
 /** An unsafe method's Origin, when present, must be this server as the browser addressed it. */
 export function isSameOrigin(request: FastifyRequest): boolean {
-  const origin = request.headers.origin;
+  return isSameOriginHeaders(request.headers);
+}
+
+/**
+ * The same check on bare headers, for the WebSocket handshake too (Q-043): an Origin, when present,
+ * must be `http://` plus the Host the browser addressed. A browser always sends one on a WebSocket.
+ */
+export function isSameOriginHeaders(headers: IncomingHttpHeaders): boolean {
+  const origin = headers.origin;
   if (origin === undefined) return true;
-  const host = request.headers.host;
+  const host = headers.host;
   if (typeof origin !== 'string' || !host) return false;
   try {
     const from = new URL(origin);
@@ -148,8 +159,9 @@ export function registerAuth(
 ): Auth {
   const sessions = createSessionStore();
   const lockout = createLockout(now);
-  const sessionOf = (request: FastifyRequest): string | undefined =>
-    dmCookieValues(request.headers.cookie).find((value) => SESSION_ID_PATTERN.test(value) && sessions.has(value));
+  const sessionOfCookie = (header: string | undefined): string | undefined =>
+    dmCookieValues(header).find((value) => SESSION_ID_PATTERN.test(value) && sessions.has(value));
+  const sessionOf = (request: FastifyRequest): string | undefined => sessionOfCookie(request.headers.cookie);
 
   app.addHook('onRequest', async (request, reply) => {
     if (!isApiRequest(request)) return;
@@ -270,5 +282,5 @@ export function registerAuth(
     return reply.code(204).send();
   });
 
-  return { sessions, lockout, sessionOf };
+  return { sessions, lockout, sessionOf, sessionOfCookie };
 }

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { t } from '../ui/messages.js';
 import { button, click, FakeServer, installDialog, settle, submit, type } from '../ui/testing/fakeServer.js';
@@ -165,5 +166,51 @@ describe('the view before the server answers', () => {
     fail = false;
     await click(button(view, t('dm.retry')));
     expect(view.querySelector('nav')).not.toBeNull();
+  });
+});
+
+describe('the live connection (LIV-01, specs/04-live-sync.md §6, specs/07-security-and-access.md §2)', () => {
+  const liveBar = (container: HTMLElement) =>
+    container.querySelector(`section[aria-label="${t('liveBar.label')}"] [role="status"]`)?.textContent;
+  const deliver = async (run: () => void) => {
+    act(() => run());
+    await settle();
+  };
+
+  it('opens one connection with the workspace and closes it with a sign-out', async () => {
+    server.signedIn = true;
+    const view = await open();
+    expect(server.sockets).toHaveLength(1);
+    await deliver(() => server.sockets[0]!.open({ role: 'dm', scene: null }));
+    await click(button(view, t('dm.signOut')));
+    expect(server.sockets[0]!.connected).toBe(false);
+    expect(heading(view)).toBe(t('signIn.heading'));
+  });
+
+  it('says it is reconnecting while the connection is lost, and keeps the workspace without asking for the PIN', async () => {
+    server.signedIn = true;
+    const view = await open();
+    const socket = server.sockets[0]!;
+    await deliver(() => socket.open({ role: 'dm', scene: null }));
+    expect(liveBar(view)).toBe(t('liveBar.none'));
+    await deliver(() => socket.drop('transport close'));
+    expect(liveBar(view)).toBe(t('liveBar.reconnecting'));
+    await deliver(() => socket.open({ role: 'dm', scene: null }));
+    expect(liveBar(view)).toBe(t('liveBar.none'));
+    expect(view.querySelector('input[type="password"]')).toBeNull();
+    expect(server.sockets).toHaveLength(1);
+  });
+
+  it('goes back to the PIN form when the server puts the reconnected socket in the players room', async () => {
+    server.signedIn = true;
+    const view = await open();
+    const socket = server.sockets[0]!;
+    await deliver(() => socket.open({ role: 'dm', scene: null }));
+    // A PIN change on another device ended this session: the server dropped the socket.
+    await deliver(() => socket.drop('io server disconnect'));
+    expect(socket.connects).toBe(1);
+    await deliver(() => socket.open({ role: 'players', scene: null }));
+    expect(heading(view)).toBe(t('signIn.heading'));
+    expect(socket.connected).toBe(false);
   });
 });

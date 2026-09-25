@@ -78,6 +78,23 @@ describe('lockout (specs/07-security-and-access.md §6)', () => {
 });
 
 describe('DM sessions (specs/07-security-and-access.md §2)', () => {
+  it('tells its listeners which sessions ended, so their sockets can be dropped (G-011)', () => {
+    const store = createSessionStore();
+    const [a, b, c] = [store.create(), store.create(), store.create()];
+    const told: string[][] = [];
+    const stop = store.onEnded((ids) => told.push([...ids]));
+    store.end(a);
+    store.end(a); // already ended: nothing to tell
+    store.end('f'.repeat(64)); // never existed
+    store.endAllExcept(c);
+    store.endAllExcept(c); // nothing left to end
+    expect(told).toEqual([[a], [b]]);
+    stop();
+    store.endAllExcept(undefined);
+    expect(told).toEqual([[a], [b]]);
+    expect(store.size).toBe(0);
+  });
+
   it('issues distinct 256-bit identifiers and ends them one at a time or all but one', () => {
     const store = createSessionStore();
     const ids = [store.create(), store.create(), store.create()];

@@ -56,6 +56,7 @@ export function DmView() {
   };
 
   const signedIn = () => setScreen({ kind: 'workspace' });
+  const signedOutElsewhere = useCallback(() => setScreen({ kind: 'signIn' }), []);
 
   // Only once the server has ended the session: a sign-out that failed must not
   // look like one on a shared laptop, whose session would still be valid.
@@ -84,7 +85,7 @@ export function DmView() {
       </header>
       {screen.kind === 'workspace' && signOutFailure ? <Notice>{signOutFailure}</Notice> : null}
       {screen.kind === 'workspace' ? (
-        <Workspace mainId={MAIN_ID} />
+        <Workspace mainId={MAIN_ID} onSignedOut={signedOutElsewhere} />
       ) : (
         <main id={MAIN_ID} tabIndex={-1} className="eg-dm__main" data-view="dm">
           {screen.kind === 'loading' ? <p className="eg-dm__status">{t('dm.loading')}</p> : null}

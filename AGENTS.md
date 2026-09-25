@@ -61,6 +61,7 @@ client/            React client workspace (both views)
   src/dm/          DM view
   src/player/      player view
   src/canvas/      react-konva map, grid, tokens
+  src/live/        live connection, snapshots, gap detection
   src/ui/          shared components, message catalogue
 shared/            contract types: REST bodies, commands, events
 e2e/               Playwright tests

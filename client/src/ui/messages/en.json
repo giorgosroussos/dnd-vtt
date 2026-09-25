@@ -60,6 +60,7 @@
   "liveBar.label": "Live scene",
   "liveBar.live": "Live: {name}",
   "liveBar.none": "Nothing is live. The TV shows the idle screen.",
+  "liveBar.reconnecting": "The connection to the server was lost. Reconnecting…",
   "sceneMap.image": "Map image: PNG, JPEG or WebP",
   "sceneMap.replaceImage": "New map image: PNG, JPEG or WebP",
   "sceneMap.attach": "Attach map",

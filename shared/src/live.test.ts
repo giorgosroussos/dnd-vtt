@@ -1,6 +1,19 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { COMMAND_TYPES, CommandEnvelopeSchema, EVENT_TYPES, EventEnvelopeSchema, SOCKET_CHANNELS } from './index.js';
+import { Value } from 'typebox/value';
+import {
+  COMMAND_TYPES,
+  CommandEnvelopeSchema,
+  DmSnapshotSchema,
+  EVENT_TYPES,
+  EventEnvelopeSchema,
+  PlayerLiveSceneSchema,
+  PlayerMapSchema,
+  PlayerSnapshotSchema,
+  PlayerTokenSchema,
+  ROOMS,
+  SOCKET_CHANNELS,
+} from './index.js';
 
 // The first column of the table in one section of specs/04-live-sync.md, split
 // on commas, with backticks removed.
@@ -24,8 +37,14 @@ describe('WebSocket envelope names', () => {
     expect([...EVENT_TYPES].sort()).toEqual(tableNames('3').sort());
   });
 
-  it('uses one Socket.io channel for commands and one for events', () => {
-    expect(SOCKET_CHANNELS).toEqual({ command: 'command', event: 'event' });
+  it('uses one Socket.io channel for commands, one for events and one for snapshot requests', () => {
+    expect(SOCKET_CHANNELS).toEqual({ command: 'command', event: 'event', snapshot: 'snapshot' });
+    // A snapshot request is not one of the commands of §2, so the players room may send it.
+    expect(COMMAND_TYPES).not.toContain(SOCKET_CHANNELS.snapshot);
+  });
+
+  it('names the two rooms of specs/04-live-sync.md §1', () => {
+    expect(ROOMS).toEqual(['dm', 'players']);
   });
 });
 
@@ -41,5 +60,63 @@ describe('envelope schemas', () => {
 
   it('requires an event version that is a whole number from 1', () => {
     expect(EventEnvelopeSchema.properties.version).toMatchObject({ type: 'integer', minimum: 1 });
+  });
+});
+
+describe('snapshot payloads (specs/04-live-sync.md §4, LIV-01)', () => {
+  const token = {
+    id: '00000000-0000-4000-8000-000000000001',
+    x: 1.5,
+    y: 2,
+    size: 'medium',
+    image_id: 'a'.repeat(64),
+    z_order: 0,
+    label: 'Goblin 1',
+  };
+
+  it('gives a player token exactly the rendering fields: id, position, size, image, stacking order and label', () => {
+    expect(Object.keys(PlayerTokenSchema.properties).sort()).toEqual(
+      ['id', 'image_id', 'label', 'size', 'x', 'y', 'z_order'].sort(),
+    );
+    expect(Value.Check(PlayerTokenSchema, token)).toBe(true);
+  });
+
+  it('refuses a player token carrying a hidden flag, an asset, a scene or notes', () => {
+    for (const extra of [
+      { hidden: false },
+      { asset_id: token.id },
+      { scene_id: token.id },
+      { asset: { name: 'Goblin' } },
+      { notes: '' },
+      { character_id: null },
+    ]) {
+      expect(Value.Check(PlayerTokenSchema, { ...token, ...extra }), JSON.stringify(extra)).toBe(false);
+    }
+  });
+
+  it('keeps a player stacking order a whole rank from 0, not the stored order', () => {
+    expect(Value.Check(PlayerTokenSchema, { ...token, z_order: -1 })).toBe(false);
+    expect(Value.Check(PlayerTokenSchema, { ...token, z_order: 0.5 })).toBe(false);
+  });
+
+  it('gives players no scene id or name and only the display version of the map', () => {
+    expect(Object.keys(PlayerLiveSceneSchema.properties).sort()).toEqual(['grid', 'map', 'tokens']);
+    expect(Object.keys(PlayerMapSchema.properties).sort()).toEqual(['height', 'id', 'variants', 'width']);
+    expect(Object.keys(PlayerMapSchema.properties.variants.properties)).toEqual(['display']);
+  });
+
+  it('is strict at every level and says which room it is for', () => {
+    const strictObjects = (schema: unknown): unknown[] => {
+      if (typeof schema !== 'object' || schema === null) return [];
+      const node = schema as Record<string, unknown>;
+      const own = node.type === 'object' ? [node] : [];
+      return [...own, ...Object.values(node).flatMap(strictObjects)];
+    };
+    for (const schema of [PlayerSnapshotSchema, DmSnapshotSchema]) {
+      for (const object of strictObjects(schema)) expect(object).toHaveProperty('additionalProperties', false);
+    }
+    expect(Value.Check(PlayerSnapshotSchema, { role: 'players', scene: null })).toBe(true);
+    expect(Value.Check(DmSnapshotSchema, { role: 'dm', scene: null })).toBe(true);
+    expect(Value.Check(PlayerSnapshotSchema, { role: 'dm', scene: null })).toBe(false);
   });
 });

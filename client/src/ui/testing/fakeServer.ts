@@ -15,6 +15,7 @@ import {
   type SceneToken,
   type Session,
 } from '@emberglass/shared';
+import { installFakeSockets, type FakeSocket } from './fakeSocket.js';
 
 // Test tooling only, never bundled: a scripted stand-in for the server behind
 // `fetch`, for the DM view's component tests (D-085). It keeps a small tree the
@@ -242,9 +243,14 @@ export class FakeServer {
     return image;
   }
 
-  /** Replaces `fetch` and `XMLHttpRequest` (uploads, D-090) until `uninstall`. */
+  /** The live sockets the views opened since `install`; none connects until a test opens it (LIV-01). */
+  sockets: FakeSocket[] = [];
+
+  /** Replaces `fetch`, `XMLHttpRequest` (uploads, D-090) and the live socket (LIV-01) until `uninstall`. */
   install(): this {
     const original = globalThis.fetch;
+    const fakeSockets = installFakeSockets();
+    this.sockets = fakeSockets.sockets;
     const originalXhr = globalThis.XMLHttpRequest;
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url;
@@ -257,6 +263,7 @@ export class FakeServer {
     };
     globalThis.XMLHttpRequest = fakeXhr(this) as unknown as typeof XMLHttpRequest;
     this.restore = () => {
+      fakeSockets.restore();
       globalThis.fetch = original;
       globalThis.XMLHttpRequest = originalXhr;
     };
