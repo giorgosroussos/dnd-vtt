@@ -22,6 +22,11 @@
   padding-bottom: var(--space-2);
 }
 
+.eg-canvas__view {
+  display: flex;
+  gap: var(--space-2);
+}
+
 .eg-canvas__help {
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
@@ -52,4 +57,10 @@
 .eg-canvas__viewport > div {
   position: absolute;
   inset: 0;
+}
+
+/* The scene's own controls on the toolbar's row (D-100) flow with the view's buttons, so a selected
+ * token's actions take the room left on the row before wrapping. */
+.eg-canvas__toolbar > [role='group'] {
+  display: contents;
 }

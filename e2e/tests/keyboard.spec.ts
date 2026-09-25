@@ -52,6 +52,10 @@ async function ringOf(page: Page, index: number): Promise<Ring> {
 }
 
 test('every interactive element of the DM view is reached, shown and operated by keyboard alone', async ({ page }) => {
+  // The walk reopens the view once per element, and every campaign the earlier specs seed adds
+  // elements: 19 s on a quiet machine, 28.6 s under load while PRP-04 was verified, against the
+  // 30 s default. The budget grows; what is checked does not (D-100).
+  test.setTimeout(90_000);
   // Activations are recorded in the test process, not in the page, so that a
   // link which loads another page still counts as operated.
   let activations = 0;

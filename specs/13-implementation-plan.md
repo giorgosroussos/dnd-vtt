@@ -150,7 +150,7 @@ Goal: the DM prepares a whole session in the browser: campaigns, scenes, calibra
 
 - Add flow through the picker, automatic numbering, sizes, default visibility (`05` §3, `05` §4, `05` §5).
 - Drag with snap and Alt free placement; hide, reveal, delete, label and stacking order on scenes that are not live (`06` §4, `04` §2).
-- Surfaces: security, scope, ux
+- Surfaces: data, security, scope, ux
 - Touches red line: yes
 - Contract change: no
 

@@ -132,3 +132,17 @@ export {
   type AssetUsage,
   type LibraryAsset,
 } from './assets.js';
+export {
+  API_TOKEN_PATHS,
+  SceneTokenSchema,
+  TOKEN_STACK,
+  TokenCreateBodySchema,
+  TokenChangeSchema,
+  TokenUpdateBodySchema,
+  type SceneToken,
+  type TokenCreateBody,
+  type TokenChange,
+  type TokenStack,
+  type TokenUpdateBody,
+} from './tokens.js';
+export { nextLabel, numberingPeers, numberOf, type LabelledToken, type Numbering } from './numbering.js';

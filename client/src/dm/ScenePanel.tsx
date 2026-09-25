@@ -1,6 +1,15 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
-import { API_IMAGE_PATHS, type Image, type Scene, type SceneGridUpdate } from '@emberglass/shared';
-import { MapCanvas, type Measure } from '../canvas/MapCanvas.js';
+import {
+  API_IMAGE_PATHS,
+  type Image,
+  type LibraryAsset,
+  type Scene,
+  type SceneGridUpdate,
+  type SceneToken,
+  type TokenUpdateBody,
+} from '@emberglass/shared';
+import { formatDecimal } from '../canvas/calibration.js';
+import { MapCanvas, type CanvasTokenControls, type Measure, type Placing } from '../canvas/MapCanvas.js';
 import { Button } from '../ui/Button.js';
 import { Dialog } from '../ui/Dialog.js';
 import { Notice } from '../ui/Notice.js';
@@ -13,6 +22,9 @@ import { CornerMagnifier } from './calibration/CornerMagnifier.js';
 import { startDraft, withRect, type Draft } from './calibration/draft.js';
 import { megabytes } from './library/labels.js';
 import { entityPath } from './tree/paths.js';
+import { DeleteTokenDialog, RenameDialog, TokenBar } from './tokens/TokenBar.js';
+import { TokenPicker } from './tokens/TokenPicker.js';
+import { toCanvasToken, useSceneTokens } from './tokens/useSceneTokens.js';
 
 // The selected scene in the centre of the workspace (PRP-02, specs/08-ux-journeys.md §1, §3,
 // specs/06-grid-and-measurement.md §2, specs/03-domain-model.md §6, D-090, D-093): its setup and
@@ -29,6 +41,13 @@ import { entityPath } from './tree/paths.js';
 // §5). While calibrating, the panel takes the place of the map and grid setup, so the map cannot
 // be replaced meanwhile and the canvas keeps its height; replacing a calibrated map asks first,
 // because its calibration goes with it (D-093). A scene without a map offers no calibration.
+//
+// Tokens (PRP-04, specs/05-assets-and-images.md §3–§5, specs/06-grid-and-measurement.md §4, D-100):
+// Add token opens the picker; the chosen asset is then placed by a click on the map, or by Enter at
+// the centre of the view, and the server numbers it and sets its visibility from the asset. The
+// selected token is moved by dragging or by the arrow keys, and hidden, revealed, renamed,
+// restacked or deleted from the token bar. The live scene's tokens are refused by the server
+// (specs/04-live-sync.md §2); live mode is LIV-04's.
 //
 // The workspace keys this panel by scene: a request still running when another scene is
 // selected ends in a panel that is gone, so its answer changes nothing on screen. One change
@@ -51,14 +70,23 @@ export function ScenePanel({ sceneId, name, uploadLimit }: { sceneId: string; na
   const [progress, setProgress] = useState<number>();
   // The value being saved, shown at once; the server's answer replaces it, a refusal drops it.
   const [savingGrid, setSavingGrid] = useState<boolean>();
-  const [status, setStatus] = useState<'attached' | 'calibrated'>();
+  const [status, setStatus] = useState<'attached' | 'calibrated' | { message: string }>();
   const [mapFailedFor, setMapFailedFor] = useState<string>();
   const [draft, setDraft] = useState<Draft>();
   const [savingCalibration, setSavingCalibration] = useState(false);
   const [confirmReplace, setConfirmReplace] = useState(false);
   // Where focus goes once the calibration panel or the confirmation has closed: set with the
   // state change that closes it, and taken after that render.
-  const refocus = useRef<'calibrate' | 'replace'>(undefined);
+  const refocus = useRef<'calibrate' | 'replace' | 'add' | 'canvas' | 'opener'>(undefined);
+  // The control that opened a token dialog, where focus returns when it closes unchanged.
+  const opener = useRef<HTMLElement | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const sceneTokens = useSceneTokens(sceneId);
+  const [selectedToken, setSelectedToken] = useState<string>();
+  const [picking, setPicking] = useState(false);
+  const [placingAsset, setPlacingAsset] = useState<LibraryAsset>();
+  const [renaming, setRenaming] = useState<SceneToken>();
+  const [deleting, setDeleting] = useState<SceneToken>();
   const formRef = useRef<HTMLFormElement>(null);
   const calibrateRef = useRef<HTMLButtonElement>(null);
   const submitRef = useRef<HTMLButtonElement>(null);
@@ -66,6 +94,12 @@ export function ScenePanel({ sceneId, name, uploadLimit }: { sceneId: string; na
   useEffect(() => {
     if (refocus.current === 'calibrate') calibrateRef.current?.focus();
     if (refocus.current === 'replace') submitRef.current?.focus();
+    if (refocus.current === 'add') panelRef.current?.querySelector<HTMLButtonElement>('.eg-tokens button')?.focus();
+    if (refocus.current === 'canvas') panelRef.current?.querySelector<HTMLElement>('[role="application"]')?.focus();
+    if (refocus.current === 'opener') {
+      if (opener.current?.isConnected) opener.current.focus();
+      else panelRef.current?.querySelector<HTMLButtonElement>('.eg-tokens button')?.focus();
+    }
     refocus.current = undefined;
   });
 
@@ -185,6 +219,129 @@ export function ScenePanel({ sceneId, name, uploadLimit }: { sceneId: string; na
     }
   }
 
+  // Tokens.
+
+  const tokens = sceneTokens.tokens;
+  const selected = tokens?.find((token) => token.id === selectedToken);
+
+  const openDialog = (open: () => void) => {
+    opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    open();
+  };
+
+  function pick(asset: LibraryAsset) {
+    setPicking(false);
+    setStatus(undefined);
+    setPlacingAsset(asset);
+    refocus.current = 'canvas';
+  }
+
+  function cancelPlacing() {
+    setPlacingAsset(undefined);
+    refocus.current = 'add';
+  }
+
+  async function placeToken(asset: LibraryAsset, at: { x: number; y: number }) {
+    setPlacingAsset(undefined);
+    const token = await sceneTokens.place(asset.id, at);
+    refocus.current = 'canvas';
+    if (!token) return;
+    setSelectedToken(token.id);
+    announce(t('tokens.placed', { label: token.label }));
+  }
+
+  async function deleteToken(token: SceneToken) {
+    setDeleting(undefined);
+    refocus.current = 'add';
+    if (await sceneTokens.remove(token.id)) {
+      setSelectedToken(undefined);
+      announce(t('tokens.deleted', { label: token.label }));
+    }
+  }
+
+  const announce = (message: string) => setStatus({ message });
+
+  async function changeToken(token: SceneToken, body: TokenUpdateBody, done: (updated: SceneToken) => string) {
+    const result = await sceneTokens.change(token.id, body);
+    if (result.ok) announce(done(result.token));
+  }
+
+  // Moves are announced too, since the canvas says nothing to assistive technology (review).
+  const moved = (updated: SceneToken) =>
+    t('tokens.moved', {
+      label: updated.label,
+      column: formatDecimal(updated.x + 1),
+      row: formatDecimal(updated.y + 1),
+    });
+
+  const placing: Placing | undefined = placingAsset
+    ? {
+        size: placingAsset.size,
+        onPlace: (at) => void placeToken(placingAsset, at),
+        onCancel: cancelPlacing,
+      }
+    : undefined;
+  const tokenControls: CanvasTokenControls | undefined = draft
+    ? undefined
+    : {
+        selectedId: selectedToken,
+        onSelect: setSelectedToken,
+        onDeselect: () => setSelectedToken(undefined),
+        onMove: (id, at) => {
+          const token = tokens?.find((each) => each.id === id);
+          if (token) void changeToken(token, at, moved);
+        },
+        onDelete: (id) => openDialog(() => setDeleting(tokens?.find((token) => token.id === id))),
+      };
+
+  // The token controls, on the canvas toolbar's row (D-100); neither while calibrating, which
+  // takes the row above the canvas, nor before the tokens have arrived.
+  const tokenFailure = sceneTokens.loadFailure
+    ? t('tokens.loadFailed', { reason: sceneTokens.loadFailure })
+    : undefined;
+  const tokenBar =
+    draft || !tokens ? undefined : placingAsset ? (
+      <div
+        className="eg-tokens"
+        role="group"
+        aria-label={t('tokens.bar')}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            cancelPlacing();
+          }
+        }}
+      >
+        <p className="eg-tokens__placing">{t('tokens.placing', { name: placingAsset.name })}</p>
+        <Button size="small" onClick={cancelPlacing}>
+          {t('tokens.cancelPlacing')}
+        </Button>
+      </div>
+    ) : (
+      <TokenBar
+        tokens={tokens}
+        selectedId={selected?.id}
+        onSelect={setSelectedToken}
+        onAdd={() => {
+          setStatus(undefined);
+          setPicking(true);
+        }}
+        onToggleHidden={(token) =>
+          void changeToken(token, { hidden: !token.hidden }, (updated) =>
+            t(updated.hidden ? 'tokens.hidden' : 'tokens.revealed', { label: updated.label }),
+          )
+        }
+        onRename={(token) => openDialog(() => setRenaming(token))}
+        onStack={(token, stack) =>
+          void changeToken(token, { stack }, (updated) =>
+            t(stack === 'front' ? 'tokens.toFront' : 'tokens.toBack', { label: updated.label }),
+          )
+        }
+        onDelete={(token) => openDialog(() => setDeleting(token))}
+        busy={false}
+      />
+    );
+
   const percent = Math.round((progress ?? 0) * 100);
   const measure: Measure | undefined =
     draft?.method === 'rectangle' && map
@@ -197,7 +354,7 @@ export function ScenePanel({ sceneId, name, uploadLimit }: { sceneId: string; na
   const loading = <p className="eg-dm__status">{t('workspace.loadingScene')}</p>;
 
   return (
-    <div className="eg-scene">
+    <div ref={panelRef} className="eg-scene">
       <div className="eg-scene__head">
         <h1 className="eg-dm__heading">{name}</h1>
         {/* One status region, always mounted, so a message is announced when it appears: after a
@@ -212,10 +369,13 @@ export function ScenePanel({ sceneId, name, uploadLimit }: { sceneId: string; na
             <span>{t('sceneMap.attached')}</span>
           ) : status === 'calibrated' ? (
             <span>{t('calibration.saved')}</span>
+          ) : typeof status === 'object' ? (
+            <span>{status.message}</span>
           ) : null}
         </div>
       </div>
       {failure ? <Notice>{failure}</Notice> : null}
+      {sceneTokens.failure ? <Notice>{sceneTokens.failure}</Notice> : null}
       {mapFailedFor !== undefined && mapFailedFor === mapId ? <Notice>{t('sceneMap.loadFailed')}</Notice> : null}
       {scene ? (
         <>
@@ -268,6 +428,14 @@ export function ScenePanel({ sceneId, name, uploadLimit }: { sceneId: string; na
               ) : null}
             </div>
           )}
+          {tokenFailure ? (
+            <div className="eg-tokens__failure">
+              <Notice>{tokenFailure}</Notice>
+              <Button size="small" onClick={sceneTokens.retry}>
+                {t('tokens.retry')}
+              </Button>
+            </div>
+          ) : null}
           {map !== undefined ? (
             <div className="eg-scene__body">
               {map && draft ? (
@@ -288,6 +456,10 @@ export function ScenePanel({ sceneId, name, uploadLimit }: { sceneId: string; na
                   label={t('canvas.label', { name })}
                   onMapError={() => setMapFailedFor(mapId ?? undefined)}
                   measure={measure}
+                  toolbar={tokenBar}
+                  tokens={tokens?.map(toCanvasToken) ?? []}
+                  tokenControls={tokenControls}
+                  placing={placing}
                 />
                 {map && draft ? <CornerMagnifier map={map} calibration={draft.calibration} /> : null}
               </div>
@@ -295,6 +467,39 @@ export function ScenePanel({ sceneId, name, uploadLimit }: { sceneId: string; na
           ) : failure ? null : (
             loading
           )}
+          {picking ? (
+            <TokenPicker
+              onPick={pick}
+              onClose={() => {
+                setPicking(false);
+                refocus.current = 'add';
+              }}
+            />
+          ) : null}
+          {renaming ? (
+            <RenameDialog
+              token={renaming}
+              onSave={async (label) => {
+                const result = await sceneTokens.change(renaming.id, { label }, { inline: true });
+                if (result.ok) announce(t('tokens.renamed', { label: result.token.label }));
+                return result.ok ? undefined : 'message' in result ? result.message : undefined;
+              }}
+              onClose={() => {
+                setRenaming(undefined);
+                refocus.current = 'opener';
+              }}
+            />
+          ) : null}
+          {deleting ? (
+            <DeleteTokenDialog
+              token={deleting}
+              onConfirm={() => void deleteToken(deleting)}
+              onClose={() => {
+                setDeleting(undefined);
+                refocus.current = 'opener';
+              }}
+            />
+          ) : null}
           {confirmReplace ? (
             <Dialog
               heading={t('sceneMap.replaceCalibrated.heading')}

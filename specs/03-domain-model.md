@@ -4,7 +4,7 @@ The stored entities, how they relate, and what deleting them does.
 
 ## 1. Entities
 
-The MVP MUST store exactly these eight entities in SQLite: [input, Q-006, Q-037, Q-042, Q-051]
+The MVP MUST store exactly these eight entities in SQLite: [input, Q-006, Q-037, Q-042, Q-051, Q-091]
 
 | Entity | Key fields | Notes |
 | --- | --- | --- |
@@ -13,7 +13,7 @@ The MVP MUST store exactly these eight entities in SQLite: [input, Q-006, Q-037,
 | AssetTag | `asset_id`, `tag` | free tags for filtering and search |
 | Campaign | `name`, `description`, `rules_version` | `rules_version = 5e-2014` |
 | Session | `campaign_id`, `title`, `order`, `date` | |
-| Scene | `session_id`, `name`, `order`, `map_image_id`, `grid` | grid: `type`, `size`, `offset_x`, `offset_y`, `visible`, `feet_per_square`, `columns`, `rows` (`06` §2) |
+| Scene | `session_id`, `name`, `order`, `map_image_id`, `grid`, `token_numbers` | grid: `type`, `size`, `offset_x`, `offset_y`, `visible`, `feet_per_square`, `columns`, `rows` (`06` §2); token numbers: the highest number issued per asset on the scene, never sent to a client (`05` §3) |
 | Token | `scene_id`, `asset_id`, `label`, `x`, `y`, `hidden`, `z_order`, `character_id` | `character_id` empty in the MVP |
 | Settings | `live_scene_id`, ruler rule, upload limit, display variant size, PIN hash | one game per server |
 

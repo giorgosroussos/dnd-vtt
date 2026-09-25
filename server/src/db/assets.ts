@@ -8,6 +8,7 @@ import {
   type TokenSize,
 } from '@emberglass/shared';
 import { deleteUnreferencedImages, imageExists } from './images.js';
+import { forgetTokenNumbers } from './tokens.js';
 
 // The shared asset library in SQLite (specs/03-domain-model.md §1, §2, §7,
 // specs/05-assets-and-images.md §1, §4, §5, D-020, D-022, D-075, D-083). Every read
@@ -196,8 +197,8 @@ export type AssetDeletionOutcome =
   | { outcome: 'in_use'; usages: AssetUsage[] };
 
 /**
- * Deletes an asset that no token uses, with its tags, and its image when nothing else
- * references it (specs/03-domain-model.md §7, Q-002). An asset in use is refused with the
+ * Deletes an asset that no token uses, with its tags, the token numbers scenes recorded for it
+ * (Q-091), and its image when nothing else references it (specs/03-domain-model.md §7, Q-002). An asset in use is refused with the
  * scenes that use it, changing nothing.
  */
 export function deleteAsset(db: Database.Database, id: string): AssetDeletionOutcome {
@@ -207,6 +208,7 @@ export function deleteAsset(db: Database.Database, id: string): AssetDeletionOut
     if (usages.length > 0) return { outcome: 'in_use', usages };
     const imageId = db.prepare('SELECT image_id FROM asset WHERE id = ?').pluck().get(id) as string;
     db.prepare('DELETE FROM asset WHERE id = ?').run(id);
+    forgetTokenNumbers(db, id);
     return { outcome: 'deleted', removedImages: deleteUnreferencedImages(db, [imageId]) };
   })();
 }

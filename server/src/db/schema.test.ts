@@ -201,6 +201,8 @@ describe('migration 0001 on a fresh database', () => {
         'grid_feet_per_square REAL NOT NULL DEFAULT 5',
         'grid_columns INTEGER NOT NULL DEFAULT 30',
         'grid_rows INTEGER NOT NULL DEFAULT 20',
+        // Migration 0002 (Q-091, D-101).
+        "token_numbers TEXT NOT NULL DEFAULT '{}'",
       ],
       token: [
         'id TEXT NOT NULL',
@@ -625,6 +627,18 @@ describe('constraints refuse what the specifications forbid', () => {
     db.prepare('UPDATE scene SET map_image_id = NULL, grid_size = NULL WHERE id = ?').run(SCENE);
   });
 
+  it('keeps the token numbers a scene issued as a JSON object, starting empty (Q-091)', () => {
+    withParents();
+    expect(db.prepare('SELECT token_numbers FROM scene WHERE id = ?').pluck().get(SCENE)).toBe('{}');
+    for (const value of ['', 'not json', '[1]', '3', 'null', '"x"']) {
+      expect(() => db.prepare('UPDATE scene SET token_numbers = ? WHERE id = ?').run(value, SCENE), value).toThrow(
+        /CHECK constraint failed/,
+      );
+    }
+    expect(() => db.prepare('UPDATE scene SET token_numbers = NULL WHERE id = ?').run(SCENE)).toThrow(/NOT NULL/);
+    db.prepare('UPDATE scene SET token_numbers = ? WHERE id = ?').run(`{"${ASSET}":4}`, SCENE);
+  });
+
   it('refuses an image inserted with a non-square preset', () => {
     migrated();
     expect(() =>
@@ -772,14 +786,18 @@ const CONTRACT: Record<Table, TSchema & { properties: Record<string, unknown> }>
 };
 
 describe('the contract types in shared', () => {
-  it('name exactly the stored columns, except the PIN hash, which never leaves the server', () => {
+  // The token numbers a scene has issued are the server's own too (Q-091, D-101).
+  it('name exactly the stored columns, except the PIN hash and the token numbers, which never leave the server', () => {
     migrated();
+    const internal = (table: string, column: string) =>
+      (table === 'settings' && column === 'pin_hash') || (table === 'scene' && column === 'token_numbers');
     for (const table of TABLES) {
-      const stored = columnNames(table).filter((c) => !(table === 'settings' && c === 'pin_hash'));
+      const stored = columnNames(table).filter((c) => !internal(table, c));
       expect(contractColumns(CONTRACT[table]).sort(), table).toEqual(stored.sort());
     }
     expect(Object.keys(GridSchema.properties)).toEqual(GRID_FIELDS);
     expect(Object.keys(SettingsSchema.properties)).not.toContain('pin_hash');
+    expect(Object.keys(SceneSchema.properties)).not.toContain('token_numbers');
   });
 
   it('describe every row of the generated fixture database', () => {
@@ -867,7 +885,9 @@ describe('migrations on the generated fixture database (specs/14-agent-playbook.
     expect(db.pragma('foreign_key_check')).toEqual([]);
     expect(countRows(db)).toEqual(counts);
     // The latest schema reads the same records; a migration that reshapes one
-    // updates readEntities and says so here.
+    // updates readEntities and says so here. Migration 0002 adds the token numbers a
+    // scene has issued, none recorded yet, which readEntities leaves out (Q-091).
     expect(readEntities(db)).toEqual(before);
+    expect(db.prepare('SELECT DISTINCT token_numbers FROM scene').pluck().all()).toEqual(['{}']);
   });
 });

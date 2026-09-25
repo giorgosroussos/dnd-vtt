@@ -13,3 +13,5 @@ Numbered SQL migrations, applied in order by `src/db/migrate.ts` before the serv
 - Every migration is tested on the generated fixture database (`src/db/testing/fixture.ts`), which is written at schema version 1 and migrated forward by `src/db/schema.test.ts` (`specs/14-agent-playbook.md` §8). A migration that reshapes a record updates `readEntities` there.
 
 `0001_initial_schema.sql` holds the eight entities of `specs/03-domain-model.md` §1 (SRV-01, D-075).
+
+`0002_scene_token_numbers.sql` adds `scene.token_numbers`, the highest token number issued per asset on the scene, so that no number is issued twice (PRP-04, Q-091, D-101).
