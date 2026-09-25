@@ -28,7 +28,7 @@ export interface MapInfo {
  * before the upload pipeline has none, and then the loaded display version's own size is
  * used once it has arrived. Undefined while neither is known.
  */
-export function mapInfo(image: Image, loaded?: Size): MapInfo | undefined {
+export function mapInfo(image: Pick<Image, 'width' | 'height' | 'variants'>, loaded?: Size): MapInfo | undefined {
   const display = image.variants.display ?? (loaded && loaded.width > 0 ? loaded : undefined);
   if (!display) return undefined;
   return { original: { width: image.width, height: image.height }, display };

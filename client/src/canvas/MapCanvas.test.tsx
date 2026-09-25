@@ -8,7 +8,7 @@ import { images, installCanvas2d, installImageLoading, installResizeObserver } f
 import { button, click, settle } from '../ui/testing/fakeServer.js';
 import { FOCUSABLE, render, type Rendered } from '../ui/testing/render.js';
 import { CELL_PX, fitCamera } from './geometry.js';
-import { GRID_OPACITY, MapCanvas } from './MapCanvas.js';
+import { CANVAS_COLOURS, GRID_OPACITY, MapCanvas } from './MapCanvas.js';
 
 // The map canvas of both views (PRP-02, specs/08-ux-journeys.md §3, specs/06-grid-and-measurement.md
 // §2, specs/03-domain-model.md §6, specs/07-security-and-access.md §5, D-026, D-090), rendered
@@ -95,6 +95,33 @@ describe('the map and the grid overlay (specs/06-grid-and-measurement.md §2)', 
     expect([background.width(), background.height()]).toEqual([2000, 1500]);
   });
 
+  it('requests the display version once, however often the map record is rebuilt (review C-5)', async () => {
+    await draw({ grid: GRID, map: MAP, mode: 'player' });
+    for (let each = 0; each < 3; each++) {
+      act(() => rendered!.rerender(createElement(MapCanvas, { grid: GRID, map: { ...MAP }, mode: 'player' })));
+    }
+    await settle();
+    expect(images.requested).toEqual([imageFileUrl(MAP.id, 'display')]);
+  });
+
+  it('loads only the display version in the player view too (review L-8)', async () => {
+    const { stage } = await draw({ grid: GRID, map: MAP, mode: 'player' });
+    expect(images.requested).toEqual([imageFileUrl(MAP.id, 'display')]);
+    expect((stage.findOne<Konva.Image>('.map')!.image() as HTMLImageElement).src).toBe(imageFileUrl(MAP.id, 'display'));
+  });
+
+  it('draws each line light over a dark halo, so the grid shows on light maps too (review UX-6)', async () => {
+    const { stage } = await draw({ grid: GRID, map: MAP, mode: 'dm' });
+    const halos = stage.find<Konva.Line>('.grid-halo');
+    const lines = stage.find<Konva.Line>('.grid-line');
+    expect(halos.map((halo) => halo.points())).toEqual(lines.map((line) => line.points()));
+    expect(halos.every((halo) => halo.stroke() === CANVAS_COLOURS.halo && halo.strokeWidth() > 1)).toBe(true);
+    // Every halo is drawn before, so under, every light line.
+    expect(Math.max(...halos.map((halo) => halo.zIndex()))).toBeLessThan(
+      Math.min(...lines.map((line) => line.zIndex())),
+    );
+  });
+
   it('tells the DM view when the display version cannot be loaded', async () => {
     images.failing.add(imageFileUrl(MAP.id, 'display'));
     const onMapError = vi.fn();
@@ -129,6 +156,7 @@ describe('the map and the grid overlay (specs/06-grid-and-measurement.md §2)', 
     const { stage } = await draw({ grid, map: null, mode: 'dm' });
     const extent = stage.findOne<Konva.Rect>('.extent')!;
     expect([extent.width(), extent.height()]).toEqual([30 * CELL_PX, 20 * CELL_PX]);
+    expect(extent.fill()).toBe(CANVAS_COLOURS.extent);
     expect(lines(stage, 'x')).toHaveLength(31);
     expect(lines(stage, 'y')).toHaveLength(21);
     expect(lines(stage, 'x').at(-1)).toEqual([30 * CELL_PX, 0, 30 * CELL_PX, 20 * CELL_PX]);
@@ -188,14 +216,40 @@ describe('the camera (specs/08-ux-journeys.md §3, specs/04-live-sync.md §9)', 
     expect(camera(element).scale).toBeGreaterThan(fitted.scale);
   });
 
-  it('leaves the arrow keys alone with a modifier, so the browser keeps its own shortcuts', async () => {
+  it('leaves the canvas keys alone with a modifier, so the browser keeps its own shortcuts', async () => {
     const { view } = await draw({ grid: GRID, map: MAP, mode: 'dm' });
     const element = viewport(view);
     const before = camera(element);
+    for (const key of ['ArrowLeft', 'ArrowRight', '+', '-', '0']) {
+      for (const modifier of ['altKey', 'ctrlKey', 'metaKey']) {
+        const event = new KeyboardEvent('keydown', { key, [modifier]: true, bubbles: true, cancelable: true });
+        act(() => {
+          element.dispatchEvent(event);
+        });
+        expect(camera(element), `${modifier} ${key}`).toEqual(before);
+        expect(event.defaultPrevented, `${modifier} ${key}`).toBe(false);
+      }
+    }
+  });
+
+  it('ignores a sideways wheel swipe, which has no vertical part (review C-1)', async () => {
+    const { view, stage } = await draw({ grid: GRID, map: MAP, mode: 'dm' });
+    const before = camera(viewport(view));
     act(() => {
-      element.dispatchEvent(new KeyboardEvent('keydown', { key: '+', ctrlKey: true, bubbles: true }));
+      stage.fire('wheel', { evt: new WheelEvent('wheel', { deltaX: 80, deltaY: 0, cancelable: true }), target: stage });
     });
-    expect(camera(element)).toEqual(before);
+    expect(camera(viewport(view))).toEqual(before);
+  });
+
+  it('keeps every wheel step when several arrive before the next render (review C-2)', async () => {
+    const { view, stage } = await draw({ grid: GRID, map: MAP, mode: 'dm' });
+    const before = camera(viewport(view));
+    act(() => {
+      for (let step = 0; step < 3; step++) {
+        stage.fire('wheel', { evt: new WheelEvent('wheel', { deltaY: -100, cancelable: true }), target: stage });
+      }
+    });
+    expect(camera(viewport(view)).scale).toBeCloseTo(before.scale * 1.1 ** 3, 9);
   });
 
   it('fits a newly shown map afresh, dropping the camera the DM set on the previous one', async () => {

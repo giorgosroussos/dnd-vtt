@@ -114,7 +114,8 @@ main[tabindex='-1']:focus {
 
 /* Not dimmed with opacity, which would lower the contrast the checks cannot see:
  * muted text on the surface, a pair tokens.test.ts checks. */
-.eg-button:disabled {
+.eg-button:disabled,
+.eg-button[aria-disabled='true'] {
   cursor: not-allowed;
   background: var(--color-surface);
   border-color: var(--color-border);

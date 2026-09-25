@@ -225,13 +225,20 @@ export class FakeServer {
   // As D-078 and D-090 do: a different map starts from its image's preset or the
   // defaults, then grid.visible applies.
   private updateScene(id: string, b: Record<string, unknown>): Reply {
-    const scene = this.scenes.find((s) => s.id === id)!;
+    const scene = this.scenes.find((s) => s.id === id);
+    if (!scene) return failure(404, 'not_found');
     const map = b.map_image_id as string | undefined;
     if (map !== undefined && map !== scene.map_image_id) {
       const image = this.images.find((each) => each.id === map);
       if (!image) return failure(400, 'reference_not_found');
+      const previous = scene.map_image_id;
       scene.map_image_id = map;
       scene.grid = image.grid_preset ? { ...image.grid_preset } : { ...DEFAULT_GRID };
+      // As the server does, the previous map goes once nothing references it (Q-002).
+      const used = (imageId: string) =>
+        this.scenes.some((each) => each.map_image_id === imageId) ||
+        this.assets.some((each) => each.image_id === imageId);
+      if (previous !== null && !used(previous)) this.images = this.images.filter((each) => each.id !== previous);
     }
     if (typeof b.name === 'string') scene.name = b.name;
     const grid = b.grid as { visible: boolean } | undefined;

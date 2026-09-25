@@ -19,14 +19,19 @@ const MAP_COLOUR: [number, number, number] = [40, 160, 90];
 const MAP_SIZE = { width: 900, height: 600 };
 const SQUARE = MAP_SIZE.width / 30;
 
-async function seedScene(page: Page, name: string): Promise<{ campaign: string; session: string; scene: string }> {
+async function seedScene(
+  page: Page,
+  name: string,
+): Promise<{ campaign: string; session: string; scene: string; id: string }> {
   const campaign = `Canvas campaign ${Date.now()}`;
   const campaignId = await seedCampaign(page, campaign, ['Canvas session']);
   const [session] = (await (await page.request.get(`/api/campaigns/${campaignId}/sessions`)).json()) as {
     id: string;
   }[];
-  expect((await page.request.post(`/api/sessions/${session!.id}/scenes`, { data: { name } })).ok()).toBe(true);
-  return { campaign, session: 'Canvas session', scene: name };
+  const created = await page.request.post(`/api/sessions/${session!.id}/scenes`, { data: { name } });
+  expect(created.ok()).toBe(true);
+  const { id } = (await created.json()) as { id: string };
+  return { campaign, session: 'Canvas session', scene: name, id };
 }
 
 async function selectScene(page: Page, names: { campaign: string; session: string; scene: string }) {
@@ -96,9 +101,12 @@ test('the DM attaches a map, sees it with the overlay, hides the grid for player
   await page.reload();
   await selectScene(page, names);
 
-  // A map-less scene: its 30 × 20 extent with the overlay (specs/03-domain-model.md §6).
+  // A map-less scene: its 30 × 20 extent on neutral dark grey, with the overlay on every
+  // square edge, 64 world px apart, and nothing mid-square (specs/03-domain-model.md §6).
   await expect(viewport(page)).toHaveAttribute('data-grid', 'shown');
-  expect((await drawnAt(page, 32, 32)).map[3]).toBe(255);
+  expect(near((await drawnAt(page, 32, 32)).map, [0x2b, 0x2b, 0x2b, 255], 2)).toBe(true);
+  expect((await drawnAt(page, 64, 32, 1)).grid).toBeGreaterThan(40);
+  expect((await drawnAt(page, 96, 32)).grid).toBe(0);
 
   // Attach a generated map: uploaded and set on the scene in one action (G-016).
   await page.getByLabel('Map image: PNG, JPEG or WebP').setInputFiles({
@@ -134,11 +142,18 @@ test('the DM attaches a map, sees it with the overlay, hides the grid for player
   await page.getByRole('button', { name: 'Fit map' }).click();
   await expect.poll(() => cameraOf(page)).toEqual(fitted);
 
+  // The wheel zooms about the pointer: the world point under it stays under it. The stage
+  // starts inside the viewport's 1 px border.
   const box = (await viewport(page).boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  const pointer = { x: 100, y: 90 };
+  const under = { x: (pointer.x - 1 - fitted.x) / fitted.scale, y: (pointer.y - 1 - fitted.y) / fitted.scale };
+  await page.mouse.move(box.x + pointer.x, box.y + pointer.y);
   await page.mouse.wheel(0, -300);
   await expect.poll(async () => (await cameraOf(page)).scale).toBeGreaterThan(fitted.scale);
   const wheeled = await cameraOf(page);
+  expect(under.x * wheeled.scale + wheeled.x + 1).toBeCloseTo(pointer.x, 0);
+  expect(under.y * wheeled.scale + wheeled.y + 1).toBeCloseTo(pointer.y, 0);
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
   await page.mouse.move(box.x + box.width / 2 + 120, box.y + box.height / 2 + 40, { steps: 8 });
   await page.mouse.up();
@@ -158,9 +173,14 @@ test('the DM attaches a map, sees it with the overlay, hides the grid for player
     .poll(async () => near((await drawnAt(page, SQUARE * 4.5, SQUARE * 3.5)).map, [...MAP_COLOUR, 255]))
     .toBe(true);
 
-  // Only the display version was ever requested for the canvas (specs/07-security-and-access.md §5).
-  expect(imageRequests.length).toBeGreaterThan(0);
-  expect(imageRequests.filter((path) => !path.endsWith('/display'))).toEqual([]);
+  // Only the display version of this map was ever requested (specs/07-security-and-access.md §5);
+  // other specs' thumbnails, if any, are no concern of this one.
+  const { map_image_id: mapId } = (await (await page.request.get(`/api/scenes/${names.id}`)).json()) as {
+    map_image_id: string;
+  };
+  const ofMap = imageRequests.filter((path) => path.startsWith(`/images/${mapId}/`));
+  expect(ofMap.length).toBeGreaterThan(0);
+  expect(new Set(ofMap)).toEqual(new Set([`/images/${mapId}/display`]));
   expect(elsewhere).toEqual([]);
 });
 
@@ -230,6 +250,8 @@ test('the canvas of a selected scene is reached, shown and operated by keyboard 
   await page.getByLabel('Players see the grid').focus();
   await page.keyboard.press('Space');
   await expect(viewport(page)).toHaveAttribute('data-grid', 'faint');
+  // Focus stays on the checkbox through the save (review UX-1).
+  await expect(page.getByLabel('Players see the grid')).toBeFocused();
 
   expect(await contrastFailures(page), 'selected scene').toEqual([]);
 });

@@ -199,6 +199,34 @@ describe('attaching a map (specs/03-domain-model.md §5, §6, Q-001, Q-034)', ()
 });
 
 describe('the previous map (specs/03-domain-model.md §7, Q-002)', () => {
+  it('keeps the current map and its grid when a replacement is refused (review L-6)', async () => {
+    const session = await newSession();
+    const current = await withPreset();
+    const scene = await newScene(session.id, current.id);
+    expectFailure(await patch(`/api/scenes/${scene.id}`, { map_image_id: 'f'.repeat(64) }), 400, 'reference_not_found');
+    expect(ok<Scene>(await get(`/api/scenes/${scene.id}`))).toEqual(scene);
+    expect(stored(current.id)).toBe(true);
+  });
+
+  it('settles two map changes sent at once on one of them, removing only the map both replaced (review L-6)', async () => {
+    const session = await newSession();
+    const old = await withPreset();
+    const scene = await newScene(session.id, old.id);
+    const [a, b] = [await uploaded(300, 200), await uploaded(200, 300)];
+    const answers = await Promise.all([
+      patch(`/api/scenes/${scene.id}`, { map_image_id: a.id }),
+      patch(`/api/scenes/${scene.id}`, { map_image_id: b.id }),
+    ]);
+    for (const answer of answers) expect(answer.statusCode, answer.body).toBe(200);
+    const final = ok<Scene>(await get(`/api/scenes/${scene.id}`));
+    expect([a.id, b.id]).toContain(final.map_image_id);
+    expect(stored(old.id)).toBe(false);
+    // The loser was attached, then replaced by the winner, and nothing else uses it.
+    const loser = final.map_image_id === a.id ? b.id : a.id;
+    expect(stored(loser)).toBe(false);
+    expect(stored(final.map_image_id!)).toBe(true);
+  });
+
   it('removes the previous map with its files and preset once nothing references it', async () => {
     const session = await newSession();
     const old = await withPreset();
@@ -242,7 +270,9 @@ describe('grid visibility for players (specs/06-grid-and-measurement.md §2, D-0
       ...PRESET,
       visible: false,
     });
-    expect((await update(scene.id, { name: 'Den' })).name).toBe('Den');
+    // A rename alone leaves the grid exactly as it was (review L-5).
+    const before = ok<Scene>(await get(`/api/scenes/${scene.id}`));
+    expect(await update(scene.id, { name: 'Den' })).toEqual({ ...before, name: 'Den' });
   });
 
   it('changes neither the image preset nor another scene of the same map (specs/03-domain-model.md §5)', async () => {
@@ -303,7 +333,7 @@ describe('hidden information (specs/07-security-and-access.md §5, §7)', () => 
     expect(ok<Scene>(await get(`/api/scenes/${scene.id}`))).toEqual(scene);
   });
 
-  it('serves the map of a scene that is not live to the DM session only, in every version', async () => {
+  it('serves a scene map to the DM session only, in every version, the scene not being live', async () => {
     const session = await newSession();
     const scene = await newScene(session.id);
     const map = await uploaded();
@@ -312,6 +342,20 @@ describe('hidden information (specs/07-security-and-access.md §5, §7)', () => 
       expect((await get(imageFileUrl(map.id, variant))).statusCode).toBe(200);
       const anonymous = await app.inject({ method: 'GET', url: imageFileUrl(map.id, variant) });
       expectFailure(anonymous, 404, 'not_found');
+    }
+  });
+
+  // Until LIV-02 adds the players' entitlement (specs/07-security-and-access.md §5), even the live
+  // scene's map is refused without a DM session; LIV-02 turns the display version of this case
+  // to 200 and keeps the other two at 404 (review L-7).
+  it('refuses the live scene map without a DM session too, until LIV-02 entitles players to its display version', async () => {
+    const session = await newSession();
+    const scene = await newScene(session.id);
+    const map = await uploaded();
+    await update(scene.id, { map_image_id: map.id });
+    data.db.prepare('UPDATE settings SET live_scene_id = ?').run(scene.id);
+    for (const variant of ['original', 'display', 'thumbnail'] as const) {
+      expectFailure(await app.inject({ method: 'GET', url: imageFileUrl(map.id, variant) }), 404, 'not_found');
     }
   });
 });

@@ -29,8 +29,9 @@ import './canvas.css';
 // and draws no overlay when the grid is hidden for players. The player view uses it from LIV-03.
 
 // Konva draws on a canvas, so these are colours, not the CSS tokens: the void around the
-// scene is the page background of tokens.css, a map-less extent a neutral dark grey (D-016).
-export const CANVAS_COLOURS = { void: '#14110f', extent: '#2b2b2b', grid: '#f2ece6' } as const;
+// scene is the page background of tokens.css, a map-less extent a neutral dark grey (D-016);
+// each grid line is light over a dark halo, so it shows on dark and light maps (D-093).
+export const CANVAS_COLOURS = { void: '#14110f', extent: '#2b2b2b', grid: '#f2ece6', halo: '#14110f' } as const;
 export const GRID_OPACITY = { shown: 0.7, faint: 0.25 } as const;
 
 type Mode = 'dm' | 'player';
@@ -62,22 +63,31 @@ function useViewport(): [React.RefObject<HTMLDivElement | null>, Size] {
   return [ref, size];
 }
 
-/** The display version of the map, once loaded; only that version is ever requested. */
-function useDisplayImage(map: Image | null, onError: (() => void) | undefined): HTMLImageElement | undefined {
+/**
+ * What the canvas needs of a map image: its id, its size and its display version's size. The
+ * player view will build it from what its snapshot carries (LIV-03), never the DM's record.
+ */
+export type CanvasMap = Pick<Image, 'id' | 'width' | 'height' | 'variants'>;
+
+/**
+ * The display version of the map, once loaded; only that version is ever requested, and only
+ * again when the map itself changes, not when its record is rebuilt.
+ */
+function useDisplayImage(id: string | undefined, onError: (() => void) | undefined): HTMLImageElement | undefined {
   const [loaded, setLoaded] = useState<{ id: string; element: HTMLImageElement }>();
   const failed = useEffectEvent(() => onError?.());
   useEffect(() => {
-    if (!map) return;
+    if (id === undefined) return;
     const element = new window.Image();
-    element.onload = () => setLoaded({ id: map.id, element });
+    element.onload = () => setLoaded({ id, element });
     element.onerror = () => failed();
-    element.src = imageFileUrl(map.id, 'display');
+    element.src = imageFileUrl(id, 'display');
     return () => {
       element.onload = null;
       element.onerror = null;
     };
-  }, [map]);
-  return map && loaded?.id === map.id ? loaded.element : undefined;
+  }, [id]);
+  return id !== undefined && loaded?.id === id ? loaded.element : undefined;
 }
 
 export function MapCanvas({
@@ -89,7 +99,7 @@ export function MapCanvas({
 }: {
   grid: Grid;
   /** The scene's map image, or null for a scene without a map. */
-  map: Image | null;
+  map: CanvasMap | null;
   mode: Mode;
   /** The DM's name for the canvas, naming the scene. */
   label?: string;
@@ -97,7 +107,7 @@ export function MapCanvas({
 }) {
   const helpId = useId();
   const [viewportRef, viewport] = useViewport();
-  const displayImage = useDisplayImage(map, onMapError);
+  const displayImage = useDisplayImage(map?.id, onMapError);
   const info = map
     ? mapInfo(map, displayImage && { width: displayImage.naturalWidth, height: displayImage.naturalHeight })
     : undefined;
@@ -107,31 +117,46 @@ export function MapCanvas({
   // The DM's own camera, kept only for the world it was set on: another scene or map fits again.
   const worldKey = `${map?.id ?? 'none'}:${world.width}x${world.height}`;
   const [manual, setManual] = useState<{ key: string; camera: Camera }>();
-  const camera = mode === 'dm' && manual?.key === worldKey ? manual.camera : fitCamera(world, viewport);
-  const setCamera = (next: Camera) => setManual({ key: worldKey, camera: next });
+  const fitted = fitCamera(world, viewport);
+  const camera = mode === 'dm' && manual?.key === worldKey ? manual.camera : fitted;
+  // From the latest camera, not this render's: wheel and drag events arrive outside React's
+  // synchronous updates, and several can land before the next render (D-093).
+  const changeCamera = (change: (current: Camera) => Camera) =>
+    setManual((previous) => ({
+      key: worldKey,
+      camera: change(previous?.key === worldKey ? previous.camera : fitted),
+    }));
 
   const lines = ready ? gridLines(grid, info) : { xs: [], ys: [] };
+  const segments = [
+    ...lines.xs.map((x) => ({ key: `x${x}`, axis: 'x', points: [x, 0, x, world.height] })),
+    ...lines.ys.map((y) => ({ key: `y${y}`, axis: 'y', points: [0, y, world.width, y] })),
+  ];
   const opacity = overlayOpacity(mode, grid.visible);
   const dm = mode === 'dm';
 
   function onKeyDown(event: KeyboardEvent) {
     if (event.altKey || event.ctrlKey || event.metaKey) return;
-    const next = cameraForKey(camera, event.key, event.shiftKey, world, viewport);
-    if (!next) return;
+    if (!cameraForKey(camera, event.key, event.shiftKey, world, viewport)) return;
     event.preventDefault();
-    setCamera(next);
+    const { key, shiftKey } = event;
+    changeCamera((current) => cameraForKey(current, key, shiftKey, world, viewport) ?? current);
   }
 
   function onWheel(event: Konva.KonvaEventObject<WheelEvent>) {
     event.evt.preventDefault();
+    // A sideways swipe has no vertical part and means no zoom.
+    if (event.evt.deltaY === 0) return;
     const at = event.target.getStage()?.getPointerPosition() ?? { x: viewport.width / 2, y: viewport.height / 2 };
-    setCamera(zoomAt(camera, event.evt.deltaY < 0 ? WHEEL_ZOOM_STEP : 1 / WHEEL_ZOOM_STEP, at));
+    const factor = event.evt.deltaY < 0 ? WHEEL_ZOOM_STEP : 1 / WHEEL_ZOOM_STEP;
+    changeCamera((current) => zoomAt(current, factor, at));
   }
 
   function onDrag(event: Konva.KonvaEventObject<DragEvent>) {
     const stage = event.target;
     if (stage !== stage.getStage()) return;
-    setCamera({ ...camera, x: stage.x(), y: stage.y() });
+    const position = { x: stage.x(), y: stage.y() };
+    changeCamera((current) => ({ ...current, ...position }));
   }
 
   const centre = { x: viewport.width / 2, y: viewport.height / 2 };
@@ -157,21 +182,22 @@ export function MapCanvas({
       <Layer listening={false}>
         {opacity > 0 ? (
           <Group name="grid" opacity={opacity}>
-            {lines.xs.map((x) => (
+            {/* A dark halo under each light line keeps the grid visible on light maps too. */}
+            {segments.map(({ key, points }) => (
               <Line
-                key={`x${x}`}
-                name="grid-line grid-line-x"
-                points={[x, 0, x, world.height]}
-                stroke={CANVAS_COLOURS.grid}
-                strokeWidth={1}
+                key={`halo-${key}`}
+                name="grid-halo"
+                points={points}
+                stroke={CANVAS_COLOURS.halo}
+                strokeWidth={3}
                 strokeScaleEnabled={false}
               />
             ))}
-            {lines.ys.map((y) => (
+            {segments.map(({ key, points, axis }) => (
               <Line
-                key={`y${y}`}
-                name="grid-line grid-line-y"
-                points={[0, y, world.width, y]}
+                key={key}
+                name={`grid-line grid-line-${axis}`}
+                points={points}
                 stroke={CANVAS_COLOURS.grid}
                 strokeWidth={1}
                 strokeScaleEnabled={false}
@@ -202,10 +228,10 @@ export function MapCanvas({
   return (
     <div className="eg-canvas eg-canvas--dm">
       <div className="eg-canvas__toolbar" role="group" aria-label={t('canvas.controls')}>
-        <Button size="small" onClick={() => setCamera(zoomAt(camera, ZOOM_STEP, centre))}>
+        <Button size="small" onClick={() => changeCamera((current) => zoomAt(current, ZOOM_STEP, centre))}>
           {t('canvas.zoomIn')}
         </Button>
-        <Button size="small" onClick={() => setCamera(zoomAt(camera, 1 / ZOOM_STEP, centre))}>
+        <Button size="small" onClick={() => changeCamera((current) => zoomAt(current, 1 / ZOOM_STEP, centre))}>
           {t('canvas.zoomOut')}
         </Button>
         <Button size="small" onClick={() => setManual(undefined)}>

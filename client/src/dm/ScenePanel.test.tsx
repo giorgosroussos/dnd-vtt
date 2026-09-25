@@ -86,6 +86,51 @@ describe('the scene on the canvas (specs/08-ux-journeys.md §3)', () => {
   });
 });
 
+describe('map states (review)', () => {
+  it('shows a failure to read the map record once, without a loading line that never ends (review UX-4)', async () => {
+    const map = server.addImage();
+    server.scenes[0]!.map_image_id = map.id;
+    server.before = (call) =>
+      call.path === `/api/images/${map.id}`
+        ? { status: 500, body: { error: { code: 'internal_error', message: 'test' } } }
+        : undefined;
+    const view = await open();
+    expect(view.querySelector('[role="alert"]')!.textContent).toBe(t('error.code.internal_error'));
+    expect(view.textContent).not.toContain(t('workspace.loadingScene'));
+  });
+
+  it('says beside Replace map that a new map starts with its own grid and the old image goes (review UX-5)', async () => {
+    const map = server.addImage();
+    server.scenes[0]!.map_image_id = map.id;
+    const view = await open();
+    const replace = button(view, t('sceneMap.replace'))!;
+    const hint = document.getElementById(replace.getAttribute('aria-describedby')!)!;
+    expect(hint.textContent).toBe(t('sceneMap.replaceHint'));
+  });
+
+  it('draws only the newest map when the record of the one it replaced answers late (review L-3)', async () => {
+    const old = server.addImage();
+    server.scenes[0]!.map_image_id = old.id;
+    let release: (reply?: Reply) => void = () => {};
+    server.before = (call) =>
+      call.path === `/api/images/${old.id}`
+        ? new Promise<Reply | undefined>((resolve) => (release = resolve))
+        : undefined;
+    const view = await open();
+    choose(view, png(100));
+    await submit(view.querySelector('form'));
+    const fresh = server.images.at(-1)!;
+    expect(fresh.id).not.toBe(old.id);
+    release({ status: 200, body: old });
+    await settle();
+    expect(images.requested).toEqual([imageFileUrl(fresh.id, 'display')]);
+    // The late record does not take the fresh map's place: its canvas is still drawn.
+    expect(view.querySelector('[role="application"]')).not.toBeNull();
+    expect(view.textContent).not.toContain(t('workspace.loadingScene'));
+    expect(stage().findOne('.map')).toBeDefined();
+  });
+});
+
 describe('attaching a map (specs/03-domain-model.md §5, §6, G-016, G-017)', () => {
   it('uploads the file and sets it as the map in the same action, then draws it', async () => {
     const preset: GridPreset = { ...scene.grid, size: 50, offset_x: 10, offset_y: 0, visible: false };
@@ -125,30 +170,45 @@ describe('attaching a map (specs/03-domain-model.md §5, §6, G-016, G-017)', ()
     const view = await open();
     await submit(view.querySelector('form'));
     expect(view.textContent).toContain(t('sceneMap.required'));
+    expect(document.activeElement).toBe(fileInput(view));
     expect(server.writes()).toEqual([]);
   });
 
-  it('shows the progress of the upload while it is sent, with the controls off, and clears it after', async () => {
+  it('shows the progress of the upload while it is sent, with the controls refusing but focusable, and says when it is done', async () => {
     let release: (reply?: Reply) => void = () => {};
     server.uploadProgress = [0.25, 0.6];
     server.before = (call) =>
       call.path === '/api/images' ? new Promise<Reply | undefined>((resolve) => (release = resolve)) : undefined;
     const view = await open();
     choose(view, png(4096));
+    const attach = button(view, t('sceneMap.attach'))!;
+    attach.focus();
     await submit(view.querySelector('form'));
     const bar = view.querySelector('progress')!;
     expect(bar.getAttribute('aria-label')).toBe(t('sceneMap.uploading'));
     expect(bar.value).toBe(60);
     expect(view.textContent).toContain(t('sceneMap.progress', { percent: 60 }));
-    expect(button(view, t('sceneMap.attach'))!.disabled).toBe(true);
-    expect(fileInput(view).disabled).toBe(true);
+    expect(bar.closest('[role="status"]')).not.toBeNull();
+    // Refusing, not disabled: a disabled control would drop keyboard focus (review UX-1).
+    expect(attach.getAttribute('aria-disabled')).toBe('true');
+    expect(attach.disabled).toBe(false);
+    expect(fileInput(view).getAttribute('aria-disabled')).toBe('true');
+    expect(gridBox(view).getAttribute('aria-disabled')).toBe('true');
+    expect(document.activeElement).toBe(attach);
+    // A second submit and a grid toggle while it runs send nothing.
+    await submit(view.querySelector('form'));
+    act(() => gridBox(view).click());
+    await settle();
+    expect(server.writes()).toEqual(['POST /api/images']);
     release();
     await settle();
     expect(view.querySelector('progress')).toBeNull();
     expect(server.writes()).toEqual(['POST /api/images', `PATCH /api/scenes/${scene.id}`]);
+    expect(view.querySelector('[role="status"]')!.textContent).toBe(t('sceneMap.attached'));
+    expect(document.activeElement).toBe(button(view, t('sceneMap.replace')));
   });
 
-  it('shows an upload refused by the server by its message and sets no map', async () => {
+  it('shows an upload refused by the server beside the file field and sets no map', async () => {
     server.before = (call) =>
       call.path === '/api/images'
         ? { status: 415, body: { error: { code: 'unsupported_media_type', message: 'test' } } }
@@ -156,10 +216,12 @@ describe('attaching a map (specs/03-domain-model.md §5, §6, G-016, G-017)', ()
     const view = await open();
     choose(view, png(100));
     await submit(view.querySelector('form'));
-    expect(view.textContent).toContain(t('error.code.unsupported_media_type'));
+    expect(view.querySelector('.eg-field__error')!.textContent).toBe(t('error.code.unsupported_media_type'));
+    expect(view.querySelector('[role="alert"]')).toBeNull();
+    expect(document.activeElement).toBe(fileInput(view));
     expect(server.writes()).toEqual(['POST /api/images']);
     expect(view.querySelector('progress')).toBeNull();
-    expect(button(view, t('sceneMap.attach'))!.disabled).toBe(false);
+    expect(button(view, t('sceneMap.attach'))!.getAttribute('aria-disabled')).toBeNull();
   });
 
   it('says the server did not answer when the upload never gets an answer', async () => {
@@ -200,20 +262,29 @@ describe('the grid for players (specs/06-grid-and-measurement.md §2, D-026)', (
     expect(canvasState(view)!.grid).toBe('shown');
   });
 
-  it('shows the change at once while it is sent, with the checkbox off until the server answers', async () => {
+  it('shows the change at once while it is sent, keeping focus on the checkbox, which refuses until the server answers', async () => {
     let release: (reply?: Reply) => void = () => {};
     server.before = (call) =>
       call.method === 'PATCH' ? new Promise<Reply | undefined>((resolve) => (release = resolve)) : undefined;
     const view = await open();
+    gridBox(view).focus();
     act(() => gridBox(view).click());
     await settle();
     expect(gridBox(view).checked).toBe(false);
-    expect(gridBox(view).disabled).toBe(true);
+    expect(gridBox(view).getAttribute('aria-disabled')).toBe('true');
+    expect(gridBox(view).disabled).toBe(false);
+    expect(document.activeElement).toBe(gridBox(view));
+    // A second press and an attach while it runs send nothing.
+    act(() => gridBox(view).click());
+    choose(view, png(100));
+    await submit(view.querySelector('form'));
+    expect(server.writes()).toEqual([`PATCH /api/scenes/${scene.id}`]);
     // The canvas follows what the server stored, not the request.
     expect(canvasState(view)!.grid).toBe('shown');
     release();
     await settle();
-    expect(gridBox(view).disabled).toBe(false);
+    expect(gridBox(view).getAttribute('aria-disabled')).toBeNull();
+    expect(document.activeElement).toBe(gridBox(view));
     expect(canvasState(view)!.grid).toBe('faint');
   });
 

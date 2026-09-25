@@ -15,10 +15,10 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
   - The scene map upload checks `upload_limit_bytes` before sending and shows progress (G-017), and creates the reference in the same action (G-016).
   - The canvas loads only the display version, never the original (`07` §5); `react-konva` and `konva` bundled, nothing fetched off the server (`02` §6).
   - Playwright: attach a generated map to a scene, see it drawn with the overlay, toggle player visibility, zoom and pan, reload unchanged; the keyboard and contrast gates pass; `make verify` exit 0 on both CI runners; `TRACEABILITY.md` PRP-02 row with test names.
-- **Status (2026-09-25):** implemented on branch `prp-02-canvas-grid` (D-090, D-092, G-019) and verified locally: `make verify` exit 0, every test named in `TRACEABILITY.md` PRP-02. Remaining before `done`: commit and push, `make verify` green on both CI runners, the review (prompt 2), and the close-out commit that removes this item.
+- **Status (2026-09-25):** implemented on branch `prp-02-canvas-grid` (D-090, D-092, G-019) and verified locally: `make verify` exit 0, every test named in `TRACEABILITY.md` PRP-02. CI run 36076377251 on `dc16d27` green on all 23 jobs; review (prompt 2) done, its fixes in D-093. Remaining before `done`: commit and push the review fixes, CI green on both runners for that commit, and the close-out commit that removes this item.
 - **Non-goals:** calibration and preset editing (PRP-03), tokens (PRP-04), the player view showing the live scene and the player camera (LIV-03, LIV-06).
 - **Review:** `Surfaces: data`, `Touches red line: yes`, so prompt 2 (review) runs after implementation. `13` §5 marks `Contract change: no`, but the scene update body gains `map_image_id` and `grid.visible` (D-078 deferred them here); treat it as a contract change.
 
 ## Next
 
-1. **PRP-03 — Grid calibration.** The three methods with live overlay, decimal square size, far-corner magnifier, original-dimension storage, presets per image (`13` §5, `06` §1, `06` §2, `06` §3).
+1. **PRP-03 — Grid calibration.** The three methods with live overlay, decimal square size, far-corner magnifier, original-dimension storage, presets per image (`13` §5, `06` §1, `06` §2, `06` §3). Replacing a map then discards a calibration, so Replace map asks for a confirmation that says so (PRP-02 review, D-093).
