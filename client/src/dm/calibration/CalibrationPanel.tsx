@@ -46,6 +46,7 @@ export function CalibrationPanel({
   saving: boolean;
 }) {
   const headingId = useId();
+  const hintId = useId();
   const panel = useRef<HTMLElement>(null);
   const original: Size = { width: map.width, height: map.height };
   const errors = fieldErrors(draft, original);
@@ -80,13 +81,24 @@ export function CalibrationPanel({
   }
 
   return (
-    <section ref={panel} className="eg-calibration" aria-labelledby={headingId}>
+    // Escape cancels, as the Cancel button does (D-096).
+    <section
+      ref={panel}
+      className="eg-calibration"
+      aria-labelledby={headingId}
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape' || saving) return;
+        event.preventDefault();
+        onCancel();
+      }}
+    >
       <div className="eg-calibration__top">
-        <h2 id={headingId} className="eg-calibration__heading">
+        {/* Named for assistive technology; on screen the strip is plainly what Calibrate grid opened. */}
+        <h2 id={headingId} className="eg-visually-hidden">
           {t('calibration.heading')}
         </h2>
         <fieldset className="eg-calibration__methods">
-          <legend>{t('calibration.method')}</legend>
+          <legend className="eg-visually-hidden">{t('calibration.method')}</legend>
           {METHODS.map((method) => (
             <label key={method} className="eg-check">
               <input
@@ -103,13 +115,6 @@ export function CalibrationPanel({
           ))}
         </fieldset>
       </div>
-      <p className="eg-calibration__hint">
-        {draft.method === 'dimensions'
-          ? t('calibration.hint.dimensions')
-          : draft.method === 'rectangle'
-            ? t('calibration.hint.rectangle', { squares: draft.fields.squares })
-            : t('calibration.hint.fine')}
-      </p>
       <div className="eg-calibration__row">
         <div className="eg-calibration__fields">
           {METHOD_FIELDS[draft.method].map((field) => (
@@ -121,6 +126,7 @@ export function CalibrationPanel({
               autoComplete="off"
               value={draft.fields[field]}
               error={errors[field] ? t(errors[field]) : undefined}
+              aria-describedby={hintId}
               aria-disabled={saving || undefined}
               readOnly={saving}
               onKeyDown={(event) => onFieldKey(field, event)}
@@ -131,27 +137,6 @@ export function CalibrationPanel({
             />
           ))}
         </div>
-        <div className="eg-calibration__notes">
-          {draft.method === 'rectangle' ? (
-            <p className="eg-calibration__hint">
-              {draft.rect
-                ? t('calibration.measured', {
-                    width: formatDecimal(draft.rect.width),
-                    height: formatDecimal(draft.rect.height),
-                  })
-                : t('calibration.notMeasured')}
-            </p>
-          ) : null}
-          <p className="eg-calibration__result">
-            {t('calibration.result', {
-              size: formatDecimal(calibration.size),
-              x: formatDecimal(calibration.offset_x),
-              y: formatDecimal(calibration.offset_y),
-              columns: calibration.columns,
-              rows: calibration.rows,
-            })}
-          </p>
-        </div>
         <div className="eg-calibration__actions">
           <Button variant="primary" aria-disabled={saving || undefined} onClick={save}>
             {t('calibration.save')}
@@ -160,6 +145,34 @@ export function CalibrationPanel({
             {t('calibration.cancel')}
           </Button>
         </div>
+      </div>
+      <div className="eg-calibration__notes">
+        <p id={hintId} className="eg-calibration__hint">
+          {draft.method === 'dimensions'
+            ? t('calibration.hint.dimensions')
+            : draft.method === 'rectangle'
+              ? t('calibration.hint.rectangle', { squares: draft.fields.squares })
+              : t('calibration.hint.fine')}
+        </p>
+        {draft.method === 'rectangle' ? (
+          <p className="eg-calibration__hint">
+            {draft.rect
+              ? t('calibration.measured', {
+                  width: formatDecimal(draft.rect.width),
+                  height: formatDecimal(draft.rect.height),
+                })
+              : t('calibration.notMeasured')}
+          </p>
+        ) : null}
+        <p className="eg-calibration__result">
+          {t('calibration.result', {
+            size: formatDecimal(calibration.size),
+            x: formatDecimal(calibration.offset_x),
+            y: formatDecimal(calibration.offset_y),
+            columns: calibration.columns,
+            rows: calibration.rows,
+          })}
+        </p>
       </div>
     </section>
   );

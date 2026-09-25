@@ -290,13 +290,21 @@ textarea.eg-field__input {
   resize: vertical;
 }
 
-/* The selected scene: its setup above its canvas (PRP-02, D-090). */
+/* The selected scene: its setup above its canvas (PRP-02, D-090); the status of the last change
+ * beside its name (D-096). */
 .eg-scene {
   flex: 1;
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
   min-height: 0;
+}
+
+.eg-scene__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-6);
 }
 
 .eg-scene__setup {
@@ -350,14 +358,15 @@ textarea.eg-field__input {
   flex: 1;
   display: flex;
   position: relative;
-  min-height: 0;
+  /* Tall enough for the magnifier over its corner (D-096). */
+  min-height: 15rem;
 }
 
 .eg-calibration {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  padding: var(--space-3);
+  padding: var(--space-2) var(--space-3);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   background: var(--color-surface);
@@ -370,11 +379,6 @@ textarea.eg-field__input {
   gap: var(--space-2) var(--space-6);
 }
 
-.eg-calibration__heading {
-  font-size: var(--font-size-md);
-  font-weight: 600;
-}
-
 .eg-calibration__methods {
   display: flex;
   flex-wrap: wrap;
@@ -383,12 +387,6 @@ textarea.eg-field__input {
   margin: 0;
   padding: 0;
   border: 0;
-}
-
-.eg-calibration__methods legend {
-  float: left;
-  margin-right: var(--space-2);
-  color: var(--color-text-muted);
 }
 
 .eg-calibration__row {
@@ -405,15 +403,28 @@ textarea.eg-field__input {
 }
 
 .eg-calibration__fields .eg-field__input {
-  width: 8rem;
+  width: 7rem;
 }
 
 .eg-calibration__notes {
-  flex: 1 1 12rem;
+  display: flex;
+  flex-direction: column;
 }
 
+/* The caption lies over the top of the box, whose bottom edge is the corner that matters; alone,
+ * when the original failed, it takes its own place. */
 .eg-magnifier__caption {
-  max-width: 202px;
+  position: absolute;
+  top: calc(var(--space-1) + 1px);
+  left: calc(var(--space-1) + 1px);
+  right: calc(var(--space-1) + 1px);
+  padding: 0 var(--space-1);
+  background: var(--color-surface);
+}
+
+.eg-magnifier--alone .eg-magnifier__caption {
+  position: static;
+  max-width: 146px;
 }
 
 .eg-calibration__hint,
@@ -433,11 +444,8 @@ textarea.eg-field__input {
   position: absolute;
   right: var(--space-2);
   bottom: var(--space-2);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
   margin: 0;
-  padding: var(--space-2);
+  padding: var(--space-1);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   background: var(--color-surface);
@@ -445,9 +453,9 @@ textarea.eg-field__input {
 }
 
 .eg-magnifier__box {
-  /* The 200 px stage inside a 1 px border. */
-  width: 202px;
-  height: 202px;
+  /* The 144 px stage inside a 1 px border. */
+  width: 146px;
+  height: 146px;
   border: 1px solid var(--color-border);
   background: var(--color-bg);
 }

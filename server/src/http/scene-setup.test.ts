@@ -422,6 +422,82 @@ describe('calibration (PRP-03, specs/06-grid-and-measurement.md §1, §2, specs/
     expect((await update(scene.id, { grid: { visible: false } })).grid).toEqual({ ...DEFAULTS, visible: false });
   });
 
+  it('attaches a first map to a map-less scene and calibrates it in one body; an unknown map is 400, not 409 (review)', async () => {
+    const session = await newSession();
+    const scene = await newScene(session.id);
+    const fresh = await uploaded(1000, 640);
+    const result = await update(scene.id, { map_image_id: fresh.id, grid: CALIBRATED });
+    expect(result.grid).toEqual({ ...DEFAULTS, ...CALIBRATED });
+    expect(await preset(fresh.id)).toEqual(result.grid);
+    const other = await newScene(session.id);
+    expectFailure(
+      await patch(`/api/scenes/${other.id}`, { map_image_id: 'f'.repeat(64), grid: { size: 50 } }),
+      400,
+      'reference_not_found',
+    );
+  });
+
+  it('refuses a size giving more than 2,000 squares across the map, storing nothing of the body (review)', async () => {
+    const session = await newSession();
+    const map = await withPreset();
+    const scene = await newScene(session.id, map.id);
+    const larger = await uploaded(500, 500);
+    const before = countRows(data.db);
+    // The map is 400 × 300: 0.1 px squares are 4,000 across; 1e-12 would never finish drawing.
+    for (const body of [
+      { name: 'Renamed', grid: { size: 0.1 } },
+      { name: 'Renamed', grid: { size: 1e-12 } },
+      { map_image_id: larger.id, grid: { size: 0.2 } },
+    ]) {
+      const response = await patch(`/api/scenes/${scene.id}`, body);
+      expectFailure(response, 400, 'validation_failed');
+      expect(response.json<ErrorEnvelope>().error.details).toEqual([
+        { path: '/grid/size', message: 'gives too many squares across the map' },
+      ]);
+    }
+    expect(countRows(data.db)).toEqual(before);
+    expect(ok<Scene>(await get(`/api/scenes/${scene.id}`))).toEqual(scene);
+    expect(await preset(map.id)).toEqual(PRESET);
+    // Columns alone too many for an uncalibrated scene are refused the same way; 2,000 exactly are allowed.
+    const plain = await newScene(session.id, (await uploaded(300, 300)).id);
+    expectFailure(await patch(`/api/scenes/${plain.id}`, { grid: { columns: 100_000 } }), 400, 'validation_failed');
+    expect((await update(plain.id, { grid: { size: 300 / 2000 } })).grid.size).toBe(300 / 2000);
+  });
+
+  it('keeps the preset as the last calibration saved, whichever scene of the map saved it (review)', async () => {
+    const session = await newSession();
+    const map = await uploaded(1000, 640);
+    const [one, two] = [await newScene(session.id, map.id), await newScene(session.id, map.id)];
+    const first = await update(one.id, { grid: CALIBRATED });
+    const second = await update(two.id, { grid: { size: 64, offset_x: 4, offset_y: 2 } });
+    expect(await preset(map.id)).toEqual(second.grid);
+    expect(ok<Scene>(await get(`/api/scenes/${one.id}`))).toEqual(first);
+    expect((await newScene(session.id, map.id)).grid).toEqual(second.grid);
+  });
+
+  it('answers a repeated identical calibration the same way, changing nothing more (review)', async () => {
+    const session = await newSession();
+    const map = await uploaded(1000, 640);
+    const scene = await newScene(session.id, map.id);
+    const first = await update(scene.id, { grid: CALIBRATED });
+    const rows = countRows(data.db);
+    const firstPreset = await preset(map.id);
+    expect(await update(scene.id, { grid: CALIBRATED })).toEqual(first);
+    expect(countRows(data.db)).toEqual(rows);
+    expect(await preset(map.id)).toEqual(firstPreset);
+  });
+
+  it('keeps a calibrated size when only the extent is sent: width ÷ columns applies only while there is no size (review)', async () => {
+    const session = await newSession();
+    const scene = await newScene(session.id, (await uploaded(1000, 640)).id);
+    await update(scene.id, { grid: { size: 40 } });
+    expect((await update(scene.id, { grid: { columns: 18, rows: 12 } })).grid).toMatchObject({
+      size: 40,
+      columns: 18,
+      rows: 12,
+    });
+  });
+
   it('writes the preset and the scene in one transaction: a failed scene write leaves the preset as it was', async () => {
     const session = await newSession();
     const map = await withPreset();

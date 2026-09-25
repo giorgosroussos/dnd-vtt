@@ -198,7 +198,23 @@ export function ScenePanel({ sceneId, name, uploadLimit }: { sceneId: string; na
 
   return (
     <div className="eg-scene">
-      <h1 className="eg-dm__heading">{name}</h1>
+      <div className="eg-scene__head">
+        <h1 className="eg-dm__heading">{name}</h1>
+        {/* One status region, always mounted, so a message is announced when it appears: after a
+          map upload, and after a save that closes the calibration panel (D-096). */}
+        <div role="status" className="eg-scene__progress">
+          {uploading ? (
+            <>
+              <progress max={100} value={percent} aria-label={t('sceneMap.uploading')} />
+              <span>{t('sceneMap.progress', { percent })}</span>
+            </>
+          ) : status === 'attached' ? (
+            <span>{t('sceneMap.attached')}</span>
+          ) : status === 'calibrated' ? (
+            <span>{t('calibration.saved')}</span>
+          ) : null}
+        </div>
+      </div>
       {failure ? <Notice>{failure}</Notice> : null}
       {mapFailedFor !== undefined && mapFailedFor === mapId ? <Notice>{t('sceneMap.loadFailed')}</Notice> : null}
       {scene ? (
@@ -231,18 +247,6 @@ export function ScenePanel({ sceneId, name, uploadLimit }: { sceneId: string; na
                     {t('sceneMap.replaceHint')}
                   </p>
                 ) : null}
-                <div role="status" className="eg-scene__progress">
-                  {uploading ? (
-                    <>
-                      <progress max={100} value={percent} aria-label={t('sceneMap.uploading')} />
-                      <span>{t('sceneMap.progress', { percent })}</span>
-                    </>
-                  ) : status === 'attached' ? (
-                    <span>{t('sceneMap.attached')}</span>
-                  ) : status === 'calibrated' ? (
-                    <span>{t('calibration.saved')}</span>
-                  ) : null}
-                </div>
               </form>
               <div className="eg-check">
                 <input

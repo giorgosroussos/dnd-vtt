@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import {
   CALIBRATION_FIELDS,
+  MAX_GRID_LINES_PER_AXIS,
   type Campaign,
   type DeletionSummary,
   type Grid,
@@ -287,7 +288,11 @@ export type SceneUpdateOutcome =
   | { outcome: 'updated'; scene: Scene; removedImages: string[] }
   | { outcome: 'not_found' }
   | { outcome: 'image_not_found' }
-  | { outcome: 'needs_map' };
+  | { outcome: 'needs_map' }
+  | { outcome: 'too_fine' };
+
+// Thrown inside the transaction so that everything the body wrote before it rolls back.
+class TooFine extends Error {}
 
 /**
  * Renames the scene and changes its setup, in one transaction (specs/02-architecture.md §5).
@@ -301,9 +306,23 @@ export type SceneUpdateOutcome =
  * (§5, Q-001, D-094); a scene without a map has no calibration (specs/06-grid-and-measurement.md
  * §1). The previous map is deleted when nothing references it any more (§7, Q-002); its
  * files are the caller's to remove. Nothing changes when the scene or the image does not
- * exist, or when a scene without a map is calibrated.
+ * exist, when a scene without a map is calibrated, or when the calibrated size would give more
+ * than MAX_GRID_LINES_PER_AXIS squares across the map (D-096).
  */
 export function updateScene(
+  db: Database.Database,
+  id: string,
+  fields: { name?: string | undefined; map_image_id?: string | undefined; grid?: SceneGridUpdate | undefined },
+): SceneUpdateOutcome {
+  try {
+    return transactUpdate(db, id, fields);
+  } catch (error) {
+    if (error instanceof TooFine) return { outcome: 'too_fine' };
+    throw error;
+  }
+}
+
+function transactUpdate(
   db: Database.Database,
   id: string,
   fields: { name?: string | undefined; map_image_id?: string | undefined; grid?: SceneGridUpdate | undefined },
@@ -352,8 +371,12 @@ export function updateScene(
       }
       if (calibration) {
         const mapId = current.map_image_id!;
-        const width = db.prepare('SELECT width FROM image WHERE id = ?').pluck().get(mapId) as number;
-        grid.size ??= width / grid.columns;
+        const image = db.prepare('SELECT width, height FROM image WHERE id = ?').get(mapId) as {
+          width: number;
+          height: number;
+        };
+        grid.size ??= image.width / grid.columns;
+        if (Math.max(image.width, image.height) / grid.size > MAX_GRID_LINES_PER_AXIS) throw new TooFine();
         updateGridPreset(db, mapId, { ...grid, size: grid.size });
       }
       db.prepare(

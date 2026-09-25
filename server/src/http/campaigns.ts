@@ -207,6 +207,11 @@ export function registerCampaigns(
       if (result.outcome === 'needs_map') {
         throw new ApiFailure(409, 'calibration_needs_map', 'A scene without a map has no calibration.');
       }
+      if (result.outcome === 'too_fine') {
+        throw new ApiFailure(400, 'validation_failed', 'The body does not match its schema.', {
+          details: [{ path: '/grid/size', message: 'gives too many squares across the map' }],
+        });
+      }
       removeImages(result.removedImages);
       return result.scene;
     },

@@ -51,6 +51,8 @@ const DEFAULT_GRID: Scene['grid'] = {
   rows: 20,
 };
 
+const CALIBRATION_KEYS = ['size', 'offset_x', 'offset_y', 'columns', 'rows'] as const;
+
 let counter = 0;
 const uuid = (): string => `00000000-0000-4000-8000-${String(++counter).padStart(12, '0')}`;
 
@@ -228,6 +230,24 @@ export class FakeServer {
     const scene = this.scenes.find((s) => s.id === id);
     if (!scene) return failure(404, 'not_found');
     const map = b.map_image_id as string | undefined;
+    // As the schema and D-094 refuse, before anything is changed: a calibration value of the
+    // wrong kind is a validation failure, and any calibration of a scene without a map is refused.
+    const grid = b.grid as Record<string, unknown> | undefined;
+    const calibrating = grid !== undefined && CALIBRATION_KEYS.some((field) => field in grid);
+    if (grid) {
+      for (const field of CALIBRATION_KEYS) {
+        if (!(field in grid)) continue;
+        const value = grid[field];
+        const whole = field === 'columns' || field === 'rows';
+        const valid =
+          typeof value === 'number' &&
+          Number.isFinite(value) &&
+          (field === 'size' ? value > 0 : true) &&
+          (whole ? Number.isInteger(value) && value >= 1 : true);
+        if (!valid) return failure(400, 'validation_failed');
+      }
+    }
+    if (calibrating && (map ?? scene.map_image_id) === null) return failure(409, 'calibration_needs_map');
     if (map !== undefined && map !== scene.map_image_id) {
       const image = this.images.find((each) => each.id === map);
       if (!image) return failure(400, 'reference_not_found');
@@ -241,12 +261,9 @@ export class FakeServer {
       if (previous !== null && !used(previous)) this.images = this.images.filter((each) => each.id !== previous);
     }
     if (typeof b.name === 'string') scene.name = b.name;
-    const grid = b.grid as Partial<Scene['grid']> | undefined;
     if (grid) {
       // As D-094 does: calibration merges over the grid and becomes the map's preset.
-      const calibrating = (['size', 'offset_x', 'offset_y', 'columns', 'rows'] as const).some((f) => f in grid);
-      if (calibrating && scene.map_image_id === null) return failure(409, 'calibration_needs_map');
-      scene.grid = { ...scene.grid, ...grid };
+      scene.grid = { ...scene.grid, ...(grid as Partial<Scene['grid']>) };
       const image = this.images.find((each) => each.id === scene.map_image_id);
       if (calibrating && image) {
         scene.grid.size ??= image.width / scene.grid.columns;

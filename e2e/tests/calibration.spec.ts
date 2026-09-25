@@ -131,6 +131,24 @@ test('known dimensions calibrate a map live, a reload keeps it, and a new scene 
 
   await page.getByRole('button', { name: 'Calibrate grid' }).click();
   await expect(calibrationPanel(page).getByLabel('Known dimensions')).toBeChecked();
+  // At 1,280 × 720 the whole canvas is on screen while calibrating, unscrolled, and the magnifier
+  // lies inside it (review H1, D-096).
+  const layout = await page.evaluate(() => {
+    window.scrollTo(0, 0);
+    const box = (selector: string) => document.querySelector(selector)!.getBoundingClientRect();
+    const canvas = box('main [role="application"]');
+    const magnifier = box('.eg-magnifier');
+    return {
+      viewport: [window.innerWidth, window.innerHeight],
+      canvas: { top: canvas.top, bottom: canvas.bottom, height: canvas.height },
+      inside: magnifier.top >= canvas.top && magnifier.bottom <= canvas.bottom && magnifier.left >= canvas.left,
+      scrolls: document.documentElement.scrollHeight > window.innerHeight,
+    };
+  });
+  expect(layout.viewport).toEqual([1280, 720]);
+  expect(layout.canvas.bottom).toBeLessThanOrEqual(720);
+  expect(layout.inside).toBe(true);
+  expect(layout.scrolls).toBe(false);
   await calibrationPanel(page).getByLabel('Columns').fill('25');
   await calibrationPanel(page).getByLabel('Rows').fill('18');
   // The overlay follows before anything is saved, out to the far lines.
@@ -140,19 +158,20 @@ test('known dimensions calibrate a map live, a reload keeps it, and a new scene 
   // The magnifier shows the original's far corner, with the drawn line and the overlay on it.
   const magnifier = page.getByRole('img', { name: 'Far corner of the map, magnified, with the grid' });
   await expect(magnifier).toBeVisible();
-  await expect(magnifier).toHaveAttribute('data-crop-x', '880');
+  await expect(magnifier).toHaveAttribute('data-crop-x', '920');
   expect(images).toContain(`/images/${map}/original`);
-  // Original x 960 is a drawn line: 80 px into the 120 px region, at 200 ÷ 120 magnifier px each.
+  // Original x 960 is a drawn line: 40 px into the 80 px region, at 144 ÷ 80 magnifier px each,
+  // read below the caption that lies over the top of the box.
   const corner = await magnifier.evaluate((element) => {
     const [mapLayer, gridLayer] = [...element.querySelectorAll('canvas')];
     const ratio = window.devicePixelRatio;
     const read = (canvas: HTMLCanvasElement, x: number, y: number) => [
       ...canvas.getContext('2d')!.getImageData(Math.round(x * ratio), Math.round(y * ratio), 1, 1).data,
     ];
-    const at = (80 * 200) / 120;
+    const at = (40 * 144) / 80;
     return {
-      line: read(mapLayer!, at + 1, 30),
-      overlay: Math.max(read(gridLayer!, at, 30)[3]!, read(gridLayer!, at + 1, 30)[3]!),
+      line: read(mapLayer!, at + 1, 100),
+      overlay: Math.max(read(gridLayer!, at, 100)[3]!, read(gridLayer!, at + 1, 100)[3]!),
     };
   });
   expect(corner.line.slice(0, 3)).toEqual(LINE);
@@ -199,7 +218,7 @@ test('the rectangle method measures N × N drawn squares dragged on the map, and
   await page.reload();
   await selectScene(page, { ...seeded, scene: 'Rectangle hall' });
   await page.getByRole('button', { name: 'Calibrate grid' }).click();
-  await calibrationPanel(page).getByLabel('Rectangle over squares').check();
+  await calibrationPanel(page).getByLabel('Rectangle', { exact: true }).check();
 
   // Zoomed in about the centre, as a DM would to drag precisely.
   await viewport(page).focus();
@@ -266,7 +285,7 @@ test('fine tuning keeps a decimal square size exactly, and the overlay lies on a
   await expectOverlayOnDrawnLines(page, drawn, [1, 13, 25], [1, 18]);
   await save(page);
   const saved = await gridOf(page, scene.id);
-  expect(saved).toMatchObject({ size: 37.5, offset_x: 12, offset_y: 7, columns: 27, rows: 19 });
+  expect(saved).toMatchObject({ size: 37.5, offset_x: 12, offset_y: 7, columns: 27, rows: 20 });
   expect(await presetOf(page, map)).toEqual(saved);
   await page.reload();
   await selectScene(page, { ...seeded, scene: 'Fine hall' });

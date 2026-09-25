@@ -1,4 +1,4 @@
-import type { Grid, Image } from '@emberglass/shared';
+import { MAX_GRID_LINES_PER_AXIS, type Grid, type Image } from '@emberglass/shared';
 
 // The geometry of the map canvas (specs/08-ux-journeys.md §3, specs/06-grid-and-measurement.md §2,
 // specs/03-domain-model.md §6, D-090), free of React and Konva so that it is tested on its own.
@@ -10,7 +10,7 @@ import type { Grid, Image } from '@emberglass/shared';
 
 export const CELL_PX = 64;
 // A grid finer than this many squares across one axis is not drawn line by line.
-export const MAX_LINES_PER_AXIS = 2000;
+export const MAX_LINES_PER_AXIS = MAX_GRID_LINES_PER_AXIS;
 
 export interface Size {
   width: number;

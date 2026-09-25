@@ -23,8 +23,8 @@ export interface Rect {
 /** The whole squares that cover the map at `size`, never fewer than one each way. */
 export function extentFor(original: Size, size: number): Pick<Grid, 'columns' | 'rows'> {
   return {
-    columns: Math.max(1, Math.round(original.width / size)),
-    rows: Math.max(1, Math.round(original.height / size)),
+    columns: Math.max(1, Math.ceil(original.width / size - 1e-9)),
+    rows: Math.max(1, Math.ceil(original.height / size - 1e-9)),
   };
 }
 
@@ -47,15 +47,24 @@ export function fromRectangle(rect: Rect, squares: number, original: Size): Cali
   return { size, offset_x: wrap(box.x, size), offset_y: wrap(box.y, size), ...extentFor(original, size) };
 }
 
-/** Fine tuning: the size and offsets as typed; the extent follows the size. */
+/**
+ * Fine tuning: the size as typed and the offsets wrapped into one square, which draws the same
+ * grid and keeps any offset within what the server takes (D-096); the extent follows the size.
+ */
 export function fromFine(original: Size, size: number, offsetX: number, offsetY: number): Calibration {
-  return { size, offset_x: offsetX, offset_y: offsetY, ...extentFor(original, size) };
+  return { size, offset_x: wrap(offsetX, size), offset_y: wrap(offsetY, size), ...extentFor(original, size) };
 }
 
-/** Where calibration starts: the scene's own grid, its size read as the overlay reads it (D-090). */
+/**
+ * Where calibration starts: the scene's own grid, its size read as the overlay reads it (D-090).
+ * A stored size too fine to draw, which only a request made outside this view can have stored,
+ * starts from the finest drawable size instead (D-096).
+ */
 export function initialCalibration(grid: Grid, original: Size): Calibration {
+  const stored = grid.size ?? original.width / grid.columns;
+  const finest = Math.max(original.width, original.height) / MAX_LINES_PER_AXIS;
   return {
-    size: grid.size ?? original.width / grid.columns,
+    size: drawableSize(stored, original) ? stored : Math.max(stored, finest),
     offset_x: grid.offset_x,
     offset_y: grid.offset_y,
     columns: grid.columns,
@@ -111,7 +120,7 @@ export function drawableSize(size: number | undefined, original: Size): size is 
 }
 
 /** The magnifier's box, in CSS pixels. */
-export const MAGNIFIER_PX = 200;
+export const MAGNIFIER_PX = 144;
 
 export interface CornerView {
   /** The region of the original shown, at its bottom-right corner. */
@@ -123,24 +132,31 @@ export interface CornerView {
   ys: number[];
 }
 
+// Counted, not stepped, and none at all past MAX_LINES_PER_AXIS, as the overlay does: a size too
+// small for floating point to step past can never loop (D-096).
 function linesIn(offset: number, size: number, from: number, to: number): number[] {
   const lines: number[] = [];
+  if (!(size > 0) || (to - from) / size > MAX_LINES_PER_AXIS) return lines;
   const first = from + wrap(offset - from, size);
-  for (let at = first; at <= to + 1e-9; at += size) lines.push(at);
+  for (let index = 0; index <= (to - from) / size + 1; index++) {
+    const at = first + index * size;
+    if (at > to + 1e-9) break;
+    lines.push(at);
+  }
   return lines;
 }
 
 /**
- * The far corner of the map, magnified: the bottom-right region the size of three squares,
- * between 48 and MAGNIFIER_PX original pixels a side and never more than the map, which is
- * where a size a fraction of a pixel wrong has drifted furthest from the first line
- * (specs/06-grid-and-measurement.md §1).
+ * The far corner of the map, magnified: the bottom-right region the size of two squares,
+ * between 40 and MAGNIFIER_PX original pixels a side and never more than the map, so the
+ * magnification is at least 1 × (at most 4 ×); that corner is where a size a fraction of a
+ * pixel wrong has drifted furthest from the first line (specs/06-grid-and-measurement.md §1).
  */
 export function cornerView(
   calibration: Pick<Calibration, 'size' | 'offset_x' | 'offset_y'>,
   original: Size,
 ): CornerView {
-  const side = Math.min(original.width, original.height, Math.max(48, Math.min(3 * calibration.size, MAGNIFIER_PX)));
+  const side = Math.min(original.width, original.height, Math.max(40, Math.min(2 * calibration.size, MAGNIFIER_PX)));
   const crop = { x: original.width - side, y: original.height - side, width: side, height: side };
   const zoom = MAGNIFIER_PX / side;
   const toBox = (from: number) => (at: number) => (at - from) * zoom;

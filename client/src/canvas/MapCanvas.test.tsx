@@ -286,7 +286,8 @@ describe('the DM rendering (specs/08-ux-journeys.md §8)', () => {
 describe('measuring a rectangle for calibration (PRP-03, specs/06-grid-and-measurement.md §1, D-094)', () => {
   // Konva reads the pointer from the event against the container, which jsdom places at 0, 0.
   function pointer(stage: Konva.Stage, type: 'pointerdown' | 'pointermove' | 'pointerup', x: number, y: number) {
-    const evt = new MouseEvent(type, { clientX: x, clientY: y, bubbles: true });
+    // A button is held from the press to the release, as in a browser.
+    const evt = new MouseEvent(type, { clientX: x, clientY: y, bubbles: true, buttons: type === 'pointerup' ? 0 : 1 });
     act(() => {
       stage.setPointersPositions(evt);
       stage.fire(type, { evt, target: stage });
@@ -329,6 +330,88 @@ describe('measuring a rectangle for calibration (PRP-03, specs/06-grid-and-measu
     pointer(stage, 'pointerdown', 300, 300);
     pointer(stage, 'pointerup', 301, 301);
     expect(onDraw).not.toHaveBeenCalled();
+  });
+
+  it('finishes the rectangle at the last point dragged when the release happens off the stage (review)', async () => {
+    const onDraw = vi.fn();
+    const { stage } = await draw({ grid: GRID, map: MAP, mode: 'dm', measure: { rect: undefined, onDraw } });
+    const [x, y, scale] = [stage.x(), stage.y(), stage.scaleX()];
+    pointer(stage, 'pointerdown', x + 100 * scale, y + 50 * scale);
+    pointer(stage, 'pointermove', x + 250 * scale, y + 200 * scale);
+    // Released over the panel above: only the window hears it.
+    act(() => {
+      window.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+    });
+    expect(onDraw).toHaveBeenCalledOnce();
+    expect((onDraw.mock.calls[0]![0] as { width: number }).width).toBeCloseTo(300, 6);
+    // Nothing follows the pointer afterwards, and the stage's own later release reports nothing more.
+    pointer(stage, 'pointermove', x + 300 * scale, y + 300 * scale);
+    pointer(stage, 'pointerup', x + 300 * scale, y + 300 * scale);
+    expect(onDraw).toHaveBeenCalledOnce();
+    expect(stage.findOne('.measure')).toBeUndefined();
+  });
+
+  it('ends a drag whose release nothing saw at the next move without a button, and a cancelled one reports nothing (review)', async () => {
+    const onDraw = vi.fn();
+    const { stage } = await draw({ grid: GRID, map: MAP, mode: 'dm', measure: { rect: undefined, onDraw } });
+    const [x, y, scale] = [stage.x(), stage.y(), stage.scaleX()];
+    pointer(stage, 'pointerdown', x + 100 * scale, y + 50 * scale);
+    pointer(stage, 'pointermove', x + 250 * scale, y + 200 * scale);
+    const unpressed = new MouseEvent('pointermove', { clientX: x, clientY: y, buttons: 0 });
+    act(() => {
+      stage.setPointersPositions(unpressed);
+      stage.fire('pointermove', { evt: unpressed, target: stage });
+    });
+    expect(onDraw).toHaveBeenCalledOnce();
+    pointer(stage, 'pointerdown', x + 100 * scale, y + 50 * scale);
+    pointer(stage, 'pointermove', x + 250 * scale, y + 200 * scale);
+    act(() => {
+      window.dispatchEvent(new MouseEvent('pointercancel'));
+    });
+    expect(onDraw).toHaveBeenCalledOnce();
+    expect(stage.findOne('.measure')).toBeUndefined();
+  });
+
+  it('ignores a drag too thin on either axis to be a rectangle (review)', async () => {
+    const onDraw = vi.fn();
+    const { stage } = await draw({ grid: GRID, map: MAP, mode: 'dm', measure: { rect: undefined, onDraw } });
+    pointer(stage, 'pointerdown', 100, 100);
+    pointer(stage, 'pointerup', 200, 102);
+    pointer(stage, 'pointerdown', 100, 100);
+    pointer(stage, 'pointerup', 102, 200);
+    expect(onDraw).not.toHaveBeenCalled();
+  });
+
+  it('shows the size in original pixels while dragging, over a dark halo, and says how to measure (review)', async () => {
+    const { view, stage } = await draw({
+      grid: GRID,
+      map: MAP,
+      mode: 'dm',
+      measure: { rect: undefined, onDraw: vi.fn() },
+    });
+    expect(view.textContent).toContain(t('canvas.helpMeasure'));
+    expect(view.textContent).not.toContain(t('canvas.help'));
+    const [x, y, scale] = [stage.x(), stage.y(), stage.scaleX()];
+    pointer(stage, 'pointerdown', x + 100 * scale, y + 50 * scale);
+    pointer(stage, 'pointermove', x + 250 * scale, y + 200 * scale);
+    const label = stage.findOne<Konva.Label>('.measure-size')!;
+    expect(label.getText().text()).toBe(t('canvas.measureSize', { width: '300', height: '300' }));
+    const halo = stage.findOne<Konva.Rect>('.measure-halo')!;
+    expect(halo.stroke()).toBe(CANVAS_COLOURS.halo);
+    expect(halo.zIndex()).toBeLessThan(stage.findOne<Konva.Rect>('.measure')!.zIndex());
+    pointer(stage, 'pointerup', x + 250 * scale, y + 200 * scale);
+    expect(stage.findOne('.measure-size')).toBeUndefined();
+  });
+
+  it('draws no rectangle once measuring ends, even one being dragged (review)', async () => {
+    const measure = { rect: { x: 200, y: 100, width: 300, height: 300 }, onDraw: vi.fn() };
+    const { stage } = await draw({ grid: GRID, map: MAP, mode: 'dm', measure });
+    pointer(stage, 'pointerdown', 100, 100);
+    pointer(stage, 'pointermove', 200, 200);
+    act(() => rendered!.rerender(createElement(MapCanvas, { grid: GRID, map: MAP, mode: 'dm' })));
+    expect(stage.findOne('.measure')).toBeUndefined();
+    expect(stage.draggable()).toBe(true);
+    expect(rendered!.container.textContent).toContain(t('canvas.help'));
   });
 
   it('pans again once measuring ends, and the player view never measures', async () => {

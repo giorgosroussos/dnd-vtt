@@ -93,7 +93,7 @@ function drag(stage: Konva.Stage, from: [number, number], to: [number, number]) 
     ['pointermove', to],
     ['pointerup', to],
   ] as const) {
-    const evt = new MouseEvent(kind, { ...at(point), bubbles: true });
+    const evt = new MouseEvent(kind, { ...at(point), bubbles: true, buttons: kind === 'pointerup' ? 0 : 1 });
     act(() => {
       stage.setPointersPositions(evt);
       stage.fire(kind, { evt, target: stage });
@@ -228,20 +228,37 @@ describe('the far-corner magnifier (specs/06-grid-and-measurement.md §1, specs/
     await calibrate(view);
     expect(images.requested).toEqual([imageFileUrl(map.id, 'display'), imageFileUrl(map.id, 'original')]);
     await settle();
+    expect(view.querySelector('.eg-magnifier__caption')!.textContent).toBe(t('calibration.magnifierCaption'));
     const box = view.querySelector<HTMLElement>('.eg-magnifier [role="img"]')!;
     expect(box.getAttribute('aria-label')).toBe(t('calibration.magnifier'));
     const corner = cornerStage()!.findOne<Konva.Image>('.corner')!;
     expect((corner.image() as HTMLImageElement).src).toBe(imageFileUrl(map.id, 'original'));
-    // 1000 ÷ 30 columns ≈ 33.3 px until calibrated: three squares, 100 px, at the far corner.
-    expect(corner.crop()).toEqual({ x: 900, y: 500, width: 100, height: 100 });
+    // 1000 ÷ 30 columns ≈ 33.3 px until calibrated: two squares, 66.7 px, at the far corner.
+    const side = 2000 / 30;
+    expect(corner.crop()).toEqual({ x: 1000 - side, y: 600 - side, width: side, height: side });
     await type(field(view, t('calibration.columns')), '25');
-    // 40 px squares: a 120 px region, lines at 880, 920, 960, 1000 in it.
-    expect(box.dataset.cropX).toBe('880');
-    const zoom = MAGNIFIER_PX / 120;
+    // 40 px squares: an 80 px region, lines at 920, 960, 1000 in it.
+    expect(box.dataset.cropX).toBe('920');
+    const zoom = MAGNIFIER_PX / 80;
     const xs = cornerStage()!
       .find<Konva.Line>('.corner-line-x')
       .map((line) => line.points()[0]);
-    expect(xs).toEqual([0, 40, 80, 120].map((at) => at * zoom));
+    expect(xs).toEqual([0, 40, 80].map((at) => at * zoom));
+  });
+
+  it('says, politely announced, that the original is loading, drawing no grid over nothing meanwhile (review)', async () => {
+    images.held.add(imageFileUrl(map.id, 'original'));
+    const view = await open();
+    await calibrate(view);
+    const caption = view.querySelector('.eg-magnifier__caption')!;
+    expect(caption.textContent).toBe(t('calibration.magnifierLoading'));
+    expect(caption.getAttribute('aria-live')).toBe('polite');
+    expect(cornerStage()!.findOne('.corner')).toBeUndefined();
+    expect(
+      cornerStage()!
+        .find('.corner-line')
+        .every((line) => !line.isVisible()),
+    ).toBe(true);
   });
 
   it('says so when the original cannot be loaded', async () => {
@@ -250,6 +267,9 @@ describe('the far-corner magnifier (specs/06-grid-and-measurement.md §1, specs/
     await calibrate(view);
     await settle();
     expect(view.querySelector('.eg-magnifier__caption')!.textContent).toBe(t('calibration.magnifierFailed'));
+    // No grid over nothing: the box is gone, the caption says why.
+    expect(view.querySelector('.eg-magnifier [role="img"]')).toBeNull();
+    expect(cornerStage()).toBeUndefined();
   });
 });
 
@@ -309,6 +329,80 @@ describe('cancelling, refusals and the map while calibrating', () => {
   });
 });
 
+describe('review fixes (D-096)', () => {
+  it('refuses to open while a map upload runs, so a draft is never measured on the map being replaced', async () => {
+    let release: (reply?: Reply) => void = () => {};
+    server.before = (call) =>
+      call.path === '/api/images' ? new Promise<Reply | undefined>((resolve) => (release = resolve)) : undefined;
+    const view = await open();
+    const input = view.querySelector<HTMLInputElement>('input[type="file"]')!;
+    Object.defineProperty(input, 'files', { configurable: true, value: [new File([new Uint8Array(10)], 'm.png')] });
+    act(() => {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await submit(view.querySelector('form'));
+    const calibrateButton = button(view, t('calibration.open'))!;
+    expect(calibrateButton.getAttribute('aria-disabled')).toBe('true');
+    await click(calibrateButton);
+    expect(view.querySelector('.eg-calibration')).toBeNull();
+    release();
+    await settle();
+  });
+
+  it('keeps one status region mounted through calibrating, so "Grid calibrated." is announced where it appears', async () => {
+    const view = await open();
+    const region = view.querySelector('[role="status"]');
+    expect(region).not.toBeNull();
+    await calibrate(view);
+    expect(view.querySelector('[role="status"]')).toBe(region);
+    await click(button(view, t('calibration.save')));
+    expect(view.querySelector('[role="status"]')).toBe(region);
+    expect(region!.textContent).toBe(t('calibration.saved'));
+  });
+
+  it("describes each field by the method's hint, the error after it", async () => {
+    const view = await open();
+    await calibrate(view);
+    await click(radio(view, t('calibration.method.fine')));
+    const size = field(view, t('calibration.size'));
+    const [hint] = size.getAttribute('aria-describedby')!.split(' ');
+    expect(document.getElementById(hint!)!.textContent).toBe(t('calibration.hint.fine'));
+    await type(size, 'abc');
+    const ids = size.getAttribute('aria-describedby')!.split(' ');
+    expect(ids).toHaveLength(2);
+    expect(document.getElementById(ids[1]!)!.textContent).toBe(t('calibration.error.decimal'));
+  });
+
+  it('cancels on Escape, sending nothing and returning focus to Calibrate grid', async () => {
+    const view = await open();
+    await calibrate(view);
+    const columns = field(view, t('calibration.columns'));
+    await type(columns, '25');
+    key(columns, 'Escape');
+    await settle();
+    expect(view.querySelector('.eg-calibration')).toBeNull();
+    expect(patches()).toEqual([]);
+    expect(document.activeElement).toBe(button(view, t('calibration.open')));
+  });
+
+  it('refuses in the fake server as the real one does: before a rename, and a value of the wrong kind (parity with scene-setup.test.ts)', async () => {
+    scene.map_image_id = null;
+    const send = (body: unknown) =>
+      fetch(`/api/scenes/${scene.id}`, { method: 'PATCH', body: JSON.stringify(body) }).then(async (response) => ({
+        status: response.status,
+        body: (await response.json()) as { error?: { code: string } },
+      }));
+    const refused = await send({ name: 'Renamed', grid: { size: 50 } });
+    expect([refused.status, refused.body.error?.code]).toEqual([409, 'calibration_needs_map']);
+    expect(server.scenes[0]!.name).toBe('Cave');
+    scene.map_image_id = map.id;
+    for (const grid of [{ size: '70.4' }, { size: 0 }, { columns: 2.5 }, { offset_x: null }]) {
+      expect((await send({ grid })).status, JSON.stringify(grid)).toBe(400);
+    }
+    expect(server.scenes[0]!.grid.size).toBeNull();
+  });
+});
+
 describe('replacing a calibrated map (D-093)', () => {
   const png = () => new File([new Uint8Array(100)], 'map.png', { type: 'image/png' });
   function choose(view: HTMLElement) {
@@ -335,6 +429,19 @@ describe('replacing a calibrated map (D-093)', () => {
     expect(server.writes()).toEqual([]);
     expect(server.scenes[0]).toEqual(before);
     expect(document.activeElement).toBe(button(view, t('sceneMap.replace')));
+  });
+
+  it('changes nothing when the confirmation is dismissed with Escape (review)', async () => {
+    scene.grid = { ...scene.grid, size: 40 };
+    const view = await open();
+    choose(view);
+    await submit(view.querySelector('form'));
+    act(() => {
+      view.querySelector('dialog')!.dispatchEvent(new Event('cancel', { cancelable: true }));
+    });
+    await settle();
+    expect(view.querySelector('dialog')).toBeNull();
+    expect(server.writes()).toEqual([]);
   });
 
   it('replaces the map once confirmed', async () => {

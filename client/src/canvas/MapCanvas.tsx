@@ -1,9 +1,9 @@
 import { useEffect, useEffectEvent, useId, useRef, useState, type KeyboardEvent } from 'react';
 import type Konva from 'konva';
-import { Group, Image as KonvaImage, Layer, Line, Rect, Stage } from 'react-konva';
+import { Group, Image as KonvaImage, Label, Layer, Line, Rect, Stage, Tag, Text } from 'react-konva';
 import { imageFileUrl, type Grid, type Image } from '@emberglass/shared';
 import { Button } from '../ui/Button.js';
-import { normalise, type Rect as Box } from './calibration.js';
+import { formatDecimal, normalise, type Rect as Box } from './calibration.js';
 import { t } from '../ui/messages.js';
 import {
   cameraForKey,
@@ -81,6 +81,11 @@ function useViewport(): [React.RefObject<HTMLDivElement | null>, Size] {
  * player view will build it from what its snapshot carries (LIV-03), never the DM's record.
  */
 export type CanvasMap = Pick<Image, 'id' | 'width' | 'height' | 'variants'>;
+
+interface Drag {
+  start: { x: number; y: number };
+  end: { x: number; y: number };
+}
 
 /** A rectangle measured on the map during calibration, in the original image's pixels. */
 export interface Measure {
@@ -164,7 +169,14 @@ export function MapCanvas({
   const opacity = overlayOpacity(mode, grid.visible);
   const dm = mode === 'dm';
   const measuring = dm && measure !== undefined && info !== undefined;
-  const [dragging, setDragging] = useState<{ start: { x: number; y: number }; end: { x: number; y: number } }>();
+  // The drag being measured: the ref is what the handlers read, the state what is drawn, so a
+  // release seen twice (by the stage and by the window) reports once.
+  const dragRef = useRef<Drag>(undefined);
+  const [dragging, setDraggingState] = useState<Drag>();
+  const setDragging = (drag: Drag | undefined) => {
+    dragRef.current = drag;
+    setDraggingState(drag);
+  };
 
   function onKeyDown(event: KeyboardEvent) {
     if (event.altKey || event.ctrlKey || event.metaKey) return;
@@ -193,47 +205,87 @@ export function MapCanvas({
   const worldPoint = (event: Konva.KonvaEventObject<PointerEvent>) =>
     event.target.getStage()?.getRelativePointerPosition();
 
+  // The pointer is captured on press, so a release over the panel above still reaches the stage;
+  // a release the stage never sees ends the drag from the window, with the last point dragged to
+  // (D-096).
   function onMeasureDown(event: Konva.KonvaEventObject<PointerEvent>) {
     const at = worldPoint(event);
-    if (at) setDragging({ start: at, end: at });
+    if (!at) return;
+    const content = event.target.getStage()?.content;
+    if (typeof event.evt.pointerId === 'number') content?.setPointerCapture?.(event.evt.pointerId);
+    setDragging({ start: at, end: at });
   }
 
   function onMeasureMove(event: Konva.KonvaEventObject<PointerEvent>) {
+    const current = dragRef.current;
+    if (!current) return;
+    // No button held: the release happened where nothing saw it.
+    if (event.evt.buttons === 0) return finishMeasure(undefined);
     const at = worldPoint(event);
-    if (at) setDragging((current) => current && { ...current, end: at });
+    if (at) setDragging({ ...current, end: at });
   }
 
-  function onMeasureUp(event: Konva.KonvaEventObject<PointerEvent>) {
-    const at = worldPoint(event) ?? dragging?.end;
-    const current = dragging;
+  function finishMeasure(at: { x: number; y: number } | undefined) {
+    const current = dragRef.current;
     setDragging(undefined);
-    if (!current || !at || !info || !measure) return;
+    if (!current || !info || !measure) return;
+    const end = at ?? current.end;
     const box = normalise({
       x: current.start.x,
       y: current.start.y,
-      width: at.x - current.start.x,
-      height: at.y - current.start.y,
+      width: end.x - current.start.x,
+      height: end.y - current.start.y,
     });
     if (box.width * camera.scale < MIN_RECT_PX || box.height * camera.scale < MIN_RECT_PX) return;
     measure.onDraw(scaled(box, info.original.width / info.display.width));
   }
 
-  // The rectangle being dragged, or the one last measured, in world pixels.
-  const shownRect: Box | undefined = dragging
-    ? normalise({
-        x: dragging.start.x,
-        y: dragging.start.y,
-        width: dragging.end.x - dragging.start.x,
-        height: dragging.end.y - dragging.start.y,
-      })
-    : measuring && measure.rect
-      ? scaled(measure.rect, info.display.width / info.original.width)
+  const releasedElsewhere = useEffectEvent(() => finishMeasure(undefined));
+  const cancelled = useEffectEvent(() => setDragging(undefined));
+  const isDragging = dragging !== undefined;
+  useEffect(() => {
+    if (!isDragging) return;
+    const up = () => releasedElsewhere();
+    const cancel = () => cancelled();
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', cancel);
+    return () => {
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', cancel);
+    };
+  }, [isDragging]);
+
+  // The rectangle being dragged, or the one last measured, in world pixels; none once measuring ends.
+  const shownRect: Box | undefined = !measuring
+    ? undefined
+    : dragging
+      ? normalise({
+          x: dragging.start.x,
+          y: dragging.start.y,
+          width: dragging.end.x - dragging.start.x,
+          height: dragging.end.y - dragging.start.y,
+        })
+      : measure.rect
+        ? scaled(measure.rect, info.display.width / info.original.width)
+        : undefined;
+  // While dragging, the rectangle's size in original pixels beside it, kept upright and readable at any zoom.
+  const dragSize =
+    measuring && dragging && shownRect
+      ? t('canvas.measureSize', {
+          width: formatDecimal((shownRect.width * info.original.width) / info.display.width),
+          height: formatDecimal((shownRect.height * info.original.width) / info.display.width),
+        })
       : undefined;
 
   const handlers = !dm
     ? {}
     : measuring
-      ? { onWheel, onPointerDown: onMeasureDown, onPointerMove: onMeasureMove, onPointerUp: onMeasureUp }
+      ? {
+          onWheel,
+          onPointerDown: onMeasureDown,
+          onPointerMove: onMeasureMove,
+          onPointerUp: (event: Konva.KonvaEventObject<PointerEvent>) => finishMeasure(worldPoint(event) ?? undefined),
+        }
       : { onWheel, onDragMove: onDrag, onDragEnd: onDrag };
 
   const centre = { x: viewport.width / 2, y: viewport.height / 2 };
@@ -284,6 +336,15 @@ export function MapCanvas({
         ) : null}
         {shownRect ? (
           <Rect
+            name="measure-halo"
+            {...shownRect}
+            stroke={CANVAS_COLOURS.halo}
+            strokeWidth={4}
+            strokeScaleEnabled={false}
+          />
+        ) : null}
+        {shownRect ? (
+          <Rect
             name="measure"
             {...shownRect}
             stroke={CANVAS_COLOURS.measure}
@@ -291,6 +352,19 @@ export function MapCanvas({
             dash={[6, 4]}
             strokeScaleEnabled={false}
           />
+        ) : null}
+        {shownRect && dragSize ? (
+          <Label
+            name="measure-size"
+            x={shownRect.x}
+            y={shownRect.y}
+            offsetY={24}
+            scaleX={1 / camera.scale}
+            scaleY={1 / camera.scale}
+          >
+            <Tag fill={CANVAS_COLOURS.halo} cornerRadius={3} />
+            <Text text={dragSize} fill={CANVAS_COLOURS.grid} fontSize={13} padding={4} />
+          </Label>
         ) : null}
       </Layer>
     </Stage>
@@ -325,7 +399,7 @@ export function MapCanvas({
           {t('canvas.fit')}
         </Button>
         <p id={helpId} className="eg-canvas__help">
-          {t('canvas.help')}
+          {measuring ? t('canvas.helpMeasure') : t('canvas.help')}
         </p>
       </div>
       <div

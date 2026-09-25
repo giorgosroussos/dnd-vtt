@@ -81,6 +81,12 @@ export const SceneGridUpdateSchema = Type.Object(
   { ...strict, minProperties: 1 },
 );
 
+/**
+ * The most squares a calibrated grid may have across either axis of its map: finer than this,
+ * the overlay is not drawn line by line and the server refuses the size (D-090, D-096).
+ */
+export const MAX_GRID_LINES_PER_AXIS = 2000;
+
 /** The fields of a grid update that calibrate it. */
 export const CALIBRATION_FIELDS = ['size', 'offset_x', 'offset_y', 'columns', 'rows'] as const;
 
