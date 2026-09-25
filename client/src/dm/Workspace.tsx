@@ -20,7 +20,7 @@ import { SceneTree } from './tree/SceneTree.js';
 // players room means the server no longer knows this browser's session (a PIN change
 // or a sign-out elsewhere dropped its socket), so the DM view goes back to the PIN form.
 export function Workspace({ mainId, onSignedOut }: { mainId: string; onSignedOut?: () => void }) {
-  const live = useLive();
+  const live = useLive('dm');
   const [selected, setSelected] = useState<Scene>();
   const [settings, setSettings] = useState<Settings>();
   const [failure, setFailure] = useState<string>();

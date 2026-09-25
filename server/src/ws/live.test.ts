@@ -1,4 +1,4 @@
-import type { AddressInfo } from 'node:net';
+import { connect as connectTcp, type AddressInfo, type Socket as TcpSocket } from 'node:net';
 import type { FastifyInstance, InjectOptions, LightMyRequestResponse } from 'fastify';
 import sharp from 'sharp';
 import { io as connectClient, type Socket as ClientSocket } from 'socket.io-client';
@@ -8,6 +8,7 @@ import {
   ErrorEnvelopeSchema,
   PlayerSnapshotSchema,
   PlayerTokenSchema,
+  PLAYER_VIEW_AUTH,
   SOCKET_CHANNELS,
   SOCKET_PATH,
   type CommandAck,
@@ -26,6 +27,7 @@ import { createVersionCounter, type VersionCounter } from '../domain/version.js'
 import { buildTestApp, createTestData, dmCookie, setUpPin, type TestData } from '../http/testing/app.js';
 import { type LogFields, type Logger } from '../log/logger.js';
 import { compileSchema } from '../validation.js';
+import { isViteUpgrade } from './live.js';
 
 // LIV-01: the WebSocket rooms, snapshots and versions, against a real SQLite file and a real
 // Socket.io client over a real port (specs/04-live-sync.md §1, §2, §4, §5, §6,
@@ -91,7 +93,10 @@ interface Connected {
 }
 
 /** A client as a browser on this server would connect: its Origin is the server unless told otherwise. */
-async function connect(headers: Record<string, string | undefined> = {}): Promise<Connected> {
+async function connect(
+  headers: Record<string, string | undefined> = {},
+  auth: Record<string, unknown> = {},
+): Promise<Connected> {
   const extraHeaders: Record<string, string> = {};
   for (const [name, value] of Object.entries({ origin: url, ...headers }))
     if (value !== undefined) extraHeaders[name] = value;
@@ -101,6 +106,7 @@ async function connect(headers: Record<string, string | undefined> = {}): Promis
     reconnection: false,
     forceNew: true,
     extraHeaders,
+    auth,
   });
   clients.push(socket);
   const events: EventEnvelope[] = [];
@@ -243,6 +249,39 @@ describe('rooms from the DM session only (specs/04-live-sync.md §1, Q-046)', ()
     clients.push(socket);
     const first = await new Promise<SnapshotEvent>((resolve) => socket.once(SOCKET_CHANNELS.event, resolve));
     expect(first.payload.role).toBe('players');
+  });
+});
+
+describe('the player view in a browser holding a DM session (specs/07-security-and-access.md §3, D-105)', () => {
+  it('puts a player view with the DM cookie in players, with visible tokens only', async () => {
+    const live = await liveScene();
+    const tv = await connect({ cookie }, { ...PLAYER_VIEW_AUTH });
+    expect(tv.first.payload.role).toBe('players');
+    expect(isPlayerSnapshot(tv.first.payload), JSON.stringify(isPlayerSnapshot.errors)).toBe(true);
+    const text = JSON.stringify(tv.first.payload);
+    for (const secret of [live.hidden.id, live.lurker.image_id, 'Lurker', live.scene.id])
+      expect(text).not.toContain(secret);
+    expect((await requestSnapshot(tv)).payload.role).toBe('players');
+    expect(app.live.count('dm')).toBe(0);
+  });
+
+  it('gives that socket no DM rights: its commands are refused, and ending the session does not touch it', async () => {
+    const tv = await connect({ cookie }, { ...PLAYER_VIEW_AUTH });
+    const dm = await connect({ cookie });
+    expect(((await command(tv.socket, { type: 'undo', payload: {} })) as ErrorEnvelope).error.code).toBe('forbidden');
+    const dmGone = disconnected(dm.socket);
+    const tvGone = disconnected(tv.socket);
+    ok(await inject({ method: 'DELETE', url: '/api/auth' }), 204);
+    expect(await within(dmGone, 1_000)).toBe('io server disconnect');
+    expect(await within(tvGone, 200)).toBe('pending');
+  });
+
+  it('never raises a socket: a DM hint or any other view without a session stays in players', async () => {
+    for (const hint of [{ view: 'dm' }, { view: 'player ' }, { view: ['player'] }, { role: 'dm' }]) {
+      expect((await connect({}, hint)).first.payload.role, JSON.stringify(hint)).toBe('players');
+    }
+    // A hint that is not the player view's leaves a DM cookie a DM.
+    expect((await connect({ cookie }, { view: 'dm' })).first.payload.role).toBe('dm');
   });
 });
 
@@ -535,5 +574,167 @@ describe('connection logs (specs/07-security-and-access.md §8, Q-041, Q-044)', 
     const text = JSON.stringify(lines);
     for (const secret of [cookie.split('=')[1]!, other.split('=')[1]!, 'emberglass_dm'])
       expect(text).not.toContain(secret);
+  });
+});
+
+// --- abuse limits and transport (LIV-01 review, D-106) ------------------------------------------
+
+/** A raw HTTP upgrade request; resolves with what the server answered once it closed the socket. */
+function rawUpgrade(
+  path: string,
+  headers: Record<string, string> = {},
+): { socket: TcpSocket; closed: Promise<string> } {
+  const port = (app.server.address() as AddressInfo).port;
+  const socket = connectTcp(port, '127.0.0.1');
+  let received = '';
+  socket.on('data', (chunk) => (received += chunk.toString()));
+  const closed = new Promise<string>((resolve) => socket.on('close', () => resolve(received)));
+  socket.on('error', () => {});
+  const lines = [
+    `GET ${path} HTTP/1.1`,
+    'Host: 127.0.0.1',
+    'Connection: Upgrade',
+    'Upgrade: websocket',
+    'Sec-WebSocket-Version: 13',
+    'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==',
+    ...Object.entries(headers).map(([name, value]) => `${name}: ${value}`),
+  ];
+  socket.write(`${lines.join('\r\n')}\r\n\r\n`);
+  return { socket, closed };
+}
+
+describe('upgrades that are not the live socket (review F1)', () => {
+  it('answers an upgrade to any other path 404 and closes it at once', async () => {
+    const { closed } = rawUpgrade('/anything');
+    const answer = await within(closed, 2_000);
+    expect(answer).toMatch(/^HTTP\/1\.1 404/);
+  });
+
+  it('still closes the server with a stray upgrade having been sent', async () => {
+    const { socket } = rawUpgrade('/x');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(await within(app.close(), 5_000)).not.toBe('pending');
+    socket.destroy();
+    // afterEach closes it again, which Fastify allows.
+  });
+
+  it('leaves Vite hot-reload upgrades to Vite in development only', () => {
+    const request = (protocol?: string) =>
+      ({ headers: protocol ? { 'sec-websocket-protocol': protocol } : {} }) as never;
+    expect(isViteUpgrade(request('vite-hmr'))).toBe(true);
+    expect(isViteUpgrade(request('vite-ping'))).toBe(true);
+    expect(isViteUpgrade(request('chat'))).toBe(false);
+    expect(isViteUpgrade(request())).toBe(false);
+  });
+
+  it('serves WebSocket only: a long-polling request is refused', async () => {
+    const response = await fetch(`${url}${SOCKET_PATH}/?EIO=4&transport=polling`, { headers: { origin: url } });
+    expect(response.status).toBe(400);
+  });
+
+  it('closes a socket that sends a message over 64 KiB, changing nothing', async () => {
+    const dm = await connect({ cookie });
+    const gone = disconnected(dm.socket);
+    dm.socket.emit(SOCKET_CHANNELS.command, { type: 'undo', payload: { padding: 'x'.repeat(70 * 1024) } });
+    expect(await within(gone, 2_000)).toBe('transport close');
+    expect(data.db.prepare('SELECT live_scene_id FROM settings').pluck().get()).toBeNull();
+  });
+});
+
+describe('snapshot requests (review F2)', () => {
+  it('sends a requested snapshot to the asking socket alone', async () => {
+    const asking = await connect();
+    const other = await connect();
+    const dm = await connect({ cookie });
+    await requestSnapshot(asking);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(asking.events).toHaveLength(2);
+    expect(other.events).toHaveLength(1);
+    expect(dm.events).toHaveLength(1);
+  });
+
+  it('serves a burst of requests as at most one snapshot per interval, without delaying other sockets', async () => {
+    await liveScene();
+    const flooding = await connect();
+    const dm = await connect({ cookie });
+    for (let i = 0; i < 500; i++) flooding.socket.emit(SOCKET_CHANNELS.snapshot);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const started = Date.now();
+    expect((await requestSnapshot(dm)).payload.role).toBe('dm');
+    expect(Date.now() - started).toBeLessThan(500);
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    // The connection's snapshot, the first request's, and one for everything merged after it.
+    expect(flooding.events).toHaveLength(3);
+    expect(version.current()).toBe(1);
+  });
+
+  it('drops a socket that leaves its messages unread instead of buffering for it', async () => {
+    await app.close();
+    await start({ liveLimits: { snapshotIntervalMs: 0, maxPendingPackets: 4 } });
+    await liveScene();
+    const reader = await connect();
+    const gone = disconnected(reader.socket);
+    // Stop reading at the TCP level, then keep asking.
+    const engine = reader.socket.io.engine as unknown as { transport: { ws: { _socket: TcpSocket } } };
+    engine.transport.ws._socket.pause();
+    const flood = setInterval(() => {
+      for (let i = 0; i < 200; i++) reader.socket.emit(SOCKET_CHANNELS.snapshot);
+    }, 10);
+    try {
+      await vi.waitFor(() => expect(lines.some((line) => line.event === 'ws.overloaded')).toBe(true), {
+        timeout: 20_000,
+      });
+    } finally {
+      clearInterval(flood);
+      engine.transport.ws._socket.resume();
+    }
+    expect(await within(gone, 5_000)).not.toBe('pending');
+    expect(app.live.count('players')).toBe(0);
+  });
+});
+
+describe('resynchronising after the live scene changed while a client was away (specs/04-live-sync.md §6)', () => {
+  it('gives a client that reconnects by itself the snapshot of the new state', async () => {
+    const live = await liveScene();
+    data.db.prepare('UPDATE settings SET live_scene_id = NULL').run();
+    const socket = connectClient(url, {
+      path: SOCKET_PATH,
+      transports: ['websocket'],
+      forceNew: true,
+      reconnectionDelay: 50,
+      reconnectionDelayMax: 100,
+      extraHeaders: { origin: url },
+    });
+    clients.push(socket);
+    const snapshots: PlayerSnapshot[] = [];
+    socket.on(SOCKET_CHANNELS.event, (event: SnapshotEvent) => snapshots.push(event.payload as PlayerSnapshot));
+    await vi.waitFor(() => expect(snapshots).toHaveLength(1));
+    expect(snapshots[0]!.scene).toBeNull();
+    // The transport is lost (sleep, Wi-Fi), and the scene goes live before the client is back.
+    for (const server of app.live.io.sockets.sockets.values()) server.conn.close();
+    data.db.prepare('UPDATE settings SET live_scene_id = ?').run(live.scene.id);
+    await vi.waitFor(() => expect(snapshots).toHaveLength(2), { timeout: 5_000 });
+    expect(snapshots[1]!.scene?.tokens.map((token) => token.id)).toEqual(live.visible.map((token) => token.id));
+  });
+});
+
+describe('connection log limits (review F4, G-006)', () => {
+  it('logs a bounded number of connection lines per address and summarises the rest', async () => {
+    await app.close();
+    await start({ liveLimits: { connectionLines: { perAddress: 3, total: 100, windowMs: 60_000 } } });
+    for (let i = 0; i < 5; i++) {
+      const client = await connect();
+      const gone = disconnected(client.socket);
+      client.socket.disconnect();
+      await gone;
+    }
+    await vi.waitFor(() => expect(app.live.count('players')).toBe(0));
+    expect(
+      lines.filter((line) => line.event.startsWith('ws.connected') || line.event === 'ws.disconnected'),
+    ).toHaveLength(3);
+    await app.close();
+    const summary = lines.find((line) => line.event === 'ws.lines_dropped');
+    expect(summary?.fields?.dropped).toBe(7);
+    await start();
   });
 });

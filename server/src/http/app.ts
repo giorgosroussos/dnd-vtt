@@ -15,7 +15,7 @@ import { registerTokens } from './tokens.js';
 import { imageFileRemover, registerImages } from './images.js';
 import { imagesDirOf, prepareImagesDir } from '../images/store.js';
 import type { VersionCounter } from '../domain/version.js';
-import { attachLiveSocket, type LiveSocket, type LiveSocketOptions } from '../ws/live.js';
+import { attachLiveSocket, isViteUpgrade, type LiveSocket, type LiveSocketOptions } from '../ws/live.js';
 import { createFailureLog, installErrorHandling, sendFailure, type RejectedLineLimits } from './errors.js';
 
 // Where the client comes from: the production build, or Vite in middleware mode
@@ -41,6 +41,8 @@ export interface AppOptions {
   version?: VersionCounter | undefined;
   /** Command validation and application; tests only replace them (LIV-01). */
   commands?: LiveSocketOptions['commands'];
+  /** The live socket's abuse limits; tests only lower them (D-106). */
+  liveLimits?: Pick<LiveSocketOptions, 'snapshotIntervalMs' | 'maxPendingPackets' | 'connectionLines'> | undefined;
 }
 
 declare module 'fastify' {
@@ -72,6 +74,7 @@ export async function buildApp({
   rejectedLines,
   version,
   commands,
+  liveLimits,
 }: AppOptions): Promise<FastifyInstance> {
   const failures = createFailureLog(logger, rejectedLines);
   const app = Fastify({
@@ -87,7 +90,15 @@ export async function buildApp({
   app.setValidatorCompiler(({ schema }) => compileSchema(schema));
   installErrorHandling(app, failures);
   const auth = registerAuth(app, { db, logger, now, pinHashParams });
-  const live = attachLiveSocket(app, { db, logger, auth, version, commands });
+  const live = attachLiveSocket(app, {
+    db,
+    logger,
+    auth,
+    version,
+    commands,
+    ...liveLimits,
+    foreignUpgrade: client.kind === 'dev' ? isViteUpgrade : undefined,
+  });
   const imagesDir = imagesDirOf(dataDir);
   const { unreferenced, orphans } = prepareImagesDir(db, imagesDir);
   if (unreferenced.length > 0) {

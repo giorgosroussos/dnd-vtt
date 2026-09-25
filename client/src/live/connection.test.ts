@@ -20,7 +20,7 @@ beforeEach(() => {
   statuses = [];
   snapshots = [];
   events = [];
-  close = connectLive({
+  close = connectLive('player', {
     onStatus: (status) => statuses.push(status),
     onSnapshot: (snapshot, version) => snapshots.push({ snapshot, version }),
     onEvent: (e) => events.push(e.version),
@@ -85,15 +85,56 @@ describe('live connection', () => {
   });
 
   it('connects again at once when the server dropped the socket, so the server can decide its room again', () => {
-    socket.open({ role: 'dm', scene: null }, 1);
+    socket.open(idle, 1);
     socket.drop('io server disconnect');
     expect(socket.connects).toBe(1);
     expect(statuses.at(-1)).toBe('reconnecting');
   });
 
-  it('reports a failed connection attempt as reconnecting', () => {
-    (socket as unknown as { fire(event: string): void }).fire('connect_error');
-    expect(statuses).toEqual(['connecting', 'reconnecting']);
+  it('reports a failed attempt as still connecting before any connection, and as reconnecting after one', () => {
+    const fire = (socket as unknown as { fire(event: string): void }).fire.bind(socket);
+    fire('connect_error');
+    expect(statuses).toEqual(['connecting', 'connecting']);
+    socket.open(idle, 1);
+    socket.drop('transport close');
+    fire('connect_error');
+    expect(statuses.slice(2)).toEqual(['connected', 'reconnecting', 'reconnecting']);
+  });
+
+  it('sends no snapshot request while disconnected, and none late after reconnecting', () => {
+    vi.useFakeTimers();
+    socket.open(idle, 1);
+    socket.deliver(event(3));
+    expect(socket.snapshotRequests()).toBe(1);
+    socket.drop('transport close');
+    vi.advanceTimersByTime(SNAPSHOT_RETRY_MS * 3);
+    expect(socket.snapshotRequests()).toBe(1);
+    socket.open(idle, 1);
+    vi.advanceTimersByTime(SNAPSHOT_RETRY_MS * 3);
+    expect(socket.snapshotRequests()).toBe(1);
+  });
+
+  it('opens the socket of the player view as a player view, and never uses a DM snapshot there (D-105)', () => {
+    expect(socket.view).toBe('player');
+    socket.open({ role: 'dm', scene: null }, 1);
+    expect(snapshots).toEqual([]);
+    socket.deliver({ type: 'scene.snapshot', version: 2, payload: idle });
+    expect(snapshots).toEqual([{ snapshot: idle, version: 2 }]);
+  });
+
+  it('lets the DM view take a snapshot of either room, so it can learn its session ended', () => {
+    const seen: string[] = [];
+    const closeDm = connectLive('dm', {
+      onStatus: () => {},
+      onSnapshot: (snapshot) => seen.push(snapshot.role),
+      onEvent: () => {},
+    });
+    const dm = fake.sockets[1]!;
+    expect(dm.view).toBe('dm');
+    dm.open({ role: 'dm', scene: null });
+    dm.deliver({ type: 'scene.snapshot', version: 1, payload: { role: 'players', scene: null } });
+    expect(seen).toEqual(['dm', 'players']);
+    closeDm();
   });
 
   it('closes for good: no reconnection, no status after closing', () => {

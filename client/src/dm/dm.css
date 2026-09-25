@@ -55,6 +55,11 @@
   margin-right: var(--space-2);
 }
 
+.eg-livebar__text--warning {
+  color: var(--color-accent);
+  font-weight: 700;
+}
+
 .eg-workspace__sidebar {
   border-right: 1px solid var(--color-border);
   padding: var(--space-4);

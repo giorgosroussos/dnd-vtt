@@ -20,6 +20,7 @@ export {
   PlayerMapSchema,
   PlayerSnapshotSchema,
   PlayerTokenSchema,
+  PLAYER_VIEW_AUTH,
   ROOMS,
   SceneSnapshotSchema,
   SOCKET_CHANNELS,

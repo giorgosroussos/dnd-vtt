@@ -8,33 +8,53 @@ import { openWorkspace } from './dm.js';
 const liveBar = (page: Page) => page.getByRole('region', { name: 'Live scene' }).getByRole('status');
 const player = (page: Page) => page.locator('main[data-view="player"]');
 
+/** The rooms of the snapshots a page receives over its WebSocket, in order. */
+function roomsOf(page: Page): string[] {
+  const rooms: string[] = [];
+  page.on('websocket', (socket) => {
+    socket.on('framereceived', ({ payload }) => {
+      const match = /"role":"(dm|players)"/.exec(String(payload));
+      if (match) rooms.push(match[1]!);
+    });
+  });
+  return rooms;
+}
+
 test('a DM view and a player view connect side by side, each to its own room', async ({ browser }) => {
   const dmContext = await browser.newContext();
   const playerContext = await browser.newContext();
   const dm = await dmContext.newPage();
   const tv = await playerContext.newPage();
-
-  const rooms: string[] = [];
-  for (const page of [dm, tv]) {
-    page.on('websocket', (socket) => {
-      socket.on('framereceived', ({ payload }) => {
-        const match = /"role":"(dm|players)"/.exec(String(payload));
-        if (match) rooms.push(match[1]!);
-      });
-    });
-  }
+  const dmRooms = roomsOf(dm);
+  const tvRooms = roomsOf(tv);
 
   await openWorkspace(dm);
   await tv.goto('/');
   await expect(player(tv)).toHaveAttribute('data-live', 'connected');
   await expect(player(tv)).toHaveAttribute('data-snapshots', '1');
   await expect(player(tv)).toHaveText('Emberglass');
-  await expect(liveBar(dm)).not.toHaveText('The connection to the server was lost. Reconnecting…');
   // Each received the snapshot of its own room, from the session cookie alone.
-  await expect.poll(() => [...rooms].sort()).toEqual(['dm', 'players']);
+  await expect.poll(() => dmRooms).toEqual(['dm']);
+  await expect.poll(() => tvRooms).toEqual(['players']);
+  await expect(dm.getByRole('navigation', { name: 'Campaigns, sessions and scenes' })).toBeVisible();
 
   await dmContext.close();
   await playerContext.close();
+});
+
+test('a player view opened in the DM browser still joins the players room (D-105)', async ({ browser }) => {
+  // The DM's laptop drives the TV from a second window of the same browser, with the DM cookie.
+  const context = await browser.newContext();
+  const dm = await context.newPage();
+  await openWorkspace(dm);
+  const tv = await context.newPage();
+  const tvRooms = roomsOf(tv);
+  await tv.goto('/');
+  await expect(player(tv)).toHaveAttribute('data-snapshots', '1');
+  await expect.poll(() => tvRooms).toEqual(['players']);
+  // The DM view in the same browser keeps its workspace.
+  await expect(dm.getByRole('navigation', { name: 'Campaigns, sessions and scenes' })).toBeVisible();
+  await context.close();
 });
 
 test('a player view taken offline reconnects by itself and resynchronises from a fresh snapshot', async ({

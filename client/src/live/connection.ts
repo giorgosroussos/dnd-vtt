@@ -1,5 +1,12 @@
 import { io } from 'socket.io-client';
-import { SOCKET_CHANNELS, SOCKET_PATH, type EventEnvelope, type SceneSnapshot } from '@emberglass/shared';
+import {
+  PLAYER_VIEW_AUTH,
+  SOCKET_CHANNELS,
+  SOCKET_PATH,
+  type EventEnvelope,
+  type Room,
+  type SceneSnapshot,
+} from '@emberglass/shared';
 import { createVersionTracker } from './versions.js';
 
 // The live connection both views keep (LIV-01; specs/04-live-sync.md §5, §6, D-104). The server
@@ -20,11 +27,15 @@ export interface LiveSocketLike {
   disconnect(): unknown;
 }
 
-export type SocketFactory = () => LiveSocketLike;
+/** The view asking: the player view's socket is always put in `players` by the server (D-105). */
+export type LiveView = 'dm' | 'player';
 
-const realSocket: SocketFactory = () =>
+export type SocketFactory = (view: LiveView) => LiveSocketLike;
+
+const realSocket: SocketFactory = (view) =>
   io({
     path: SOCKET_PATH,
+    auth: view === 'player' ? { ...PLAYER_VIEW_AUTH } : {},
     // WebSocket only: no long-polling requests (D-104).
     transports: ['websocket'],
     reconnection: true,
@@ -54,10 +65,16 @@ export interface LiveHandlers {
 export const SNAPSHOT_RETRY_MS = 5_000;
 
 /** Opens the connection; the returned function closes it for good. */
-export function connectLive(handlers: LiveHandlers): () => void {
-  const socket = socketFactory();
+// The room each view's snapshots must be for. The player view never uses a DM snapshot, even if
+// one reached it, so nothing hidden could be drawn on the TV (D-105).
+const EXPECTED: Record<LiveView, Room | undefined> = { player: 'players', dm: undefined };
+
+export function connectLive(view: LiveView, handlers: LiveHandlers): () => void {
+  const socket = socketFactory(view);
   const tracker = createVersionTracker();
   let closed = false;
+  // Until the first connection succeeds nothing was lost: a failed attempt is still connecting.
+  let everConnected = false;
   let retry: ReturnType<typeof setTimeout> | undefined;
 
   const requestSnapshot = (): void => {
@@ -70,8 +87,11 @@ export function connectLive(handlers: LiveHandlers): () => void {
   };
 
   handlers.onStatus('connecting');
-  socket.on('connect', () => handlers.onStatus('connected'));
-  socket.on('connect_error', () => handlers.onStatus('reconnecting'));
+  socket.on('connect', () => {
+    everConnected = true;
+    handlers.onStatus('connected');
+  });
+  socket.on('connect_error', () => handlers.onStatus(everConnected ? 'reconnecting' : 'connecting'));
   socket.on('disconnect', (reason: string) => {
     clearTimeout(retry);
     tracker.reset();
@@ -82,6 +102,8 @@ export function connectLive(handlers: LiveHandlers): () => void {
   });
   socket.on(SOCKET_CHANNELS.event, (event: EventEnvelope) => {
     if (event.type === 'scene.snapshot') {
+      const expected = EXPECTED[view];
+      if (expected !== undefined && (event.payload as SceneSnapshot).role !== expected) return;
       clearTimeout(retry);
       tracker.snapshot(event.version);
       handlers.onSnapshot(event.payload as SceneSnapshot, event.version);

@@ -9,7 +9,7 @@ import { IdleScreen } from '../ui/IdleScreen.js';
 // and the idle screen shows the product name only (Q-025, D-104). The data attributes
 // are for the end-to-end tests: the connection state and how many snapshots arrived.
 export function PlayerView() {
-  const live = useLive();
+  const live = useLive('player');
   return (
     <main data-view="player" data-live={live.status} data-snapshots={live.snapshots}>
       <IdleScreen />

@@ -1,5 +1,5 @@
 import { SOCKET_CHANNELS, type EventEnvelope, type SceneSnapshot } from '@emberglass/shared';
-import { setSocketFactory, type LiveSocketLike } from '../../live/connection.js';
+import { setSocketFactory, type LiveSocketLike, type LiveView } from '../../live/connection.js';
 
 // Test tooling only, never bundled: a scripted stand-in for the Socket.io client socket, for the
 // component tests of the live connection (LIV-01). A test drives it as the server would: open it,
@@ -9,6 +9,7 @@ import { setSocketFactory, type LiveSocketLike } from '../../live/connection.js'
 type Listener = (...args: never[]) => void;
 
 export class FakeSocket implements LiveSocketLike {
+  constructor(readonly view: LiveView = 'dm') {}
   connected = false;
   connects = 0;
   readonly emitted: { event: string; args: unknown[] }[] = [];
@@ -67,8 +68,8 @@ export class FakeSocket implements LiveSocketLike {
 /** Every socket the views open until `restore` is called goes into `sockets`. */
 export function installFakeSockets(): { sockets: FakeSocket[]; restore: () => void } {
   const sockets: FakeSocket[] = [];
-  const restore = setSocketFactory(() => {
-    const socket = new FakeSocket();
+  const restore = setSocketFactory((view) => {
+    const socket = new FakeSocket(view);
     sockets.push(socket);
     return socket;
   });

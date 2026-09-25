@@ -34,6 +34,13 @@ export const SOCKET_PATH = '/socket.io';
 export const ROOMS = ['dm', 'players'] as const;
 export type Room = (typeof ROOMS)[number];
 
+// What the player view sends in the handshake's `auth` field (D-105). It can only lower a
+// socket to `players`: a player view opened in a browser that also holds a DM session (the DM's
+// laptop driving the TV) must still receive only visible content (specs/04-live-sync.md §4,
+// specs/07-security-and-access.md §3). Nothing a client sends ever raises a socket to `dm`;
+// only the DM session does (Q-046).
+export const PLAYER_VIEW_AUTH = { view: 'player' } as const;
+
 // The commands of specs/04-live-sync.md §2, exactly.
 export const COMMAND_TYPES = [
   'token.add',
