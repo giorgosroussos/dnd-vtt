@@ -42,6 +42,12 @@
   cursor: grabbing;
 }
 
+/* Calibration by rectangle: a drag measures instead of panning (PRP-03, D-094). */
+.eg-canvas__viewport--measure,
+.eg-canvas__viewport--measure:active {
+  cursor: crosshair;
+}
+
 /* The Konva stage fills the viewport, which is measured; it must not size it. */
 .eg-canvas__viewport > div {
   position: absolute;

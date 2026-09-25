@@ -334,3 +334,120 @@ textarea.eg-field__input {
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
 }
+
+/* While calibrating: the calibration strip above the canvas, and the magnified far corner
+ * floating over the canvas's bottom-right corner, where the map's far corner is when it is
+ * fitted (PRP-03, D-094). The magnifier lets the pointer through to the map. */
+.eg-scene__body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+}
+
+.eg-scene__canvas {
+  flex: 1;
+  display: flex;
+  position: relative;
+  min-height: 0;
+}
+
+.eg-calibration {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+.eg-calibration__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-6);
+}
+
+.eg-calibration__heading {
+  font-size: var(--font-size-md);
+  font-weight: 600;
+}
+
+.eg-calibration__methods {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-4);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.eg-calibration__methods legend {
+  float: left;
+  margin-right: var(--space-2);
+  color: var(--color-text-muted);
+}
+
+.eg-calibration__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2) var(--space-4);
+}
+
+.eg-calibration__fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.eg-calibration__fields .eg-field__input {
+  width: 8rem;
+}
+
+.eg-calibration__notes {
+  flex: 1 1 12rem;
+}
+
+.eg-magnifier__caption {
+  max-width: 202px;
+}
+
+.eg-calibration__hint,
+.eg-calibration__result,
+.eg-magnifier__caption {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.eg-calibration__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.eg-magnifier {
+  position: absolute;
+  right: var(--space-2);
+  bottom: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  pointer-events: none;
+}
+
+.eg-magnifier__box {
+  /* The 200 px stage inside a 1 px border. */
+  width: 202px;
+  height: 202px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+}

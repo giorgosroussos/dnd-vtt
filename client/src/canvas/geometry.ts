@@ -40,7 +40,7 @@ export function worldSize(grid: Grid, map: MapInfo | undefined): Size {
 }
 
 /**
- * The square size in original pixels. Until the grid is calibrated (PRP-03) it has no size,
+ * The square size in original pixels. Until the grid is calibrated (D-094) it has no size,
  * and the stored columns are read as the map's width in squares, as the known-dimensions
  * method of specs/06-grid-and-measurement.md §1 does (D-090).
  */

@@ -222,8 +222,8 @@ export class FakeServer {
     }
   }
 
-  // As D-078 and D-090 do: a different map starts from its image's preset or the
-  // defaults, then grid.visible applies.
+  // As D-078, D-090 and D-094 do: a different map starts from its image's preset or the
+  // defaults, then the grid fields apply.
   private updateScene(id: string, b: Record<string, unknown>): Reply {
     const scene = this.scenes.find((s) => s.id === id);
     if (!scene) return failure(404, 'not_found');
@@ -241,8 +241,18 @@ export class FakeServer {
       if (previous !== null && !used(previous)) this.images = this.images.filter((each) => each.id !== previous);
     }
     if (typeof b.name === 'string') scene.name = b.name;
-    const grid = b.grid as { visible: boolean } | undefined;
-    if (grid) scene.grid = { ...scene.grid, visible: grid.visible };
+    const grid = b.grid as Partial<Scene['grid']> | undefined;
+    if (grid) {
+      // As D-094 does: calibration merges over the grid and becomes the map's preset.
+      const calibrating = (['size', 'offset_x', 'offset_y', 'columns', 'rows'] as const).some((f) => f in grid);
+      if (calibrating && scene.map_image_id === null) return failure(409, 'calibration_needs_map');
+      scene.grid = { ...scene.grid, ...grid };
+      const image = this.images.find((each) => each.id === scene.map_image_id);
+      if (calibrating && image) {
+        scene.grid.size ??= image.width / scene.grid.columns;
+        image.grid_preset = { ...scene.grid, size: scene.grid.size };
+      }
+    }
     return json(200, { ...scene, grid: { ...scene.grid } });
   }
 

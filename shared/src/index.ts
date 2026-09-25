@@ -78,6 +78,7 @@ export {
 export {
   API_STRUCTURE_PATHS,
   CALENDAR_DATE_PATTERN,
+  CALIBRATION_FIELDS,
   CampaignCreateBodySchema,
   CampaignUpdateBodySchema,
   DeleteBodySchema,

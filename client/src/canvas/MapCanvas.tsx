@@ -3,6 +3,7 @@ import type Konva from 'konva';
 import { Group, Image as KonvaImage, Layer, Line, Rect, Stage } from 'react-konva';
 import { imageFileUrl, type Grid, type Image } from '@emberglass/shared';
 import { Button } from '../ui/Button.js';
+import { normalise, type Rect as Box } from './calibration.js';
 import { t } from '../ui/messages.js';
 import {
   cameraForKey,
@@ -27,11 +28,23 @@ import './canvas.css';
 // that fits the map; the overlay is drawn faintly when players do not see it (D-026). `player`
 // has no control and nothing that takes focus, always fits the map (specs/04-live-sync.md §9),
 // and draws no overlay when the grid is hidden for players. The player view uses it from LIV-03.
+//
+// While the DM calibrates by rectangle (PRP-03, specs/06-grid-and-measurement.md §1, D-094), a
+// drag on the map draws a rectangle instead of panning, reported in the original's pixels.
 
 // Konva draws on a canvas, so these are colours, not the CSS tokens: the void around the
 // scene is the page background of tokens.css, a map-less extent a neutral dark grey (D-016);
 // each grid line is light over a dark halo, so it shows on dark and light maps (D-093).
-export const CANVAS_COLOURS = { void: '#14110f', extent: '#2b2b2b', grid: '#f2ece6', halo: '#14110f' } as const;
+export const CANVAS_COLOURS = {
+  void: '#14110f',
+  extent: '#2b2b2b',
+  grid: '#f2ece6',
+  halo: '#14110f',
+  // The accent of tokens.css, for the rectangle measured during calibration.
+  measure: '#f0a04b',
+} as const;
+// A press-and-release shorter than this, in screen pixels either way, is a click, not a rectangle.
+const MIN_RECT_PX = 4;
 export const GRID_OPACITY = { shown: 0.7, faint: 0.25 } as const;
 
 type Mode = 'dm' | 'player';
@@ -69,6 +82,19 @@ function useViewport(): [React.RefObject<HTMLDivElement | null>, Size] {
  */
 export type CanvasMap = Pick<Image, 'id' | 'width' | 'height' | 'variants'>;
 
+/** A rectangle measured on the map during calibration, in the original image's pixels. */
+export interface Measure {
+  rect: Box | undefined;
+  onDraw: (rect: Box) => void;
+}
+
+const scaled = (box: Box, ratio: number): Box => ({
+  x: box.x * ratio,
+  y: box.y * ratio,
+  width: box.width * ratio,
+  height: box.height * ratio,
+});
+
 /**
  * The display version of the map, once loaded; only that version is ever requested, and only
  * again when the map itself changes, not when its record is rebuilt.
@@ -96,6 +122,7 @@ export function MapCanvas({
   mode,
   label,
   onMapError,
+  measure,
 }: {
   grid: Grid;
   /** The scene's map image, or null for a scene without a map. */
@@ -104,6 +131,8 @@ export function MapCanvas({
   /** The DM's name for the canvas, naming the scene. */
   label?: string;
   onMapError?: () => void;
+  /** DM view only: a drag measures a rectangle instead of panning. */
+  measure?: Measure | undefined;
 }) {
   const helpId = useId();
   const [viewportRef, viewport] = useViewport();
@@ -134,6 +163,8 @@ export function MapCanvas({
   ];
   const opacity = overlayOpacity(mode, grid.visible);
   const dm = mode === 'dm';
+  const measuring = dm && measure !== undefined && info !== undefined;
+  const [dragging, setDragging] = useState<{ start: { x: number; y: number }; end: { x: number; y: number } }>();
 
   function onKeyDown(event: KeyboardEvent) {
     if (event.altKey || event.ctrlKey || event.metaKey) return;
@@ -159,6 +190,52 @@ export function MapCanvas({
     changeCamera((current) => ({ ...current, ...position }));
   }
 
+  const worldPoint = (event: Konva.KonvaEventObject<PointerEvent>) =>
+    event.target.getStage()?.getRelativePointerPosition();
+
+  function onMeasureDown(event: Konva.KonvaEventObject<PointerEvent>) {
+    const at = worldPoint(event);
+    if (at) setDragging({ start: at, end: at });
+  }
+
+  function onMeasureMove(event: Konva.KonvaEventObject<PointerEvent>) {
+    const at = worldPoint(event);
+    if (at) setDragging((current) => current && { ...current, end: at });
+  }
+
+  function onMeasureUp(event: Konva.KonvaEventObject<PointerEvent>) {
+    const at = worldPoint(event) ?? dragging?.end;
+    const current = dragging;
+    setDragging(undefined);
+    if (!current || !at || !info || !measure) return;
+    const box = normalise({
+      x: current.start.x,
+      y: current.start.y,
+      width: at.x - current.start.x,
+      height: at.y - current.start.y,
+    });
+    if (box.width * camera.scale < MIN_RECT_PX || box.height * camera.scale < MIN_RECT_PX) return;
+    measure.onDraw(scaled(box, info.original.width / info.display.width));
+  }
+
+  // The rectangle being dragged, or the one last measured, in world pixels.
+  const shownRect: Box | undefined = dragging
+    ? normalise({
+        x: dragging.start.x,
+        y: dragging.start.y,
+        width: dragging.end.x - dragging.start.x,
+        height: dragging.end.y - dragging.start.y,
+      })
+    : measuring && measure.rect
+      ? scaled(measure.rect, info.display.width / info.original.width)
+      : undefined;
+
+  const handlers = !dm
+    ? {}
+    : measuring
+      ? { onWheel, onPointerDown: onMeasureDown, onPointerMove: onMeasureMove, onPointerUp: onMeasureUp }
+      : { onWheel, onDragMove: onDrag, onDragEnd: onDrag };
+
   const centre = { x: viewport.width / 2, y: viewport.height / 2 };
   const stage = (
     <Stage
@@ -168,9 +245,9 @@ export function MapCanvas({
       y={camera.y}
       scaleX={camera.scale}
       scaleY={camera.scale}
-      draggable={dm}
+      draggable={dm && !measuring}
       listening={dm}
-      {...(dm ? { onWheel, onDragMove: onDrag, onDragEnd: onDrag } : {})}
+      {...handlers}
     >
       <Layer listening={false}>
         {map === null ? (
@@ -204,6 +281,16 @@ export function MapCanvas({
               />
             ))}
           </Group>
+        ) : null}
+        {shownRect ? (
+          <Rect
+            name="measure"
+            {...shownRect}
+            stroke={CANVAS_COLOURS.measure}
+            strokeWidth={2}
+            dash={[6, 4]}
+            strokeScaleEnabled={false}
+          />
         ) : null}
       </Layer>
     </Stage>
@@ -243,7 +330,7 @@ export function MapCanvas({
       </div>
       <div
         ref={viewportRef}
-        className="eg-canvas__viewport"
+        className={measuring ? 'eg-canvas__viewport eg-canvas__viewport--measure' : 'eg-canvas__viewport'}
         role="application"
         aria-label={label}
         aria-describedby={helpId}

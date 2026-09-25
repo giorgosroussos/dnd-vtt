@@ -282,3 +282,66 @@ describe('the DM rendering (specs/08-ux-journeys.md §8)', () => {
     expect(document.getElementById(element.getAttribute('aria-describedby')!)!.textContent).toBe(t('canvas.help'));
   });
 });
+
+describe('measuring a rectangle for calibration (PRP-03, specs/06-grid-and-measurement.md §1, D-094)', () => {
+  // Konva reads the pointer from the event against the container, which jsdom places at 0, 0.
+  function pointer(stage: Konva.Stage, type: 'pointerdown' | 'pointermove' | 'pointerup', x: number, y: number) {
+    const evt = new MouseEvent(type, { clientX: x, clientY: y, bubbles: true });
+    act(() => {
+      stage.setPointersPositions(evt);
+      stage.fire(type, { evt, target: stage });
+    });
+  }
+
+  it('draws instead of panning, reports the rectangle in original pixels, and shows it', async () => {
+    const onDraw = vi.fn();
+    const { view, stage } = await draw({ grid: GRID, map: MAP, mode: 'dm', measure: { rect: undefined, onDraw } });
+    expect(stage.draggable()).toBe(false);
+    const fitted = camera(viewport(view));
+    const screen = (wx: number, wy: number) => [fitted.x + wx * fitted.scale, fitted.y + wy * fitted.scale] as const;
+    // World (display) pixels 100, 50 to 250, 200: the display version is half the original.
+    pointer(stage, 'pointerdown', ...screen(100, 50));
+    pointer(stage, 'pointermove', ...screen(180, 120));
+    const dragged = stage.findOne<Konva.Rect>('.measure')!;
+    expect(dragged.x()).toBeCloseTo(100, 6);
+    expect(dragged.width()).toBeCloseTo(80, 6);
+    pointer(stage, 'pointerup', ...screen(250, 200));
+    expect(onDraw).toHaveBeenCalledOnce();
+    const rect = onDraw.mock.calls[0]![0] as { x: number; y: number; width: number; height: number };
+    expect(rect.x).toBeCloseTo(200, 6);
+    expect(rect.y).toBeCloseTo(100, 6);
+    expect(rect.width).toBeCloseTo(300, 6);
+    expect(rect.height).toBeCloseTo(300, 6);
+    // The camera did not move.
+    expect(camera(viewport(view))).toEqual(fitted);
+  });
+
+  it('shows the measured rectangle it is given, in display pixels, and ignores a click', async () => {
+    const onDraw = vi.fn();
+    const { stage } = await draw({
+      grid: GRID,
+      map: MAP,
+      mode: 'dm',
+      measure: { rect: { x: 200, y: 100, width: 300, height: 300 }, onDraw },
+    });
+    const shown = stage.findOne<Konva.Rect>('.measure')!;
+    expect([shown.x(), shown.y(), shown.width(), shown.height()]).toEqual([100, 50, 150, 150]);
+    pointer(stage, 'pointerdown', 300, 300);
+    pointer(stage, 'pointerup', 301, 301);
+    expect(onDraw).not.toHaveBeenCalled();
+  });
+
+  it('pans again once measuring ends, and the player view never measures', async () => {
+    const { stage } = await draw({ grid: GRID, map: MAP, mode: 'dm' });
+    expect(stage.draggable()).toBe(true);
+    expect(stage.findOne('.measure')).toBeUndefined();
+    rendered!.unmount();
+    const player = await draw({
+      grid: GRID,
+      map: MAP,
+      mode: 'player',
+      measure: { rect: { x: 0, y: 0, width: 10, height: 10 }, onDraw: vi.fn() },
+    });
+    expect(player.stage.findOne('.measure')).toBeUndefined();
+  });
+});

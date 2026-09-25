@@ -1,9 +1,11 @@
-import type { ButtonHTMLAttributes } from 'react';
+import type { ButtonHTMLAttributes, Ref } from 'react';
 
 type ButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'type' | 'className'> & {
   variant?: 'primary' | 'secondary' | 'danger';
   size?: 'normal' | 'small';
   type?: 'button' | 'submit';
+  // A prop in React 19, passed on to the button, for a caller that moves focus to it.
+  ref?: Ref<HTMLButtonElement>;
 };
 
 // A native button, so Enter and Space operate it and it takes focus in order (D-069).
