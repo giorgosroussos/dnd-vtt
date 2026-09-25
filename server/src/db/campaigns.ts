@@ -272,9 +272,64 @@ export function createScene(
   return created ? readScene(db, id) : undefined;
 }
 
-export function renameScene(db: Database.Database, id: string, name: string): Scene | undefined {
-  db.prepare('UPDATE scene SET name = ? WHERE id = ?').run(name, id);
-  return readScene(db, id);
+const DEFAULT_GRID_COLUMNS = `grid_type = 'square', grid_size = NULL, grid_offset_x = 0, grid_offset_y = 0,
+  grid_visible = 1, grid_feet_per_square = 5, grid_columns = 30, grid_rows = 20`;
+
+export type SceneUpdateOutcome =
+  | { outcome: 'updated'; scene: Scene; removedImages: string[] }
+  | { outcome: 'not_found' }
+  | { outcome: 'image_not_found' };
+
+/**
+ * Renames the scene and changes its setup, in one transaction (specs/02-architecture.md §5).
+ * A different map image starts the grid again from that image's preset, or from the
+ * stored defaults while it has none (specs/03-domain-model.md §5, §6): the grid is in
+ * the old map's pixels and means nothing on the new one. Tokens keep their positions,
+ * which are in grid units (§4). `visible` then applies. The previous map is deleted
+ * when nothing references it any more (§7, Q-002); its files are the caller's to
+ * remove. Nothing changes when the scene or the image does not exist.
+ */
+export function updateScene(
+  db: Database.Database,
+  id: string,
+  fields: { name?: string | undefined; map_image_id?: string | undefined; grid?: { visible: boolean } | undefined },
+): SceneUpdateOutcome {
+  return db.transaction((): SceneUpdateOutcome => {
+    const before = readScene(db, id);
+    if (before === undefined) return { outcome: 'not_found' };
+    const map = fields.map_image_id;
+    let removedImages: string[] = [];
+    if (map !== undefined && map !== before.map_image_id) {
+      const preset = db.prepare(`SELECT ${PRESET_COLUMNS} FROM image WHERE id = ?`).get(map) as PresetRow | undefined;
+      if (preset === undefined) return { outcome: 'image_not_found' };
+      const grid = toPreset(preset);
+      if (grid === null) {
+        db.prepare(`UPDATE scene SET map_image_id = ?, ${DEFAULT_GRID_COLUMNS} WHERE id = ?`).run(map, id);
+      } else {
+        db.prepare(
+          `UPDATE scene SET map_image_id = ?, grid_type = ?, grid_size = ?, grid_offset_x = ?, grid_offset_y = ?,
+            grid_visible = ?, grid_feet_per_square = ?, grid_columns = ?, grid_rows = ? WHERE id = ?`,
+        ).run(
+          map,
+          grid.type,
+          grid.size,
+          grid.offset_x,
+          grid.offset_y,
+          grid.visible ? 1 : 0,
+          grid.feet_per_square,
+          grid.columns,
+          grid.rows,
+          id,
+        );
+      }
+      if (before.map_image_id !== null) removedImages = deleteUnreferencedImages(db, [before.map_image_id]);
+    }
+    if (fields.name !== undefined) db.prepare('UPDATE scene SET name = ? WHERE id = ?').run(fields.name, id);
+    if (fields.grid !== undefined) {
+      db.prepare('UPDATE scene SET grid_visible = ? WHERE id = ?').run(fields.grid.visible ? 1 : 0, id);
+    }
+    return { outcome: 'updated', scene: readScene(db, id)!, removedImages };
+  })();
 }
 
 /** False, changing nothing, unless `ids` names every scene of the session exactly once. */

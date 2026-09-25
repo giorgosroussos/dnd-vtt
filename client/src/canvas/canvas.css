@@ -1,0 +1,49 @@
+/* The map canvas of both views (PRP-02, D-090). Built only from the tokens of
+ * ui/tokens.css; the colours Konva draws with are in MapCanvas.tsx. */
+
+.eg-canvas {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.eg-canvas--player {
+  position: fixed;
+  inset: 0;
+  background: var(--color-bg);
+}
+
+.eg-canvas__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+}
+
+.eg-canvas__help {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.eg-canvas__viewport {
+  flex: 1;
+  min-height: 12rem;
+  position: relative;
+  overflow: hidden;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  cursor: grab;
+}
+
+.eg-canvas__viewport:active {
+  cursor: grabbing;
+}
+
+/* The Konva stage fills the viewport, which is measured; it must not size it. */
+.eg-canvas__viewport > div {
+  position: absolute;
+  inset: 0;
+}

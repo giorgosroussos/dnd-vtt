@@ -63,8 +63,24 @@ export const SceneCreateBodySchema = Type.Object(
   strict,
 );
 
-// Rename only: the map and the grid are scene setup (PRP-02, PRP-03).
-export const SceneUpdateBodySchema = Type.Object({ name: Type.String({ minLength: 1 }) }, strict);
+// The grid fields a scene update takes: whether players see the overlay
+// (specs/06-grid-and-measurement.md §2). Size, offsets, extent and feet per square
+// are calibration (PRP-03) and refused until then.
+export const SceneGridUpdateSchema = Type.Object({ visible: Type.Boolean() }, strict);
+
+// Rename and scene setup (specs/02-architecture.md §5). A different `map_image_id`
+// attaches that image as the map: the grid starts again from the image's preset, or
+// from the stored defaults while it has none (specs/03-domain-model.md §5, §6), and
+// the previous map goes once nothing references it (§7). A map is replaced, never
+// removed, so null is refused. `grid.visible` applies after the map's grid.
+export const SceneUpdateBodySchema = Type.Object(
+  {
+    name: Type.Optional(Type.String({ minLength: 1 })),
+    map_image_id: Type.Optional(Sha256Schema),
+    grid: Type.Optional(SceneGridUpdateSchema),
+  },
+  { ...strict, minProperties: 1 },
+);
 
 // The copy is placed right after the original; its name comes from the client,
 // which words it from the message catalogue.
@@ -94,6 +110,7 @@ export type CampaignUpdateBody = Static<typeof CampaignUpdateBodySchema>;
 export type SessionCreateBody = Static<typeof SessionCreateBodySchema>;
 export type SessionUpdateBody = Static<typeof SessionUpdateBodySchema>;
 export type SceneCreateBody = Static<typeof SceneCreateBodySchema>;
+export type SceneGridUpdate = Static<typeof SceneGridUpdateSchema>;
 export type SceneUpdateBody = Static<typeof SceneUpdateBodySchema>;
 export type SceneDuplicateBody = Static<typeof SceneDuplicateBodySchema>;
 export type OrderBody = Static<typeof OrderBodySchema>;
