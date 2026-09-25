@@ -27,6 +27,8 @@ export const ERROR_CODES = [
   'confirmation_mismatch',
   // SRV-05 (specs/03-domain-model.md §7, specs/05-assets-and-images.md §5):
   'asset_in_use',
+  // PRP-03 (specs/06-grid-and-measurement.md §1): calibration of a scene without a map.
+  'calibration_needs_map',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

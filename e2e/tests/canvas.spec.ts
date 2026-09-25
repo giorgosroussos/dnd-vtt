@@ -2,6 +2,7 @@ import { writeFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import { contrastFailures } from './contrast.js';
 import { openWorkspace, seedCampaign } from './dm.js';
+import { cameraOf, drawnAt, nameButton, near, selectScene, viewport } from './canvas-view.js';
 import { solidPng } from './png.js';
 
 // The canvas and the grid overlay against the real server (PRP-02, specs/08-ux-journeys.md §3,
@@ -10,12 +11,8 @@ import { solidPng } from './png.js';
 // overlay, the grid is hidden for players and stays faint for the DM, the DM zooms and pans,
 // and a reload finds the scene unchanged. What is drawn is read from the canvas pixels.
 
-const tree = (page: Page) => page.getByRole('navigation', { name: 'Campaigns, sessions and scenes' });
-const nameButton = (page: Page, name: string) => tree(page).getByRole('button', { name, exact: true });
-const viewport = (page: Page) => page.locator('main [role="application"]');
-
 const MAP_COLOUR: [number, number, number] = [40, 160, 90];
-// 30 squares across by default until PRP-03 calibrates (D-090): 900 / 30 = 30 px a square.
+// 30 squares across by default until the scene is calibrated (D-090, D-094): 900 / 30 = 30 px a square.
 const MAP_SIZE = { width: 900, height: 600 };
 const SQUARE = MAP_SIZE.width / 30;
 
@@ -33,52 +30,6 @@ async function seedScene(
   const { id } = (await created.json()) as { id: string };
   return { campaign, session: 'Canvas session', scene: name, id };
 }
-
-async function selectScene(page: Page, names: { campaign: string; session: string; scene: string }) {
-  await nameButton(page, names.campaign).click();
-  await nameButton(page, names.session).click();
-  await nameButton(page, names.scene).click();
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText(names.scene);
-  await expect(viewport(page)).toBeVisible();
-}
-
-interface Camera {
-  x: number;
-  y: number;
-  scale: number;
-}
-
-async function cameraOf(page: Page): Promise<Camera> {
-  return viewport(page).evaluate((element: HTMLElement) => ({
-    x: Number(element.dataset.cameraX),
-    y: Number(element.dataset.cameraY),
-    scale: Number(element.dataset.cameraScale),
-  }));
-}
-
-/**
- * What the two layers show around world point (wx, wy): the map layer's colour there, and the
- * strongest grid-layer alpha within `radius` screen pixels of it.
- */
-async function drawnAt(page: Page, wx: number, wy: number, radius = 0): Promise<{ map: number[]; grid: number }> {
-  const camera = await cameraOf(page);
-  return viewport(page).evaluate(
-    (element, { sx, sy, radius }) => {
-      const [mapLayer, gridLayer] = [...element.querySelectorAll('canvas')];
-      const ratio = window.devicePixelRatio;
-      const read = (canvas: HTMLCanvasElement, x: number, y: number) => [
-        ...canvas.getContext('2d')!.getImageData(Math.round(x * ratio), Math.round(y * ratio), 1, 1).data,
-      ];
-      let grid = 0;
-      for (let dx = -radius; dx <= radius; dx++) grid = Math.max(grid, read(gridLayer!, sx + dx, sy)[3]!);
-      return { map: read(mapLayer!, sx, sy), grid };
-    },
-    { sx: camera.x + wx * camera.scale, sy: camera.y + wy * camera.scale, radius },
-  );
-}
-
-const near = (actual: number[], expected: number[], tolerance = 10) =>
-  expected.every((value, index) => Math.abs(actual[index]! - value) <= tolerance);
 
 test('the DM attaches a map, sees it with the overlay, hides the grid for players, zooms and pans, and a reload keeps it', async ({
   page,

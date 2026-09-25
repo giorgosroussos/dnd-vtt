@@ -63,16 +63,39 @@ export const SceneCreateBodySchema = Type.Object(
   strict,
 );
 
-// The grid fields a scene update takes: whether players see the overlay
-// (specs/06-grid-and-measurement.md §2). Size, offsets, extent and feet per square
-// are calibration (PRP-03) and refused until then.
-export const SceneGridUpdateSchema = Type.Object({ visible: Type.Boolean() }, strict);
+// The grid fields a scene update takes (specs/06-grid-and-measurement.md §1, §2): whether
+// players see the overlay, and the calibration, in the original image's pixels: a decimal
+// square size, the x/y offset and the extent in squares. Calibration fields merge over the
+// scene's grid and are refused on a scene without a map (`calibration_needs_map`); saving them
+// also writes the image's preset (specs/03-domain-model.md §5, D-094). Feet per square is the
+// ruler's (LIV-07) and the type is `square` only, so both are refused here.
+export const SceneGridUpdateSchema = Type.Object(
+  {
+    visible: Type.Optional(Type.Boolean()),
+    size: Type.Optional(Type.Number({ exclusiveMinimum: 0, maximum: 1e6 })),
+    offset_x: Type.Optional(Type.Number({ minimum: -1e6, maximum: 1e6 })),
+    offset_y: Type.Optional(Type.Number({ minimum: -1e6, maximum: 1e6 })),
+    columns: Type.Optional(Type.Integer({ minimum: 1, maximum: 100_000 })),
+    rows: Type.Optional(Type.Integer({ minimum: 1, maximum: 100_000 })),
+  },
+  { ...strict, minProperties: 1 },
+);
+
+/**
+ * The most squares a calibrated grid may have across either axis of its map: finer than this,
+ * the overlay is not drawn line by line and the server refuses the size (D-090, D-096).
+ */
+export const MAX_GRID_LINES_PER_AXIS = 2000;
+
+/** The fields of a grid update that calibrate it. */
+export const CALIBRATION_FIELDS = ['size', 'offset_x', 'offset_y', 'columns', 'rows'] as const;
 
 // Rename and scene setup (specs/02-architecture.md §5). A different `map_image_id`
 // attaches that image as the map: the grid starts again from the image's preset, or
 // from the stored defaults while it has none (specs/03-domain-model.md §5, §6), and
 // the previous map goes once nothing references it (§7). A map is replaced, never
-// removed, so null is refused. `grid.visible` applies after the map's grid.
+// removed, so null is refused. `grid` applies after the map's grid, so a body may attach a map
+// and calibrate it at once.
 export const SceneUpdateBodySchema = Type.Object(
   {
     name: Type.Optional(Type.String({ minLength: 1 })),

@@ -59,12 +59,14 @@ export function installResizeObserver(size: { width: number; height: number }): 
 
 /**
  * jsdom fetches no image. Every URL an image element is given is recorded in `requested`,
- * and the element then reports that it loaded, or failed when the URL is in `failing`.
+ * and the element then reports that it loaded, or failed when the URL is in `failing`; a URL in
+ * `held` never reports, as an image still on its way.
  */
-export const images = { requested: [] as string[], failing: new Set<string>() };
+export const images = { requested: [] as string[], failing: new Set<string>(), held: new Set<string>() };
 export function installImageLoading(): void {
   images.requested = [];
   images.failing = new Set();
+  images.held = new Set();
   Object.defineProperty(HTMLImageElement.prototype, 'src', {
     configurable: true,
     get(this: HTMLImageElement) {
@@ -73,6 +75,7 @@ export function installImageLoading(): void {
     set(this: HTMLImageElement, value: string) {
       this.setAttribute('src', value);
       images.requested.push(value);
+      if (images.held.has(value)) return;
       const failed = images.failing.has(value);
       setTimeout(() => this.dispatchEvent(new Event(failed ? 'error' : 'load')), 0);
     },

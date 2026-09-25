@@ -11,6 +11,7 @@ import {
   SessionCreateBodySchema,
   SessionUpdateBodySchema,
   isCalendarDate,
+  CALIBRATION_FIELDS,
 } from './index.js';
 
 const UUID = '00000000-0000-4000-8000-000000000001';
@@ -54,18 +55,39 @@ describe('campaign, session and scene bodies (D-078)', () => {
       expect(isCalendarDate(date), date).toBe(false);
   });
 
-  it('takes a scene map and grid.visible in an update, and refuses every other grid field until PRP-03', () => {
+  it('takes a scene map, grid.visible and the calibration fields in an update (PRP-03, D-094)', () => {
     const map = 'a'.repeat(64);
     expect(Value.Check(SceneUpdateBodySchema, { map_image_id: map })).toBe(true);
     expect(Value.Check(SceneUpdateBodySchema, { grid: { visible: false } })).toBe(true);
     expect(Value.Check(SceneUpdateBodySchema, { name: 'A', map_image_id: map, grid: { visible: true } })).toBe(true);
+    const calibration = { size: 70.4, offset_x: 12.25, offset_y: -3.5, columns: 40, rows: 30 };
+    expect(Value.Check(SceneUpdateBodySchema, { grid: calibration })).toBe(true);
+    expect(Value.Check(SceneUpdateBodySchema, { grid: { ...calibration, visible: false } })).toBe(true);
+    for (const field of CALIBRATION_FIELDS) {
+      expect(Value.Check(SceneUpdateBodySchema, { grid: { [field]: calibration[field] } }), field).toBe(true);
+    }
     expect(Value.Check(SceneUpdateBodySchema, {})).toBe(false);
     // A map is replaced, never removed; an id is the lowercase sha256.
     expect(Value.Check(SceneUpdateBodySchema, { map_image_id: null })).toBe(false);
     expect(Value.Check(SceneUpdateBodySchema, { map_image_id: 'A'.repeat(64) })).toBe(false);
     expect(Value.Check(SceneUpdateBodySchema, { grid: {} })).toBe(false);
-    for (const field of ['size', 'offset_x', 'offset_y', 'feet_per_square', 'columns', 'rows', 'type']) {
+    // Feet per square is the ruler's (LIV-07); the type is square only; unknown fields are refused.
+    for (const field of ['feet_per_square', 'type', 'colour']) {
       expect(Value.Check(SceneUpdateBodySchema, { grid: { visible: true, [field]: 1 } }), field).toBe(false);
+    }
+    // A square has a positive size, the extent whole squares, every value a finite bound.
+    for (const grid of [
+      { size: 0 },
+      { size: -1 },
+      { size: 2e6 },
+      { size: null },
+      { offset_x: 2e6 },
+      { offset_y: -2e6 },
+      { columns: 0 },
+      { rows: 2.5 },
+      { columns: 200_000 },
+    ]) {
+      expect(Value.Check(SceneUpdateBodySchema, { grid }), JSON.stringify(grid)).toBe(false);
     }
   });
 });

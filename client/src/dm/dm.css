@@ -290,13 +290,21 @@ textarea.eg-field__input {
   resize: vertical;
 }
 
-/* The selected scene: its setup above its canvas (PRP-02, D-090). */
+/* The selected scene: its setup above its canvas (PRP-02, D-090); the status of the last change
+ * beside its name (D-096). */
 .eg-scene {
   flex: 1;
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
   min-height: 0;
+}
+
+.eg-scene__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-6);
 }
 
 .eg-scene__setup {
@@ -333,4 +341,121 @@ textarea.eg-field__input {
   flex-basis: 100%;
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
+}
+
+/* While calibrating: the calibration strip above the canvas, and the magnified far corner
+ * floating over the canvas's bottom-right corner, where the map's far corner is when it is
+ * fitted (PRP-03, D-094). The magnifier lets the pointer through to the map. */
+.eg-scene__body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+}
+
+.eg-scene__canvas {
+  flex: 1;
+  display: flex;
+  position: relative;
+  /* Tall enough for the magnifier over its corner (D-096). */
+  min-height: 15rem;
+}
+
+.eg-calibration {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+.eg-calibration__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-6);
+}
+
+.eg-calibration__methods {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-4);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.eg-calibration__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2) var(--space-4);
+}
+
+.eg-calibration__fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.eg-calibration__fields .eg-field__input {
+  width: 7rem;
+}
+
+.eg-calibration__notes {
+  display: flex;
+  flex-direction: column;
+}
+
+/* The caption lies over the top of the box, whose bottom edge is the corner that matters; alone,
+ * when the original failed, it takes its own place. */
+.eg-magnifier__caption {
+  position: absolute;
+  top: calc(var(--space-1) + 1px);
+  left: calc(var(--space-1) + 1px);
+  right: calc(var(--space-1) + 1px);
+  padding: 0 var(--space-1);
+  background: var(--color-surface);
+}
+
+.eg-magnifier--alone .eg-magnifier__caption {
+  position: static;
+  max-width: 146px;
+}
+
+.eg-calibration__hint,
+.eg-calibration__result,
+.eg-magnifier__caption {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.eg-calibration__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.eg-magnifier {
+  position: absolute;
+  right: var(--space-2);
+  bottom: var(--space-2);
+  margin: 0;
+  padding: var(--space-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  pointer-events: none;
+}
+
+.eg-magnifier__box {
+  /* The 144 px stage inside a 1 px border. */
+  width: 146px;
+  height: 146px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
 }

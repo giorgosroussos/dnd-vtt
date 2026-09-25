@@ -24,6 +24,7 @@ export const ERROR_MESSAGES: Readonly<Record<ErrorCode | 'network', MessageKey>>
   order_mismatch: 'error.code.order_mismatch',
   confirmation_mismatch: 'error.code.confirmation_mismatch',
   asset_in_use: 'error.code.asset_in_use',
+  calibration_needs_map: 'error.code.calibration_needs_map',
   network: 'error.code.network',
 };
 

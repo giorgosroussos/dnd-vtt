@@ -20,10 +20,11 @@ import { imagesDirOf } from '../images/store.js';
 import { compileSchema } from '../validation.js';
 import { buildTestApp, createTestData, setUpPin, type TestData } from './testing/app.js';
 
-// PRP-02: a scene's map and whether players see its grid, set through PATCH /api/scenes/:id,
+// PRP-02 and PRP-03: a scene's map, whether players see its grid and its calibration, set through
+// PATCH /api/scenes/:id,
 // against a real SQLite file and a real images folder (specs/02-architecture.md §5,
-// specs/03-domain-model.md §4, §5, §6, §7, specs/06-grid-and-measurement.md §2, D-078, D-080,
-// D-090). Every image is generated here (Q-088).
+// specs/03-domain-model.md §4, §5, §6, §7, specs/06-grid-and-measurement.md §1, §2, D-078, D-080,
+// D-090, D-094). Every image is generated here (Q-088).
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
@@ -284,7 +285,7 @@ describe('grid visibility for players (specs/06-grid-and-measurement.md §2, D-0
     expect(ok<Image>(await get(`/api/images/${map.id}`)).grid_preset).toEqual(PRESET);
   });
 
-  it('refuses every other grid field, a null map, an unknown field and an empty body, changing nothing', async () => {
+  it('refuses feet per square, the type, a null map, an unknown field and an empty body, changing nothing', async () => {
     const session = await newSession();
     const scene = await newScene(session.id, (await withPreset()).id);
     const before = countRows(data.db);
@@ -292,12 +293,12 @@ describe('grid visibility for players (specs/06-grid-and-measurement.md §2, D-0
       {},
       { grid: {} },
       { grid: { visible: 'yes' } },
-      { grid: { visible: true, size: 50 } },
-      { grid: { visible: true, offset_x: 1 } },
-      { grid: { visible: true, offset_y: 1 } },
-      { grid: { visible: true, columns: 10 } },
-      { grid: { visible: true, rows: 10 } },
       { grid: { visible: true, feet_per_square: 10 } },
+      { grid: { size: 0 } },
+      { grid: { size: null } },
+      { grid: { columns: 2.5 } },
+      { grid: { rows: 0 } },
+      { grid: { offset_x: '3' } },
       { grid: { visible: true, type: 'square' } },
       { map_image_id: null },
       { map_image_id: 'A'.repeat(64) },
@@ -314,6 +315,216 @@ describe('grid visibility for players (specs/06-grid-and-measurement.md §2, D-0
   it('answers 404 for an unknown scene and 400 for an id that is not a lowercase UUID', async () => {
     expectFailure(await patch(`/api/scenes/${randomUUID()}`, { grid: { visible: false } }), 404, 'not_found');
     expectFailure(await patch('/api/scenes/NOT-A-UUID', { grid: { visible: false } }), 400, 'validation_failed');
+  });
+});
+
+describe('calibration (PRP-03, specs/06-grid-and-measurement.md §1, §2, specs/03-domain-model.md §5, D-094)', () => {
+  const CALIBRATED = { size: 70.4, offset_x: 12.25, offset_y: 3.5, columns: 14, rows: 9 };
+  const preset = async (imageId: string) => ok<Image>(await get(`/api/images/${imageId}`)).grid_preset;
+
+  it('stores a decimal size and the offsets and extent exactly, in original pixels, and writes the same grid as the image preset', async () => {
+    const session = await newSession();
+    const map = await uploaded(1000, 640);
+    const scene = await newScene(session.id, map.id);
+    expect(scene.grid).toEqual(DEFAULTS);
+    const calibrated = await update(scene.id, { grid: CALIBRATED });
+    expect(calibrated.grid).toEqual({ ...DEFAULTS, ...CALIBRATED });
+    expect(await preset(map.id)).toEqual(calibrated.grid);
+    // A size with more digits than a display would show survives the round trip unchanged.
+    const fine = await update(scene.id, { grid: { size: 70.123456789 } });
+    expect(fine.grid.size).toBe(70.123456789);
+    expect(data.db.prepare('SELECT grid_size FROM scene WHERE id = ?').pluck().get(scene.id)).toBe(70.123456789);
+    expect((await preset(map.id))!.size).toBe(70.123456789);
+  });
+
+  it('reads a missing size as original width ÷ columns, as the overlay does, so an offset alone calibrates', async () => {
+    const session = await newSession();
+    const map = await uploaded(1000, 640);
+    const scene = await newScene(session.id, map.id);
+    expect((await update(scene.id, { grid: { offset_x: 5 } })).grid).toMatchObject({ size: 1000 / 30, offset_x: 5 });
+    const other = await newScene(session.id, (await uploaded(900, 600)).id);
+    // Known dimensions: the columns alone give the size (specs/06-grid-and-measurement.md §1).
+    expect((await update(other.id, { grid: { columns: 18, rows: 12 } })).grid).toMatchObject({
+      size: 50,
+      columns: 18,
+      rows: 12,
+    });
+  });
+
+  it('starts a new scene of the map from the preset and changes no other existing scene (Q-001)', async () => {
+    const session = await newSession();
+    const map = await uploaded(1000, 640);
+    const [one, two] = [await newScene(session.id, map.id), await newScene(session.id, map.id)];
+    const first = await update(one.id, { grid: CALIBRATED });
+    expect(ok<Scene>(await get(`/api/scenes/${two.id}`))).toEqual(two);
+    const later = await newScene(session.id, map.id);
+    expect(later.grid).toEqual(first.grid);
+    // Recalibrating the first scene moves the preset again, and only for scenes created after.
+    const second = await update(one.id, { grid: { size: 64, offset_x: 0, offset_y: 0 } });
+    expect(await preset(map.id)).toEqual(second.grid);
+    expect(ok<Scene>(await get(`/api/scenes/${later.id}`))).toEqual(later);
+    expect(ok<Scene>(await get(`/api/scenes/${two.id}`))).toEqual(two);
+    expect((await newScene(session.id, map.id)).grid).toEqual(second.grid);
+  });
+
+  it("keeps the players' grid setting in the preset, and a visibility change alone writes no preset (specs/03-domain-model.md §5)", async () => {
+    const session = await newSession();
+    const map = await uploaded(1000, 640);
+    const scene = await newScene(session.id, map.id);
+    await update(scene.id, { grid: { ...CALIBRATED, visible: false } });
+    expect(await preset(map.id)).toMatchObject({ ...CALIBRATED, visible: false });
+    await update(scene.id, { grid: { visible: true } });
+    expect((await preset(map.id))!.visible).toBe(false);
+  });
+
+  it("calibrates the new map when a body attaches it and calibrates at once, leaving the old map's preset alone", async () => {
+    const session = await newSession();
+    const old = await withPreset();
+    const scene = await newScene(session.id, old.id);
+    await newScene(session.id, old.id);
+    const fresh = await uploaded(800, 800);
+    const result = await update(scene.id, { map_image_id: fresh.id, grid: CALIBRATED });
+    expect(result.grid).toEqual({ ...DEFAULTS, ...CALIBRATED });
+    expect(await preset(fresh.id)).toEqual(result.grid);
+    expect(await preset(old.id)).toEqual(PRESET);
+  });
+
+  it('never moves a token when the calibration changes (specs/03-domain-model.md §4)', async () => {
+    const session = await newSession();
+    const scene = await newScene(session.id, (await uploaded(1000, 640)).id);
+    const asset = randomUUID();
+    data.db
+      .prepare(
+        `INSERT INTO asset (id, name, category, image_id, size, default_hidden) VALUES (?, 'Orc', 'monster', ?, 'medium', 1)`,
+      )
+      .run(asset, (await uploaded(64, 64)).id);
+    data.db
+      .prepare(
+        'INSERT INTO token (id, scene_id, asset_id, label, x, y, hidden, z_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      )
+      .run(randomUUID(), scene.id, asset, 'Orc', 3.25, 7.5, 1, 0);
+    await update(scene.id, { grid: CALIBRATED });
+    await update(scene.id, { grid: { size: 33.3, offset_x: -4 } });
+    expect(data.db.prepare('SELECT x, y FROM token WHERE scene_id = ?').all(scene.id)).toEqual([{ x: 3.25, y: 7.5 }]);
+  });
+
+  it('refuses every calibration field on a scene without a map, storing nothing of the body (specs/03-domain-model.md §6)', async () => {
+    const session = await newSession();
+    const scene = await newScene(session.id);
+    const before = countRows(data.db);
+    for (const grid of [{ size: 50 }, { offset_x: 1 }, { offset_y: 1 }, { columns: 10 }, { rows: 10 }]) {
+      const response = await patch(`/api/scenes/${scene.id}`, { name: 'Renamed', grid: { ...grid, visible: false } });
+      expectFailure(response, 409, 'calibration_needs_map');
+    }
+    expect(countRows(data.db)).toEqual(before);
+    expect(ok<Scene>(await get(`/api/scenes/${scene.id}`))).toEqual(scene);
+    // Whether players see the grid is not calibration, and stays allowed.
+    expect((await update(scene.id, { grid: { visible: false } })).grid).toEqual({ ...DEFAULTS, visible: false });
+  });
+
+  it('attaches a first map to a map-less scene and calibrates it in one body; an unknown map is 400, not 409 (review)', async () => {
+    const session = await newSession();
+    const scene = await newScene(session.id);
+    const fresh = await uploaded(1000, 640);
+    const result = await update(scene.id, { map_image_id: fresh.id, grid: CALIBRATED });
+    expect(result.grid).toEqual({ ...DEFAULTS, ...CALIBRATED });
+    expect(await preset(fresh.id)).toEqual(result.grid);
+    const other = await newScene(session.id);
+    expectFailure(
+      await patch(`/api/scenes/${other.id}`, { map_image_id: 'f'.repeat(64), grid: { size: 50 } }),
+      400,
+      'reference_not_found',
+    );
+  });
+
+  it('refuses a size giving more than 2,000 squares across the map, storing nothing of the body (review)', async () => {
+    const session = await newSession();
+    const map = await withPreset();
+    const scene = await newScene(session.id, map.id);
+    const larger = await uploaded(500, 500);
+    const before = countRows(data.db);
+    // The map is 400 × 300: 0.1 px squares are 4,000 across; 1e-12 would never finish drawing.
+    for (const body of [
+      { name: 'Renamed', grid: { size: 0.1 } },
+      { name: 'Renamed', grid: { size: 1e-12 } },
+      { map_image_id: larger.id, grid: { size: 0.2 } },
+    ]) {
+      const response = await patch(`/api/scenes/${scene.id}`, body);
+      expectFailure(response, 400, 'validation_failed');
+      expect(response.json<ErrorEnvelope>().error.details).toEqual([
+        { path: '/grid/size', message: 'gives too many squares across the map' },
+      ]);
+    }
+    expect(countRows(data.db)).toEqual(before);
+    expect(ok<Scene>(await get(`/api/scenes/${scene.id}`))).toEqual(scene);
+    expect(await preset(map.id)).toEqual(PRESET);
+    // Columns alone too many for an uncalibrated scene are refused the same way; 2,000 exactly are allowed.
+    const plain = await newScene(session.id, (await uploaded(300, 300)).id);
+    expectFailure(await patch(`/api/scenes/${plain.id}`, { grid: { columns: 100_000 } }), 400, 'validation_failed');
+    expect((await update(plain.id, { grid: { size: 300 / 2000 } })).grid.size).toBe(300 / 2000);
+  });
+
+  it('keeps the preset as the last calibration saved, whichever scene of the map saved it (review)', async () => {
+    const session = await newSession();
+    const map = await uploaded(1000, 640);
+    const [one, two] = [await newScene(session.id, map.id), await newScene(session.id, map.id)];
+    const first = await update(one.id, { grid: CALIBRATED });
+    const second = await update(two.id, { grid: { size: 64, offset_x: 4, offset_y: 2 } });
+    expect(await preset(map.id)).toEqual(second.grid);
+    expect(ok<Scene>(await get(`/api/scenes/${one.id}`))).toEqual(first);
+    expect((await newScene(session.id, map.id)).grid).toEqual(second.grid);
+  });
+
+  it('answers a repeated identical calibration the same way, changing nothing more (review)', async () => {
+    const session = await newSession();
+    const map = await uploaded(1000, 640);
+    const scene = await newScene(session.id, map.id);
+    const first = await update(scene.id, { grid: CALIBRATED });
+    const rows = countRows(data.db);
+    const firstPreset = await preset(map.id);
+    expect(await update(scene.id, { grid: CALIBRATED })).toEqual(first);
+    expect(countRows(data.db)).toEqual(rows);
+    expect(await preset(map.id)).toEqual(firstPreset);
+  });
+
+  it('keeps a calibrated size when only the extent is sent: width ÷ columns applies only while there is no size (review)', async () => {
+    const session = await newSession();
+    const scene = await newScene(session.id, (await uploaded(1000, 640)).id);
+    await update(scene.id, { grid: { size: 40 } });
+    expect((await update(scene.id, { grid: { columns: 18, rows: 12 } })).grid).toMatchObject({
+      size: 40,
+      columns: 18,
+      rows: 12,
+    });
+  });
+
+  it('writes the preset and the scene in one transaction: a failed scene write leaves the preset as it was', async () => {
+    const session = await newSession();
+    const map = await withPreset();
+    const scene = await newScene(session.id, map.id);
+    data.db.exec(`CREATE TRIGGER refuse_scene_grid BEFORE UPDATE OF grid_size ON scene
+      BEGIN SELECT RAISE(ABORT, 'test: scene write refused'); END`);
+    const response = await patch(`/api/scenes/${scene.id}`, { grid: CALIBRATED });
+    expect(response.statusCode).toBe(500);
+    data.db.exec('DROP TRIGGER refuse_scene_grid');
+    expect(await preset(map.id)).toEqual(PRESET);
+    expect(ok<Scene>(await get(`/api/scenes/${scene.id}`))).toEqual(scene);
+  });
+
+  it('answers a browser without a DM session with 401 and neither the scene nor the preset changes', async () => {
+    const session = await newSession();
+    const map = await withPreset();
+    const scene = await newScene(session.id, map.id);
+    const response = await app.inject({
+      method: 'PATCH',
+      url: `/api/scenes/${scene.id}`,
+      payload: { grid: CALIBRATED },
+    });
+    expectFailure(response, 401, 'unauthorized');
+    expect(response.body).not.toContain(scene.id);
+    expect(response.body).not.toContain(map.id);
+    expect(ok<Scene>(await get(`/api/scenes/${scene.id}`))).toEqual(scene);
+    expect(await preset(map.id)).toEqual(PRESET);
   });
 });
 

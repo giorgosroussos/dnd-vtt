@@ -191,7 +191,8 @@ export function registerCampaigns(
     requireScene(request.params.id),
   );
 
-  // Rename and setup: the map and whether players see the grid (PRP-02). Calibration is PRP-03.
+  // Rename and setup: the map, whether players see the grid (PRP-02) and the calibration, which
+  // also writes the map's preset (PRP-03, specs/03-domain-model.md §5, D-094).
   // The live scene's change is saved but reaches no player view until LIV-04 pushes it as a
   // snapshot (specs/04-live-sync.md §10, G-019).
   app.patch<{ Params: IdParams; Body: SceneUpdateBody }>(
@@ -202,6 +203,14 @@ export function registerCampaigns(
       if (result.outcome === 'not_found') throw notFound();
       if (result.outcome === 'image_not_found') {
         throw new ApiFailure(400, 'reference_not_found', 'The map image does not exist.');
+      }
+      if (result.outcome === 'needs_map') {
+        throw new ApiFailure(409, 'calibration_needs_map', 'A scene without a map has no calibration.');
+      }
+      if (result.outcome === 'too_fine') {
+        throw new ApiFailure(400, 'validation_failed', 'The body does not match its schema.', {
+          details: [{ path: '/grid/size', message: 'gives too many squares across the map' }],
+        });
       }
       removeImages(result.removedImages);
       return result.scene;
