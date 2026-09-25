@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createVersionCounter, liveVersion } from './version.js';
+import { createVersionCounter, createVersionCounters, liveVersions } from './version.js';
 
 describe('the live version counter', () => {
   it('starts at 1 and strictly ascends by one', () => {
@@ -27,7 +27,19 @@ describe('the live version counter', () => {
     expect(createVersionCounter().next()).toBe(1);
   });
 
-  it('has one process counter that no import has advanced', () => {
-    expect(liveVersion.current()).toBe(0);
+  it('has one counter per room that no import has advanced (Q-093)', () => {
+    expect(Object.keys(liveVersions).sort()).toEqual(['dm', 'players']);
+    expect(liveVersions.dm.current()).toBe(0);
+    expect(liveVersions.players.current()).toBe(0);
+  });
+
+  it('keeps the rooms apart: an event counted for dm leaves the players sequence unbroken (Q-093)', () => {
+    const counters = createVersionCounters();
+    counters.dm.next(); // seen by both rooms
+    counters.players.next();
+    counters.dm.next(); // a hidden token moved: dm only
+    counters.dm.next(); // seen by both rooms
+    counters.players.next();
+    expect([counters.dm.current(), counters.players.current()]).toEqual([3, 2]);
   });
 });

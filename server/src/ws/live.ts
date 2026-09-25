@@ -16,7 +16,7 @@ import {
 } from '@emberglass/shared';
 import { normalizeAddress } from '../auth/lockout.js';
 import { dispatchCommand, validateCommand, type CommandValidator } from '../domain/commands.js';
-import { liveVersion, type VersionCounter } from '../domain/version.js';
+import { liveVersions, type VersionCounters } from '../domain/version.js';
 import { isSameOriginHeaders, type Auth } from '../http/auth.js';
 import { createLineLimiter, type LineLimiterOptions } from '../log/limiter.js';
 import type { Logger } from '../log/logger.js';
@@ -38,10 +38,11 @@ import { readSnapshot } from './snapshot.js';
 // reconnecting afterwards joins `players`. A command from any socket outside `dm` is
 // refused in the error envelope before it is even validated, and changes nothing.
 //
-// Versions (D-017, Q-056, D-104): the process counter takes version 1 for the state at
-// start-up; a snapshot sent to one socket carries the version of the state it shows and
-// takes none, so another client never sees a gap because a screen connected. Events that
-// change the live scene take the next version (LIV-02 onward).
+// Versions (Q-056, Q-093, D-104, D-108): each room has its own counter, which takes version 1
+// for the state at start-up; a snapshot sent to one socket carries its room's current version
+// and takes none, so another client never sees a gap because a screen connected. An event
+// takes the next version of each room it is sent to (LIV-02 onward), so players, who receive
+// nothing about hidden tokens, see no hole either.
 //
 // Abuse limits (LIV-01 review, D-106): an HTTP upgrade to any other path is answered 404 and
 // closed at once, as Fastify answered it before there was a WebSocket, except Vite's own in
@@ -53,8 +54,8 @@ export interface LiveSocketOptions {
   db: Database.Database;
   logger: Logger;
   auth: Auth;
-  /** The process's version counter; tests pass their own. */
-  version?: VersionCounter | undefined;
+  /** The process's version counters, one per room; tests pass their own. */
+  versions?: VersionCounters | undefined;
   /** Command validation and the step that applies a valid command (LIV-02 onward). */
   commands?: { validate: CommandValidator; apply: (command: CommandEnvelope) => void } | undefined;
   /** Upgrades on other paths that belong to someone else: Vite's hot reload in development. */
@@ -95,7 +96,7 @@ export function attachLiveSocket(
     db,
     logger,
     auth,
-    version = liveVersion,
+    versions = liveVersions,
     commands = { validate: validateCommand, apply: applyNothing },
     foreignUpgrade = () => false,
     snapshotIntervalMs = SNAPSHOT_INTERVAL_MS,
@@ -103,7 +104,7 @@ export function attachLiveSocket(
     connectionLines = {},
   }: LiveSocketOptions,
 ): LiveSocket {
-  if (version.current() === 0) version.next();
+  for (const counter of Object.values(versions)) if (counter.current() === 0) counter.next();
 
   const io = new Server(app.server, {
     path: SOCKET_PATH,
@@ -160,7 +161,7 @@ export function attachLiveSocket(
     if (overloaded(socket)) return;
     const event: SnapshotEvent = {
       type: 'scene.snapshot',
-      version: version.current(),
+      version: versions[role].current(),
       payload: readSnapshot(db, role),
     };
     socket.emit(SOCKET_CHANNELS.event, event);

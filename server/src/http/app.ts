@@ -14,7 +14,7 @@ import { registerCampaigns } from './campaigns.js';
 import { registerTokens } from './tokens.js';
 import { imageFileRemover, registerImages } from './images.js';
 import { imagesDirOf, prepareImagesDir } from '../images/store.js';
-import type { VersionCounter } from '../domain/version.js';
+import type { VersionCounters } from '../domain/version.js';
 import { attachLiveSocket, isViteUpgrade, type LiveSocket, type LiveSocketOptions } from '../ws/live.js';
 import { createFailureLog, installErrorHandling, sendFailure, type RejectedLineLimits } from './errors.js';
 
@@ -37,8 +37,8 @@ export interface AppOptions {
   pinHashParams?: Readonly<ScryptParams> | undefined;
   /** Limits on rejected-request log lines (G-006); the defaults suit production. */
   rejectedLines?: RejectedLineLimits | undefined;
-  /** The live event version counter; the process's own unless a test passes one (D-017). */
-  version?: VersionCounter | undefined;
+  /** The live event version counters, one per room; the process's own unless a test passes them (D-108). */
+  versions?: VersionCounters | undefined;
   /** Command validation and application; tests only replace them (LIV-01). */
   commands?: LiveSocketOptions['commands'];
   /** The live socket's abuse limits; tests only lower them (D-106). */
@@ -72,7 +72,7 @@ export async function buildApp({
   now,
   pinHashParams,
   rejectedLines,
-  version,
+  versions,
   commands,
   liveLimits,
 }: AppOptions): Promise<FastifyInstance> {
@@ -94,7 +94,7 @@ export async function buildApp({
     db,
     logger,
     auth,
-    version,
+    versions,
     commands,
     ...liveLimits,
     foreignUpgrade: client.kind === 'dev' ? isViteUpgrade : undefined,

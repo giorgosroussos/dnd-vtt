@@ -33,7 +33,7 @@ Affected specs: …
 - D-014 — Port and view routes — implementation
 - D-015 — REST base path and resource shape — implementation
 - D-016 — Grid of a scene without a map — implementation
-- D-017 — Live event version counter — implementation
+- D-017 — Live event version counter — implementation — superseded by D-108
 - D-018 — Player camera on activation — implementation
 - D-019 — Automatic token numbering — implementation
 - D-020 — Default visibility of npc and object assets — implementation
@@ -123,6 +123,8 @@ Affected specs: …
 - D-104 — WebSocket rooms, snapshots, versions and reconnection: WebSocket-only Socket.io on the server's port, a snapshot channel, snapshots at the state's version, the players' projection and dropped sockets of ended sessions (LIV-01) — implementation
 - D-105 — The player view's handshake hint puts its socket in players even in a browser holding a DM session (LIV-01 review) — implementation
 - D-106 — LIV-01 review fixes: stray upgrades answered and closed, snapshot requests throttled with back-pressure, connection lines limited, the reason and focus after a session ends, and the connection notice delayed and styled — implementation
+- D-107 — One event version counter per room (Q-093) — spec-amendment
+- D-108 — Live event version counters, one per room (after Q-093) — implementation
 
 ## D-001 (2026-09-23) — Repository documentation regime
 Type: implementation
@@ -237,6 +239,7 @@ Alternatives: an unbounded grid (rejected: fit-to-map and the player camera need
 Affected specs: `specs/03-domain-model.md` §6.
 
 ## D-017 (2026-09-23) — Live event version counter
+Status: superseded by D-108
 Type: implementation
 Decision: One monotonic version counter per server process, incremented on every event emitted for the live scene and carried by every event and snapshot; it restarts at 1 when the server starts, and every client treats a lower version than its last seen as a gap.
 Why: the input requires ascending version numbers with gap detection; nothing needs to survive a restart because every client takes a fresh snapshot on reconnect.
@@ -875,3 +878,17 @@ Decision: Refines D-104 and D-105, which stay in force. (1) Upgrades: `attachLiv
 Why: The LIV-01 review (prompt 2, four passes, 2026-09-25) found: one high in the correctness and security passes, reproduced: with `destroyUpgrade: false` and no other listener in production, an upgrade to any other path kept its socket open for good (500 stayed open after their clients left) and `app.close()` never resolved, so Ctrl-C hung; before LIV-01 Fastify answered such a request 404. The security pass reproduced a medium: one player socket flooding snapshot requests without reading grew the server from 203 MB to 1.5 GB and stalled the event loop for 15 s, delaying the DM's snapshot by 24 s; and a low: connection churn wrote 6,000 lines in 10 s, rotating away the PIN-failure lines `07` §8 wants kept, which G-006's limiter already prevents for REST. The UX pass found that a DM view sent back to the PIN form by a session ending elsewhere left focus on the page body and said nothing, now without any action of the DM's, and that the connection text was styled as live, claimed a loss on a first connection that never succeeded, and flickered on a blip. The test pass found that a snapshot sent to the whole room, polling accepted or no message limit all passed the tests, that the client's gap loop had never run over a real transport, and that resynchronisation was shown only by a snapshot count; a mutation of each fix above now fails a test. A 404 is what the server answered before the WebSocket existed, so nothing a client could do changes. Merging requests keeps a flood to one snapshot a second per socket without refusing a real gap, and the queue check bounds memory whatever a client does not read.
 Alternatives: `destroyUpgrade: true` in production only (rejected: the engine destroys after a 1 s delay without answering, and development would still leak every upgrade that is neither Vite's nor ours); destroying stray upgrades without an answer (rejected: a 404 is what Fastify answered before, and a client sees why); refusing snapshot requests beyond a rate with an error (rejected: a real gap after a burst would go unserved until the client's retry, and an error per request is itself output to flood); acknowledging merged requests at once (rejected: 50,000 acknowledgements are the flood again); disconnecting on request count (rejected: counts what a client asks, not what the server holds for it); a cap on sockets per address (not taken: a LAN of a few screens has no need yet and it would not bound one socket's queue); keeping the workspace open behind a notice until the next action (rejected: D-104 rejected a signed-out workspace whose calls fail one by one); a separate reconnecting region (rejected: two status regions for one bar, D-096); announcing reconnection with a separate message (rejected: the bar's text returning to the live scene says it); no delay on the connection text (rejected: a blip was announced twice).
 Affected specs: `04` §5, `04` §6, `07` §2, `07` §8, `08` §8
+
+## D-107 (2026-09-25) — One event version counter per room (Q-093)
+Type: spec-amendment
+Decision: `04` §5's statement "The version counter MUST be one per server process, starting at 1 on start-up" now reads: the version counter MUST be one per room per server process, each held in memory and starting at 1 on start-up; the `players` room's counts only the events players receive, so a player never sees a version skip that another room's event caused (`04` §4) [Q-056, Q-093]. The register bullet (the live version counter lives in memory and restarts at 1, Q-056) still holds and is unchanged. Changed through `make unlock`, recorded in `UNLOCKS.md`.
+Why: The owner answered Q-093 with A on 2026-09-25, the recommendation. With one counter shared by both rooms, an event sent to `dm` only (a hidden token added, moved or deleted, `04` §3) would leave a hole in the versions a TV receives, telling a player that something hidden happened, which `04` §4 forbids; separate counters keep both the gap detection `04` §5 requires of every client and that isolation. Raised while implementing LIV-01; LIV-02's events are the first that differ between rooms.
+Alternatives: B, no version on the players' events (rejected by the owner: the TV could no longer detect a missed event, against `04` §5); C, one shared counter accepting the leak (rejected: an exception to `04` §4); D, empty events to players filling the holes (rejected: the TV learns when something invisible happens, the same leak as C).
+Affected specs: `04` §5
+
+## D-108 (2026-09-25) — Live event version counters, one per room (after Q-093)
+Type: implementation
+Decision: Supersedes D-017 and refines the counter of D-064 and D-104. `server/src/domain/version.ts` holds `liveVersions`, a `VersionCounter` for each of `dm` and `players` (`createVersionCounters`), in memory, each first `next()` 1. `attachLiveSocket` takes version 1 of each for the state at start-up; a snapshot sent to one socket carries its room's current version and takes none; an event takes the next version of each room it is sent to, so an event for `dm` only advances `dm`'s counter and the players' sequence has no hole (LIV-02 onward emits events). A snapshot broadcast on activation (D-039) is an event for both rooms and advances both. Every client applies the gap rule of D-104 to its own room's versions; a version lower than the last seen is a gap, as a restart resets both counters. `buildApp` and `attachLiveSocket` take `versions` in place of `version`. Tests: `server/src/domain/version.test.ts` "keeps the rooms apart: an event counted for dm leaves the players sequence unbroken (Q-093)", `server/src/ws/live.test.ts` "counts each room apart: events the players room never received leave its version unchanged (Q-093)".
+Why: Q-093's answer (D-107) replaces the one process counter of D-017, whose record now misstates the rule. Advancing only the rooms an event reaches is the whole of the change; the snapshot semantics of D-104 carry over per room.
+Alternatives: One counter object carrying a per-room map inside it (rejected: the same thing with a less direct interface); deriving the players' version from the DM's by counting filtered events (rejected: needs the history of what was filtered, and a mistake in it would leak the very holes it exists to hide).
+Affected specs: `04` §5

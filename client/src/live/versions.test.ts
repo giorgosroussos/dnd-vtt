@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createVersionTracker } from './versions.js';
 
-// Gap detection (specs/04-live-sync.md §5, D-017, D-104).
+// Gap detection (specs/04-live-sync.md §5, D-104, D-108).
 describe('version tracker', () => {
   it('waits for a first snapshot and applies each next version after it', () => {
     const tracker = createVersionTracker();

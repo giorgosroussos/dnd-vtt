@@ -115,21 +115,11 @@ Every card opens `Blocking` and is answered before the specification proceeds. `
 - Q-090 — Ordering campaigns in the sidebar — data — Resolved
 - Q-091 — Remembering the token numbers already issued on a scene — data — Resolved
 - Q-092 — Token numbering that would reveal a hidden token — security — Resolved
-- Q-093 — Version numbers that would reveal a hidden token — security — Blocking
+- Q-093 — Version numbers that would reveal a hidden token — security — Resolved
 
 ## Blocking
 
-### Q-093 — Version numbers that would reveal a hidden token
-- Surface: security
-- Source: Raised while implementing LIV-01, 2026-09-25: `04` §5 has one version counter per server process [Q-056, D-017] carried by every event, but `04` §3 sends the `players` room only some events (not the move, addition or deletion of a hidden token), so a TV would see its versions skip (5, then 7) exactly when the DM touches a hidden token, and `04` §4 forbids anything from which a hidden token's existence can be learnt. In LIV-01 only per-socket snapshots exist, so nothing diverges yet; LIV-02's events are the first that do.
-- Question: How should event versions be counted so that the players room never sees a version it did not receive?
-- Options:
-  - A) One counter per room, both in the process's memory and starting at 1 at start-up: the dm room's counts every event, the players room's only the events players receive → effect on security: a player's versions never skip, so they say nothing about hidden tokens; `04` §5's "one per server process" becomes "one per room per server process", and the register bullet (in memory, restarts at 1) still holds.
-  - B) Keep one counter; the players' copy of each event carries no version, and players resynchronise only from the snapshot every reconnection brings → effect on security: nothing leaks, but `04` §5's input requirement that every event carries a version and a client detects gaps no longer holds for the TV.
-  - C) Keep one counter shared by both rooms and accept that a TV can infer that some DM-only event happened → effect on security: an exception to `04` §4; a curious player reading the traffic learns when a hidden token is added, moved or deleted.
-  - D) Keep one counter, and send players an empty keep-alive event for every DM-only event so their sequence has no holes → effect on security: the TV still learns that something invisible happened and when, which is the same leak as C.
-- Recommendation: A, because it is the only option that keeps both the gap detection `04` §5 requires and the isolation `04` §4 requires, and it changes only where the counter lives, not what is stored.
-- Blocks: specification
+None. Phase 0 can proceed.
 
 ## Open
 
@@ -1174,3 +1164,16 @@ None.
 - Recommendation: A, because it keeps numbers on hidden tokens for the DM while nothing reaches the TV at the moment of adding.
 - Blocks: specification
 - Answer: B (2026-09-25)
+
+### Q-093 — Version numbers that would reveal a hidden token
+- Surface: security
+- Source: Raised while implementing LIV-01, 2026-09-25: `04` §5 has one version counter per server process [Q-056, D-017] carried by every event, but `04` §3 sends the `players` room only some events (not the move, addition or deletion of a hidden token), so a TV would see its versions skip (5, then 7) exactly when the DM touches a hidden token, and `04` §4 forbids anything from which a hidden token's existence can be learnt. In LIV-01 only per-socket snapshots exist, so nothing diverges yet; LIV-02's events are the first that do.
+- Question: How should event versions be counted so that the players room never sees a version it did not receive?
+- Options:
+  - A) One counter per room, both in the process's memory and starting at 1 at start-up: the dm room's counts every event, the players room's only the events players receive → effect on security: a player's versions never skip, so they say nothing about hidden tokens; `04` §5's "one per server process" becomes "one per room per server process", and the register bullet (in memory, restarts at 1) still holds.
+  - B) Keep one counter; the players' copy of each event carries no version, and players resynchronise only from the snapshot every reconnection brings → effect on security: nothing leaks, but `04` §5's input requirement that every event carries a version and a client detects gaps no longer holds for the TV.
+  - C) Keep one counter shared by both rooms and accept that a TV can infer that some DM-only event happened → effect on security: an exception to `04` §4; a curious player reading the traffic learns when a hidden token is added, moved or deleted.
+  - D) Keep one counter, and send players an empty keep-alive event for every DM-only event so their sequence has no holes → effect on security: the TV still learns that something invisible happened and when, which is the same leak as C.
+- Recommendation: A, because it is the only option that keeps both the gap detection `04` §5 requires and the isolation `04` §4 requires, and it changes only where the counter lives, not what is stored.
+- Blocks: specification
+- Answer: A (2026-09-25; recommendation accepted)
