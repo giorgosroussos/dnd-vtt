@@ -25,6 +25,8 @@ Token footprint MUST follow the asset's size: [input]
 - A token MUST hold only its own state: position, visibility, label and stacking order; name, image, size and category come from its asset. [input]
 - Adding several tokens of the same asset to a scene MUST number their labels automatically ("Goblin 1" to "Goblin 4"). [input]
 - Numbering MUST be per scene; a single token keeps the bare name, and freed numbers are not reused. [Q-063]
+- Only the first token of an asset placed on a scene takes the bare name; a later token of that asset is numbered even when it is alone. The highest number issued for each asset MUST be stored with the scene (`03` §1), so that no number, the highest included, is issued twice on it. [Q-091]
+- A token placed hidden MUST take the asset's bare name and no number, and be numbered by these rules only when it is first shown to players, placed visible or revealed; a lone visible token carrying the bare name becomes "<name> 1" only then, so numbering never reveals a hidden token (`04` §4). A label the DM typed is never renumbered. [Q-092]
 
 ## 4. Default visibility
 

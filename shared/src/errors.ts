@@ -29,6 +29,8 @@ export const ERROR_CODES = [
   'asset_in_use',
   // PRP-03 (specs/06-grid-and-measurement.md §1): calibration of a scene without a map.
   'calibration_needs_map',
+  // PRP-04 (specs/04-live-sync.md §2): the live scene's tokens change only by live commands.
+  'scene_live',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

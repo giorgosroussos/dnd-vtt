@@ -1,12 +1,18 @@
 import { act } from 'react';
+import { Value } from 'typebox/value';
 import {
+  TokenCreateBodySchema,
+  TokenUpdateBodySchema,
+  nextLabel,
   normalizeTag,
+  numberingPeers,
   type AssetUsage,
   type Campaign,
   type DeletionSummary,
   type Image,
   type LibraryAsset,
   type Scene,
+  type SceneToken,
   type Session,
 } from '@emberglass/shared';
 
@@ -76,6 +82,10 @@ export class FakeServer {
   uploads: unknown[] = [];
   /** Fields of the image the next uploads store. */
   uploadedImage: Partial<Image> = {};
+  /** Tokens with their state, served by the token routes (PRP-04, D-100). */
+  sceneTokens: SceneToken[] = [];
+  /** The highest number issued per scene and asset, as `scene.token_numbers` (Q-091). */
+  private issued: Record<string, number> = {};
   calls: Call[] = [];
   before: Interceptor | undefined;
   private restore: (() => void) | undefined;
@@ -121,6 +131,101 @@ export class FakeServer {
     };
     this.assets.push(asset);
     return asset;
+  }
+
+  /** A token of `asset` on `scene`, as a placement makes it, numbered and visible as the server would. */
+  addToken(sceneId: string, asset: LibraryAsset, fields: Partial<SceneToken> = {}): SceneToken {
+    const top = Math.max(
+      -1,
+      ...this.sceneTokens.filter((each) => each.scene_id === sceneId).map((each) => each.z_order),
+    );
+    const token: SceneToken = {
+      id: uuid(),
+      scene_id: sceneId,
+      asset_id: asset.id,
+      label: asset.name,
+      x: 0,
+      y: 0,
+      hidden: asset.default_hidden,
+      z_order: top + 1,
+      character_id: null,
+      asset: { name: asset.name, image_id: asset.image_id, size: asset.size },
+      ...fields,
+    };
+    this.sceneTokens.push(token);
+    // A hidden token keeps the bare name until it is shown (Q-092).
+    if (!token.hidden && fields.label === undefined) this.numberAs(token);
+    return token;
+  }
+
+  /** Numbers `token` as the server does (D-019, Q-091, Q-092), with its shared rule; answers the token it renamed. */
+  private numberAs(token: SceneToken): SceneToken | undefined {
+    const others = this.sceneTokens.filter(
+      (each) => each.scene_id === token.scene_id && each.asset_id === token.asset_id && each !== token,
+    );
+    const key = `${token.scene_id}:${token.asset_id}`;
+    const numbering = nextLabel(token.asset.name, numberingPeers(token.asset.name, others), this.issued[key] ?? 0);
+    token.label = numbering.label;
+    this.issued[key] = numbering.issued;
+    const renamed = numbering.relabel && others.find((each) => each.id === numbering.relabel!.id);
+    if (renamed) renamed.label = numbering.relabel!.label;
+    return renamed;
+  }
+
+  private tokensOf(sceneId: string): SceneToken[] {
+    return this.sceneTokens
+      .filter((each) => each.scene_id === sceneId)
+      .sort((a, b) => a.z_order - b.z_order || a.id.localeCompare(b.id));
+  }
+
+  // As D-100 does: the live scene's tokens are refused; positions and labels as sent.
+  private handleTokens(
+    method: string,
+    sceneId: string | undefined,
+    tokenId: string | undefined,
+    b: Record<string, unknown>,
+  ): Reply {
+    if (sceneId !== undefined) {
+      if (!this.scenes.some((each) => each.id === sceneId)) return failure(404, 'not_found');
+      if (method === 'GET') return json(200, this.tokensOf(sceneId));
+      // The contract's own schema, as the server validates it before anything else (D-100).
+      if (!Value.Check(TokenCreateBodySchema, b)) return failure(400, 'validation_failed');
+      if (sceneId === this.liveSceneId) return failure(409, 'scene_live');
+      const asset = this.assets.find((each) => each.id === b.asset_id);
+      if (!asset) return failure(400, 'reference_not_found');
+      const before = this.tokensOf(sceneId).map((each) => ({ ...each }));
+      const token = this.addToken(sceneId, asset, { x: Number(b.x), y: Number(b.y) });
+      const relabelled = this.tokensOf(sceneId).filter((each) =>
+        before.some((old) => old.id === each.id && old.label !== each.label),
+      );
+      return json(201, { token, relabelled });
+    }
+    if (method === 'PATCH' && !Value.Check(TokenUpdateBodySchema, b)) return failure(400, 'validation_failed');
+    const token = this.sceneTokens.find((each) => each.id === tokenId);
+    if (!token) return failure(404, 'not_found');
+    if (token.scene_id === this.liveSceneId) return failure(409, 'scene_live');
+    if (method === 'DELETE') {
+      this.sceneTokens = this.sceneTokens.filter((each) => each !== token);
+      return json(204);
+    }
+    const { stack, ...fields } = b as Partial<SceneToken> & { stack?: 'front' | 'back' };
+    const revealed =
+      token.hidden && fields.hidden === false && fields.label === undefined && token.label === token.asset.name;
+    Object.assign(token, fields, typeof fields.label === 'string' ? { label: fields.label.trim() } : {});
+    const renamed = revealed ? this.numberAs(token) : undefined;
+    if (stack) {
+      const others = this.tokensOf(token.scene_id)
+        .filter((each) => each !== token)
+        .map((each) => each.z_order);
+      // As the server does: unless it already is there.
+      if (stack === 'front' && others.length > 0 && token.z_order <= Math.max(...others)) {
+        token.z_order = Math.max(...others) + 1;
+      }
+      if (stack === 'back' && others.length > 0 && token.z_order >= Math.min(...others)) {
+        token.z_order = Math.min(...others) - 1;
+      }
+    }
+    return json(200, { token: { ...token }, relabelled: renamed ? [{ ...renamed }] : [] });
   }
 
   addImage(fields: Partial<Image> = {}): Image {
@@ -196,7 +301,7 @@ export class FakeServer {
     return {
       sessions: sessions.length,
       scenes: scenes.length,
-      tokens: scenes.reduce((sum, scene) => sum + (this.tokens[scene.id] ?? 0), 0),
+      tokens: scenes.reduce((sum, scene) => sum + (this.tokens[scene.id] ?? 0) + this.tokensOf(scene.id).length, 0),
       live: scenes.some((scene) => scene.id === this.liveSceneId),
     };
   }
@@ -372,6 +477,10 @@ export class FakeServer {
     }
     const asset = /^\/api\/assets(?:\/([^/]+))?$/.exec(path);
     if (asset) return this.handleAssets(method, asset[1], query, b);
+    const sceneTokens = /^\/api\/scenes\/([^/]+)\/tokens$/.exec(path);
+    if (sceneTokens) return this.handleTokens(method, sceneTokens[1], undefined, b);
+    const token = /^\/api\/tokens\/([^/]+)$/.exec(path);
+    if (token) return this.handleTokens(method, undefined, token[1], b);
 
     const match =
       /^\/api\/(campaigns|sessions|scenes)(?:\/([^/]+))?(?:\/(sessions|scenes|deletion|order))?(?:\/(order))?$/.exec(

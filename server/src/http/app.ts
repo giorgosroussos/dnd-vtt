@@ -11,6 +11,7 @@ import type { ScryptParams } from '../auth/pin-hash.js';
 import { registerAssets } from './assets.js';
 import { registerAuth, type Auth } from './auth.js';
 import { registerCampaigns } from './campaigns.js';
+import { registerTokens } from './tokens.js';
 import { imageFileRemover, registerImages } from './images.js';
 import { imagesDirOf, prepareImagesDir } from '../images/store.js';
 import { createFailureLog, installErrorHandling, sendFailure, type RejectedLineLimits } from './errors.js';
@@ -91,6 +92,7 @@ export async function buildApp({
   const removeImages = imageFileRemover(imagesDir, logger);
   registerCampaigns(app, db, removeImages);
   registerAssets(app, db, removeImages);
+  registerTokens(app, db);
   await registerImages(app, { db, imagesDir, auth });
   const sendIndex = client.kind === 'static' ? await serveBuild(app, client.dist) : await serveVite(app, client.root);
 

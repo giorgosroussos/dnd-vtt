@@ -181,7 +181,11 @@ export function readEntities(db: Database.Database): Entities {
     asset_tag: all('asset_tag') as AssetTag[],
     campaign: all('campaign') as Campaign[],
     session: all('session') as Session[],
-    scene: all('scene').map((row) => ({ ...without(row, 'grid_'), grid: grid(row, 'grid_') })) as Scene[],
+    // The token numbers a scene has issued are the server's own, not part of the record (Q-091).
+    scene: all('scene').map((row) => ({
+      ...without(without(row, 'grid_'), 'token_numbers'),
+      grid: grid(row, 'grid_'),
+    })) as Scene[],
     token: all('token').map((row) => ({ ...row, hidden: row.hidden === 1 })) as Token[],
     settings: all('settings').map((row) => without(row, 'pin_hash')) as Settings[],
   };

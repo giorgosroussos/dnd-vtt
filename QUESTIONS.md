@@ -113,6 +113,8 @@ Every card opens `Blocking` and is answered before the specification proceeds. `
 - Q-088 — Test art is generated, not third-party — external — Resolved
 - Q-089 — Reordering by dragging in the sidebar — ux — Resolved
 - Q-090 — Ordering campaigns in the sidebar — data — Resolved
+- Q-091 — Remembering the token numbers already issued on a scene — data — Resolved
+- Q-092 — Token numbering that would reveal a hidden token — security — Resolved
 
 ## Blocking
 
@@ -1136,3 +1138,28 @@ None.
 - Recommendation: A, because one game runs per server and a DM rarely has more than a few campaigns; B stays open later as an additive migration. Can be deferred to PRP-01, which builds the sidebar; SRV-03 lists by name meanwhile.
 - Blocks: specification
 - Answer: A (2026-09-24; recommendation accepted)
+
+### Q-091 — Remembering the token numbers already issued on a scene
+- Surface: data
+- Source: Raised by PRP-04: `05-assets-and-images.md` §3 says freed numbers are not reused [Q-063] and D-019 that the first token keeps the bare name until a second arrives, but `03-domain-model.md` §1 and migration 0001 store nothing that remembers the highest number issued, so after deleting "Goblin 4" the labels left (Goblin 1 to 3) would give "Goblin 4" again.
+- Question: How should the server remember the highest token number issued per scene and asset, and what is a new token called after a lone bare-named one was deleted?
+- Options:
+  - A) An additive migration adds `scene.token_numbers`, a JSON object from asset id to the highest number issued; only the first token of an asset ever placed on a scene takes the bare name, later ones are numbered even when alone → effect on data: one column on Scene, still eight entities; `03` §1 and `05` §3 amended; no number, the highest included, is ever issued twice.
+  - B) An additive migration adds a ninth table (scene_id, asset_id, last_number) with cascading keys → effect on data: relationally cleanest, but contradicts the locked "eight entities" bullet of `12` §1 and needs an ADR.
+  - C) No schema change: the next number is the highest among the current labels plus one → effect on data: nothing stored; deleting the highest-numbered token lets its number return ("Goblin 4" deleted, the next is "Goblin 4"), contradicting Q-063, which would need a superseding card.
+- Recommendation: A, because it keeps Q-063 strict with one additive column, touches no locked bullet, and a label never points at a different creature.
+- Blocks: specification
+- Answer: A (2026-09-25; recommendation accepted)
+
+### Q-092 — Token numbering that would reveal a hidden token
+- Surface: security
+- Source: Raised by the PRP-04 security review, 2026-09-25: numbering counts hidden tokens (`05` §3, D-019, Q-091), so adding a hidden second Goblin to the live scene would rename the visible lone "Goblin" to "Goblin 1" on the TV, and `04` §4 forbids anything from which a hidden token's existence can be learnt.
+- Question: How should numbering treat hidden tokens so that it never tells players a hidden token exists?
+- Options:
+  - A) Number hidden and visible tokens alike, but never rename a visible token when a hidden one is added on the live scene → effect on security: no rename leaks at the moment of adding; the rule differs between preparation and play, and a later reveal renames tokens.
+  - B) A token placed hidden takes the bare name and no number; it is numbered when it is first shown to players (placed visible or revealed), and only then is a lone visible bare-named token renamed "<name> 1" → effect on security: numbering never depends on a hidden token; the DM cannot tell hidden tokens of one asset apart by number until they are revealed.
+  - C) Keep one rule and accept the leak as an exception to `04` §4 → effect on security: the TV may show a rename that hints a hidden token was added.
+  - D) Defer to LIV-02 → effect on security: PRP-04 numbers as now; LIV-02 decides before live play.
+- Recommendation: A, because it keeps numbers on hidden tokens for the DM while nothing reaches the TV at the moment of adding.
+- Blocks: specification
+- Answer: B (2026-09-25)

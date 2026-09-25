@@ -1,7 +1,7 @@
-import { useEffect, useEffectEvent, useId, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useEffectEvent, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type Konva from 'konva';
-import { Group, Image as KonvaImage, Label, Layer, Line, Rect, Stage, Tag, Text } from 'react-konva';
-import { imageFileUrl, type Grid, type Image } from '@emberglass/shared';
+import { Circle, Group, Image as KonvaImage, Label, Layer, Line, Rect, Stage, Tag, Text } from 'react-konva';
+import { imageFileUrl, type Grid, type Image, type TokenSize } from '@emberglass/shared';
 import { Button } from '../ui/Button.js';
 import { formatDecimal, normalise, type Rect as Box } from './calibration.js';
 import { t } from '../ui/messages.js';
@@ -17,6 +17,17 @@ import {
   type Camera,
   type Size,
 } from './geometry.js';
+import { TokenLayer, type TokenControls } from './TokenLayer.js';
+import {
+  clampToWorld,
+  footprint,
+  gridFrame,
+  nudge,
+  placePosition,
+  toWorld,
+  type CanvasToken,
+  type Point,
+} from './tokens.js';
 import './canvas.css';
 
 // The map canvas both views draw (specs/08-ux-journeys.md §3, specs/06-grid-and-measurement.md §2,
@@ -31,6 +42,11 @@ import './canvas.css';
 //
 // While the DM calibrates by rectangle (PRP-03, specs/06-grid-and-measurement.md §1, D-094), a
 // drag on the map draws a rectangle instead of panning, reported in the original's pixels.
+//
+// Tokens (PRP-04, D-100) are drawn over the grid by TokenLayer. In the DM mode a click selects one
+// and a drag moves it; while a token is selected the arrow keys move it by a square (half a square
+// for Tiny), Escape lets it go and Delete asks to delete it. While a token is being placed, a click
+// on the map places it there and Enter at the centre of the view; Escape cancels.
 
 // Konva draws on a canvas, so these are colours, not the CSS tokens: the void around the
 // scene is the page background of tokens.css, a map-less extent a neutral dark grey (D-016);
@@ -87,6 +103,20 @@ interface Drag {
   end: { x: number; y: number };
 }
 
+/** A token being placed: a click on the map, or Enter, says where (specs/05-assets-and-images.md §5). */
+export interface Placing {
+  size: TokenSize;
+  /** Where the token goes, in grid units, snapped unless Alt was held. */
+  onPlace: (at: Point) => void;
+  onCancel: () => void;
+}
+
+/** The DM's token controls: selection, moves and the deletion request. */
+export interface CanvasTokenControls extends TokenControls {
+  onDeselect: () => void;
+  onDelete: (id: string) => void;
+}
+
 /** A rectangle measured on the map during calibration, in the original image's pixels. */
 export interface Measure {
   rect: Box | undefined;
@@ -128,6 +158,10 @@ export function MapCanvas({
   label,
   onMapError,
   measure,
+  tokens = [],
+  tokenControls,
+  placing,
+  toolbar,
 }: {
   grid: Grid;
   /** The scene's map image, or null for a scene without a map. */
@@ -138,6 +172,14 @@ export function MapCanvas({
   onMapError?: () => void;
   /** DM view only: a drag measures a rectangle instead of panning. */
   measure?: Measure | undefined;
+  /** The scene's tokens; the player mode draws only the visible ones. */
+  tokens?: readonly CanvasToken[];
+  /** DM view only: selecting, moving and deleting tokens. */
+  tokenControls?: CanvasTokenControls | undefined;
+  /** DM view only: a token being placed by a click on the map. */
+  placing?: Placing | undefined;
+  /** DM view only: the scene's own controls, on the toolbar's row before the view's (D-100). */
+  toolbar?: ReactNode;
 }) {
   const helpId = useId();
   const [viewportRef, viewport] = useViewport();
@@ -169,6 +211,12 @@ export function MapCanvas({
   const opacity = overlayOpacity(mode, grid.visible);
   const dm = mode === 'dm';
   const measuring = dm && measure !== undefined && info !== undefined;
+  const frame = ready ? gridFrame(grid, info) : undefined;
+  const place = dm && !measuring && placing && frame ? { ...placing, frame } : undefined;
+  const placingNow = place !== undefined;
+  // Tokens are selected and dragged only when nothing else uses the pointer.
+  const controls = dm && !measuring && !placingNow ? tokenControls : undefined;
+  const selected = controls && tokens.find((token) => token.id === controls.selectedId);
   // The drag being measured: the ref is what the handlers read, the state what is drawn, so a
   // release seen twice (by the stage and by the window) reports once.
   const dragRef = useRef<Drag>(undefined);
@@ -178,8 +226,55 @@ export function MapCanvas({
     setDraggingState(drag);
   };
 
+  // Centred on `at`, snapped unless Alt, and kept on the map.
+  const placeAt = (target: Placing & { frame: typeof frame & object }, at: Point, alt: boolean): Point =>
+    clampToWorld(target.frame, world, placePosition(target.frame, at, target.size, alt), target.size, !alt);
+
+  // The world point at the centre of the view, where Enter places a token.
+  const centreWorld = (): Point => ({
+    x: (viewport.width / 2 - camera.x) / camera.scale,
+    y: (viewport.height / 2 - camera.y) / camera.scale,
+  });
+
+  const ARROWS: Record<string, [number, number]> = {
+    ArrowLeft: [-1, 0],
+    ArrowRight: [1, 0],
+    ArrowUp: [0, -1],
+    ArrowDown: [0, 1],
+  };
+
   function onKeyDown(event: KeyboardEvent) {
     if (event.altKey || event.ctrlKey || event.metaKey) return;
+    if (place) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        place.onPlace(placeAt(place, centreWorld(), false));
+        return;
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        place.onCancel();
+        return;
+      }
+    }
+    if (controls && selected) {
+      const arrow = ARROWS[event.key];
+      if (arrow) {
+        event.preventDefault();
+        controls.onMove(selected.id, nudge(selected, selected.size, arrow[0], arrow[1]));
+        return;
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        controls.onDeselect();
+        return;
+      }
+      if (event.key === 'Delete' || event.key === 'Backspace') {
+        event.preventDefault();
+        controls.onDelete(selected.id);
+        return;
+      }
+    }
     if (!cameraForKey(camera, event.key, event.shiftKey, world, viewport)) return;
     event.preventDefault();
     const { key, shiftKey } = event;
@@ -277,6 +372,17 @@ export function MapCanvas({
         })
       : undefined;
 
+  // A click that did not drag the view: places the token being placed, or lets the selection go.
+  function onStageClick(event: Konva.KonvaEventObject<MouseEvent>) {
+    if (event.target !== event.target.getStage()) return;
+    if (place) {
+      const at = event.target.getStage()?.getRelativePointerPosition();
+      if (at) place.onPlace(placeAt(place, at, event.evt.altKey));
+      return;
+    }
+    if (controls?.selectedId !== undefined) controls.onDeselect();
+  }
+
   const handlers = !dm
     ? {}
     : measuring
@@ -286,7 +392,7 @@ export function MapCanvas({
           onPointerMove: onMeasureMove,
           onPointerUp: (event: Konva.KonvaEventObject<PointerEvent>) => finishMeasure(worldPoint(event) ?? undefined),
         }
-      : { onWheel, onDragMove: onDrag, onDragEnd: onDrag };
+      : { onWheel, onDragMove: onDrag, onDragEnd: onDrag, onClick: onStageClick };
 
   const centre = { x: viewport.width / 2, y: viewport.height / 2 };
   const stage = (
@@ -367,6 +473,18 @@ export function MapCanvas({
           </Label>
         ) : null}
       </Layer>
+      {frame ? <TokenLayer tokens={tokens} frame={frame} scale={camera.scale} mode={mode} controls={controls} /> : null}
+      {place ? (
+        // Where Enter places the token: the centre of the view, marked while placing (review).
+        <Layer listening={false}>
+          <Group name="place-target" {...centreWorld()} scaleX={1 / camera.scale} scaleY={1 / camera.scale}>
+            <Circle radius={10} stroke={CANVAS_COLOURS.halo} strokeWidth={4} />
+            <Circle radius={10} stroke={CANVAS_COLOURS.measure} strokeWidth={2} />
+            <Line points={[-16, 0, 16, 0]} stroke={CANVAS_COLOURS.measure} strokeWidth={2} />
+            <Line points={[0, -16, 0, 16]} stroke={CANVAS_COLOURS.measure} strokeWidth={2} />
+          </Group>
+        </Layer>
+      ) : null}
     </Stage>
   );
 
@@ -378,6 +496,26 @@ export function MapCanvas({
     'data-camera-scale': camera.scale,
     'data-grid': opacity === 0 ? 'none' : grid.visible ? 'shown' : 'faint',
   };
+  // Where each token is drawn, in screen pixels from the viewport's corner, for the end-to-end tests;
+  // the DM view's own tokens only. The player mode exposes none (LIV-03 decides what it may).
+  const tokenBoxes =
+    dm && frame
+      ? JSON.stringify(
+          tokens.map((token) => {
+            const at = toWorld(frame, token);
+            return {
+              id: token.id,
+              label: token.label,
+              hidden: token.hidden,
+              x: token.x,
+              y: token.y,
+              left: camera.x + at.x * camera.scale,
+              top: camera.y + at.y * camera.scale,
+              side: footprint(token.size) * frame.square * camera.scale,
+            };
+          }),
+        )
+      : undefined;
 
   if (!dm) {
     return (
@@ -388,29 +526,39 @@ export function MapCanvas({
   }
   return (
     <div className="eg-canvas eg-canvas--dm">
-      <div className="eg-canvas__toolbar" role="group" aria-label={t('canvas.controls')}>
-        <Button size="small" onClick={() => changeCamera((current) => zoomAt(current, ZOOM_STEP, centre))}>
-          {t('canvas.zoomIn')}
-        </Button>
-        <Button size="small" onClick={() => changeCamera((current) => zoomAt(current, 1 / ZOOM_STEP, centre))}>
-          {t('canvas.zoomOut')}
-        </Button>
-        <Button size="small" onClick={() => setManual(undefined)}>
-          {t('canvas.fit')}
-        </Button>
+      <div className="eg-canvas__toolbar">
+        {toolbar}
+        <div className="eg-canvas__view" role="group" aria-label={t('canvas.controls')}>
+          <Button size="small" onClick={() => changeCamera((current) => zoomAt(current, ZOOM_STEP, centre))}>
+            {t('canvas.zoomIn')}
+          </Button>
+          <Button size="small" onClick={() => changeCamera((current) => zoomAt(current, 1 / ZOOM_STEP, centre))}>
+            {t('canvas.zoomOut')}
+          </Button>
+          <Button size="small" onClick={() => setManual(undefined)}>
+            {t('canvas.fit')}
+          </Button>
+        </div>
         <p id={helpId} className="eg-canvas__help">
-          {measuring ? t('canvas.helpMeasure') : t('canvas.help')}
+          {measuring
+            ? t('canvas.helpMeasure')
+            : placingNow
+              ? t('canvas.helpPlace')
+              : selected
+                ? t('canvas.helpToken', { label: selected.label })
+                : t('canvas.help')}
         </p>
       </div>
       <div
         ref={viewportRef}
-        className={measuring ? 'eg-canvas__viewport eg-canvas__viewport--measure' : 'eg-canvas__viewport'}
+        className={measuring || placingNow ? 'eg-canvas__viewport eg-canvas__viewport--measure' : 'eg-canvas__viewport'}
         role="application"
         aria-label={label}
         aria-describedby={helpId}
         tabIndex={0}
         onKeyDown={onKeyDown}
         {...state}
+        data-tokens={tokenBoxes}
       >
         {stage}
       </div>

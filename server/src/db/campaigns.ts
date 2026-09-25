@@ -400,7 +400,7 @@ export function reorderScenes(db: Database.Database, sessionId: string, ids: rea
 /**
  * A copy of the scene, right after it in its session, with its own copy of
  * every token under new identifiers (specs/03-domain-model.md §7). The grid is
- * the scene's own, not its image's preset.
+ * the scene's own, not its image's preset, and so are the token numbers issued (Q-091).
  */
 export function duplicateScene(db: Database.Database, id: string, name: string): Scene | undefined {
   const copyId = randomUUID();
@@ -416,6 +416,11 @@ export function duplicateScene(db: Database.Database, id: string, name: string):
       nextOrder(db, SCENES, original.session_id),
       original.map_image_id,
       original.grid,
+    );
+    // The copy numbers on from the original's numbers, since its tokens carry them (Q-091).
+    db.prepare('UPDATE scene SET token_numbers = (SELECT token_numbers FROM scene WHERE id = ?) WHERE id = ?').run(
+      id,
+      copyId,
     );
     siblings.splice(siblings.indexOf(id) + 1, 0, copyId);
     writeOrder(db, SCENES, original.session_id, siblings);
