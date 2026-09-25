@@ -81,7 +81,7 @@ export function SetupElsewhere() {
   );
 }
 
-export function PinEntry({ onDone }: { onDone: () => void }) {
+export function PinEntry({ onDone, notice }: { onDone: () => void; notice?: string | undefined }) {
   const [pin, setPin] = useState('');
   const [fieldError, setFieldError] = useState<string>();
   const [failure, setFailure] = useState<string>();
@@ -111,6 +111,7 @@ export function PinEntry({ onDone }: { onDone: () => void }) {
   return (
     <form className="eg-signin" onSubmit={(event) => void submit(event)} noValidate>
       <h1 className="eg-dm__heading">{t('signIn.heading')}</h1>
+      {notice && !failure ? <Notice>{notice}</Notice> : null}
       {failure ? <Notice>{failure}</Notice> : null}
       <TextField
         {...pinInput}

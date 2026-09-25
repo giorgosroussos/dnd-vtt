@@ -17,7 +17,9 @@ type Screen =
   | { kind: 'failed'; code: ClientErrorCode }
   | { kind: 'setup' }
   | { kind: 'setupElsewhere' }
-  | { kind: 'signIn' }
+  // `ended`: the server ended this browser's session while it was open (a restart, a PIN change
+  // or a sign-out elsewhere), so the form says why it is back (LIV-01 review, D-106).
+  | { kind: 'signIn'; ended?: boolean }
   | { kind: 'workspace' };
 
 // The DM view at /dm (specs/08-ux-journeys.md §1, specs/07-security-and-access.md
@@ -46,7 +48,7 @@ export function DmView() {
   useEffect(() => {
     load();
     // A session the server no longer knows sends the DM back to the PIN form.
-    setUnauthorizedHandler(() => setScreen({ kind: 'signIn' }));
+    setUnauthorizedHandler(() => setScreen({ kind: 'signIn', ended: true }));
     return () => setUnauthorizedHandler(undefined);
   }, [load]);
 
@@ -56,6 +58,14 @@ export function DmView() {
   };
 
   const signedIn = () => setScreen({ kind: 'workspace' });
+  const signedOutElsewhere = useCallback(() => setScreen({ kind: 'signIn', ended: true }), []);
+
+  // The control that had focus went away with the workspace: put focus where the form starts,
+  // so the keyboard and assistive technology are not left on the page body.
+  const ended = screen.kind === 'signIn' && screen.ended === true;
+  useEffect(() => {
+    if (ended) document.getElementById(MAIN_ID)?.focus();
+  }, [ended]);
 
   // Only once the server has ended the session: a sign-out that failed must not
   // look like one on a shared laptop, whose session would still be valid.
@@ -84,7 +94,7 @@ export function DmView() {
       </header>
       {screen.kind === 'workspace' && signOutFailure ? <Notice>{signOutFailure}</Notice> : null}
       {screen.kind === 'workspace' ? (
-        <Workspace mainId={MAIN_ID} />
+        <Workspace mainId={MAIN_ID} onSignedOut={signedOutElsewhere} />
       ) : (
         <main id={MAIN_ID} tabIndex={-1} className="eg-dm__main" data-view="dm">
           {screen.kind === 'loading' ? <p className="eg-dm__status">{t('dm.loading')}</p> : null}
@@ -103,7 +113,9 @@ export function DmView() {
           ) : null}
           {screen.kind === 'setup' ? <SetupScreen onDone={signedIn} onPinAlreadySet={retry} /> : null}
           {screen.kind === 'setupElsewhere' ? <SetupElsewhere /> : null}
-          {screen.kind === 'signIn' ? <PinEntry onDone={signedIn} /> : null}
+          {screen.kind === 'signIn' ? (
+            <PinEntry onDone={signedIn} notice={screen.ended ? t('signIn.sessionEnded') : undefined} />
+          ) : null}
         </main>
       )}
     </div>

@@ -14,6 +14,8 @@ import { registerCampaigns } from './campaigns.js';
 import { registerTokens } from './tokens.js';
 import { imageFileRemover, registerImages } from './images.js';
 import { imagesDirOf, prepareImagesDir } from '../images/store.js';
+import type { VersionCounter } from '../domain/version.js';
+import { attachLiveSocket, isViteUpgrade, type LiveSocket, type LiveSocketOptions } from '../ws/live.js';
 import { createFailureLog, installErrorHandling, sendFailure, type RejectedLineLimits } from './errors.js';
 
 // Where the client comes from: the production build, or Vite in middleware mode
@@ -35,12 +37,20 @@ export interface AppOptions {
   pinHashParams?: Readonly<ScryptParams> | undefined;
   /** Limits on rejected-request log lines (G-006); the defaults suit production. */
   rejectedLines?: RejectedLineLimits | undefined;
+  /** The live event version counter; the process's own unless a test passes one (D-017). */
+  version?: VersionCounter | undefined;
+  /** Command validation and application; tests only replace them (LIV-01). */
+  commands?: LiveSocketOptions['commands'];
+  /** The live socket's abuse limits; tests only lower them (D-106). */
+  liveLimits?: Pick<LiveSocketOptions, 'snapshotIntervalMs' | 'maxPendingPackets' | 'connectionLines'> | undefined;
 }
 
 declare module 'fastify' {
   interface FastifyInstance {
-    // LIV-01's WebSocket handshake checks the same sessions.
+    // The WebSocket handshake checks the same sessions (LIV-01).
     auth: Auth;
+    // The Socket.io server of the live scene, on the same HTTP server (LIV-01).
+    live: LiveSocket;
     // Every route declared, HEAD routes included: the tests that check every
     // /api route read it, so a new route cannot escape them.
     declaredRoutes: readonly { method: string; url: string }[];
@@ -62,6 +72,9 @@ export async function buildApp({
   now,
   pinHashParams,
   rejectedLines,
+  version,
+  commands,
+  liveLimits,
 }: AppOptions): Promise<FastifyInstance> {
   const failures = createFailureLog(logger, rejectedLines);
   const app = Fastify({
@@ -77,6 +90,15 @@ export async function buildApp({
   app.setValidatorCompiler(({ schema }) => compileSchema(schema));
   installErrorHandling(app, failures);
   const auth = registerAuth(app, { db, logger, now, pinHashParams });
+  const live = attachLiveSocket(app, {
+    db,
+    logger,
+    auth,
+    version,
+    commands,
+    ...liveLimits,
+    foreignUpgrade: client.kind === 'dev' ? isViteUpgrade : undefined,
+  });
   const imagesDir = imagesDirOf(dataDir);
   const { unreferenced, orphans } = prepareImagesDir(db, imagesDir);
   if (unreferenced.length > 0) {
@@ -101,6 +123,7 @@ export async function buildApp({
   app.get(VIEW_PATHS.dm, sendIndex);
   app.get(`${VIEW_PATHS.dm}/*`, sendIndex);
   app.decorate('auth', auth);
+  app.decorate('live', live);
   app.decorate('declaredRoutes', declaredRoutes);
   return app;
 }

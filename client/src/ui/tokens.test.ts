@@ -35,6 +35,8 @@ const TEXT_PAIRS: [string, string][] = [
   ['color-on-accent', 'color-accent'],
   ['color-danger', 'color-bg'],
   ['color-danger', 'color-surface'],
+  // The live bar's connection warning (D-106).
+  ['color-accent', 'color-bg'],
   // The danger button: dark text on the danger colour (D-085).
   ['color-on-accent', 'color-danger'],
 ];

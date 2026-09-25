@@ -6,8 +6,8 @@ import { buildApp } from './http/app.js';
 import { createLogger } from './log/logger.js';
 import { CLIENT_DIST, CLIENT_ROOT, MIGRATIONS_DIR } from './paths.js';
 
-// One process: the built client (or Vite in development), the REST API and,
-// from LIV-01, the WebSocket (specs/02-architecture.md §2).
+// One process: the built client (or Vite in development), the REST API and the
+// WebSocket of the live scene, all on one port (specs/02-architecture.md §2).
 export async function start({ dev }: { dev: boolean }): Promise<void> {
   const config = loadConfig();
   // Console and logs/emberglass.log in the data directory (specs/09-operations.md §6, D-035).
