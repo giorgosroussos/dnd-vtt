@@ -6,9 +6,10 @@ import { nextLabel, numberingPeers, type SceneToken, type TokenSize, type TokenS
 // specs/05-assets-and-images.md §2–§5, specs/04-live-sync.md §2, D-019, Q-063, Q-091). Every
 // read and write names its columns. A token holds only its own state (position, visibility,
 // label, stacking order); its name, image and size are its asset's and are read by joining it.
-// Positions are decimal grid units and are stored exactly as sent. The live scene's tokens are
-// refused here, inside the transaction that would change them, since they change only by the
-// live commands of LIV-02.
+// Positions are decimal grid units and are stored exactly as sent. Every write names the scope it
+// is for, checked inside the transaction that would change the token: preparation (REST) is refused
+// on the live scene, whose tokens change only by the live commands, and a live command is refused
+// on any scene that is not live (LIV-02, specs/04-live-sync.md §2, D-100).
 
 const COLUMNS = `token.id, token.scene_id, token.asset_id, token.label, token.x, token.y, token.hidden,
   token.z_order, token.character_id, asset.name AS asset_name, asset.image_id AS asset_image_id,
@@ -46,6 +47,17 @@ const toToken = (row: Row): SceneToken => ({
 const isLive = (db: Database.Database, sceneId: string): boolean =>
   (db.prepare('SELECT live_scene_id FROM settings').pluck().get() as string | null) === sceneId;
 
+/** Who writes: preparation over REST, or a live command over the WebSocket (LIV-02). */
+export type TokenScope = 'prep' | 'live';
+
+/** Why a write in `scope` to a token of the scene is refused, if it is. */
+const refusal = (db: Database.Database, sceneId: string, scope: TokenScope): 'live' | 'not_live' | undefined => {
+  const live = isLive(db, sceneId);
+  if (scope === 'prep' && live) return 'live';
+  if (scope === 'live' && !live) return 'not_live';
+  return undefined;
+};
+
 export function readToken(db: Database.Database, id: string): SceneToken | undefined {
   const row = db.prepare(`SELECT ${COLUMNS} ${FROM} WHERE token.id = ?`).get(id) as Row | undefined;
   return row && toToken(row);
@@ -64,7 +76,8 @@ export type TokenCreateOutcome =
   | { outcome: 'created'; token: SceneToken; relabelled: SceneToken[] }
   | { outcome: 'not_found' }
   | { outcome: 'asset_not_found' }
-  | { outcome: 'live' };
+  | { outcome: 'live' }
+  | { outcome: 'not_live' };
 
 /**
  * Numbers token `id` of the asset on the scene as it is shown to players (D-019, Q-091, Q-092),
@@ -109,13 +122,15 @@ export function createToken(
   db: Database.Database,
   sceneId: string,
   fields: { asset_id: string; x: number; y: number },
+  scope: TokenScope = 'prep',
 ): TokenCreateOutcome {
   const id = randomUUID();
   return db.transaction((): TokenCreateOutcome => {
     const numbers = db.prepare('SELECT token_numbers FROM scene WHERE id = ?').pluck().get(sceneId) as
       string | undefined;
     if (numbers === undefined) return { outcome: 'not_found' };
-    if (isLive(db, sceneId)) return { outcome: 'live' };
+    const refused = refusal(db, sceneId, scope);
+    if (refused) return { outcome: refused };
     const asset = db.prepare('SELECT name, default_hidden FROM asset WHERE id = ?').get(fields.asset_id) as
       { name: string; default_hidden: 0 | 1 } | undefined;
     if (asset === undefined) return { outcome: 'asset_not_found' };
@@ -144,10 +159,15 @@ export function forgetTokenNumbers(db: Database.Database, assetId: string): void
 }
 
 export type TokenChangeOutcome =
-  { outcome: 'updated'; token: SceneToken; relabelled: SceneToken[] } | { outcome: 'not_found' } | { outcome: 'live' };
+  | { outcome: 'updated'; before: SceneToken; token: SceneToken; relabelled: SceneToken[] }
+  | { outcome: 'not_found' }
+  | { outcome: 'live' }
+  | { outcome: 'not_live' };
 
 /**
- * Moves, hides or reveals, relabels or restacks a token of a scene that is not live. `stack`
+ * Moves, hides or reveals, relabels or restacks a token; in preparation, of a scene that is not
+ * live, and by a live command (only a move or a visibility change, specs/04-live-sync.md §2), of the
+ * live scene. `stack`
  * puts it above (`front`) or below (`back`) every other token of the scene, unless it already is.
  * Revealing a token that still carries its asset's bare name numbers it (Q-092), unless the same
  * change gives it a label; hiding one keeps its label.
@@ -156,11 +176,13 @@ export function updateToken(
   db: Database.Database,
   id: string,
   fields: { x?: number; y?: number; hidden?: boolean; label?: string; stack?: TokenStack },
+  scope: TokenScope = 'prep',
 ): TokenChangeOutcome {
   return db.transaction((): TokenChangeOutcome => {
     const before = readToken(db, id);
     if (before === undefined) return { outcome: 'not_found' };
-    if (isLive(db, before.scene_id)) return { outcome: 'live' };
+    const refused = refusal(db, before.scene_id, scope);
+    if (refused) return { outcome: refused };
     let z = before.z_order;
     if (fields.stack !== undefined) {
       const others = db
@@ -186,19 +208,26 @@ export function updateToken(
       revealed && fields.label === undefined && before.label === before.asset.name
         ? numberAs(db, before.scene_id, { id: before.asset_id, name: before.asset.name }, id)
         : undefined;
-    return { outcome: 'updated', token: readToken(db, id)!, relabelled: renamed ? [readToken(db, renamed)!] : [] };
+    return {
+      outcome: 'updated',
+      before,
+      token: readToken(db, id)!,
+      relabelled: renamed ? [readToken(db, renamed)!] : [],
+    };
   })();
 }
 
-export type TokenDeleteOutcome = { outcome: 'deleted' } | { outcome: 'not_found' } | { outcome: 'live' };
+export type TokenDeleteOutcome =
+  { outcome: 'deleted'; token: SceneToken } | { outcome: 'not_found' } | { outcome: 'live' } | { outcome: 'not_live' };
 
-/** Deletes a token of a scene that is not live; its number is not issued again (Q-063). */
-export function deleteToken(db: Database.Database, id: string): TokenDeleteOutcome {
+/** Deletes a token, answering what it was; its number is not issued again (Q-063). */
+export function deleteToken(db: Database.Database, id: string, scope: TokenScope = 'prep'): TokenDeleteOutcome {
   return db.transaction((): TokenDeleteOutcome => {
-    const sceneId = db.prepare('SELECT scene_id FROM token WHERE id = ?').pluck().get(id) as string | undefined;
-    if (sceneId === undefined) return { outcome: 'not_found' };
-    if (isLive(db, sceneId)) return { outcome: 'live' };
+    const token = readToken(db, id);
+    if (token === undefined) return { outcome: 'not_found' };
+    const refused = refusal(db, token.scene_id, scope);
+    if (refused) return { outcome: refused };
     db.prepare('DELETE FROM token WHERE id = ?').run(id);
-    return { outcome: 'deleted' };
+    return { outcome: 'deleted', token };
   })();
 }

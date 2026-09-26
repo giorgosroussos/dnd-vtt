@@ -30,3 +30,21 @@ export function replacePinHash(db: Database.Database, current: string, hash: str
 export function clearPinHash(db: Database.Database): boolean {
   return db.prepare('UPDATE settings SET pin_hash = NULL WHERE pin_hash IS NOT NULL').run().changes === 1;
 }
+
+/**
+ * Makes the scene live, or clears the live scene with null (`scene.activate`, `scene.deactivate`,
+ * specs/04-live-sync.md §2). Answers the live scene before, or `not_found` for an unknown scene.
+ */
+export function setLiveScene(
+  db: Database.Database,
+  sceneId: string | null,
+): { outcome: 'set'; previous: string | null } | { outcome: 'not_found' } {
+  return db.transaction(() => {
+    if (sceneId !== null && db.prepare('SELECT count(*) FROM scene WHERE id = ?').pluck().get(sceneId) === 0) {
+      return { outcome: 'not_found' as const };
+    }
+    const previous = db.prepare('SELECT live_scene_id FROM settings').pluck().get() as string | null;
+    db.prepare('UPDATE settings SET live_scene_id = ?').run(sceneId);
+    return { outcome: 'set' as const, previous };
+  })();
+}

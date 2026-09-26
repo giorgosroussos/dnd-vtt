@@ -6,6 +6,7 @@ import { Server, type Socket } from 'socket.io';
 import {
   errorEnvelope,
   PLAYER_VIEW_AUTH,
+  ROOMS,
   SOCKET_CHANNELS,
   SOCKET_PATH,
   type CommandAck,
@@ -16,10 +17,12 @@ import {
 } from '@emberglass/shared';
 import { normalizeAddress } from '../auth/lockout.js';
 import { dispatchCommand, validateCommand, type CommandValidator } from '../domain/commands.js';
+import { applyLiveCommand, type LiveEffect, type LiveResult } from '../domain/live.js';
 import { liveVersions, type VersionCounters } from '../domain/version.js';
 import { isSameOriginHeaders, type Auth } from '../http/auth.js';
 import { createLineLimiter, type LineLimiterOptions } from '../log/limiter.js';
 import type { Logger } from '../log/logger.js';
+import { project } from './projection.js';
 import { readSnapshot } from './snapshot.js';
 
 // The WebSocket of the live scene (LIV-01; specs/04-live-sync.md §1, §2, §5, §6,
@@ -38,11 +41,16 @@ import { readSnapshot } from './snapshot.js';
 // reconnecting afterwards joins `players`. A command from any socket outside `dm` is
 // refused in the error envelope before it is even validated, and changes nothing.
 //
+// Commands (LIV-02): a DM command is validated against its payload schema and applied to the
+// database (`server/src/domain/live.ts`); each effect is projected into what each room receives
+// (`projection.ts`) and emitted to the room, and only then is the sender acknowledged, so the
+// events of its own command reach it before the answer does.
+//
 // Versions (Q-056, Q-093, D-104, D-108): each room has its own counter, which takes version 1
 // for the state at start-up; a snapshot sent to one socket carries its room's current version
 // and takes none, so another client never sees a gap because a screen connected. An event
-// takes the next version of each room it is sent to (LIV-02 onward), so players, who receive
-// nothing about hidden tokens, see no hole either.
+// takes the next version of each room it is sent to, so players, who receive nothing about
+// hidden tokens, see no hole either.
 //
 // Abuse limits (LIV-01 review, D-106): an HTTP upgrade to any other path is answered 404 and
 // closed at once, as Fastify answered it before there was a WebSocket, except Vite's own in
@@ -56,8 +64,8 @@ export interface LiveSocketOptions {
   auth: Auth;
   /** The process's version counters, one per room; tests pass their own. */
   versions?: VersionCounters | undefined;
-  /** Command validation and the step that applies a valid command (LIV-02 onward). */
-  commands?: { validate: CommandValidator; apply: (command: CommandEnvelope) => void } | undefined;
+  /** Command validation and the step that applies a valid command; tests only replace them. */
+  commands?: { validate: CommandValidator; apply: (command: CommandEnvelope) => LiveResult | void } | undefined;
   /** Upgrades on other paths that belong to someone else: Vite's hot reload in development. */
   foreignUpgrade?: ((request: IncomingMessage) => boolean) | undefined;
   /** At most one requested snapshot per socket per this many milliseconds. */
@@ -86,10 +94,6 @@ const isSocketPath = (url: string | undefined): boolean => (url ?? '').split('?'
 export const isViteUpgrade = (request: IncomingMessage): boolean =>
   /\bvite-(?:hmr|ping)\b/.test(String(request.headers['sec-websocket-protocol'] ?? ''));
 
-// No payload schema is registered before LIV-02, so the validator refuses every
-// command and this is never reached; LIV-02 replaces it with the live commands.
-const applyNothing = (): void => {};
-
 export function attachLiveSocket(
   app: FastifyInstance,
   {
@@ -97,7 +101,7 @@ export function attachLiveSocket(
     logger,
     auth,
     versions = liveVersions,
-    commands = { validate: validateCommand, apply: applyNothing },
+    commands = { validate: validateCommand, apply: (command) => applyLiveCommand(db, command) },
     foreignUpgrade = () => false,
     snapshotIntervalMs = SNAPSHOT_INTERVAL_MS,
     maxPendingPackets = MAX_PENDING_PACKETS,
@@ -167,6 +171,26 @@ export function attachLiveSocket(
     socket.emit(SOCKET_CHANNELS.event, event);
   };
 
+  // One event to every socket of a room, each version taken once for the room. A socket that left
+  // too much unread is dropped rather than buffered for, as for snapshots.
+  const broadcast = (room: Room, event: { type: string; payload: object }): void => {
+    const versioned = { ...event, version: versions[room].next() };
+    for (const id of io.sockets.adapter.rooms.get(room) ?? []) {
+      const socket = io.sockets.sockets.get(id);
+      if (socket && !overloaded(socket)) socket.emit(SOCKET_CHANNELS.event, versioned);
+    }
+  };
+
+  const publish = (effects: readonly LiveEffect[]): void => {
+    for (const effect of effects) {
+      const events = project(db, effect);
+      for (const room of ROOMS) {
+        const event = events[room];
+        if (event) broadcast(room, event);
+      }
+    }
+  };
+
   io.on('connection', (socket) => {
     const playerView = (socket.handshake.auth as { view?: unknown }).view === PLAYER_VIEW_AUTH.view;
     // A player view's socket holds no session at all: it can neither command nor stay a DM.
@@ -198,7 +222,28 @@ export function attachLiveSocket(
         reply(errorEnvelope('forbidden', 'Commands are accepted from the DM view only.'));
         return;
       }
-      reply(dispatchCommand(typeof args[0] === 'function' ? undefined : args[0], commands.validate, commands.apply));
+      // A failure while applying or projecting answers the sender and is logged, without the payload;
+      // Socket.io calls this listener outside any promise, so a throw would end the whole process and
+      // blank every screen (review L2). A failed apply changed nothing: its transaction rolled back.
+      try {
+        let effects: readonly LiveEffect[] = [];
+        const ack = dispatchCommand(
+          typeof args[0] === 'function' ? undefined : args[0],
+          commands.validate,
+          (command) => {
+            const result = commands.apply(command);
+            if (Array.isArray(result)) effects = result;
+            else return result;
+          },
+        );
+        publish(effects);
+        reply(ack);
+      } catch (error) {
+        logger.error('ws.command_failed', 'A live command failed.', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        reply(errorEnvelope('internal_error', 'The command failed on the server.'));
+      }
     });
 
     // One requested snapshot per interval: a request inside it is served when it ends, and any

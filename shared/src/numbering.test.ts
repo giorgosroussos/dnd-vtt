@@ -97,13 +97,20 @@ describe('nextLabel', () => {
 });
 
 describe('numberingPeers (Q-092)', () => {
-  it('leaves out only the hidden tokens that still carry the bare name', () => {
+  it('counts every visible token and a hidden one only when it carries a number of the name (Q-094)', () => {
     const all = [
       { id: 'a', label: 'Goblin', hidden: true },
       { id: 'b', label: 'Goblin', hidden: false },
       { id: 'c', label: 'Goblin 2', hidden: true },
       { id: 'd', label: 'Boss', hidden: true },
+      { id: 'e', label: 'Boss', hidden: false },
+      { id: 'f', label: 'Hobgoblin 3', hidden: true },
     ];
-    expect(numberingPeers('Goblin', all).map((token) => token.id)).toEqual(['b', 'c', 'd']);
+    expect(numberingPeers('Goblin', all).map((token) => token.id)).toEqual(['b', 'c', 'e']);
+  });
+
+  it('gives the first goblin shown the bare name beside a hidden one the DM relabelled (Q-094)', () => {
+    const peers = numberingPeers('Goblin', [{ id: 'd', label: 'Boss', hidden: true }]);
+    expect(nextLabel('Goblin', peers, 0).label).toBe('Goblin');
   });
 });

@@ -11,8 +11,13 @@ import {
   PlayerMapSchema,
   PlayerSnapshotSchema,
   PlayerTokenSchema,
+  LIVE_COMMAND_PAYLOAD_SCHEMAS,
+  PlayerTokenAddedPayloadSchema,
+  PlayerTokenUpdatedPayloadSchema,
   ROOMS,
+  SceneClearedPayloadSchema,
   SOCKET_CHANNELS,
+  TokenRemovedPayloadSchema,
 } from './index.js';
 
 // The first column of the table in one section of specs/04-live-sync.md, split
@@ -118,5 +123,53 @@ describe('snapshot payloads (specs/04-live-sync.md §4, LIV-01)', () => {
     expect(Value.Check(PlayerSnapshotSchema, { role: 'players', scene: null })).toBe(true);
     expect(Value.Check(DmSnapshotSchema, { role: 'dm', scene: null })).toBe(true);
     expect(Value.Check(PlayerSnapshotSchema, { role: 'dm', scene: null })).toBe(false);
+  });
+});
+
+describe('live command and event payloads (specs/04-live-sync.md §2, §3, §4, LIV-02)', () => {
+  const objects = (schema: unknown): Record<string, unknown>[] => {
+    if (typeof schema !== 'object' || schema === null) return [];
+    const node = schema as Record<string, unknown>;
+    return [...(node.type === 'object' ? [node] : []), ...Object.values(node).flatMap(objects)];
+  };
+  const id = '00000000-0000-4000-8000-000000000001';
+
+  it('defines a payload for the commands LIV-02 implements and no other', () => {
+    expect(Object.keys(LIVE_COMMAND_PAYLOAD_SCHEMAS).sort()).toEqual(
+      ['scene.activate', 'scene.deactivate', 'token.add', 'token.delete', 'token.move', 'token.setVisibility'].sort(),
+    );
+    for (const type of Object.keys(LIVE_COMMAND_PAYLOAD_SCHEMAS)) expect(COMMAND_TYPES).toContain(type);
+  });
+
+  it('keeps every command and event payload strict at every level', () => {
+    for (const schema of [
+      ...Object.values(LIVE_COMMAND_PAYLOAD_SCHEMAS),
+      PlayerTokenAddedPayloadSchema,
+      PlayerTokenUpdatedPayloadSchema,
+      TokenRemovedPayloadSchema,
+      SceneClearedPayloadSchema,
+    ] as object[]) {
+      for (const object of objects(schema)) expect(object).toHaveProperty('additionalProperties', false);
+    }
+  });
+
+  it('lets a client choose neither the label, the visibility nor the stacking of a live token', () => {
+    const add = LIVE_COMMAND_PAYLOAD_SCHEMAS['token.add'];
+    expect(Object.keys(add.properties).sort()).toEqual(['asset_id', 'scene_id', 'x', 'y']);
+    const base = { scene_id: id, asset_id: id, x: 1, y: 1 };
+    expect(Value.Check(add, base)).toBe(true);
+    for (const extra of [{ hidden: false }, { label: 'Boss' }, { z_order: 0 }, { id }]) {
+      expect(Value.Check(add, { ...base, ...extra }), JSON.stringify(extra)).toBe(false);
+    }
+    expect(Value.Check(LIVE_COMMAND_PAYLOAD_SCHEMAS['token.move'], { token_id: id, x: 1, y: 1, label: 'x' })).toBe(
+      false,
+    );
+  });
+
+  it('gives players tokens of the player shape only, and the id alone on removal, whether hidden or deleted', () => {
+    expect(PlayerTokenAddedPayloadSchema.properties.token).toBe(PlayerTokenSchema);
+    expect(PlayerTokenAddedPayloadSchema.properties.relabelled.items).toBe(PlayerTokenSchema);
+    expect(PlayerTokenUpdatedPayloadSchema.properties.token).toBe(PlayerTokenSchema);
+    expect(Object.keys(TokenRemovedPayloadSchema.properties)).toEqual(['id']);
   });
 });

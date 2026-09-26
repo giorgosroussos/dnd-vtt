@@ -9,7 +9,7 @@ import {
   UuidSchema,
 } from './entities.js';
 import type { ErrorEnvelope } from './errors.js';
-import { SceneTokenSchema } from './tokens.js';
+import { SceneTokenSchema, TokenChangeSchema, TokenCreateBodySchema } from './tokens.js';
 
 // WebSocket envelopes (specs/04-live-sync.md §2, §3, §5; D-047, D-064).
 //
@@ -190,3 +190,85 @@ export type SnapshotEvent<S extends SceneSnapshot = SceneSnapshot> = EventEnvelo
 
 /** The acknowledgement of a snapshot request: the snapshot itself arrives as an event before it. */
 export type SnapshotAck = { ok: true };
+
+// --- the live commands and their events (LIV-02) ---------------------------------------------
+//
+// The payload of each live command (specs/04-live-sync.md §2, Q-014, D-064), strict so that a
+// field the server does not expect is refused, never ignored (D-067). A token command names the
+// token; the live scene is the server's, never the client's. `token.add` and `scene.activate` name
+// the scene, and `token.add` is refused when that scene is not the live one, so a placement meant
+// for the scene that was live a moment ago never lands on the one another DM browser just made
+// live. A new token's label and visibility come from the server (specs/05-assets-and-images.md §3,
+// §4, Q-092), as in preparation. `camera.setPlayer`, the ruler and `undo` are LIV-05 to LIV-07's.
+
+const Coordinate = TokenCreateBodySchema.properties.x;
+
+export const TokenAddPayloadSchema = Type.Object(
+  { scene_id: UuidSchema, asset_id: UuidSchema, x: Coordinate, y: Coordinate },
+  strict,
+);
+export const TokenMovePayloadSchema = Type.Object({ token_id: UuidSchema, x: Coordinate, y: Coordinate }, strict);
+export const TokenSetVisibilityPayloadSchema = Type.Object({ token_id: UuidSchema, hidden: Type.Boolean() }, strict);
+export const TokenDeletePayloadSchema = Type.Object({ token_id: UuidSchema }, strict);
+export const SceneActivatePayloadSchema = Type.Object({ scene_id: UuidSchema }, strict);
+export const SceneDeactivatePayloadSchema = Type.Object({}, strict);
+
+/** The payload schema of every command LIV-02 implements; the server registers exactly these. */
+export const LIVE_COMMAND_PAYLOAD_SCHEMAS = {
+  'token.add': TokenAddPayloadSchema,
+  'token.move': TokenMovePayloadSchema,
+  'token.setVisibility': TokenSetVisibilityPayloadSchema,
+  'token.delete': TokenDeletePayloadSchema,
+  'scene.activate': SceneActivatePayloadSchema,
+  'scene.deactivate': SceneDeactivatePayloadSchema,
+} as const satisfies Partial<Record<CommandType, object>>;
+
+export type TokenAddPayload = Static<typeof TokenAddPayloadSchema>;
+export type TokenMovePayload = Static<typeof TokenMovePayloadSchema>;
+export type TokenSetVisibilityPayload = Static<typeof TokenSetVisibilityPayloadSchema>;
+export type TokenDeletePayload = Static<typeof TokenDeletePayloadSchema>;
+export type SceneActivatePayload = Static<typeof SceneActivatePayloadSchema>;
+export type SceneDeactivatePayload = Static<typeof SceneDeactivatePayloadSchema>;
+
+// What each room's events carry (specs/04-live-sync.md §3, §4; D-049, Q-083, G-023, G-025). One
+// event per room per command, as the table of §3 has it. The DM's token events carry the token in
+// the DM's shape and, like the REST answer (D-100), `relabelled`: the lone token renamed
+// "<name> 1" when this one was numbered beside it, so a rename reaches the rooms inside the event
+// that caused it (G-023). The players' carry `PlayerTokenSchema` only; the renamed token is
+// always visible, since a hidden token carrying the bare name is never counted (Q-092).
+//
+// A player token's `z_order` is its rank among the visible tokens after the event, bottom first,
+// from 0: a client keeps the visible tokens in that order, inserting an added token at its rank
+// and closing the gap a removed one leaves, so the ranks it holds are always those a fresh snapshot
+// would give. A rank depends on visible tokens only, so it says nothing of a hidden one (G-025).
+// Hiding and deleting a token send players the same `token.removed`, with the id alone (Q-083).
+
+export const DmTokenEventPayloadSchema = TokenChangeSchema;
+export const TokenRemovedPayloadSchema = Type.Object({ id: UuidSchema }, strict);
+export const PlayerTokenAddedPayloadSchema = Type.Object(
+  { token: PlayerTokenSchema, relabelled: Type.Array(PlayerTokenSchema) },
+  strict,
+);
+export const PlayerTokenUpdatedPayloadSchema = Type.Object({ token: PlayerTokenSchema }, strict);
+export const SceneClearedPayloadSchema = Type.Object({}, strict);
+
+export type DmTokenEventPayload = Static<typeof DmTokenEventPayloadSchema>;
+export type TokenRemovedPayload = Static<typeof TokenRemovedPayloadSchema>;
+export type PlayerTokenAddedPayload = Static<typeof PlayerTokenAddedPayloadSchema>;
+export type PlayerTokenUpdatedPayload = Static<typeof PlayerTokenUpdatedPayloadSchema>;
+export type SceneClearedPayload = Static<typeof SceneClearedPayloadSchema>;
+
+/** Every event of the dm room with its payload. */
+export type DmEvent =
+  | EventEnvelope<'scene.snapshot', DmSnapshot>
+  | EventEnvelope<'token.added' | 'token.updated', DmTokenEventPayload>
+  | EventEnvelope<'token.removed', TokenRemovedPayload>
+  | EventEnvelope<'scene.cleared', SceneClearedPayload>;
+
+/** Every event of the players room with its payload: nothing here names a hidden token. */
+export type PlayerEvent =
+  | EventEnvelope<'scene.snapshot', PlayerSnapshot>
+  | EventEnvelope<'token.added', PlayerTokenAddedPayload>
+  | EventEnvelope<'token.updated', PlayerTokenUpdatedPayload>
+  | EventEnvelope<'token.removed', TokenRemovedPayload>
+  | EventEnvelope<'scene.cleared', SceneClearedPayload>;

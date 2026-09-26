@@ -146,8 +146,10 @@ export function updateAsset(
   fields: Partial<Omit<AssetFields, 'tags'>> & { tags?: readonly string[] | undefined },
 ): AssetUpdateOutcome {
   return db.transaction((): AssetUpdateOutcome => {
-    const before = db.prepare('SELECT image_id FROM asset WHERE id = ?').pluck().get(id) as string | undefined;
-    if (before === undefined) return { outcome: 'not_found' };
+    const row = db.prepare('SELECT image_id, name FROM asset WHERE id = ?').get(id) as
+      { image_id: string; name: string } | undefined;
+    if (row === undefined) return { outcome: 'not_found' };
+    const before = row.image_id;
     if (fields.image_id !== undefined && !imageExists(db, fields.image_id)) return { outcome: 'image_not_found' };
     const hidden = fields.default_hidden === undefined ? null : fields.default_hidden ? 1 : 0;
     db.prepare(
@@ -163,6 +165,12 @@ export function updateAsset(
       fields.notes ?? null,
       id,
     );
+    // A token carrying the bare name follows the asset's new name, so that numbering, which knows a
+    // never-numbered token by its bare name, still tells it from a label the DM typed and never
+    // counts a hidden one (Q-094). Numbered and typed labels are the DM's and stay.
+    if (fields.name !== undefined && fields.name !== row.name) {
+      db.prepare('UPDATE token SET label = ? WHERE asset_id = ? AND label = ?').run(fields.name, id, row.name);
+    }
     if (fields.tags !== undefined) writeTags(db, id, fields.tags);
     const removedImages = fields.image_id !== undefined ? deleteUnreferencedImages(db, [before]) : [];
     return { outcome: 'updated', asset: readAsset(db, id)!, removedImages };

@@ -15,12 +15,13 @@ export interface LabelledToken {
 }
 
 /**
- * The tokens of an asset on a scene that numbering counts (Q-092): every one but a hidden token that
- * still carries the bare name, which has never been numbered, so that no label ever depends on a
- * hidden token. A token the DM relabelled, or one numbered and hidden again, still counts.
+ * The tokens of an asset on a scene that numbering counts (Q-092, Q-094): every visible token, and a
+ * hidden one only when it carries a number of this name ("<name> N"), that is, one numbered when it
+ * was shown and hidden again. A hidden token with the bare name or a label the DM typed ("Boss")
+ * takes no part, so that no label ever depends on a token players have not seen numbered.
  */
 export function numberingPeers<T extends LabelledToken & { hidden: boolean }>(name: string, tokens: readonly T[]): T[] {
-  return tokens.filter((token) => !(token.hidden && token.label === name));
+  return tokens.filter((token) => !token.hidden || numberOf(name, token.label) !== undefined);
 }
 
 export interface Numbering {

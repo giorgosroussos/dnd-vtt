@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
-import { openWorkspace } from './dm.js';
+import { openWorkspace, seedCampaign } from './dm.js';
+import { solidPng } from './png.js';
 
 // LIV-01: the live connection of both views against the production server (specs/04-live-sync.md
 // §1, §5, §6, specs/07-security-and-access.md §2). The player view shows the idle screen until
@@ -104,4 +105,138 @@ test('a DM view whose session is ended elsewhere goes back to the PIN form at on
   expect((await dm.request.delete('/api/auth')).status()).toBe(204);
   await expect(dm.getByRole('heading', { name: 'Enter the DM PIN' })).toBeVisible();
   await context.close();
+});
+
+// LIV-02: a live command from the DM view's browser over the real socket (specs/04-live-sync.md
+// §2, §3, §4). The DM view has no Go live control until LIV-04, so the DM page speaks the Socket.io
+// wire protocol itself: its WebSocket carries the page's DM cookie and Origin, as the view's own
+// does. The player view still draws only the idle screen (LIV-03), so what it received is read from
+// its WebSocket frames.
+
+/** Sends one command from inside `page` over a WebSocket of its own and answers the acknowledgement. */
+function commandFromPage(page: Page, type: string, payload: object): Promise<unknown> {
+  return page.evaluate(
+    ([type, payload]) =>
+      new Promise((resolve, reject) => {
+        const socket = new WebSocket(`ws://${location.host}/socket.io/?EIO=4&transport=websocket`);
+        const timer = setTimeout(() => {
+          socket.close();
+          reject(new Error('no acknowledgement'));
+        }, 10_000);
+        socket.onmessage = ({ data }) => {
+          const frame = String(data);
+          if (frame === '2') socket.send('3');
+          else if (frame.startsWith('0')) socket.send('40');
+          else if (frame.startsWith('40')) socket.send(`421${JSON.stringify(['command', { type, payload }])}`);
+          else if (frame.startsWith('431')) {
+            clearTimeout(timer);
+            socket.close();
+            resolve((JSON.parse(frame.slice(3)) as unknown[])[0]);
+          }
+        };
+        socket.onerror = () => {
+          clearTimeout(timer);
+          socket.close();
+          reject(new Error('socket error'));
+        };
+      }),
+    [type, payload] as const,
+  );
+}
+
+/** The `scene.snapshot` payloads a page receives over its WebSocket, in order. */
+function snapshotsOf(page: Page): unknown[] {
+  const snapshots: unknown[] = [];
+  page.on('websocket', (socket) => {
+    socket.on('framereceived', ({ payload }) => {
+      const frame = String(payload);
+      if (!frame.startsWith('42')) return;
+      const [, event] = JSON.parse(frame.slice(2)) as [string, { type: string; payload: unknown }];
+      if (event.type === 'scene.snapshot') snapshots.push(event.payload);
+    });
+  });
+  return snapshots;
+}
+
+test('a DM context activates a scene through the socket and a player context receives its snapshot, visible tokens only', async ({
+  browser,
+}) => {
+  const dmContext = await browser.newContext();
+  const playerContext = await browser.newContext();
+  const dm = await dmContext.newPage();
+  const tv = await playerContext.newPage();
+  await openWorkspace(dm);
+
+  // A scene with a map, a visible token and a hidden one, prepared over REST.
+  const upload = async (colour: [number, number, number]) =>
+    (await (
+      await dm.request.post('/api/images', {
+        data: solidPng(64, 48, colour),
+        headers: { 'content-type': 'application/octet-stream' },
+      })
+    ).json()) as { id: string };
+  const campaignId = await seedCampaign(dm, 'Live campaign LIV-02', ['Live night']);
+  const [session] = (await (await dm.request.get(`/api/campaigns/${campaignId}/sessions`)).json()) as { id: string }[];
+  const scene = (await (
+    await dm.request.post(`/api/sessions/${session!.id}/scenes`, { data: { name: 'Hidden lair' } })
+  ).json()) as { id: string };
+  const map = await upload([20, 60, 20]);
+  expect((await dm.request.patch(`/api/scenes/${scene.id}`, { data: { map_image_id: map.id } })).ok()).toBe(true);
+  const asset = async (name: string, colour: [number, number, number], hidden: boolean) =>
+    (await (
+      await dm.request.post('/api/assets', {
+        data: {
+          name,
+          image_id: (await upload(colour)).id,
+          category: 'monster',
+          size: 'medium',
+          default_hidden: hidden,
+        },
+      })
+    ).json()) as { id: string; image_id: string };
+  const knight = await asset('Knight of LIV-02', [200, 200, 30], false);
+  const lurker = await asset('Lurker of LIV-02', [90, 10, 90], true);
+  const place = async (assetId: string) =>
+    (
+      (await (
+        await dm.request.post(`/api/scenes/${scene.id}/tokens`, { data: { asset_id: assetId, x: 1, y: 1 } })
+      ).json()) as { token: { id: string } }
+    ).token.id;
+  const visibleId = await place(knight.id);
+  const hiddenId = await place(lurker.id);
+
+  // Whatever fails, nothing stays live for the specs after this one: they share the server.
+  try {
+    const snapshots = snapshotsOf(tv);
+    await tv.goto('/');
+    await expect(player(tv)).toHaveAttribute('data-snapshots', '1');
+
+    expect(await commandFromPage(dm, 'scene.activate', { scene_id: scene.id })).toEqual({ ok: true });
+    await expect(player(tv)).toHaveAttribute('data-snapshots', '2');
+    await expect.poll(() => snapshots.length).toBe(2);
+    const live = snapshots[1] as { role: string; scene: { map: { id: string }; tokens: { id: string }[] } };
+    expect(live.role).toBe('players');
+    expect(live.scene.map.id).toBe(map.id);
+    expect(live.scene.tokens.map((token) => token.id)).toEqual([visibleId]);
+    const text = JSON.stringify(snapshots);
+    for (const secret of [hiddenId, lurker.id, lurker.image_id, 'Lurker', scene.id, 'Hidden lair']) {
+      expect(text, secret).not.toContain(secret);
+    }
+    // The player view's browser, with no DM session, fetches the live map's display version and
+    // the visible token's image only.
+    expect((await tv.request.get(`/images/${map.id}/display`)).status()).toBe(200);
+    expect((await tv.request.get(`/images/${knight.image_id}/display`)).status()).toBe(200);
+    expect((await tv.request.get(`/images/${lurker.image_id}/display`)).status()).toBe(404);
+    expect((await tv.request.get(`/images/${map.id}/original`)).status()).toBe(404);
+
+    // A command from the player view's browser is refused, and the scene stays live.
+    expect(await commandFromPage(tv, 'scene.deactivate', {})).toMatchObject({ error: { code: 'forbidden' } });
+    expect((await tv.request.get(`/images/${map.id}/display`)).status()).toBe(200);
+    expect(await commandFromPage(dm, 'scene.deactivate', {})).toEqual({ ok: true });
+    await expect.poll(async () => (await tv.request.get(`/images/${map.id}/display`)).status()).toBe(404);
+  } finally {
+    await commandFromPage(dm, 'scene.deactivate', {}).catch(() => undefined);
+    await dmContext.close();
+    await playerContext.close();
+  }
 });

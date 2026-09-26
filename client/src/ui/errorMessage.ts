@@ -26,6 +26,7 @@ export const ERROR_MESSAGES: Readonly<Record<ErrorCode | 'network', MessageKey>>
   asset_in_use: 'error.code.asset_in_use',
   calibration_needs_map: 'error.code.calibration_needs_map',
   scene_live: 'error.code.scene_live',
+  scene_not_live: 'error.code.scene_not_live',
   network: 'error.code.network',
 };
 

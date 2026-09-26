@@ -491,7 +491,7 @@ describe('commands from the players room (specs/04-live-sync.md §2, specs/07-se
     await app.close();
     const applied: unknown[] = [];
     await start({
-      commands: { validate: (raw) => ({ ok: true, command: raw as never }), apply: (c) => applied.push(c) },
+      commands: { validate: (raw) => ({ ok: true, command: raw as never }), apply: (c) => void applied.push(c) },
     });
     const player = await connect();
     const dm = await connect({ cookie });
@@ -503,9 +503,31 @@ describe('commands from the players room (specs/04-live-sync.md §2, specs/07-se
     expect(applied).toEqual([{ type: 'undo', payload: {} }]);
   });
 
-  it('validates a DM command in the envelope: none is supported before LIV-02', async () => {
+  it('answers a command that fails on the server with internal_error, logs it without the payload and keeps serving', async () => {
+    await app.close();
+    await start({
+      commands: {
+        validate: (raw) => ({ ok: true, command: raw as never }),
+        apply: () => {
+          throw new Error('disk full');
+        },
+      },
+    });
     const dm = await connect({ cookie });
-    expect(((await command(dm.socket, { type: 'scene.deactivate', payload: {} })) as ErrorEnvelope).error.code).toBe(
+    const player = await connect();
+    const ack = await command(dm.socket, { type: 'token.move', payload: { secret: 'Waits in the dark' } });
+    expect((ack as ErrorEnvelope).error.code).toBe('internal_error');
+    const failure = lines.find((line) => line.event === 'ws.command_failed');
+    expect(failure?.fields?.error).toBe('disk full');
+    expect(JSON.stringify(lines)).not.toContain('Waits in the dark');
+    // The server is still up: both sockets are served.
+    expect((await requestSnapshot(player)).payload.role).toBe('players');
+    expect((await requestSnapshot(dm)).payload.role).toBe('dm');
+  });
+
+  it('validates a DM command in the envelope: a command of a later package is unsupported', async () => {
+    const dm = await connect({ cookie });
+    expect(((await command(dm.socket, { type: 'undo', payload: {} })) as ErrorEnvelope).error.code).toBe(
       'command_unsupported',
     );
     expect(((await command(dm.socket, { type: 'nope', payload: {} })) as ErrorEnvelope).error.code).toBe(

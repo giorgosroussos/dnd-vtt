@@ -556,16 +556,16 @@ describe('hidden information (specs/07-security-and-access.md §5, §7)', () => 
     }
   });
 
-  // Until LIV-02 adds the players' entitlement (specs/07-security-and-access.md §5), even the live
-  // scene's map is refused without a DM session; LIV-02 turns the display version of this case
-  // to 200 and keeps the other two at 404 (review L-7).
-  it('refuses the live scene map without a DM session too, until LIV-02 entitles players to its display version', async () => {
+  // LIV-02 entitles players to the display version of the live scene's map only
+  // (specs/07-security-and-access.md §5, review L-7).
+  it('serves the live scene map without a DM session in its display version only', async () => {
     const session = await newSession();
     const scene = await newScene(session.id);
     const map = await uploaded();
     await update(scene.id, { map_image_id: map.id });
     data.db.prepare('UPDATE settings SET live_scene_id = ?').run(scene.id);
-    for (const variant of ['original', 'display', 'thumbnail'] as const) {
+    expect((await app.inject({ method: 'GET', url: imageFileUrl(map.id, 'display') })).statusCode).toBe(200);
+    for (const variant of ['original', 'thumbnail'] as const) {
       expectFailure(await app.inject({ method: 'GET', url: imageFileUrl(map.id, variant) }), 404, 'not_found');
     }
   });

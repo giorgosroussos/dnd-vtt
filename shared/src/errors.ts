@@ -31,6 +31,8 @@ export const ERROR_CODES = [
   'calibration_needs_map',
   // PRP-04 (specs/04-live-sync.md §2): the live scene's tokens change only by live commands.
   'scene_live',
+  // LIV-02 (specs/04-live-sync.md §2): a live command for a scene or token that is not live.
+  'scene_not_live',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

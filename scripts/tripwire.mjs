@@ -23,19 +23,9 @@ export const GATES = [
     id: 'hidden-information',
     spec: 'specs/10-testing-acceptance.md §3',
     gate: 'a recorded-traffic test proving no hidden token reaches a player view',
-    lands: 'LIV-02, REL-02',
-  },
-  {
-    id: 'player-command-rejection',
-    spec: 'specs/10-testing-acceptance.md §3',
-    gate: 'a test proving every command from the players room is rejected and changes nothing',
-    lands: 'LIV-02, REL-02',
-  },
-  {
-    id: 'image-revocation',
-    spec: 'specs/10-testing-acceptance.md §3',
-    gate: 'a test proving an image a player once fetched is refused after its token is hidden',
-    lands: 'LIV-02, REL-02',
+    // LIV-02 records every step but undo (server/src/ws/hidden-information.test.ts); the marker
+    // comes with undo in LIV-05.
+    lands: 'LIV-05, REL-02',
   },
   {
     id: 'offline-e2e',

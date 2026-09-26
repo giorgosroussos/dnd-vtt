@@ -25,6 +25,8 @@ import { ApiFailure } from './errors.js';
 // 409 `scene_live`: live tokens change only by the live commands of LIV-02.
 
 const notFound = (): ApiFailure => new ApiFailure(404, 'not_found', 'No such resource.');
+// A write in the preparation scope is refused only because the scene is live (`not_live` is the
+// live commands' refusal and never answers a preparation write).
 const live = (): ApiFailure =>
   new ApiFailure(409, 'scene_live', "The live scene's tokens change only by live commands.");
 
@@ -43,10 +45,10 @@ export function registerTokens(app: FastifyInstance, db: Database.Database): voi
     async (request, reply) => {
       const result = createToken(db, request.params.id, request.body);
       if (result.outcome === 'not_found') throw notFound();
-      if (result.outcome === 'live') throw live();
       if (result.outcome === 'asset_not_found') {
         throw new ApiFailure(400, 'reference_not_found', 'The asset does not exist.');
       }
+      if (result.outcome !== 'created') throw live();
       return reply.code(201).send({ token: result.token, relabelled: result.relabelled });
     },
   );
@@ -61,7 +63,7 @@ export function registerTokens(app: FastifyInstance, db: Database.Database): voi
         ...(label === undefined ? {} : { label: label.trim() }),
       });
       if (result.outcome === 'not_found') throw notFound();
-      if (result.outcome === 'live') throw live();
+      if (result.outcome !== 'updated') throw live();
       return { token: result.token, relabelled: result.relabelled };
     },
   );
@@ -69,7 +71,7 @@ export function registerTokens(app: FastifyInstance, db: Database.Database): voi
   app.delete<{ Params: IdParams }>(PATHS.token, { schema: params }, async (request, reply) => {
     const result = deleteToken(db, request.params.id);
     if (result.outcome === 'not_found') throw notFound();
-    if (result.outcome === 'live') throw live();
+    if (result.outcome !== 'deleted') throw live();
     return reply.code(204).send();
   });
 }
