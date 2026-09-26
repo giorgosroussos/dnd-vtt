@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { API_PATHS, DEFAULT_SETTINGS, type Scene, type Settings } from '@emberglass/shared';
 import { Notice } from '../ui/Notice.js';
 import { errorMessage } from '../ui/errorMessage.js';
 import { useLive } from '../live/useLive.js';
 import { t } from '../ui/messages.js';
 import { errorCode, request } from './api.js';
+import { Button } from '../ui/Button.js';
+import { ConnectDialog } from './ConnectDialog.js';
 import { LiveBar } from './LiveBar.js';
 import { ScenePanel } from './ScenePanel.js';
 import { Library } from './library/Library.js';
@@ -18,13 +20,21 @@ import { SceneTree } from './tree/SceneTree.js';
 // deleting the live scene clears it (specs/03-domain-model.md §7). The workspace keeps
 // the live connection open (LIV-01, specs/04-live-sync.md §6): a snapshot for the
 // players room means the server no longer knows this browser's session (a PIN change
-// or a sign-out elsewhere dropped its socket), so the DM view goes back to the PIN form.
+// or a sign-out elsewhere dropped its socket), so the DM view goes back to the PIN form. The live
+// bar's Connect a screen opens the panel with the player view's URL and QR code (LIV-03).
 export function Workspace({ mainId, onSignedOut }: { mainId: string; onSignedOut?: () => void }) {
   const live = useLive('dm');
   const [selected, setSelected] = useState<Scene>();
   const [settings, setSettings] = useState<Settings>();
   const [failure, setFailure] = useState<string>();
   const [treeVersion, setTreeVersion] = useState(0);
+  const [connecting, setConnecting] = useState(false);
+  // Focus returns to the button that opened the panel when it closes, as for the other dialogs.
+  const connectButton = useRef<HTMLButtonElement>(null);
+  const closeConnect = () => {
+    setConnecting(false);
+    connectButton.current?.focus();
+  };
 
   useEffect(() => {
     request<Settings>('GET', API_PATHS.settings).then(
@@ -45,7 +55,17 @@ export function Workspace({ mainId, onSignedOut }: { mainId: string; onSignedOut
 
   return (
     <div className="eg-workspace">
-      <LiveBar liveSceneId={settings?.live_scene_id} refreshKey={treeVersion} connection={live.status} />
+      <LiveBar
+        liveSceneId={settings?.live_scene_id}
+        refreshKey={treeVersion}
+        connection={live.status}
+        actions={
+          <Button ref={connectButton} size="small" onClick={() => setConnecting(true)}>
+            {t('connect.open')}
+          </Button>
+        }
+      />
+      {connecting ? <ConnectDialog onClose={closeConnect} /> : null}
       {failure ? <Notice>{failure}</Notice> : null}
       <div className="eg-workspace__columns">
         <nav className="eg-workspace__sidebar" aria-label={t('tree.label')}>

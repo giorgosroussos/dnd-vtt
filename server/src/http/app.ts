@@ -11,6 +11,8 @@ import type { ScryptParams } from '../auth/pin-hash.js';
 import { registerAssets } from './assets.js';
 import { registerAuth, type Auth } from './auth.js';
 import { registerCampaigns } from './campaigns.js';
+import { registerConnect } from './connect.js';
+import type { NetworkInterfaces } from '../connect.js';
 import { registerTokens } from './tokens.js';
 import { imageFileRemover, registerImages } from './images.js';
 import { imagesDirOf, prepareImagesDir } from '../images/store.js';
@@ -43,6 +45,8 @@ export interface AppOptions {
   commands?: LiveSocketOptions['commands'];
   /** The live socket's abuse limits; tests only lower them (D-106). */
   liveLimits?: Pick<LiveSocketOptions, 'snapshotIntervalMs' | 'maxPendingPackets' | 'connectionLines'> | undefined;
+  /** The PC's network interfaces, for the connect panel; the system's unless a test passes them (LIV-03). */
+  networkInterfaces?: NetworkInterfaces | undefined;
 }
 
 declare module 'fastify' {
@@ -75,6 +79,7 @@ export async function buildApp({
   versions,
   commands,
   liveLimits,
+  networkInterfaces,
 }: AppOptions): Promise<FastifyInstance> {
   const failures = createFailureLog(logger, rejectedLines);
   const app = Fastify({
@@ -115,6 +120,7 @@ export async function buildApp({
   registerCampaigns(app, db, removeImages);
   registerAssets(app, db, removeImages);
   registerTokens(app, db);
+  registerConnect(app, networkInterfaces);
   await registerImages(app, { db, imagesDir, auth });
   const sendIndex = client.kind === 'static' ? await serveBuild(app, client.dist) : await serveVite(app, client.root);
 

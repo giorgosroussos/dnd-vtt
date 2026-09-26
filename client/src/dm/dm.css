@@ -500,3 +500,39 @@ textarea.eg-field__input {
   max-height: 50vh;
   overflow-y: auto;
 }
+
+/* The live bar's controls, after its status (LIV-03). A small button is taller than the status
+   line, so the bar's own padding shrinks to keep its height, and the canvas's place, unchanged. */
+.eg-livebar {
+  padding-block: var(--space-1);
+  min-height: calc(2.5rem + 1px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+/* Connect a screen (LIV-03, specs/08-ux-journeys.md §5): the URL large enough to read across a
+   room, and the QR code dark on light whatever the theme, with its own quiet zone. */
+.eg-connect__url {
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.eg-connect__qr {
+  display: block;
+  width: 14rem;
+  height: 14rem;
+  align-self: center;
+}
+
+.eg-connect__subheading {
+  font-size: var(--font-size-md);
+  margin: var(--space-2) 0 0;
+}
+
+.eg-connect__others {
+  margin: 0;
+  overflow-wrap: anywhere;
+}

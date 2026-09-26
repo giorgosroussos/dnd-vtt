@@ -7,6 +7,7 @@ import {
   normalizeTag,
   numberingPeers,
   type AssetUsage,
+  type ConnectInfo,
   type Campaign,
   type DeletionSummary,
   type Image,
@@ -87,6 +88,17 @@ export class FakeServer {
   sceneTokens: SceneToken[] = [];
   /** The highest number issued per scene and asset, as `scene.token_numbers` (Q-091). */
   private issued: Record<string, number> = {};
+  /** What GET /api/connect answers (LIV-03): two addresses and a code of the first. */
+  connect: ConnectInfo = {
+    addresses: [
+      { address: '192.168.1.20', url: 'http://192.168.1.20:3000/', private: true },
+      { address: '100.64.3.4', url: 'http://100.64.3.4:3000/', private: false },
+    ],
+    qr: {
+      size: 21,
+      rows: Array.from({ length: 21 }, (_, y) => (y % 2 ? '10'.repeat(10) + '1' : '01'.repeat(10) + '0')),
+    },
+  };
   calls: Call[] = [];
   before: Interceptor | undefined;
   private restore: (() => void) | undefined;
@@ -464,6 +476,7 @@ export class FakeServer {
       return json(200, { dm: true });
     }
     if (!this.signedIn) return failure(401, 'unauthorized');
+    if (path === '/api/connect' && method === 'GET') return json(200, this.connect);
     if (path === '/api/settings') {
       return json(200, {
         id: '00000000-0000-4000-8000-00000000ffff',

@@ -172,4 +172,40 @@ test('every text in both views keeps readable contrast', async ({ page }) => {
   await page.getByRole('complementary', { name: 'Asset library' }).getByRole('button', { name: 'New asset' }).click();
   await expect(page.getByRole('dialog', { name: 'New asset' })).toBeVisible();
   expect(await contrastFailures(page), 'asset dialog').toEqual([]);
+  await page.keyboard.press('Escape');
+  // The Connect a screen panel (LIV-03).
+  await page.getByRole('button', { name: 'Connect a screen' }).click();
+  await expect(page.getByRole('dialog', { name: 'Connect a screen' })).toBeVisible();
+  await expect(page.getByText('Finding the addresses of this PC…')).toHaveCount(0);
+  expect(await contrastFailures(page), 'connect panel').toEqual([]);
+});
+
+// The DM view's load-failure state (G-007, D-113): its code cannot be fetched, as when the server
+// stopped or restarted with a new build since the page arrived. The state is reached in the
+// production build by refusing the view's chunk, and its one way out is operated by keyboard alone.
+test('the DM view’s load-failure state is reached, shown and operated by keyboard alone', async ({ page }) => {
+  await openWorkspace(page);
+  const chunk = '**/assets/DmView-*.js';
+  await page.route(chunk, (route) => route.abort());
+  await page.goto('/dm');
+  const failed = page.locator('main[data-view="boot"][data-boot="failed"]');
+  await expect(failed).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveText(
+    'Emberglass could not load. The server may have stopped, or restarted with a new version.',
+  );
+  expect(await contrastFailures(page), 'load failure').toEqual([]);
+  const reload = page.getByRole('button', { name: 'Reload' });
+  expect(await page.locator(FOCUSABLE).count()).toBe(1);
+  await page.keyboard.press('Tab');
+  await expect(reload).toBeFocused();
+  const ring = await reload.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return (style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) > 0) || style.boxShadow !== 'none';
+  });
+  expect(ring, 'Reload shows no focus indicator').toBe(true);
+  // The server can serve the view again: Enter reloads the page, which now loads it.
+  await page.unroute(chunk);
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('navigation', { name: 'Campaigns, sessions and scenes' })).toBeVisible();
+  await expect(page.locator('main[data-view="boot"]')).toHaveCount(0);
 });
