@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { t } from '../ui/messages.js';
 import { installCanvas2d, installImageLoading, installResizeObserver } from '../ui/testing/canvas2d.js';
@@ -55,10 +56,21 @@ describe('Connect a screen', () => {
     expect(server.calls.filter((call) => call.path === '/api/connect')).toHaveLength(1);
   });
 
-  it('closes with its Close button', async () => {
+  it('closes with its Close button, and gives focus back to the button that opened it', async () => {
     const dialog = await openPanel();
     await click(button(dialog, t('connect.close')));
     expect(rendered!.container.querySelector('dialog')).toBeNull();
+    expect(document.activeElement).toBe(button(rendered!.container, t('connect.open')));
+  });
+
+  it('closes with Escape, and gives focus back to the button that opened it', async () => {
+    const dialog = await openPanel();
+    act(() => {
+      dialog.dispatchEvent(new Event('cancel', { cancelable: true }));
+    });
+    await settle();
+    expect(rendered!.container.querySelector('dialog')).toBeNull();
+    expect(document.activeElement).toBe(button(rendered!.container, t('connect.open')));
   });
 
   it('says so when the PC has no network address, with no code', async () => {
@@ -73,7 +85,7 @@ describe('Connect a screen', () => {
     server.before = (call) =>
       call.path === '/api/connect' ? new Promise<Reply | undefined>((resolve) => (release = resolve)) : undefined;
     const dialog = await openPanel();
-    expect(dialog.textContent).toContain(t('connect.loading'));
+    expect(dialog.querySelector('[role="status"]')!.textContent).toBe(t('connect.loading'));
     release({ status: 500, body: { error: { code: 'internal_error', message: 'x' } } });
     await settle();
     expect(dialog.textContent).not.toContain(t('connect.loading'));

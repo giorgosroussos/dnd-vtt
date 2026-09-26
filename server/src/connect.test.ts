@@ -95,6 +95,17 @@ describe('LAN addresses (Q-053)', () => {
     expect(lanAddresses({ lo: [entry('127.0.0.1', { internal: true })] }, 3000)).toEqual([]);
   });
 
+  it('accepts the family given as a number, as some Node versions give it, and still leaves IPv6 out', () => {
+    const listed = lanAddresses(
+      {
+        a: [{ ...entry('192.168.1.5'), family: 4 as never }],
+        b: [{ ...v6('fe80::2'), family: 6 as never }],
+      },
+      3000,
+    );
+    expect(listed.map((each) => each.address)).toEqual(['192.168.1.5']);
+  });
+
   it('knows the private ranges of RFC 1918 and their edges', () => {
     for (const address of [
       '10.0.0.0',

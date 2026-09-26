@@ -529,7 +529,7 @@ textarea.eg-field__input {
 
 .eg-connect__subheading {
   font-size: var(--font-size-md);
-  margin-top: var(--space-2);
+  margin: var(--space-2) 0 0;
 }
 
 .eg-connect__others {

@@ -7,7 +7,7 @@ export interface PlayerLive {
   status: LiveStatus;
   /** What to draw: undefined until the first snapshot, null while nothing is live. */
   scene: PlayerScene | undefined;
-  /** How many snapshots arrived: each connection brings one, and each gap another. */
+  /** How many snapshots arrived: one per connection, per gap and per activation. */
   snapshots: number;
 }
 

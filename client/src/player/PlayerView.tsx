@@ -1,12 +1,10 @@
 import { MapCanvas } from '../canvas/MapCanvas.js';
 import type { CanvasToken } from '../canvas/tokens.js';
 import { IdleScreen } from '../ui/IdleScreen.js';
-import { useIdleCursor } from './useIdleCursor.js';
+import { CURSOR_IDLE_MS, useIdleCursor } from '../ui/useIdleCursor.js';
 import { usePlayerLive } from './usePlayerLive.js';
-import './player.css';
 
-// How long the pointer stays still before the TV hides it (specs/08-ux-journeys.md §9, Q-054).
-export const CURSOR_IDLE_MS = 2_000;
+export { CURSOR_IDLE_MS };
 
 // Player view at / (FND-04, LIV-01, LIV-03): the dark idle screen with the product name while
 // nothing is live (specs/08-ux-journeys.md §4, Q-025), and the live scene once one is, drawn by

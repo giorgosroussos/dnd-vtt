@@ -52,7 +52,11 @@ export function ConnectDialog({ onClose }: { onClose: () => void }) {
   return (
     <Dialog heading={t('connect.heading')} onClose={onClose}>
       {failure ? <Notice>{failure}</Notice> : null}
-      {!info && !failure ? <p className="eg-dm__status">{t('connect.loading')}</p> : null}
+      {!info && !failure ? (
+        <p className="eg-dm__status" role="status">
+          {t('connect.loading')}
+        </p>
+      ) : null}
       {info && !first ? <Notice>{t('connect.none')}</Notice> : null}
       {first ? (
         <div className="eg-dialog__body eg-connect">

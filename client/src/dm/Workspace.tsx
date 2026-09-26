@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { API_PATHS, DEFAULT_SETTINGS, type Scene, type Settings } from '@emberglass/shared';
 import { Notice } from '../ui/Notice.js';
 import { errorMessage } from '../ui/errorMessage.js';
@@ -29,6 +29,12 @@ export function Workspace({ mainId, onSignedOut }: { mainId: string; onSignedOut
   const [failure, setFailure] = useState<string>();
   const [treeVersion, setTreeVersion] = useState(0);
   const [connecting, setConnecting] = useState(false);
+  // Focus returns to the button that opened the panel when it closes, as for the other dialogs.
+  const connectButton = useRef<HTMLButtonElement>(null);
+  const closeConnect = () => {
+    setConnecting(false);
+    connectButton.current?.focus();
+  };
 
   useEffect(() => {
     request<Settings>('GET', API_PATHS.settings).then(
@@ -54,12 +60,12 @@ export function Workspace({ mainId, onSignedOut }: { mainId: string; onSignedOut
         refreshKey={treeVersion}
         connection={live.status}
         actions={
-          <Button size="small" onClick={() => setConnecting(true)}>
+          <Button ref={connectButton} size="small" onClick={() => setConnecting(true)}>
             {t('connect.open')}
           </Button>
         }
       />
-      {connecting ? <ConnectDialog onClose={() => setConnecting(false)} /> : null}
+      {connecting ? <ConnectDialog onClose={closeConnect} /> : null}
       {failure ? <Notice>{failure}</Notice> : null}
       <div className="eg-workspace__columns">
         <nav className="eg-workspace__sidebar" aria-label={t('tree.label')}>

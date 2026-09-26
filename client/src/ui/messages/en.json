@@ -72,7 +72,7 @@
   "connect.intro": "On the TV, open the web browser and type this address, or scan the code with a phone.",
   "connect.qrLabel": "QR code that opens {url}",
   "connect.others": "Other addresses of this PC",
-  "connect.othersHint": "If the TV cannot open the address above, it may be on another network: try one of these.",
+  "connect.othersHint": "If the TV cannot open the address above, it may be on another network. Try one of these.",
   "connect.none": "This PC has no network address. Connect it to the Wi-Fi the TV uses, then open this panel again.",
   "connect.close": "Close",
   "sceneMap.image": "Map image: PNG, JPEG or WebP",

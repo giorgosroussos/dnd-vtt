@@ -165,4 +165,42 @@ describe('the players’ events applied to the drawn state', () => {
     snapshot.scene!.tokens.reverse();
     expect(fromSnapshot(snapshot)?.tokens.map((token) => token.label)).toEqual(['A', 'B']);
   });
+
+  it('is idempotent and ignores what it does not hold: a replayed add, an unknown removal or relabel, a malformed event', () => {
+    const server = new Server([
+      { id: id(1), label: 'Goblin 1', x: 0, y: 0, hidden: false },
+      { id: id(2), label: 'Hero', x: 1, y: 0, hidden: false },
+    ]);
+    const start = fromSnapshot(server.snapshot());
+    server.stack.push({ id: id(3), label: 'Ogre', x: 2, y: 0, hidden: false });
+    const added = server.event('token.added', { token: server.player(server.find(3)), relabelled: [] });
+    const once = applyPlayerEvent(start, added);
+    expect(applyPlayerEvent(once, added)).toEqual(once);
+    expectSameAsSnapshot(once, server);
+    expect(applyPlayerEvent(once, server.event('token.removed', { id: id(9) }))).toEqual(once);
+    const stranger = { ...server.player(server.find(3)), id: id(9), label: 'Nobody' };
+    const relabel = applyPlayerEvent(
+      once,
+      server.event('token.added', { token: server.player(server.find(3)), relabelled: [stranger] }),
+    );
+    expect(relabel).toEqual(once);
+    expect(applyPlayerEvent(once, server.event('token.added', {}))).toEqual(once);
+    expect(applyPlayerEvent(once, server.event('token.updated', {}))).toEqual(once);
+  });
+
+  it('moves a token to the rank its update gives', () => {
+    const server = new Server([
+      { id: id(1), label: 'A', x: 0, y: 0, hidden: false },
+      { id: id(2), label: 'B', x: 0, y: 0, hidden: false },
+    ]);
+    const scene = fromSnapshot(server.snapshot());
+    const moved = applyPlayerEvent(
+      scene,
+      server.event('token.updated', { token: { ...server.player(server.find(1)), z_order: 1 } }),
+    );
+    expect(moved?.tokens.map((token) => [token.label, token.z_order])).toEqual([
+      ['B', 0],
+      ['A', 1],
+    ]);
+  });
 });

@@ -260,4 +260,66 @@ describe('no controls, and the pointer hidden when still (specs/08-ux-journeys.m
     expect(main().dataset.cursor).toBe('hidden');
     expect(CURSOR_IDLE_MS).toBe(2_000);
   });
+
+  it('leaves no timer or listener behind once it is gone', () => {
+    rendered.unmount();
+    vi.useFakeTimers();
+    rendered = render(PlayerView);
+    rendered.unmount();
+    expect(vi.getTimerCount()).toBe(0);
+    window.dispatchEvent(new PointerEvent('pointermove'));
+    expect(vi.getTimerCount()).toBe(0);
+    rendered = render(PlayerView);
+  });
+
+  it('shows the pointer again on a pointer movement too', () => {
+    rendered.unmount();
+    vi.useFakeTimers();
+    rendered = render(PlayerView);
+    act(() => {
+      vi.advanceTimersByTime(CURSOR_IDLE_MS);
+    });
+    expect(main().dataset.cursor).toBe('hidden');
+    act(() => {
+      window.dispatchEvent(new PointerEvent('pointermove'));
+    });
+    expect(main().dataset.cursor).toBe('shown');
+  });
+});
+
+describe('ordering and replacement', () => {
+  it('draws nothing from an event that arrives before the first snapshot', async () => {
+    act(() => {
+      fake.sockets[0]!.open();
+      fake.sockets[0]!.deliver({
+        type: 'token.added',
+        version: 1,
+        payload: { token: token(1, 'Early', 0), relabelled: [] },
+      });
+    });
+    await settle();
+    expect(main().dataset.scene).toBe('idle');
+    await open(snapshot([]));
+    expect(drawnBoxes()).toEqual([]);
+  });
+
+  it('replaces the drawing when a snapshot of another scene arrives: its map only, its tokens only, fitted again', async () => {
+    await open(snapshot([token(1, 'Goblin', 0)]));
+    const other = {
+      id: 'e'.repeat(64),
+      width: 1000,
+      height: 1000,
+      variants: { display: { width: 1000, height: 1000 } },
+    };
+    images.requested = [];
+    act(() =>
+      fake.sockets[0]!.open({ role: 'players', scene: { map: other, grid: GRID, tokens: [token(7, 'Dragon', 0)] } }, 5),
+    );
+    await settle();
+    expect(images.requested).toContain(imageFileUrl(other.id, 'display'));
+    expect(images.requested).not.toContain(imageFileUrl(MAP.id, 'display'));
+    expect(drawnBoxes().map((box) => box.label)).toEqual(['Dragon']);
+    const fitted = fitCamera(other.variants.display, VIEWPORT);
+    expect([stage().x(), stage().y(), stage().scaleX()]).toEqual([fitted.x, fitted.y, fitted.scale]);
+  });
 });

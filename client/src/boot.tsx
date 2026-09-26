@@ -1,7 +1,7 @@
 import { StrictMode, type ComponentType } from 'react';
 import { createRoot } from 'react-dom/client';
 import { viewForPath } from '@emberglass/shared';
-import { BootScreen } from './ui/BootScreen.js';
+import { BootScreen, clearBootReloads } from './ui/BootScreen.js';
 import { loadGuardedView } from './views.js';
 
 // Starts the view for `pathname` in `element` (G-007, D-113): its loading state at once, from the
@@ -16,12 +16,14 @@ export function boot(
   const root = createRoot(element);
   root.render(<BootScreen view={view} state="loading" />);
   return load(pathname).then(
-    (View) =>
+    (View) => {
+      clearBootReloads();
       root.render(
         <StrictMode>
           <View />
         </StrictMode>,
-      ),
+      );
+    },
     (error: unknown) => {
       // The browser console only; nothing is sent anywhere (specs/02-architecture.md §6).
       console.error(error);

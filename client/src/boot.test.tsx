@@ -2,7 +2,8 @@
 import { act, createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { t } from './ui/messages.js';
-import { BOOT_RETRY_MS, BootScreen } from './ui/BootScreen.js';
+import { BOOT_FALLBACK_MS, BOOT_RELOADS_KEY, BOOT_RETRY_MS, BootScreen } from './ui/BootScreen.js';
+import { CURSOR_IDLE_MS } from './ui/useIdleCursor.js';
 import { render, type Rendered } from './ui/testing/render.js';
 import { boot } from './boot.js';
 
@@ -94,37 +95,126 @@ describe('the player view before its code', () => {
     expect(element.querySelectorAll('button, a, input, [tabindex]')).toHaveLength(0);
   });
 
-  it('asks the server again every few seconds after a failure, and reloads once it answers', async () => {
-    vi.useFakeTimers();
-    const answers = [
-      new TypeError('offline'),
-      new Response(null, { status: 503 }),
-      new Response(null, { status: 200 }),
-    ];
-    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(() => {
-      const next = answers.shift()!;
+  // The page this document was loaded from names its build by its entry script.
+  const PAGE = (entry: string) => `<!doctype html><script type="module" crossorigin src="${entry}"></script>`;
+  const ok = (entry = '/assets/index-a.js') => new Response(PAGE(entry), { status: 200 });
+
+  function scriptedFetch(answers: (Response | Error)[]) {
+    return vi.spyOn(globalThis, 'fetch').mockImplementation(() => {
+      const next = answers.shift() ?? ok();
       return next instanceof Error ? Promise.reject(next) : Promise.resolve(next);
     });
+  }
+
+  beforeEach(() => {
+    const script = document.createElement('script');
+    script.type = 'module';
+    script.src = '/assets/index-a.js';
+    script.id = 'entry';
+    document.head.append(script);
+    window.sessionStorage.clear();
+  });
+  afterEach(() => document.getElementById('entry')?.remove());
+
+  const tick = (ms: number) => act(async () => vi.advanceTimersByTimeAsync(ms));
+
+  it('reloads once the server answers again after having been unreachable (it restarted)', async () => {
+    vi.useFakeTimers();
+    const fetch = scriptedFetch([new TypeError('offline'), new Response(null, { status: 503 }), ok()]);
     const reload = vi.fn();
     rendered = render(createElement(BootScreen, { view: 'player', state: 'failed', reload }));
-    await act(async () => vi.advanceTimersByTimeAsync(BOOT_RETRY_MS - 1));
+    await tick(BOOT_RETRY_MS - 1);
     expect(fetch).not.toHaveBeenCalled();
-    await act(async () => vi.advanceTimersByTimeAsync(1));
+    await tick(1);
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(fetch).toHaveBeenLastCalledWith('/', { method: 'HEAD', cache: 'no-store' });
-    await act(async () => vi.advanceTimersByTimeAsync(BOOT_RETRY_MS));
+    expect(fetch).toHaveBeenLastCalledWith('/', { cache: 'no-store' });
+    await tick(BOOT_RETRY_MS);
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(reload).not.toHaveBeenCalled();
-    await act(async () => vi.advanceTimersByTimeAsync(BOOT_RETRY_MS));
+    await tick(BOOT_RETRY_MS);
     expect(fetch).toHaveBeenCalledTimes(3);
     expect(reload).toHaveBeenCalledOnce();
+    // A reload that could help does not lengthen the next wait.
+    expect(window.sessionStorage.getItem(BOOT_RELOADS_KEY)).toBeNull();
+  });
+
+  it('reloads at the first answer that names another build', async () => {
+    vi.useFakeTimers();
+    scriptedFetch([ok('/assets/index-b.js')]);
+    const reload = vi.fn();
+    rendered = render(createElement(BootScreen, { view: 'player', state: 'failed', reload }));
+    await tick(BOOT_RETRY_MS);
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it('does not loop when the same build keeps failing with the server up: it waits, doubling each time, up to five minutes', async () => {
+    vi.useFakeTimers();
+    const fetch = scriptedFetch([]);
+    for (const [index, wait] of [...BOOT_FALLBACK_MS, 300_000].entries()) {
+      const reload = vi.fn();
+      rendered = render(createElement(BootScreen, { view: 'player', state: 'failed', reload }));
+      await tick(wait - BOOT_RETRY_MS);
+      expect(reload, `reload ${index}`).not.toHaveBeenCalled();
+      await tick(BOOT_RETRY_MS);
+      expect(reload, `reload ${index}`).toHaveBeenCalledOnce();
+      expect(window.sessionStorage.getItem(BOOT_RELOADS_KEY)).toBe(String(index + 1));
+      rendered.unmount();
+      rendered = undefined;
+    }
+    expect(fetch.mock.calls.length).toBeGreaterThan(10);
+  });
+
+  it('starts from the shortest wait again once a view has loaded', async () => {
+    window.sessionStorage.setItem(BOOT_RELOADS_KEY, '3');
+    await act(async () => {
+      await boot(element, '/', () => Promise.resolve(() => createElement('p')));
+    });
+    expect(window.sessionStorage.getItem(BOOT_RELOADS_KEY)).toBeNull();
+  });
+
+  it('stops asking once it is gone, even with an answer on its way', async () => {
+    vi.useFakeTimers();
+    let answer: (response: Response) => void = () => {};
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(() => new Promise<Response>((resolve) => (answer = resolve)));
+    const reload = vi.fn();
+    rendered = render(createElement(BootScreen, { view: 'player', state: 'failed', reload }));
+    await tick(BOOT_RETRY_MS);
+    expect(fetch).toHaveBeenCalledOnce();
+    rendered.unmount();
+    rendered = undefined;
+    answer(ok('/assets/index-b.js'));
+    await tick(BOOT_RETRY_MS * 3);
+    expect(reload).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledOnce();
+    // Gone before the first attempt: it never asks.
+    rendered = render(createElement(BootScreen, { view: 'player', state: 'failed', reload }));
+    rendered.unmount();
+    rendered = undefined;
+    await tick(BOOT_RETRY_MS * 3);
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it('hides the pointer after two seconds still, on its loading and failure states', async () => {
+    vi.useFakeTimers();
+    scriptedFetch([]);
+    rendered = render(createElement(BootScreen, { view: 'player', state: 'failed', reload: vi.fn() }));
+    const main = () => rendered!.container.querySelector('main')!;
+    expect(main().dataset.cursor).toBe('shown');
+    await tick(CURSOR_IDLE_MS);
+    expect(main().dataset.cursor).toBe('hidden');
+    act(() => {
+      window.dispatchEvent(new PointerEvent('pointermove'));
+    });
+    expect(main().dataset.cursor).toBe('shown');
   });
 
   it('does not ask the server while it is only loading', async () => {
     vi.useFakeTimers();
     const fetch = vi.spyOn(globalThis, 'fetch');
     rendered = render(createElement(BootScreen, { view: 'player', state: 'loading', reload: vi.fn() }));
-    await act(async () => vi.advanceTimersByTimeAsync(BOOT_RETRY_MS * 3));
+    await tick(BOOT_RETRY_MS * 3);
     expect(fetch).not.toHaveBeenCalled();
   });
 });

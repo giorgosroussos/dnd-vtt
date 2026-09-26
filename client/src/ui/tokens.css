@@ -216,6 +216,13 @@ main[data-view='boot'] {
   height: 100%;
 }
 
+/* The TV hides the pointer once it has been still for two seconds (specs/08-ux-journeys.md §9,
+   Q-054), on the player view and on its loading and failure states alike (D-114). */
+main[data-cursor='hidden'],
+main[data-cursor='hidden'] * {
+  cursor: none;
+}
+
 /* The DM view's loading and load-failure states, before its chunk arrives (G-007, D-113). */
 .eg-boot {
   display: flex;

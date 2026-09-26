@@ -112,9 +112,14 @@ test('a player context draws the scene a DM context activates, visible tokens on
     await expect
       .poll(async () => (await drawnTokens(tv)).map((box) => box.label))
       .toEqual([knightToken.label, bruteToken.label]);
+    // Fitted once the canvas has measured its viewport; until then the camera is the identity,
+    // so everything read from screen positions waits for the fit (a slow runner measures late).
     const viewport = tv.viewportSize()!;
+    const fitted = Math.min(viewport.width / 600, viewport.height / 400);
+    await expect
+      .poll(async () => Math.abs(Number(await canvas(tv).getAttribute('data-camera-scale')) - fitted))
+      .toBeLessThan(1e-5);
     const scale = Number(await canvas(tv).getAttribute('data-camera-scale'));
-    expect(scale).toBeCloseTo(Math.min(viewport.width / 600, viewport.height / 400), 5);
     await expect(canvas(tv)).toHaveAttribute('data-grid', 'shown');
     // The map's colour away from the tokens, and each token's image in its square.
     const [knightBox, bruteBox] = await drawnTokens(tv);
@@ -244,16 +249,26 @@ test('the DM view’s Connect a screen panel shows the player view’s URL and i
   await stranger.close();
 });
 
-test('the player view keeps the idle look when its code cannot load, and comes back by itself once it can', async ({
+test('the player view keeps the idle look when its code cannot load, and comes back by itself after the server restarts', async ({
   page,
 }) => {
   const chunk = '**/assets/PlayerView-*.js';
   await page.route(chunk, (route) => route.abort());
   await page.goto('/');
-  await expect(page.locator('main[data-view="boot"]')).toHaveAttribute('data-boot', 'failed');
-  await expect(page.locator('main[data-view="boot"]')).toHaveText('Emberglass');
+  const boot = page.locator('main[data-view="boot"]');
+  await expect(boot).toHaveAttribute('data-boot', 'failed');
+  await expect(boot).toHaveText('Emberglass');
   await expect(page.locator('button, a[href], input, [tabindex]')).toHaveCount(0);
+  // The server is unreachable for one of the TV's checks, as while it restarts (D-114).
+  const isPage = (url: URL) => url.pathname === '/';
+  let refused = 0;
+  await page.route(isPage, (route) => {
+    refused++;
+    return route.abort();
+  });
+  await expect.poll(() => refused, { timeout: 10_000 }).toBeGreaterThan(0);
+  await page.unroute(isPage);
   await page.unroute(chunk);
-  // It asks the server again every five seconds and reloads once it answers.
+  // At its next check the server answers again, and the TV reloads into the player view.
   await expect(player(page)).toHaveAttribute('data-live', 'connected', { timeout: 15_000 });
 });

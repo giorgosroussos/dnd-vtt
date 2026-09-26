@@ -51,15 +51,18 @@ export function applyPlayerEvent(scene: PlayerScene, event: EventEnvelope): Play
   if (scene === null) return null;
   switch (event.type) {
     case 'token.added': {
-      const { token, relabelled } = event.payload as unknown as PlayerTokenAddedPayload;
+      const { token, relabelled } = event.payload as unknown as Partial<PlayerTokenAddedPayload>;
+      // A malformed event is skipped rather than ending the view (LIV-03 review).
+      if (!token) return scene;
       let tokens = placed(scene.tokens, token);
-      for (const renamed of relabelled) {
+      for (const renamed of relabelled ?? []) {
         tokens = tokens.map((each) => (each.id === renamed.id ? { ...each, label: renamed.label } : each));
       }
       return { ...scene, tokens };
     }
     case 'token.updated': {
-      const { token } = event.payload as unknown as PlayerTokenUpdatedPayload;
+      const { token } = event.payload as unknown as Partial<PlayerTokenUpdatedPayload>;
+      if (!token) return scene;
       return { ...scene, tokens: placed(scene.tokens, token) };
     }
     case 'token.removed': {
