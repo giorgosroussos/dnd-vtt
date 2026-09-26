@@ -34,12 +34,16 @@ export function useDmLive(): DmLive {
   // Written by the connection's handlers as each message arrives, before React renders it.
   const scene = useRef<DmScene | undefined>(undefined);
   const added = useRef<SceneToken | undefined>(undefined);
+  // The room of the latest snapshot: after a `players` one the events that follow are the players'
+  // room's, whose tokens lack the DM's fields, so none of them may touch the DM's scene (review M1).
+  const room = useRef<Room | undefined>(undefined);
 
   useEffect(() => {
     const live = connectLive('dm', {
       onStatus: (status) => setState((current) => ({ ...current, status })),
       onSnapshot: (snapshot) => {
         const role = snapshot.role;
+        room.current = role;
         if (role === 'dm') scene.current = fromDmSnapshot(snapshot);
         setState((current) => ({
           ...current,
@@ -49,7 +53,7 @@ export function useDmLive(): DmLive {
         }));
       },
       onEvent: (event) => {
-        if (scene.current === undefined) return;
+        if (room.current !== 'dm' || scene.current === undefined) return;
         if (event.type === 'token.added') added.current = (event.payload as { token?: SceneToken }).token;
         scene.current = applyDmEvent(scene.current, event);
         const next = scene.current;

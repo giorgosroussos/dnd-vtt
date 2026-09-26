@@ -211,8 +211,12 @@ test('the DM view’s load-failure state is reached, shown and operated by keybo
   await expect(page.locator('main[data-view="boot"]')).toHaveCount(0);
 });
 
-/** Tabs from where focus is until `target` has it; fails when it is not reached within `limit` presses. */
-async function tabTo(page: Page, target: ReturnType<Page['locator']>, limit = 200): Promise<void> {
+/**
+ * Tabs until `target` has focus, starting from Sign out, the control just before the live bar, so the
+ * walk is a few presses whatever earlier specs left in the shared data directory (review M8).
+ */
+async function tabTo(page: Page, target: ReturnType<Page['locator']>, limit = 12): Promise<void> {
+  await page.getByRole('banner').getByRole('button', { name: 'Sign out' }).focus();
   for (let presses = 0; presses < limit; presses++) {
     await page.keyboard.press('Tab');
     if (await target.evaluate((element) => element === document.activeElement)) return;
@@ -255,18 +259,19 @@ test('Go live, Show live scene and Blank TV are reached, shown and operated by k
     expect(await hasRing(goLive), 'Go live shows no focus indicator').toBe(true);
     await page.keyboard.press('Enter');
     await expect(panel).toHaveAttribute('data-mode', 'live');
+    // Go live is gone once it has worked: focus is on Blank TV, not lost (review M2).
+    await expect(bar.getByRole('button', { name: 'Blank TV' })).toBeFocused();
     expect(await contrastFailures(page), 'live mode').toEqual([]);
 
     await tree.getByRole('button', { name: 'Second hall', exact: true }).click();
     await expect(panel).toHaveAttribute('data-mode', 'prep');
     const showLive = bar.getByRole('button', { name: 'Show live scene' });
-    await page.locator('#main').focus();
-    await page.keyboard.press('Shift+Tab');
     await tabTo(page, showLive);
     expect(await hasRing(showLive), 'Show live scene shows no focus indicator').toBe(true);
     await page.keyboard.press('Enter');
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('First hall');
     await expect(panel).toHaveAttribute('data-mode', 'live');
+    await expect(page.locator('#main')).toBeFocused();
 
     const blank = bar.getByRole('button', { name: 'Blank TV' });
     await tabTo(page, blank);
@@ -274,6 +279,7 @@ test('Go live, Show live scene and Blank TV are reached, shown and operated by k
     await page.keyboard.press('Space');
     await expect(panel).toHaveAttribute('data-mode', 'prep');
     await expect(bar.getByRole('status')).toHaveText('Nothing is live. The TV shows the idle screen.');
+    await expect(bar.getByRole('button', { name: 'Go live: First hall' })).toBeFocused();
   } finally {
     await commandFromPage(page, 'scene.deactivate', {}).catch(() => undefined);
   }

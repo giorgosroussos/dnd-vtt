@@ -87,6 +87,13 @@ export function ScenePanel({
   const hintId = useId();
   const liveScene = live?.scene != null && live.scene.scene.id === sceneId ? live.scene : undefined;
   const isLive = liveScene !== undefined;
+  // Live mode while the connection is down: nothing done here reaches the TV until it is back (review M3).
+  const offline = isLive && live?.status !== 'connected';
+  // Live mode names itself in the head, not by colour alone (specs/08-ux-journeys.md §2, review M4).
+  const modeLabel = offline ? 'scene.liveOffline' : 'scene.live';
+  const frameClass = !isLive
+    ? 'eg-scene__canvas'
+    : `eg-scene__canvas eg-scene__canvas--live${offline ? ' eg-scene__canvas--offline' : ''}`;
   // The scene as read over REST in prep mode; live mode shows the live scene's record instead.
   const [prepScene, setScene] = useState<Scene>();
   const scene = liveScene?.scene ?? prepScene;
@@ -449,8 +456,12 @@ export function ScenePanel({
   return (
     <div ref={panelRef} className="eg-scene" data-mode={isLive ? 'live' : 'prep'}>
       <div className="eg-scene__head">
-        <h1 className="eg-dm__heading">{name}</h1>
-        {isLive ? <p className="eg-scene__live">{t('scene.live')}</p> : null}
+        <div className="eg-scene__title">
+          <h1 className="eg-dm__heading">{name}</h1>
+          {isLive ? (
+            <p className={`eg-scene__mode eg-scene__mode--${offline ? 'offline' : 'live'}`}>{t(modeLabel)}</p>
+          ) : null}
+        </div>
         {/* One status region, always mounted, so a message is announced when it appears: after a
           map upload, and after a save that closes the calibration panel (D-096). */}
         <div role="status" className="eg-scene__progress">
@@ -543,12 +554,12 @@ export function ScenePanel({
                   saving={savingCalibration}
                 />
               ) : null}
-              <div className={isLive ? 'eg-scene__canvas eg-scene__canvas--live' : 'eg-scene__canvas'}>
+              <div className={frameClass}>
                 <MapCanvas
                   grid={draft ? { ...scene.grid, ...draft.calibration } : scene.grid}
                   map={map}
                   mode="dm"
-                  label={t(isLive ? 'canvas.labelLive' : 'canvas.label', { name })}
+                  label={t(!isLive ? 'canvas.label' : offline ? 'canvas.labelOffline' : 'canvas.labelLive', { name })}
                   onMapError={() => setMapFailedFor(mapId ?? undefined)}
                   measure={measure}
                   toolbar={tokenBar}

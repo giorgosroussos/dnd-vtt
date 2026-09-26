@@ -2,7 +2,7 @@
 import { act, createElement } from 'react';
 import Konva from 'konva';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { LibraryAsset, Scene, SceneToken } from '@emberglass/shared';
+import type { CommandAck, LibraryAsset, Scene, SceneToken } from '@emberglass/shared';
 import { t } from '../ui/messages.js';
 import { installCanvas2d, installImageLoading, installResizeObserver } from '../ui/testing/canvas2d.js';
 import { button, click, FakeServer, installDialog, settle } from '../ui/testing/fakeServer.js';
@@ -307,5 +307,161 @@ describe('following another DM browser (G-018)', () => {
     // Live mode draws the live scene's record, which only the snapshot the change caused updates.
     expect(box.checked).toBe(false);
     expect(mode(view)).toBe('live');
+  });
+});
+
+// The LIV-04 review's fixes (D-116).
+
+/** Holds every command until `release` lets the oldest one through (applied, or refused with `answer`). */
+function holdCommands() {
+  const held: ((answer?: CommandAck) => void)[] = [];
+  server.beforeCommand = () => new Promise<CommandAck | undefined>((resolve) => held.push(resolve));
+  return {
+    get count() {
+      return held.length;
+    },
+    async release(answer?: CommandAck) {
+      await act(async () => {
+        held.shift()!(answer);
+        await Promise.resolve();
+      });
+      await settle();
+    },
+  };
+}
+
+const drawnToken = (view: HTMLElement, id: string) =>
+  (JSON.parse(viewport(view).dataset.tokens ?? '[]') as { id: string; x: number; hidden: boolean }[]).find(
+    (each) => each.id === id,
+  );
+
+describe('a live change shows at once and keeps the latest (review M5)', () => {
+  it('draws a move before the server answers, and an earlier answer does not take back a later move', async () => {
+    server.liveSceneId = cave.id;
+    const view = await open();
+    await selectScene(view, cave);
+    await selectToken(view, caveGoblin.id);
+    const held = holdCommands();
+    press(viewport(view), 'ArrowRight');
+    await settle();
+    expect(drawnToken(view, caveGoblin.id)?.x).toBe(3);
+    press(viewport(view), 'ArrowRight');
+    await settle();
+    expect(held.count).toBe(2);
+    expect(drawnToken(view, caveGoblin.id)?.x).toBe(4);
+    // The first move is applied and answered: the second is still on its way and stays drawn.
+    await held.release();
+    expect(drawnToken(view, caveGoblin.id)?.x).toBe(4);
+    await held.release();
+    expect(drawnToken(view, caveGoblin.id)?.x).toBe(4);
+    expect(server.sceneTokens.find((each) => each.id === caveGoblin.id)?.x).toBe(4);
+  });
+
+  it('draws a hide at once, and puts the token back when the server refuses it', async () => {
+    server.liveSceneId = cave.id;
+    const view = await open();
+    await selectScene(view, cave);
+    await selectToken(view, caveGoblin.id);
+    const held = holdCommands();
+    await click(button(bar(view), t('tokens.hide')));
+    expect(drawnToken(view, caveGoblin.id)?.hidden).toBe(true);
+    await held.release({ error: { code: 'scene_not_live', message: 'test' } });
+    expect(drawnToken(view, caveGoblin.id)?.hidden).toBe(false);
+    expect(view.textContent).toContain(t('scene.liveFailed', { reason: t('error.code.scene_not_live') }));
+  });
+});
+
+describe('focus after the live bar’s actions (08 §8, review M2)', () => {
+  it('goes to Blank TV after Go live, to the scene after Show live scene, and to Go live after Blank TV', async () => {
+    const view = await open();
+    await selectScene(view, cave);
+    await goLive(view);
+    expect(document.activeElement).toBe(button(view, t('liveBar.blank')));
+    await selectScene(view, hall);
+    await click(button(view, t('liveBar.showLive')));
+    expect(heading(view)).toBe('Cave');
+    expect(document.activeElement?.id).toBe('main');
+    await click(button(view, t('liveBar.blank')));
+    await settle();
+    expect(document.activeElement).toBe(goLiveButton(view));
+  });
+
+  it('goes to Connect a screen after Blank TV when no scene is selected', async () => {
+    server.liveSceneId = cave.id;
+    const view = await open();
+    await click(button(view, t('liveBar.blank')));
+    await settle();
+    expect(document.activeElement).toBe(button(view, t('connect.open')));
+  });
+});
+
+describe('while the connection is down (review M3, M4)', () => {
+  it('names live mode in the head, and says when it is not connected', async () => {
+    server.liveSceneId = cave.id;
+    const view = await open();
+    await selectScene(view, hall);
+    expect(panel(view).querySelector('.eg-scene__mode')).toBeNull();
+    await click(button(view, t('liveBar.showLive')));
+    expect(panel(view).querySelector('.eg-scene__mode')?.textContent).toBe(t('scene.live'));
+    expect(indicator(view)?.classList.contains('eg-scene__canvas--offline')).toBe(false);
+    act(() => server.sockets[0]!.drop());
+    await settle();
+    expect(panel(view).querySelector('.eg-scene__mode')?.textContent).toBe(t('scene.liveOffline'));
+    expect(indicator(view)?.classList.contains('eg-scene__canvas--offline')).toBe(true);
+    expect(viewport(view).getAttribute('aria-label')).toBe(t('canvas.labelOffline', { name: 'Cave' }));
+  });
+
+  it('keeps Go live and Blank TV in place but refusing, sends nothing, and clears a stale refusal once back', async () => {
+    server.liveSceneId = cave.id;
+    const view = await open();
+    await selectScene(view, hall);
+    server.beforeCommand = () => ({ error: { code: 'internal_error', message: 'test' } });
+    await click(button(view, t('liveBar.blank')));
+    await settle();
+    expect(view.textContent).toContain(t('liveBar.blankFailed', { reason: t('error.code.internal_error') }));
+    server.beforeCommand = undefined;
+    const sent = commands().length;
+    act(() => server.sockets[0]!.drop());
+    await settle();
+    for (const control of [goLiveButton(view)!, button(view, t('liveBar.blank'))!]) {
+      expect(control.getAttribute('aria-disabled')).toBe('true');
+      await click(control);
+    }
+    expect(commands()).toHaveLength(sent);
+    // Refused in place: no second notice contradicting the bar, which says it is reconnecting.
+    expect(view.querySelector('.eg-workspace > [role="alert"]')?.textContent).toBe(
+      t('liveBar.blankFailed', { reason: t('error.code.internal_error') }),
+    );
+    await server.openSockets();
+    await settle();
+    expect(view.textContent).not.toContain(t('liveBar.blankFailed', { reason: t('error.code.internal_error') }));
+    expect(goLiveButton(view)!.getAttribute('aria-disabled')).toBeNull();
+  });
+});
+
+describe('a DM view demoted to players (G-027, review M1)', () => {
+  it('applies none of the players room’s events to the DM’s live scene while it asks the server', async () => {
+    server.liveSceneId = cave.id;
+    const view = await open();
+    await selectScene(view, cave);
+    // The auth check is held open: the window in which players' events arrive.
+    server.before = (call) => (call.path === '/api/auth' ? new Promise<undefined>(() => {}) : undefined);
+    const socket = server.sockets[0]!;
+    act(() => socket.drop('io server disconnect'));
+    act(() => socket.open({ role: 'players', scene: null }, 7));
+    const moved = {
+      id: caveGoblin.id,
+      x: 9,
+      y: 9,
+      size: 'medium',
+      image_id: goblin.image_id,
+      z_order: 0,
+      label: 'Goblin',
+    };
+    act(() => socket.deliver({ type: 'token.updated', version: 8, payload: { token: moved } }));
+    await settle();
+    expect(view.querySelector('.eg-scene')).not.toBeNull();
+    expect(drawnToken(view, caveGoblin.id)).toMatchObject({ x: 2 });
+    expect(drawn().sort()).toEqual(['Goblin', 'Lurker']);
   });
 });

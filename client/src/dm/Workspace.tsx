@@ -85,19 +85,56 @@ export function Workspace({ mainId, onSignedOut }: { mainId: string; onSignedOut
 
   const liveScene = live.scene;
   const showingLive = liveScene != null && selected?.id === liveScene.scene.id;
+  const connected = live.status === 'connected';
+
+  // Why Go live or Blank TV was refused, shown until the next snapshot: a reconnection always brings
+  // one, so a refusal from before it is not left contradicting the bar (review M3).
+  const [barFailure, setBarFailure] = useState<{ message: string; at: number }>();
+  const barMessage = barFailure?.at === live.snapshots ? barFailure.message : undefined;
+
+  // Go live, Show live scene and Blank TV each remove themselves once they have done their work, so
+  // focus is put where the keyboard carries on, once the change they caused has rendered: Blank TV
+  // after Go live, the scene after Show live scene, Go live (or Connect a screen) after Blank TV
+  // (specs/08-ux-journeys.md §8, review M2).
+  const goLiveButton = useRef<HTMLButtonElement>(null);
+  const blankButton = useRef<HTMLButtonElement>(null);
+  const refocus = useRef<'wentLive' | 'showedLive' | 'blanked'>(undefined);
+  useEffect(() => {
+    if (refocus.current === 'wentLive' && showingLive) blankButton.current?.focus();
+    else if (refocus.current === 'showedLive' && showingLive) document.getElementById(mainId)?.focus();
+    else if (refocus.current === 'blanked' && liveScene === null) {
+      (goLiveButton.current ?? connectButton.current)?.focus();
+    } else return;
+    refocus.current = undefined;
+  });
 
   // Go live on the scene being edited (specs/08-ux-journeys.md §2): in the live bar, which has the
   // room; the scene's own head stays one line, so the canvas keeps its place (G-022).
+  // While the connection is down the two commands could not be sent: their buttons stay where they
+  // are, refusing, and the bar says the connection is being restored (review M3).
   async function goLive(scene: Scene) {
-    setFailure(undefined);
+    if (!connected) return;
+    setBarFailure(undefined);
+    refocus.current = 'wentLive';
     const outcome = await live.command('scene.activate', { scene_id: scene.id });
-    if (!outcome.ok) setFailure(t('scene.goLiveFailed', { reason: errorMessage(outcome.code) }));
+    if (outcome.ok) return;
+    refocus.current = undefined;
+    setBarFailure({ message: t('scene.goLiveFailed', { reason: errorMessage(outcome.code) }), at: live.snapshots });
   }
 
   async function blank() {
-    setFailure(undefined);
+    if (!connected) return;
+    setBarFailure(undefined);
+    refocus.current = 'blanked';
     const outcome = await live.command('scene.deactivate', {});
-    if (!outcome.ok) setFailure(t('liveBar.blankFailed', { reason: errorMessage(outcome.code) }));
+    if (outcome.ok) return;
+    refocus.current = undefined;
+    setBarFailure({ message: t('liveBar.blankFailed', { reason: errorMessage(outcome.code) }), at: live.snapshots });
+  }
+
+  function showLive(scene: Scene) {
+    refocus.current = 'showedLive';
+    setSelected(scene);
   }
 
   return (
@@ -109,21 +146,28 @@ export function Workspace({ mainId, onSignedOut }: { mainId: string; onSignedOut
           <>
             {selected && !showingLive && liveScene !== undefined ? (
               <Button
+                ref={goLiveButton}
                 variant="primary"
                 size="small"
                 aria-label={t('liveBar.goLiveWith', { name: selected.name })}
+                aria-disabled={!connected || undefined}
                 onClick={() => void goLive(selected)}
               >
                 {t('liveBar.goLive')}
               </Button>
             ) : null}
             {liveScene && !showingLive ? (
-              <Button size="small" onClick={() => setSelected(liveScene.scene)}>
+              <Button size="small" onClick={() => showLive(liveScene.scene)}>
                 {t('liveBar.showLive')}
               </Button>
             ) : null}
             {liveScene ? (
-              <Button size="small" onClick={() => void blank()}>
+              <Button
+                ref={blankButton}
+                size="small"
+                aria-disabled={!connected || undefined}
+                onClick={() => void blank()}
+              >
                 {t('liveBar.blank')}
               </Button>
             ) : null}
@@ -135,6 +179,7 @@ export function Workspace({ mainId, onSignedOut }: { mainId: string; onSignedOut
       />
       {connecting ? <ConnectDialog onClose={closeConnect} /> : null}
       {failure ? <Notice>{failure}</Notice> : null}
+      {barMessage ? <Notice>{barMessage}</Notice> : null}
       <div className="eg-workspace__columns">
         <nav className="eg-workspace__sidebar" aria-label={t('tree.label')}>
           <SceneTree

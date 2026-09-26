@@ -148,7 +148,12 @@ test('the DM runs a scene from the DM view: Go live, move, hide, reveal, delete,
     // A setup edit in live mode reaches the TV as a snapshot (04 §10): the grid hidden for players.
     const snapshotsBefore = Number(await player(tv).getAttribute('data-snapshots'));
     await panel(dm).getByLabel('Players see the grid').uncheck();
-    await expect(player(tv)).toHaveAttribute('data-snapshots', String(snapshotsBefore + 1));
+    // At least one more snapshot (a slow runner may also have asked for one after a gap), and the TV
+    // no longer draws the grid.
+    await expect
+      .poll(async () => Number(await player(tv).getAttribute('data-snapshots')))
+      .toBeGreaterThan(snapshotsBefore);
+    await expect(tvCanvas(tv)).toHaveAttribute('data-grid', 'none');
 
     // No token was written over REST from the DM view while live (G-024).
     const tokens = (await (await dm.request.get(`/api/scenes/${scene.id}/tokens`)).json()) as {

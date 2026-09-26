@@ -1,6 +1,7 @@
 import { act } from 'react';
 import { Value } from 'typebox/value';
 import {
+  LIVE_COMMAND_PAYLOAD_SCHEMAS,
   TokenCreateBodySchema,
   TokenUpdateBodySchema,
   type CommandAck,
@@ -112,7 +113,7 @@ export class FakeServer {
   };
   calls: Call[] = [];
   /** Answers a live command before the fake applies it, to refuse it or hold it; undefined applies it. */
-  beforeCommand: ((command: CommandEnvelope) => CommandAck | Promise<CommandAck> | undefined) | undefined;
+  beforeCommand: ((command: CommandEnvelope) => CommandAck | Promise<CommandAck | undefined> | undefined) | undefined;
   /** The `dm` room's version counter (D-108). */
   private dmVersion = 1;
   before: Interceptor | undefined;
@@ -364,6 +365,11 @@ export class FakeServer {
   private command({ type, payload }: CommandEnvelope): CommandAck {
     const refuse = (code: ErrorCode): CommandAck => ({ error: { code, message: 'test' } });
     if (!this.signedIn) return refuse('forbidden');
+    // The contract's own payload schemas, as the server validates a command before applying it (D-109).
+    if (!(type in LIVE_COMMAND_PAYLOAD_SCHEMAS)) return refuse('command_unsupported');
+    const schema = LIVE_COMMAND_PAYLOAD_SCHEMAS[type as keyof typeof LIVE_COMMAND_PAYLOAD_SCHEMAS];
+    const body: unknown = payload;
+    if (!Value.Check(schema, body)) return refuse('validation_failed');
     const p = payload;
     const liveToken = () => {
       const token = this.sceneTokens.find((each) => each.id === p.token_id);
