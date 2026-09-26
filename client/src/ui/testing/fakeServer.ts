@@ -3,6 +3,11 @@ import { Value } from 'typebox/value';
 import {
   TokenCreateBodySchema,
   TokenUpdateBodySchema,
+  type CommandAck,
+  type CommandEnvelope,
+  type DmSnapshot,
+  type ErrorCode,
+  type EventEnvelope,
   nextLabel,
   normalizeTag,
   numberingPeers,
@@ -25,6 +30,12 @@ import { installFakeSockets, type FakeSocket } from './fakeSocket.js';
 // can intercept any request first with `before`, to answer it differently or to
 // hold it open. The server's real behaviour is proven by server/src/http/*.test.ts;
 // the end-to-end tests run the view against it.
+//
+// The live side (LIV-04) follows the server's rules for the `dm` room: `openSockets` connects every
+// socket a view opened with the snapshot of its room; a DM socket's commands are applied as the
+// live commands are (D-109) and their events delivered to every open DM socket before the
+// acknowledgement (D-111); and a REST write that changes the DM's live scene delivers a fresh
+// snapshot, or `scene.cleared` when it cleared it, as `server/src/ws/live.ts` `refresh` does.
 
 export interface Call {
   method: string;
@@ -100,6 +111,10 @@ export class FakeServer {
     },
   };
   calls: Call[] = [];
+  /** Answers a live command before the fake applies it, to refuse it or hold it; undefined applies it. */
+  beforeCommand: ((command: CommandEnvelope) => CommandAck | Promise<CommandAck> | undefined) | undefined;
+  /** The `dm` room's version counter (D-108). */
+  private dmVersion = 1;
   before: Interceptor | undefined;
   private restore: (() => void) | undefined;
 
@@ -261,7 +276,11 @@ export class FakeServer {
   /** Replaces `fetch`, `XMLHttpRequest` (uploads, D-090) and the live socket (LIV-01) until `uninstall`. */
   install(): this {
     const original = globalThis.fetch;
-    const fakeSockets = installFakeSockets();
+    const fakeSockets = installFakeSockets((socket) => {
+      socket.onCommand = (command, ack) => {
+        void Promise.resolve(this.beforeCommand?.(command)).then((answer) => ack(answer ?? this.command(command)));
+      };
+    });
     this.sockets = fakeSockets.sockets;
     const originalXhr = globalThis.XMLHttpRequest;
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -282,10 +301,133 @@ export class FakeServer {
     return this;
   }
 
-  /** Records the call and answers it, through `before` first. */
+  /** Records the call and answers it, through `before` first; a write tells the DM room what it changed live. */
   async reply(call: Call): Promise<Reply> {
     this.calls.push(call);
-    return (await this.before?.(call)) ?? this.handle(call);
+    const intercepted = await this.before?.(call);
+    if (intercepted) return intercepted;
+    if (call.method === 'GET') return this.handle(call);
+    const before = this.dmSnapshot();
+    const reply = this.handle(call);
+    const after = this.dmSnapshot();
+    if (before.scene !== null && after.scene === null) this.deliver('scene.cleared', {});
+    else if (JSON.stringify(before) !== JSON.stringify(after)) this.deliver('scene.snapshot', after);
+    return reply;
+  }
+
+  // --- the live side (LIV-04) ---
+
+  /** The DM room's snapshot of the live scene, tokens drawn from their asset's current fields. */
+  dmSnapshot(): DmSnapshot {
+    const scene = this.scenes.find((each) => each.id === this.liveSceneId);
+    if (!scene) return { role: 'dm', scene: null };
+    return {
+      role: 'dm',
+      scene: {
+        scene: structuredClone(scene),
+        map: structuredClone(this.images.find((each) => each.id === scene.map_image_id) ?? null),
+        tokens: this.tokensOf(scene.id).map((token) => this.withAsset(token)),
+      },
+    };
+  }
+
+  private withAsset(token: SceneToken): SceneToken {
+    const asset = this.assets.find((each) => each.id === token.asset_id);
+    return structuredClone(
+      asset ? { ...token, asset: { name: asset.name, image_id: asset.image_id, size: asset.size } } : token,
+    );
+  }
+
+  /**
+   * Connects every socket the views opened and not yet connected, each with the snapshot of its room:
+   * the DM's live scene, or for a player view or a browser without a session the idle players' one.
+   */
+  async openSockets(): Promise<void> {
+    await act(async () => {
+      for (const socket of this.sockets) {
+        if (socket.connected) continue;
+        socket.open(
+          socket.view === 'dm' && this.signedIn ? this.dmSnapshot() : { role: 'players', scene: null },
+          this.dmVersion,
+        );
+      }
+      await Promise.resolve();
+    });
+  }
+
+  /** An event to every open DM socket, taking the room's next version. */
+  deliver(type: EventEnvelope['type'], payload: object): void {
+    const event = { type, version: ++this.dmVersion, payload } as EventEnvelope;
+    for (const socket of this.sockets) if (socket.connected && socket.view === 'dm') socket.deliver(event);
+  }
+
+  private command({ type, payload }: CommandEnvelope): CommandAck {
+    const refuse = (code: ErrorCode): CommandAck => ({ error: { code, message: 'test' } });
+    if (!this.signedIn) return refuse('forbidden');
+    const p = payload;
+    const liveToken = () => {
+      const token = this.sceneTokens.find((each) => each.id === p.token_id);
+      return token ? (token.scene_id === this.liveSceneId ? token : 'not_live') : undefined;
+    };
+    switch (type) {
+      case 'scene.activate': {
+        if (!this.scenes.some((each) => each.id === p.scene_id)) return refuse('not_found');
+        this.liveSceneId = String(p.scene_id);
+        this.deliver('scene.snapshot', this.dmSnapshot());
+        return { ok: true };
+      }
+      case 'scene.deactivate': {
+        if (this.liveSceneId === null) return { ok: true };
+        this.liveSceneId = null;
+        this.deliver('scene.cleared', {});
+        return { ok: true };
+      }
+      case 'token.add': {
+        const sceneId = this.liveSceneId;
+        if (sceneId === null || p.scene_id !== sceneId) return refuse('scene_not_live');
+        const asset = this.assets.find((each) => each.id === p.asset_id);
+        if (!asset) return refuse('reference_not_found');
+        const before = this.tokensOf(sceneId).map((each) => ({ ...each }));
+        const token = this.addToken(sceneId, asset, { x: Number(p.x), y: Number(p.y) });
+        const relabelled = this.tokensOf(sceneId).filter((each) =>
+          before.some((old) => old.id === each.id && old.label !== each.label),
+        );
+        this.deliver('token.added', {
+          token: this.withAsset(token),
+          relabelled: relabelled.map((each) => this.withAsset(each)),
+        });
+        return { ok: true };
+      }
+      case 'token.move':
+      case 'token.setVisibility': {
+        const token = liveToken();
+        if (token === undefined) return refuse('not_found');
+        if (token === 'not_live') return refuse('scene_not_live');
+        let renamed: SceneToken | undefined;
+        if (type === 'token.move') Object.assign(token, { x: Number(p.x), y: Number(p.y) });
+        else {
+          if (token.hidden === p.hidden) return { ok: true };
+          const revealing = token.hidden && token.label === token.asset.name;
+          token.hidden = Boolean(p.hidden);
+          if (revealing) renamed = this.numberAs(token);
+        }
+        this.deliver('token.updated', {
+          token: this.withAsset(token),
+          relabelled: renamed ? [this.withAsset(renamed)] : [],
+        });
+        return { ok: true };
+      }
+      case 'token.delete': {
+        const token = liveToken();
+        if (token === undefined) return refuse('not_found');
+        if (token === 'not_live') return refuse('scene_not_live');
+        this.sceneTokens = this.sceneTokens.filter((each) => each !== token);
+        this.deliver('token.removed', { id: token.id });
+        return { ok: true };
+      }
+      default:
+        return refuse('command_unsupported');
+    }
   }
 
   /** The fractions an upload reports as sent before its answer, as a browser's progress events do. */

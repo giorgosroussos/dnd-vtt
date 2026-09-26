@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import {
   API_IMAGE_PATHS,
+  type CommandType,
   type Image,
   type LibraryAsset,
   type Scene,
@@ -15,12 +16,13 @@ import { Dialog } from '../ui/Dialog.js';
 import { Notice } from '../ui/Notice.js';
 import { TextField } from '../ui/TextField.js';
 import { errorMessage } from '../ui/errorMessage.js';
-import { t } from '../ui/messages.js';
+import { t, type MessageKey } from '../ui/messages.js';
 import { errorCode, request, upload } from './api.js';
 import { CalibrationPanel } from './calibration/CalibrationPanel.js';
 import { CornerMagnifier } from './calibration/CornerMagnifier.js';
 import { startDraft, withRect, type Draft } from './calibration/draft.js';
 import { megabytes } from './library/labels.js';
+import type { DmLive } from './live/useDmLive.js';
 import { entityPath } from './tree/paths.js';
 import { DeleteTokenDialog, RenameDialog, TokenBar } from './tokens/TokenBar.js';
 import { TokenPicker } from './tokens/TokenPicker.js';
@@ -46,8 +48,18 @@ import { toCanvasToken, useSceneTokens } from './tokens/useSceneTokens.js';
 // Add token opens the picker; the chosen asset is then placed by a click on the map, or by Enter at
 // the centre of the view, and the server numbers it and sets its visibility from the asset. The
 // selected token is moved by dragging or by the arrow keys, and hidden, revealed, renamed,
-// restacked or deleted from the token bar. The live scene's tokens are refused by the server
-// (specs/04-live-sync.md §2); live mode is LIV-04's.
+// restacked or deleted from the token bar.
+//
+// Live and prep modes (LIV-04, specs/08-ux-journeys.md §2, Q-024): the live scene is shown in live
+// mode, framed by a persistent live indicator, and every other scene in prep mode, where nothing
+// reaches the TV and the live bar's Go live makes it the live scene (`scene.activate`, Workspace). In live mode the scene, its
+// map and its tokens come from the `dm` room (`useDmLive`), so another DM browser's changes show as
+// they happen, and the token controls send the live commands instead of REST writes: placing is
+// `token.add`, a drop or an arrow key `token.move`, Hide and Reveal `token.setVisibility`, Delete
+// `token.delete` (specs/04-live-sync.md §2, §7, D-109); renaming and restacking are prep-mode only.
+// A move or a visibility change shows at once and is dropped if the server refuses it. The setup
+// (map, players' grid, calibration) is still saved over REST in live mode (Q-015), and the server
+// pushes it to both rooms as a fresh snapshot (specs/04-live-sync.md §10).
 //
 // The workspace keys this panel by scene: a request still running when another scene is
 // selected ends in a panel that is gone, so its answer changes nothing on screen. One change
@@ -59,10 +71,25 @@ const imagePath = (id: string): string => API_IMAGE_PATHS.image.replace(':id', i
 // Refusals of the file itself are shown beside the field (D-069); anything else above.
 const FILE_REFUSALS = new Set(['unsupported_media_type', 'payload_too_large']);
 
-export function ScenePanel({ sceneId, name, uploadLimit }: { sceneId: string; name: string; uploadLimit: number }) {
+export function ScenePanel({
+  sceneId,
+  name,
+  uploadLimit,
+  live,
+}: {
+  sceneId: string;
+  name: string;
+  uploadLimit: number;
+  /** The workspace's live connection: whether this scene is live, and the commands (LIV-04). */
+  live?: DmLive | undefined;
+}) {
   const gridId = useId();
   const hintId = useId();
-  const [scene, setScene] = useState<Scene>();
+  const liveScene = live?.scene != null && live.scene.scene.id === sceneId ? live.scene : undefined;
+  const isLive = liveScene !== undefined;
+  // The scene as read over REST in prep mode; live mode shows the live scene's record instead.
+  const [prepScene, setScene] = useState<Scene>();
+  const scene = liveScene?.scene ?? prepScene;
   const [loadedMap, setLoadedMap] = useState<Image>();
   const [failure, setFailure] = useState<string>();
   const [file, setFile] = useState<File>();
@@ -81,7 +108,13 @@ export function ScenePanel({ sceneId, name, uploadLimit }: { sceneId: string; na
   // The control that opened a token dialog, where focus returns when it closes unchanged.
   const opener = useRef<HTMLElement | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const sceneTokens = useSceneTokens(sceneId);
+  const sceneTokens = useSceneTokens(sceneId, isLive);
+  // Moves and visibility changes sent in live mode, shown until the server has answered (LIV-04).
+  const [pending, setPending] = useState<
+    Record<string, { seq: number; fields: { x?: number; y?: number; hidden?: boolean } }>
+  >({});
+  const pendingSeq = useRef(0);
+  const [liveFailure, setLiveFailure] = useState<string>();
   const [selectedToken, setSelectedToken] = useState<string>();
   const [picking, setPicking] = useState(false);
   const [placingAsset, setPlacingAsset] = useState<LibraryAsset>();
@@ -103,15 +136,26 @@ export function ScenePanel({ sceneId, name, uploadLimit }: { sceneId: string; na
     refocus.current = undefined;
   });
 
+  // Read again whenever the scene is shown in prep mode, since it may have changed while it was live.
   useEffect(() => {
-    request<Scene>('GET', entityPath('scene', sceneId)).then(setScene, (error: unknown) =>
-      setFailure(errorMessage(errorCode(error))),
+    if (isLive) return;
+    let active = true;
+    request<Scene>('GET', entityPath('scene', sceneId)).then(
+      (value) => {
+        if (active) setScene(value);
+      },
+      (error: unknown) => {
+        if (active) setFailure(errorMessage(errorCode(error)));
+      },
     );
-  }, [sceneId]);
+    return () => {
+      active = false;
+    };
+  }, [sceneId, isLive]);
 
   const mapId = scene?.map_image_id;
   useEffect(() => {
-    if (typeof mapId !== 'string') return;
+    if (isLive || typeof mapId !== 'string') return;
     let active = true;
     request<Image>('GET', imagePath(mapId)).then(
       (value) => {
@@ -124,9 +168,16 @@ export function ScenePanel({ sceneId, name, uploadLimit }: { sceneId: string; na
     return () => {
       active = false;
     };
-  }, [mapId]);
-  // Null for a scene without a map; undefined while the map's record is on its way.
-  const map = mapId === null ? null : loadedMap && loadedMap.id === mapId ? loadedMap : undefined;
+  }, [mapId, isLive]);
+  // Null for a scene without a map; undefined while the map's record is on its way. The live scene's
+  // map comes with its snapshot.
+  const map = liveScene
+    ? liveScene.map
+    : mapId === null
+      ? null
+      : loadedMap && loadedMap.id === mapId
+        ? loadedMap
+        : undefined;
 
   const uploading = progress !== undefined;
   const busy = uploading || savingGrid !== undefined || savingCalibration;
@@ -219,9 +270,11 @@ export function ScenePanel({ sceneId, name, uploadLimit }: { sceneId: string; na
     }
   }
 
-  // Tokens.
+  // Tokens: over REST in prep mode, through the live commands in live mode.
 
-  const tokens = sceneTokens.tokens;
+  const tokens = liveScene
+    ? liveScene.tokens.map((token) => ({ ...token, ...pending[token.id]?.fields }))
+    : sceneTokens.tokens;
   const selected = tokens?.find((token) => token.id === selectedToken);
 
   const openDialog = (open: () => void) => {
@@ -241,9 +294,27 @@ export function ScenePanel({ sceneId, name, uploadLimit }: { sceneId: string; na
     refocus.current = 'add';
   }
 
+  /** Sends a live command; a refusal says why above the canvas. */
+  async function command(
+    type: CommandType,
+    payload: object,
+    message: MessageKey = 'scene.liveFailed',
+  ): Promise<boolean> {
+    setLiveFailure(undefined);
+    const outcome = live ? await live.command(type, payload) : ({ ok: false, code: 'network' } as const);
+    if (!outcome.ok) setLiveFailure(t(message, { reason: errorMessage(outcome.code) }));
+    return outcome.ok;
+  }
+
+  async function placeLive(assetId: string, at: { x: number; y: number }): Promise<SceneToken | undefined> {
+    // The token the acknowledged token.add placed is the last one added before the acknowledgement.
+    if (!(await command('token.add', { scene_id: sceneId, asset_id: assetId, ...at }))) return undefined;
+    return live?.lastAdded();
+  }
+
   async function placeToken(asset: LibraryAsset, at: { x: number; y: number }) {
     setPlacingAsset(undefined);
-    const token = await sceneTokens.place(asset.id, at);
+    const token = isLive ? await placeLive(asset.id, at) : await sceneTokens.place(asset.id, at);
     refocus.current = 'canvas';
     if (!token) return;
     setSelectedToken(token.id);
@@ -253,7 +324,8 @@ export function ScenePanel({ sceneId, name, uploadLimit }: { sceneId: string; na
   async function deleteToken(token: SceneToken) {
     setDeleting(undefined);
     refocus.current = 'add';
-    if (await sceneTokens.remove(token.id)) {
+    const removed = isLive ? await command('token.delete', { token_id: token.id }) : await sceneTokens.remove(token.id);
+    if (removed) {
       setSelectedToken(undefined);
       announce(t('tokens.deleted', { label: token.label }));
     }
@@ -262,8 +334,29 @@ export function ScenePanel({ sceneId, name, uploadLimit }: { sceneId: string; na
   const announce = (message: string) => setStatus({ message });
 
   async function changeToken(token: SceneToken, body: TokenUpdateBody, done: (updated: SceneToken) => string) {
+    if (isLive) return changeLive(token, body, done);
     const result = await sceneTokens.change(token.id, body);
     if (result.ok) announce(done(result.token));
+  }
+
+  // A live move or visibility change shows at once and is dropped when answered: by then its events
+  // have brought the live scene in step (D-111), or the refusal leaves the token where it was.
+  async function changeLive(token: SceneToken, body: TokenUpdateBody, done: (updated: SceneToken) => string) {
+    const seq = ++pendingSeq.current;
+    const { x, y, hidden } = body;
+    const moving = x !== undefined && y !== undefined;
+    const shown = moving ? { x, y } : hidden !== undefined ? { hidden } : {};
+    setPending((current) => ({ ...current, [token.id]: { seq, fields: { ...current[token.id]?.fields, ...shown } } }));
+    const ok = moving
+      ? await command('token.move', { token_id: token.id, x, y })
+      : await command('token.setVisibility', { token_id: token.id, hidden });
+    setPending((current) =>
+      current[token.id]?.seq === seq
+        ? Object.fromEntries(Object.entries(current).filter(([id]) => id !== token.id))
+        : current,
+    );
+    const updated = live?.current()?.tokens.find((each) => each.id === token.id);
+    if (ok && updated) announce(done(updated));
   }
 
   // Moves are announced too, since the canvas says nothing to assistive technology (review).
@@ -296,9 +389,8 @@ export function ScenePanel({ sceneId, name, uploadLimit }: { sceneId: string; na
 
   // The token controls, on the canvas toolbar's row (D-100); neither while calibrating, which
   // takes the row above the canvas, nor before the tokens have arrived.
-  const tokenFailure = sceneTokens.loadFailure
-    ? t('tokens.loadFailed', { reason: sceneTokens.loadFailure })
-    : undefined;
+  const tokenFailure =
+    !isLive && sceneTokens.loadFailure ? t('tokens.loadFailed', { reason: sceneTokens.loadFailure }) : undefined;
   const tokenBar =
     draft || !tokens ? undefined : placingAsset ? (
       <div
@@ -339,6 +431,7 @@ export function ScenePanel({ sceneId, name, uploadLimit }: { sceneId: string; na
         }
         onDelete={(token) => openDialog(() => setDeleting(token))}
         busy={false}
+        live={isLive}
       />
     );
 
@@ -354,9 +447,10 @@ export function ScenePanel({ sceneId, name, uploadLimit }: { sceneId: string; na
   const loading = <p className="eg-dm__status">{t('workspace.loadingScene')}</p>;
 
   return (
-    <div ref={panelRef} className="eg-scene">
+    <div ref={panelRef} className="eg-scene" data-mode={isLive ? 'live' : 'prep'}>
       <div className="eg-scene__head">
         <h1 className="eg-dm__heading">{name}</h1>
+        {isLive ? <p className="eg-scene__live">{t('scene.live')}</p> : null}
         {/* One status region, always mounted, so a message is announced when it appears: after a
           map upload, and after a save that closes the calibration panel (D-096). */}
         <div role="status" className="eg-scene__progress">
@@ -375,7 +469,8 @@ export function ScenePanel({ sceneId, name, uploadLimit }: { sceneId: string; na
         </div>
       </div>
       {failure ? <Notice>{failure}</Notice> : null}
-      {sceneTokens.failure ? <Notice>{sceneTokens.failure}</Notice> : null}
+      {liveFailure ? <Notice>{liveFailure}</Notice> : null}
+      {!isLive && sceneTokens.failure ? <Notice>{sceneTokens.failure}</Notice> : null}
       {mapFailedFor !== undefined && mapFailedFor === mapId ? <Notice>{t('sceneMap.loadFailed')}</Notice> : null}
       {scene ? (
         <>
@@ -448,12 +543,12 @@ export function ScenePanel({ sceneId, name, uploadLimit }: { sceneId: string; na
                   saving={savingCalibration}
                 />
               ) : null}
-              <div className="eg-scene__canvas">
+              <div className={isLive ? 'eg-scene__canvas eg-scene__canvas--live' : 'eg-scene__canvas'}>
                 <MapCanvas
                   grid={draft ? { ...scene.grid, ...draft.calibration } : scene.grid}
                   map={map}
                   mode="dm"
-                  label={t('canvas.label', { name })}
+                  label={t(isLive ? 'canvas.labelLive' : 'canvas.label', { name })}
                   onMapError={() => setMapFailedFor(mapId ?? undefined)}
                   measure={measure}
                   toolbar={tokenBar}

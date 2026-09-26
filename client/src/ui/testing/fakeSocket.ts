@@ -1,4 +1,10 @@
-import { SOCKET_CHANNELS, type EventEnvelope, type SceneSnapshot } from '@emberglass/shared';
+import {
+  SOCKET_CHANNELS,
+  type CommandAck,
+  type CommandEnvelope,
+  type EventEnvelope,
+  type SceneSnapshot,
+} from '@emberglass/shared';
 import { setSocketFactory, type LiveSocketLike, type LiveView } from '../../live/connection.js';
 
 // Test tooling only, never bundled: a scripted stand-in for the Socket.io client socket, for the
@@ -13,6 +19,8 @@ export class FakeSocket implements LiveSocketLike {
   connected = false;
   connects = 0;
   readonly emitted: { event: string; args: unknown[] }[] = [];
+  /** Answers each command as the server would; without it a command stays unanswered (LIV-04). */
+  onCommand: ((command: CommandEnvelope, ack: (answer: CommandAck) => void) => void) | undefined;
   private readonly listeners = new Map<string, Listener[]>();
 
   on(event: string, listener: Listener): this {
@@ -22,6 +30,9 @@ export class FakeSocket implements LiveSocketLike {
 
   emit(event: string, ...args: unknown[]): this {
     this.emitted.push({ event, args });
+    if (event === SOCKET_CHANNELS.command && this.onCommand) {
+      this.onCommand(args[0] as CommandEnvelope, args[1] as (answer: CommandAck) => void);
+    }
     return this;
   }
 
@@ -55,6 +66,13 @@ export class FakeSocket implements LiveSocketLike {
     this.fire('disconnect', reason);
   }
 
+  /** The commands sent so far, in order. */
+  commands(): CommandEnvelope[] {
+    return this.emitted
+      .filter(({ event }) => event === SOCKET_CHANNELS.command)
+      .map(({ args }) => args[0] as CommandEnvelope);
+  }
+
   /** The snapshot requests sent so far. */
   snapshotRequests(): number {
     return this.emitted.filter(({ event }) => event === SOCKET_CHANNELS.snapshot).length;
@@ -65,11 +83,15 @@ export class FakeSocket implements LiveSocketLike {
   }
 }
 
-/** Every socket the views open until `restore` is called goes into `sockets`. */
-export function installFakeSockets(): { sockets: FakeSocket[]; restore: () => void } {
+/** Every socket the views open until `restore` is called goes into `sockets`, after `created` sees it. */
+export function installFakeSockets(created?: (socket: FakeSocket) => void): {
+  sockets: FakeSocket[];
+  restore: () => void;
+} {
   const sockets: FakeSocket[] = [];
   const restore = setSocketFactory((view) => {
     const socket = new FakeSocket(view);
+    created?.(socket);
     sockets.push(socket);
     return socket;
   });
