@@ -3,6 +3,9 @@ import {
   PLAYER_VIEW_AUTH,
   SOCKET_CHANNELS,
   SOCKET_PATH,
+  type CommandAck,
+  type CommandType,
+  type ErrorCode,
   type EventEnvelope,
   type Room,
   type SceneSnapshot,
@@ -15,6 +18,12 @@ import { createVersionTracker } from './versions.js';
 // connection starts with a fresh snapshot, so a reconnected client is in step again without
 // asking. The server also drops the sockets of a session that ended; the client then connects
 // again at once and the server puts it in `players`, which the DM view reads as signed out.
+//
+// Commands (LIV-04, specs/04-live-sync.md §2): the DM view sends each on `command` and learns the
+// outcome from the acknowledgement; the events it caused arrive first (D-111). A command is sent
+// only while connected: Socket.io would otherwise buffer it and send it after a reconnection, when
+// a move or a reveal may no longer be what the DM means. One left unanswered is reported as a lost
+// connection after COMMAND_TIMEOUT_MS; if it did apply, its events still bring the view in step.
 
 export type LiveStatus = 'connecting' | 'connected' | 'reconnecting';
 
@@ -63,13 +72,27 @@ export interface LiveHandlers {
 
 // How long a snapshot request may go unanswered before it is sent again.
 export const SNAPSHOT_RETRY_MS = 5_000;
+// How long a command may go unanswered before the view says the connection was lost.
+export const COMMAND_TIMEOUT_MS = 10_000;
 
-/** Opens the connection; the returned function closes it for good. */
+/** A command's outcome: `network` when it could not be sent or was not answered in time. */
+export type CommandOutcome = { ok: true } | { ok: false; code: ErrorCode | 'network' };
+
+export interface LiveConnection {
+  /** Closes the connection for good. */
+  close: () => void;
+  /** Sends a command from the DM view (the server refuses every other socket's, Q-046). */
+  command: (type: CommandType, payload: object) => Promise<CommandOutcome>;
+  /** Drops the connection and opens it again, with the cookie the browser holds now (G-027). */
+  reconnect: () => void;
+}
+
 // The room each view's snapshots must be for. The player view never uses a DM snapshot, even if
 // one reached it, so nothing hidden could be drawn on the TV (D-105).
 const EXPECTED: Record<LiveView, Room | undefined> = { player: 'players', dm: undefined };
 
-export function connectLive(view: LiveView, handlers: LiveHandlers): () => void {
+/** Opens the connection. */
+export function connectLive(view: LiveView, handlers: LiveHandlers): LiveConnection {
   const socket = socketFactory(view);
   const tracker = createVersionTracker();
   let closed = false;
@@ -114,9 +137,31 @@ export function connectLive(view: LiveView, handlers: LiveHandlers): () => void 
     else if (verdict === 'gap') requestSnapshot();
   });
 
-  return () => {
-    closed = true;
-    clearTimeout(retry);
-    socket.disconnect();
+  const command = (type: CommandType, payload: object): Promise<CommandOutcome> =>
+    new Promise((resolve) => {
+      if (closed || !socket.connected) return resolve({ ok: false, code: 'network' });
+      const timer = setTimeout(() => resolve({ ok: false, code: 'network' }), COMMAND_TIMEOUT_MS);
+      socket.emit(SOCKET_CHANNELS.command, { type, payload }, (ack: CommandAck) => {
+        clearTimeout(timer);
+        resolve(
+          'ok' in ack && ack.ok
+            ? { ok: true }
+            : { ok: false, code: 'error' in ack ? ack.error.code : 'internal_error' },
+        );
+      });
+    });
+
+  return {
+    close: () => {
+      closed = true;
+      clearTimeout(retry);
+      socket.disconnect();
+    },
+    command,
+    reconnect: () => {
+      if (closed) return;
+      socket.disconnect();
+      socket.connect();
+    },
   };
 }

@@ -53,12 +53,15 @@ const params = { params: IdParamsSchema };
 
 /**
  * `removeImages` removes the files of the images an update or a deletion left
- * unreferenced, once it has committed (specs/03-domain-model.md §7, Q-002).
+ * unreferenced, once it has committed (specs/03-domain-model.md §7, Q-002). `refreshLive` runs a
+ * change that can alter the live scene's tokens and tells the WebSocket rooms what it changed
+ * (LIV-04, `server/src/ws/live.ts`).
  */
 export function registerAssets(
   app: FastifyInstance,
   db: Database.Database,
   removeImages: (ids: readonly string[]) => void,
+  refreshLive: <T>(work: () => T) => T,
 ): void {
   app.get<{ Querystring: AssetListQuery }>(
     PATHS.assets,
@@ -89,15 +92,16 @@ export function registerAssets(
     (request) => readAsset(db, request.params.id) ?? raise(notFound()),
   );
 
+  // Every token of the asset follows its image, size and bare name (specs/05-assets-and-images.md §5,
+  // D-111), the live scene's included: the rooms that see such a token get a fresh snapshot, players
+  // only for a visible one (specs/04-live-sync.md §4, LIV-04, G-019).
   app.patch<{ Params: IdParams; Body: AssetUpdateBody }>(
     PATHS.asset,
     { schema: { ...params, body: AssetUpdateBodySchema, response: { 200: LibraryAssetSchema } } },
     (request) => {
       const { tags, ...fields } = request.body;
-      const result = updateAsset(db, request.params.id, {
-        ...fields,
-        tags: tags === undefined ? undefined : normalizeTags(tags, 'body', '/tags'),
-      });
+      const normalized = tags === undefined ? undefined : normalizeTags(tags, 'body', '/tags');
+      const result = refreshLive(() => updateAsset(db, request.params.id, { ...fields, tags: normalized }));
       if (result.outcome === 'not_found') throw notFound();
       if (result.outcome === 'image_not_found') throw imageNotFound();
       removeImages(result.removedImages);

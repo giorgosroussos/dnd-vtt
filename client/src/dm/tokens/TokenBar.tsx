@@ -8,8 +8,9 @@ import { t } from '../../ui/messages.js';
 // The token controls above the canvas (PRP-04, specs/05-assets-and-images.md §5,
 // specs/04-live-sync.md §2, specs/08-ux-journeys.md §8, D-100): Add token, which opens the picker;
 // the selected token, chosen here or by a click on the map; and what can be done to it on a scene
-// that is not live: hide or reveal, rename, bring to front, send to back, delete. Every control is
-// a native one, so the keyboard reaches and operates all of it.
+// that is not live: hide or reveal, rename, bring to front, send to back, delete. On the live scene
+// only what the live commands do: hide or reveal and delete (specs/04-live-sync.md §2, Q-014, LIV-04).
+// Every control is a native one, so the keyboard reaches and operates all of it.
 
 export function TokenBar({
   tokens,
@@ -21,6 +22,7 @@ export function TokenBar({
   onStack,
   onDelete,
   busy,
+  live = false,
 }: {
   tokens: readonly SceneToken[];
   selectedId: string | undefined;
@@ -32,6 +34,8 @@ export function TokenBar({
   onDelete: (token: SceneToken) => void;
   /** A placement is under way: the controls refuse, keeping focus where it is (D-093). */
   busy: boolean;
+  /** Live mode: label and stacking order are edited only on scenes that are not live. */
+  live?: boolean;
 }) {
   const selectId = useId();
   const selected = tokens.find((token) => token.id === selectedId);
@@ -74,30 +78,34 @@ export function TokenBar({
           >
             {selected.hidden ? t('tokens.reveal') : t('tokens.hide')}
           </Button>
-          <Button
-            size="small"
-            aria-disabled={busy || undefined}
-            aria-label={t('tokens.renameOf', { label: selected.label })}
-            onClick={guard(() => onRename(selected))}
-          >
-            {t('tokens.rename')}
-          </Button>
-          <Button
-            size="small"
-            aria-disabled={busy || undefined}
-            aria-label={t('tokens.frontOf', { label: selected.label })}
-            onClick={guard(() => onStack(selected, 'front'))}
-          >
-            {t('tokens.front')}
-          </Button>
-          <Button
-            size="small"
-            aria-disabled={busy || undefined}
-            aria-label={t('tokens.backOf', { label: selected.label })}
-            onClick={guard(() => onStack(selected, 'back'))}
-          >
-            {t('tokens.back')}
-          </Button>
+          {live ? null : (
+            <>
+              <Button
+                size="small"
+                aria-disabled={busy || undefined}
+                aria-label={t('tokens.renameOf', { label: selected.label })}
+                onClick={guard(() => onRename(selected))}
+              >
+                {t('tokens.rename')}
+              </Button>
+              <Button
+                size="small"
+                aria-disabled={busy || undefined}
+                aria-label={t('tokens.frontOf', { label: selected.label })}
+                onClick={guard(() => onStack(selected, 'front'))}
+              >
+                {t('tokens.front')}
+              </Button>
+              <Button
+                size="small"
+                aria-disabled={busy || undefined}
+                aria-label={t('tokens.backOf', { label: selected.label })}
+                onClick={guard(() => onStack(selected, 'back'))}
+              >
+                {t('tokens.back')}
+              </Button>
+            </>
+          )}
           <Button
             size="small"
             aria-disabled={busy || undefined}

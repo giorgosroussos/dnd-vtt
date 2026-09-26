@@ -214,14 +214,82 @@ describe('the live connection (LIV-01, specs/04-live-sync.md §6, specs/07-secur
     const socket = server.sockets[0]!;
     await deliver(() => socket.open({ role: 'dm', scene: null }));
     // A PIN change on another device ended this session: the server dropped the socket.
+    server.signedIn = false;
     await deliver(() => socket.drop('io server disconnect'));
     expect(socket.connects).toBe(1);
     await deliver(() => socket.open({ role: 'players', scene: null }));
+    await settle();
     expect(heading(view)).toBe(t('signIn.heading'));
     expect(socket.connected).toBe(false);
     // It says why, and focus is where the form starts, not lost with the workspace.
     expect(view.querySelector('[role="alert"]')?.textContent).toBe(t('signIn.sessionEnded'));
     expect(document.activeElement?.id).toBe('main');
+  });
+
+  it('reconnects once, keeping the workspace, when the server still knows the session (G-027)', async () => {
+    server.signedIn = true;
+    const view = await open();
+    const socket = server.sockets[0]!;
+    await deliver(() => socket.open({ role: 'dm', scene: null }));
+    // A reconnection that left before a sign-in in another tab had stored its cookie lands in players.
+    await deliver(() => socket.drop('io server disconnect'));
+    await deliver(() => socket.open({ role: 'players', scene: null }));
+    await settle();
+    expect(server.calls.filter((call) => call.method === 'GET' && call.path === '/api/auth')).toHaveLength(2);
+    expect(socket.connects).toBe(2);
+    expect(view.querySelector('input[type="password"]')).toBeNull();
+    await deliver(() => socket.open({ role: 'dm', scene: null }));
+    expect(liveBar(view)).toBe(t('liveBar.none'));
+    expect(view.querySelector('input[type="password"]')).toBeNull();
+  });
+
+  it('signs out when the socket lands in players again after that one reconnection (G-027)', async () => {
+    server.signedIn = true;
+    const view = await open();
+    const socket = server.sockets[0]!;
+    await deliver(() => socket.open({ role: 'dm', scene: null }));
+    await deliver(() => socket.drop('io server disconnect'));
+    await deliver(() => socket.open({ role: 'players', scene: null }));
+    await settle();
+    expect(socket.connects).toBe(2);
+    await deliver(() => socket.open({ role: 'players', scene: null }));
+    await settle();
+    expect(heading(view)).toBe(t('signIn.heading'));
+    expect(view.querySelector('[role="alert"]')?.textContent).toBe(t('signIn.sessionEnded'));
+  });
+
+  it('asks the server again at a later race, once a reconnection brought it back to dm (G-027, review M6)', async () => {
+    server.signedIn = true;
+    const view = await open();
+    const socket = server.sockets[0]!;
+    await deliver(() => socket.open({ role: 'dm', scene: null }));
+    await deliver(() => socket.drop('io server disconnect'));
+    await deliver(() => socket.open({ role: 'players', scene: null }));
+    await settle();
+    await deliver(() => socket.open({ role: 'dm', scene: null }));
+    // Another sign-in race, later in the evening: checked with the server again, not signed out.
+    await deliver(() => socket.drop('io server disconnect'));
+    await deliver(() => socket.open({ role: 'players', scene: null }));
+    await settle();
+    expect(server.calls.filter((call) => call.method === 'GET' && call.path === '/api/auth')).toHaveLength(3);
+    expect(socket.connects).toBe(4);
+    expect(view.querySelector('input[type="password"]')).toBeNull();
+  });
+
+  it('signs out when the check with the server fails (G-027, review M6)', async () => {
+    server.signedIn = true;
+    const view = await open();
+    const socket = server.sockets[0]!;
+    await deliver(() => socket.open({ role: 'dm', scene: null }));
+    server.before = (call) =>
+      call.path === '/api/auth'
+        ? { status: 500, body: { error: { code: 'internal_error', message: 'test' } } }
+        : undefined;
+    await deliver(() => socket.drop('io server disconnect'));
+    await deliver(() => socket.open({ role: 'players', scene: null }));
+    await settle();
+    expect(heading(view)).toBe(t('signIn.heading'));
+    expect(socket.connects).toBe(1);
   });
 
   it('says it is connecting, not that a connection was lost, while a first connection does not succeed', async () => {

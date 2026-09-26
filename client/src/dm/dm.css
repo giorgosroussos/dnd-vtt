@@ -55,6 +55,12 @@
   margin-right: var(--space-2);
 }
 
+.eg-livebar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
 .eg-livebar__text--warning {
   color: var(--color-accent);
   font-weight: 700;
@@ -312,6 +318,24 @@ textarea.eg-field__input {
   gap: var(--space-2) var(--space-6);
 }
 
+/* The heading and the mode's name share one line, so the mode never adds a row: a long scene name
+   is cut short with an ellipsis (its full text stays in the DOM). The status wraps below them when
+   it does not fit beside them, as it did before (G-022, review M4). */
+.eg-scene__title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.eg-scene__title > .eg-dm__heading {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .eg-scene__setup {
   display: flex;
   flex-wrap: wrap;
@@ -365,6 +389,38 @@ textarea.eg-field__input {
   position: relative;
   /* Tall enough for the magnifier over its corner (D-096). */
   min-height: 15rem;
+}
+
+/* Live mode's persistent indicator around the canvas (specs/08-ux-journeys.md §2, Q-024): a double
+   outline, so it takes no room from the canvas and cannot be taken for a focus ring, which is a single
+   line; dashed while the connection is down (review M3, M4). */
+.eg-scene__canvas--live {
+  outline: 6px double var(--color-danger);
+  outline-offset: 0;
+  border-radius: var(--radius);
+}
+
+.eg-scene__canvas--offline {
+  outline-style: dashed;
+  outline-width: 3px;
+}
+
+/* The mode's name in the scene's head, on one line: the heading gives way first (G-022). */
+.eg-scene__mode {
+  margin: 0;
+  white-space: nowrap;
+  font-size: var(--font-size-sm);
+}
+
+.eg-scene__mode--live,
+.eg-scene__mode--offline {
+  color: var(--color-danger);
+  font-weight: 700;
+}
+
+.eg-scene__mode--live::before {
+  content: '●' / '';
+  margin-right: var(--space-2);
 }
 
 .eg-calibration {

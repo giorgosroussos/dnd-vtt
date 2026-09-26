@@ -17,22 +17,21 @@ export interface PlayerLive {
 // snapshot is never drawn (D-105). While reconnecting the last picture stays.
 export function usePlayerLive(): PlayerLive {
   const [state, setState] = useState<PlayerLive>({ status: 'connecting', scene: undefined, snapshots: 0 });
-  useEffect(
-    () =>
-      connectLive('player', {
-        onStatus: (status) => setState((current) => ({ ...current, status })),
-        onSnapshot: (snapshot) =>
-          setState((current) => ({
-            ...current,
-            scene: fromSnapshot(snapshot as PlayerSnapshot),
-            snapshots: current.snapshots + 1,
-          })),
-        onEvent: (event) =>
-          setState((current) =>
-            current.scene === undefined ? current : { ...current, scene: applyPlayerEvent(current.scene, event) },
-          ),
-      }),
-    [],
-  );
+  useEffect(() => {
+    const connection = connectLive('player', {
+      onStatus: (status) => setState((current) => ({ ...current, status })),
+      onSnapshot: (snapshot) =>
+        setState((current) => ({
+          ...current,
+          scene: fromSnapshot(snapshot as PlayerSnapshot),
+          snapshots: current.snapshots + 1,
+        })),
+      onEvent: (event) =>
+        setState((current) =>
+          current.scene === undefined ? current : { ...current, scene: applyPlayerEvent(current.scene, event) },
+        ),
+    });
+    return () => connection.close();
+  }, []);
   return state;
 }

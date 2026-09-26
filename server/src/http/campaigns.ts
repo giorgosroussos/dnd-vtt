@@ -78,12 +78,14 @@ const params = { params: IdParamsSchema };
 
 /**
  * `removeImages` removes the files of the map images a deletion left unreferenced, once the
- * deletion has committed (specs/03-domain-model.md §7, Q-002).
+ * deletion has committed (specs/03-domain-model.md §7, Q-002). `refreshLive` runs a change that can
+ * alter the live scene and tells the WebSocket rooms what it changed (LIV-04, `server/src/ws/live.ts`).
  */
 export function registerCampaigns(
   app: FastifyInstance,
   db: Database.Database,
   removeImages: (ids: readonly string[]) => void,
+  refreshLive: <T>(work: () => T) => T,
 ): void {
   const requireCampaign = (id: string) => readCampaign(db, id) ?? raise(notFound());
   const requireSession = (id: string) => readSession(db, id) ?? raise(notFound());
@@ -193,13 +195,13 @@ export function registerCampaigns(
 
   // Rename and setup: the map, whether players see the grid (PRP-02) and the calibration, which
   // also writes the map's preset (PRP-03, specs/03-domain-model.md §5, D-094).
-  // The live scene's change is saved but reaches no player view until LIV-04 pushes it as a
-  // snapshot (specs/04-live-sync.md §10, G-019).
+  // A change to the live scene reaches both rooms as a fresh snapshot, the players' only when what
+  // they see changed: a rename reaches the DM's room alone (specs/04-live-sync.md §10, Q-015, LIV-04).
   app.patch<{ Params: IdParams; Body: SceneUpdateBody }>(
     PATHS.scene,
     { schema: { ...params, body: SceneUpdateBodySchema, response: { 200: SceneSchema } } },
     (request) => {
-      const result = updateScene(db, request.params.id, request.body);
+      const result = refreshLive(() => updateScene(db, request.params.id, request.body));
       if (result.outcome === 'not_found') throw notFound();
       if (result.outcome === 'image_not_found') {
         throw new ApiFailure(400, 'reference_not_found', 'The map image does not exist.');
@@ -227,7 +229,8 @@ export function registerCampaigns(
   );
 
   // Deletion: GET …/deletion states what goes, DELETE sends it back as the
-  // confirmation (specs/03-domain-model.md §7).
+  // confirmation (specs/03-domain-model.md §7). Deleting the live scene or an ancestor clears the
+  // live scene, and both rooms receive the idle state (Q-031, LIV-04).
 
   const deletion = (target: DeletionTarget, summaryPath: string, entityPath: string): void => {
     app.get<{ Params: IdParams }>(
@@ -239,7 +242,7 @@ export function registerCampaigns(
       entityPath,
       { schema: { ...params, body: DeleteBodySchema } },
       async (request, reply) => {
-        const result = deleteEntity(db, target, request.params.id, request.body.confirm);
+        const result = refreshLive(() => deleteEntity(db, target, request.params.id, request.body.confirm));
         if (result.outcome === 'not_found') throw notFound();
         if (result.outcome === 'mismatch') throw confirmationMismatch();
         removeImages(result.removedImages);

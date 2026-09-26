@@ -58,7 +58,7 @@ function open() {
     onStatus: (status) => statuses.push(status),
     onSnapshot: (_snapshot, at) => snapshots.push(at),
     onEvent: (event) => events.push(event.version),
-  });
+  }).close;
   return { statuses, snapshots, events };
 }
 

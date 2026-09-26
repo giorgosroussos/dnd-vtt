@@ -12,6 +12,10 @@ import { errorCode, request } from '../api.js';
 // so an earlier answer cannot move the token back on screen. A refusal shows why and reads the
 // scene's tokens again, so the view shows what the server stored; a change made from a dialog may
 // take its refusal to show beside its field instead.
+//
+// While the scene is live its tokens come from the `dm` room and change only by live commands
+// (LIV-04, specs/04-live-sync.md §2), so nothing is read here; they are read again when the scene
+// returns to prep mode, since live play changed them.
 
 export const sceneTokensPath = (sceneId: string): string =>
   API_TOKEN_PATHS.sceneTokens.replace(':id', encodeURIComponent(sceneId));
@@ -45,7 +49,7 @@ export interface SceneTokens {
   remove: (id: string) => Promise<boolean>;
 }
 
-export function useSceneTokens(sceneId: string): SceneTokens {
+export function useSceneTokens(sceneId: string, live = false): SceneTokens {
   const [tokens, setTokens] = useState<SceneToken[]>();
   const [loadFailure, setLoadFailure] = useState<string>();
   const [failure, setFailure] = useState<string>();
@@ -57,6 +61,7 @@ export function useSceneTokens(sceneId: string): SceneTokens {
   const queue = useRef(new Map<string, Promise<unknown>>());
 
   useEffect(() => {
+    if (live) return;
     let active = true;
     request<SceneToken[]>('GET', sceneTokensPath(sceneId)).then(
       (list) => {
@@ -71,7 +76,7 @@ export function useSceneTokens(sceneId: string): SceneTokens {
     return () => {
       active = false;
     };
-  }, [sceneId, version]);
+  }, [sceneId, version, live]);
 
   const reload = () => setVersion((each) => each + 1);
   const refused = (error: unknown) => {

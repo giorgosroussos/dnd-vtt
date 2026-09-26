@@ -117,8 +117,8 @@ export async function buildApp({
     });
   }
   const removeImages = imageFileRemover(imagesDir, logger);
-  registerCampaigns(app, db, removeImages);
-  registerAssets(app, db, removeImages);
+  registerCampaigns(app, db, removeImages, live.refresh);
+  registerAssets(app, db, removeImages, live.refresh);
   registerTokens(app, db);
   registerConnect(app, networkInterfaces);
   await registerImages(app, { db, imagesDir, auth });

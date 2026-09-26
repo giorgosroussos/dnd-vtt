@@ -117,6 +117,7 @@ Every card opens `Blocking` and is answered before the specification proceeds. `
 - Q-092 — Token numbering that would reveal a hidden token — security — Resolved
 - Q-093 — Version numbers that would reveal a hidden token — security — Resolved
 - Q-094 — Labels that would hint at a hidden token — security — Resolved
+- Q-095 — Where a token revealed live sits in the stacking order — security — Resolved
 
 ## Blocking
 
@@ -1189,5 +1190,16 @@ None.
   - C) Keep numbering as it is and record an exception to `04` §4 → effect on security: the TV may show "Goblin 2" while one goblin is visible, telling players another exists.
   - D) Defer to LIV-04 with the leak recorded as a gap → effect on security: live play from the DM view waits for the answer; LIV-02 merges with the leak.
 - Recommendation: A, because it closes every reproduced leak with a local change and no migration, and what remains is indistinguishable from a deletion, which numbers already show by design (Q-091).
+- Blocks: specification
+- Answer: A (2026-09-26; recommendation accepted)
+
+### Q-095 — Where a token revealed live sits in the stacking order
+- Surface: security
+- Source: G-030, found by the LIV-02 review (security pass), 2026-09-26: a revealed token reaches players at its place in the stacking order among visible tokens (D-109), while a token added live always goes on top, so a `token.added` below the top tells a player reading the traffic that the token was on the scene before it was shown. It names no hidden token that stays hidden and gives no count. `PLAN.md` LIV-04 asks for the owner's answer with its test.
+- Question: Should a token revealed on the live scene keep its place in the stacking order, or come to the front as a newly placed token does?
+- Options:
+  - A) Keep its place, as `04` §4 and a fresh snapshot show it, and accept the residual → effect on security: a player reading the traffic can tell a reveal from a new placement; no hidden token that stays hidden is named or counted. No spec or data change; a test pins the behaviour.
+  - B) Bring a revealed token to the front → effect on security: a reveal looks exactly like a placement; the stored stacking order changes on every live reveal, so the DM's layering from preparation is lost, and how `04` §4's stacking order applies is amended.
+- Recommendation: A, because the residual tells players only what the table sees anyway when a token appears, and keeping the DM's layering is what `04` §4 describes.
 - Blocks: specification
 - Answer: A (2026-09-26; recommendation accepted)

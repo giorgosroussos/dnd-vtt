@@ -12,7 +12,8 @@ import { applyPlayerEvent, startLive, type LiveHarness, type PlayerState } from 
 // The recorded-traffic test of specs/10-testing-acceptance.md §3 (Q-067, D-042), as far as LIV-02
 // reaches: everything a player socket receives, every message and every image response, across a
 // scripted session of adding hidden tokens, revealing, hiding, moving, deleting, activating another
-// scene and reconnecting. It asserts that no hidden token's id, asset, image or name appears, and
+// scene, reconnecting, and, since LIV-04, editing the live scene's setup and assets over REST and
+// deleting the live scene. It asserts that no hidden token's id, asset, image or name appears, and
 // that the count of hidden tokens cannot be learnt either: the whole recording is identical, byte
 // for byte once identifiers are numbered by first appearance, to the recording of the same session
 // without any of the hidden-only steps. Undo joins the script with LIV-05, which then marks it as that gate
@@ -184,6 +185,36 @@ async function record(hidden: boolean): Promise<Recording> {
   });
   await step('deactivate', () => send('scene.deactivate', {}));
   await step('activate A again', () => send('scene.activate', { scene_id: sceneA.id }));
+  // Setup edits and asset changes over REST while A is live (LIV-04, specs/04-live-sync.md §10): a
+  // visible change reaches players as a snapshot; one that touches only hidden tokens reaches them
+  // not at all, so the recording stays that of the session without them.
+  const patch = async (url: string, payload: object): Promise<void> => {
+    const response = await live.inject({ method: 'PATCH', url, payload });
+    expect(response.statusCode, response.body).toBe(200);
+  };
+  await step('hide the grid of A', () => patch(`/api/scenes/${sceneA.id}`, { grid: { visible: false } }));
+  await step('recalibrate A', () =>
+    patch(`/api/scenes/${sceneA.id}`, { grid: { size: 16, offset_x: 1, offset_y: 2, columns: 5, rows: 2 } }),
+  );
+  await step(
+    'repaint and resize the lurker asset',
+    async () => {
+      const { id } = await live.image('traffic lurker, repainted');
+      secrets.push(id);
+      await patch(`/api/assets/${lurker!.id}`, { image_id: id, size: 'huge' });
+    },
+    true,
+  );
+  await step('resize the goblin asset', () => patch(`/api/assets/${goblin.id}`, { size: 'large' }));
+  await step('delete the live scene A', async () => {
+    const summary = await live.inject({ method: 'GET', url: `/api/scenes/${sceneA.id}/deletion` });
+    const response = await live.inject({
+      method: 'DELETE',
+      url: `/api/scenes/${sceneA.id}`,
+      payload: { confirm: summary.json<object>() },
+    });
+    expect(response.statusCode, response.body).toBe(204);
+  });
   // Anything sent late, after the last step, arrives before this.
   await step('nothing more', () => Promise.resolve());
   return { steps, secrets, shownFrom };
