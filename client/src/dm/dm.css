@@ -55,6 +55,12 @@
   margin-right: var(--space-2);
 }
 
+.eg-livebar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
 .eg-livebar__text--warning {
   color: var(--color-accent);
   font-weight: 700;
@@ -365,6 +371,25 @@ textarea.eg-field__input {
   position: relative;
   /* Tall enough for the magnifier over its corner (D-096). */
   min-height: 15rem;
+}
+
+/* Live mode's persistent indicator around the canvas (specs/08-ux-journeys.md §2, Q-024): drawn
+   as an outline so it takes no room from the canvas, in the live bar's live colour. */
+.eg-scene__canvas--live {
+  outline: 4px solid var(--color-danger);
+  outline-offset: 0;
+  border-radius: var(--radius);
+}
+
+.eg-scene__live {
+  margin: 0;
+  color: var(--color-danger);
+  font-weight: 700;
+}
+
+.eg-scene__live::before {
+  content: '●' / '';
+  margin-right: var(--space-2);
 }
 
 .eg-calibration {

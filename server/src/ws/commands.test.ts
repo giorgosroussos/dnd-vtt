@@ -313,6 +313,24 @@ describe('token commands and what each room receives (specs/04-live-sync.md §2,
     expect(await tv.settle()).toEqual([]);
   });
 
+  it('keeps a revealed token at its place in the stacking order, not brought to the front (Q-095, G-030)', async () => {
+    const w = await world();
+    const { dm, tv } = await liveA(w);
+    const stored = tokenRow(w.hidden.id)!.z_order;
+    await acknowledged(dm, 'token.setVisibility', { token_id: w.hidden.id, hidden: false });
+    await dm.settle();
+    const [reveal] = await tv.settle();
+    // Between the two goblins, as a fresh snapshot shows it; a token placed live would be rank 2.
+    expect(payloadOf<{ token: PlayerToken }>(reveal).token.z_order).toBe(1);
+    expect(tokenRow(w.hidden.id)!.z_order).toBe(stored);
+    const [fresh] = await tv.settle().then(() => tv.events.slice(-1));
+    expect((fresh!.payload as PlayerSnapshot).scene?.tokens.map((token) => token.id)).toEqual([
+      w.goblins[0]!.id,
+      w.hidden.id,
+      w.goblins[1]!.id,
+    ]);
+  });
+
   it('token.setVisibility reveals as token.added and hides as token.removed to players, exactly what deleting sends (Q-083)', async () => {
     const w = await world();
     const { dm, tv } = await liveA(w);

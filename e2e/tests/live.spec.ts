@@ -109,9 +109,9 @@ test('a DM view whose session is ended elsewhere goes back to the PIN form at on
 });
 
 // LIV-02: a live command from the DM view's browser over the real socket (specs/04-live-sync.md
-// §2, §3, §4). The DM view has no Go live control until LIV-04, so the DM page speaks the Socket.io
-// wire protocol itself (socket.ts): its WebSocket carries the page's DM cookie and Origin, as the
-// view's own does. What the player view received is read here from its WebSocket frames; what it
+// §2, §3, §4). The DM page speaks the Socket.io wire protocol itself (socket.ts), so the command and
+// what the player socket receives are checked frame by frame; its WebSocket carries the page's DM
+// cookie and Origin, as the view's own does. The DM view's own controls are live-mode.spec.ts's (LIV-04). What the player view received is read here from its WebSocket frames; what it
 // draws from them is player.spec.ts's (LIV-03).
 
 test('a DM context activates a scene through the socket and a player context receives its snapshot, visible tokens only', async ({

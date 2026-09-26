@@ -46,6 +46,10 @@ import { readSnapshot } from './snapshot.js';
 // (`projection.ts`) and emitted to the room, and only then is the sender acknowledged, so the
 // events of its own command reach it before the answer does.
 //
+// REST changes (LIV-04): a route that can change what a room sees of the live scene runs its change
+// through `refresh`, which sends each room a fresh snapshot of the live scene when its view changed,
+// or the idle state when the change cleared it (specs/04-live-sync.md §10, specs/03-domain-model.md §7).
+//
 // Versions (Q-056, Q-093, D-104, D-108): each room has its own counter, which takes version 1
 // for the state at start-up; a snapshot sent to one socket carries its room's current version
 // and takes none, so another client never sees a gap because a screen connected. An event
@@ -80,6 +84,12 @@ export interface LiveSocket {
   io: Server;
   /** The sockets in each room now, for the tests and the log. */
   count(room: Room): number;
+  /**
+   * Runs a REST change and tells each room what it changed of the live scene (LIV-04): the idle
+   * state to both rooms when it cleared the live scene, otherwise a fresh snapshot to each room whose
+   * snapshot it changed, and nothing to a room whose view of the live scene stayed the same.
+   */
+  refresh: <T>(work: () => T) => T;
 }
 
 // A command or a snapshot request is small; nothing a DM sends comes near this.
@@ -179,6 +189,29 @@ export function attachLiveSocket(
       const socket = io.sockets.sockets.get(id);
       if (socket && !overloaded(socket)) socket.emit(SOCKET_CHANNELS.event, versioned);
     }
+  };
+
+  // A REST change to the live scene's setup, to an asset a live token uses, or a deletion of the
+  // live scene or an ancestor (LIV-04; specs/04-live-sync.md §10, specs/03-domain-model.md §7,
+  // specs/05-assets-and-images.md §5, Q-015, Q-031). Each room's snapshot is read before and after,
+  // in the same synchronous step as the change, so no command can come between them; a room is told
+  // only when what it sees changed. Players therefore learn nothing of a change that touched only a
+  // hidden token (a renamed or re-imaged asset whose live tokens are all hidden): the DM's room gets
+  // its snapshot, theirs stays silent and keeps its version (specs/04-live-sync.md §4, §5, Q-093).
+  const refresh = <T>(work: () => T): T => {
+    const before = { dm: readSnapshot(db, 'dm'), players: readSnapshot(db, 'players') };
+    const result = work();
+    const after = { dm: readSnapshot(db, 'dm'), players: readSnapshot(db, 'players') };
+    if (before.dm.scene !== null && after.dm.scene === null) {
+      publish([{ type: 'cleared' }]);
+      return result;
+    }
+    for (const room of ROOMS) {
+      if (JSON.stringify(before[room]) !== JSON.stringify(after[room])) {
+        broadcast(room, { type: 'scene.snapshot', payload: after[room] });
+      }
+    }
+    return result;
   };
 
   const publish = (effects: readonly LiveEffect[]): void => {
@@ -293,7 +326,7 @@ export function attachLiveSocket(
     done();
   });
 
-  return { io, count: (room) => io.sockets.adapter.rooms.get(room)?.size ?? 0 };
+  return { io, count: (room) => io.sockets.adapter.rooms.get(room)?.size ?? 0, refresh };
 }
 
 /** The acknowledgement a client passed as the last argument, or a no-op when it passed none. */

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SOCKET_CHANNELS, type EventEnvelope, type SceneSnapshot } from '@emberglass/shared';
 import { installFakeSockets, type FakeSocket } from '../ui/testing/fakeSocket.js';
-import { connectLive, SNAPSHOT_RETRY_MS, type LiveStatus } from './connection.js';
+import { COMMAND_TIMEOUT_MS, connectLive, SNAPSHOT_RETRY_MS, type LiveStatus } from './connection.js';
 
 // The live connection (LIV-01, specs/04-live-sync.md §5, §6), against a scripted socket.
 
@@ -24,7 +24,7 @@ beforeEach(() => {
     onStatus: (status) => statuses.push(status),
     onSnapshot: (snapshot, version) => snapshots.push({ snapshot, version }),
     onEvent: (e) => events.push(e.version),
-  });
+  }).close;
   socket = fake.sockets[0]!;
 });
 
@@ -128,7 +128,7 @@ describe('live connection', () => {
       onStatus: () => {},
       onSnapshot: (snapshot) => seen.push(snapshot.role),
       onEvent: () => {},
-    });
+    }).close;
     const dm = fake.sockets[1]!;
     expect(dm.view).toBe('dm');
     dm.open({ role: 'dm', scene: null });
@@ -144,5 +144,67 @@ describe('live connection', () => {
     expect(socket.connects).toBe(0);
     expect(statuses.at(-1)).toBe('connected');
     expect(socket.emitted.filter(({ event: name }) => name === SOCKET_CHANNELS.command)).toEqual([]);
+  });
+});
+
+describe('commands from the DM view (LIV-04, specs/04-live-sync.md §2)', () => {
+  const dmConnection = () => {
+    const connection = connectLive('dm', { onStatus: () => {}, onSnapshot: () => {}, onEvent: () => {} });
+    return { connection, dm: fake.sockets.at(-1)! };
+  };
+
+  it('sends a command in its envelope and answers what the server acknowledged', async () => {
+    const { connection, dm } = dmConnection();
+    dm.open({ role: 'dm', scene: null });
+    dm.onCommand = (command, ack) =>
+      ack(
+        command.type === 'scene.deactivate'
+          ? { ok: true }
+          : { error: { code: 'scene_not_live', message: 'The scene is not live.' } },
+      );
+    await expect(connection.command('scene.deactivate', {})).resolves.toEqual({ ok: true });
+    await expect(connection.command('token.delete', { token_id: 'a' })).resolves.toEqual({
+      ok: false,
+      code: 'scene_not_live',
+    });
+    expect(dm.commands()).toEqual([
+      { type: 'scene.deactivate', payload: {} },
+      { type: 'token.delete', payload: { token_id: 'a' } },
+    ]);
+    connection.close();
+  });
+
+  it('sends nothing while disconnected, so no command is replayed after a reconnection', async () => {
+    const { connection, dm } = dmConnection();
+    await expect(connection.command('scene.deactivate', {})).resolves.toEqual({ ok: false, code: 'network' });
+    dm.open({ role: 'dm', scene: null });
+    dm.drop();
+    await expect(connection.command('token.move', { token_id: 'a', x: 1, y: 1 })).resolves.toEqual({
+      ok: false,
+      code: 'network',
+    });
+    expect(dm.commands()).toEqual([]);
+    connection.close();
+    await expect(connection.command('scene.deactivate', {})).resolves.toEqual({ ok: false, code: 'network' });
+  });
+
+  it('reports a command left unanswered as a lost connection', async () => {
+    vi.useFakeTimers();
+    const { connection, dm } = dmConnection();
+    dm.open({ role: 'dm', scene: null });
+    const outcome = connection.command('scene.deactivate', {});
+    vi.advanceTimersByTime(COMMAND_TIMEOUT_MS);
+    await expect(outcome).resolves.toEqual({ ok: false, code: 'network' });
+    connection.close();
+  });
+
+  it('reconnects on request, and not once closed', () => {
+    const { connection, dm } = dmConnection();
+    dm.open({ role: 'dm', scene: null });
+    connection.reconnect();
+    expect(dm.connects).toBe(1);
+    connection.close();
+    connection.reconnect();
+    expect(dm.connects).toBe(1);
   });
 });

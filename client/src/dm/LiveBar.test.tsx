@@ -26,6 +26,7 @@ afterEach(() => {
 async function open(): Promise<HTMLElement> {
   rendered = render(createElement(Workspace, { mainId: 'main' }));
   await settle();
+  await server.openSockets();
   return rendered.container;
 }
 

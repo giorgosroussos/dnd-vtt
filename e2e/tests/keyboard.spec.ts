@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { contrastFailures } from './contrast.js';
 import { openWorkspace, seedCampaign } from './dm.js';
+import { commandFromPage } from './socket.js';
 
 // Keyboard-operability smoke test of the DM view (FND-04, specs/08-ux-journeys.md
 // §8, D-072). It is generic: every element sequential navigation can reach in the
@@ -208,4 +209,72 @@ test('the DM view’s load-failure state is reached, shown and operated by keybo
   await page.keyboard.press('Enter');
   await expect(page.getByRole('navigation', { name: 'Campaigns, sessions and scenes' })).toBeVisible();
   await expect(page.locator('main[data-view="boot"]')).toHaveCount(0);
+});
+
+/** Tabs from where focus is until `target` has it; fails when it is not reached within `limit` presses. */
+async function tabTo(page: Page, target: ReturnType<Page['locator']>, limit = 200): Promise<void> {
+  for (let presses = 0; presses < limit; presses++) {
+    await page.keyboard.press('Tab');
+    if (await target.evaluate((element) => element === document.activeElement)) return;
+  }
+  throw new Error(`Tab did not reach ${await target.textContent()}`);
+}
+
+async function hasRing(target: ReturnType<Page['locator']>): Promise<boolean> {
+  return target.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return (style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) > 0) || style.boxShadow !== 'none';
+  });
+}
+
+// The live controls appear only with a scene selected or a scene live, which the generic walk above
+// does not reach (it walks the workspace as it opens): Go live, Show live scene and Blank TV
+// (LIV-04, specs/08-ux-journeys.md §2, §8).
+test('Go live, Show live scene and Blank TV are reached, shown and operated by keyboard alone', async ({ page }) => {
+  await openWorkspace(page);
+  const campaign = `Keyboard live ${Date.now()}`;
+  const campaignId = await seedCampaign(page, campaign, ['Live session']);
+  const [session] = (await (await page.request.get(`/api/campaigns/${campaignId}/sessions`)).json()) as {
+    id: string;
+  }[];
+  for (const name of ['First hall', 'Second hall']) {
+    expect((await page.request.post(`/api/sessions/${session!.id}/scenes`, { data: { name } })).ok()).toBe(true);
+  }
+  await page.reload();
+  const tree = page.getByRole('navigation', { name: 'Campaigns, sessions and scenes' });
+  const panel = page.locator('main .eg-scene');
+  const bar = page.getByRole('region', { name: 'Live scene' });
+  try {
+    await tree.getByRole('button', { name: campaign, exact: true }).click();
+    await tree.getByRole('button', { name: 'Live session', exact: true }).click();
+    await tree.getByRole('button', { name: 'First hall', exact: true }).click();
+    await expect(panel).toHaveAttribute('data-mode', 'prep');
+
+    const goLive = bar.getByRole('button', { name: 'Go live: First hall' });
+    await tabTo(page, goLive);
+    expect(await hasRing(goLive), 'Go live shows no focus indicator').toBe(true);
+    await page.keyboard.press('Enter');
+    await expect(panel).toHaveAttribute('data-mode', 'live');
+    expect(await contrastFailures(page), 'live mode').toEqual([]);
+
+    await tree.getByRole('button', { name: 'Second hall', exact: true }).click();
+    await expect(panel).toHaveAttribute('data-mode', 'prep');
+    const showLive = bar.getByRole('button', { name: 'Show live scene' });
+    await page.locator('#main').focus();
+    await page.keyboard.press('Shift+Tab');
+    await tabTo(page, showLive);
+    expect(await hasRing(showLive), 'Show live scene shows no focus indicator').toBe(true);
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('First hall');
+    await expect(panel).toHaveAttribute('data-mode', 'live');
+
+    const blank = bar.getByRole('button', { name: 'Blank TV' });
+    await tabTo(page, blank);
+    expect(await hasRing(blank), 'Blank TV shows no focus indicator').toBe(true);
+    await page.keyboard.press('Space');
+    await expect(panel).toHaveAttribute('data-mode', 'prep');
+    await expect(bar.getByRole('status')).toHaveText('Nothing is live. The TV shows the idle screen.');
+  } finally {
+    await commandFromPage(page, 'scene.deactivate', {}).catch(() => undefined);
+  }
 });
