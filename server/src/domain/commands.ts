@@ -1,5 +1,6 @@
 import {
   CommandEnvelopeSchema,
+  LIVE_COMMAND_PAYLOAD_SCHEMAS,
   errorEnvelope,
   type CommandAck,
   type CommandEnvelope,
@@ -88,23 +89,25 @@ export function createCommandValidator(payloadSchemas: CommandPayloadSchemas): C
   };
 }
 
-// No command has a payload schema yet: LIV-01 onward register theirs here.
-export const COMMAND_PAYLOAD_SCHEMAS: CommandPayloadSchemas = {};
+// The live commands of LIV-02 (specs/04-live-sync.md §2); `camera.setPlayer`, the ruler and `undo`
+// stay refused as unsupported until LIV-05 to LIV-07 register theirs.
+export const COMMAND_PAYLOAD_SCHEMAS: CommandPayloadSchemas = { ...LIVE_COMMAND_PAYLOAD_SCHEMAS };
 
 export const validateCommand: CommandValidator = createCommandValidator(COMMAND_PAYLOAD_SCHEMAS);
 
 /**
  * Validate `raw`, then apply it; `apply` is never called for an invalid command,
- * so a rejection changes nothing. The result is the acknowledgement the socket
+ * so a rejection changes nothing. `apply` may itself refuse a valid command (an
+ * unknown token, a scene that is not live) by answering the error envelope, and
+ * must then have changed nothing. The result is the acknowledgement the socket
  * layer returns to the sender.
  */
 export function dispatchCommand(
   raw: unknown,
   validate: CommandValidator,
-  apply: (command: CommandEnvelope) => void,
+  apply: (command: CommandEnvelope) => ErrorEnvelope | void,
 ): CommandAck {
   const result = validate(raw);
   if (!result.ok) return result.error;
-  apply(result.command);
-  return { ok: true };
+  return apply(result.command) ?? { ok: true };
 }

@@ -39,6 +39,16 @@ function harness(validate: CommandValidator) {
 const validate = createCommandValidator({ 'token.move': MovePayloadSchema });
 
 describe('command validation and dispatch', () => {
+  it('answers the refusal of the apply step itself, which changed nothing', () => {
+    const refusing = vi.fn((): ErrorEnvelope => ({ error: { code: 'not_found', message: 'No such token.' } }));
+    expect(dispatchCommand({ type: 'token.move', payload: { tokenId: 't1', x: 0, y: 0 } }, validate, refusing)).toEqual(
+      {
+        error: { code: 'not_found', message: 'No such token.' },
+      },
+    );
+    expect(refusing).toHaveBeenCalledOnce();
+  });
+
   it('applies a valid command and acknowledges it', () => {
     const { board, counter, apply, send } = harness(validate);
     expect(send({ type: 'token.move', payload: { tokenId: 't1', x: 3.5, y: 4 } })).toEqual({ ok: true });
@@ -155,13 +165,27 @@ describe('command validation and dispatch', () => {
 });
 
 describe('the process command validator', () => {
-  // No package has registered a payload schema yet (LIV-01 onward), so every
-  // command is refused, whatever its content: fail closed, never open.
-  it('has no payload schema registered yet', () => {
-    expect(COMMAND_PAYLOAD_SCHEMAS).toEqual({});
+  // LIV-02 registers the live commands; every other command stays refused, whatever
+  // its content, until the package that implements it registers its payload: fail
+  // closed, never open.
+  const LIVE = ['token.add', 'token.move', 'token.setVisibility', 'token.delete', 'scene.activate', 'scene.deactivate'];
+
+  it('registers a payload schema for the live commands of LIV-02 and no other', () => {
+    expect(Object.keys(COMMAND_PAYLOAD_SCHEMAS).sort()).toEqual([...LIVE].sort());
   });
 
-  it.each(COMMAND_TYPES)('refuses %s as unsupported', (type) => {
+  it('refuses a live command whose payload is incomplete, and applies nothing', () => {
+    const { apply, send } = harness(validateCommand);
+    for (const type of LIVE.filter((each) => each !== 'scene.deactivate')) {
+      expect((send({ type, payload: {} }) as ErrorEnvelope).error.code, type).toBe('validation_failed');
+    }
+    expect((send({ type: 'scene.deactivate', payload: { scene_id: 'x' } }) as ErrorEnvelope).error.code).toBe(
+      'validation_failed',
+    );
+    expect(apply).not.toHaveBeenCalled();
+  });
+
+  it.each(COMMAND_TYPES.filter((type) => !LIVE.includes(type)))('refuses %s as unsupported', (type) => {
     const { board, apply, send } = harness(validateCommand);
     const before = structuredClone(board);
     expect(send({ type, payload: {} })).toEqual({

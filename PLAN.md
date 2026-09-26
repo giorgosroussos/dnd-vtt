@@ -15,6 +15,7 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
   - Playwright: a DM context activates a scene through the socket and a player context receives its snapshot (drawing it is LIV-03); `make verify` exit 0 on both CI runners; `TRACEABILITY.md` LIV-02 row with test names.
 - **Non-goals:** drawing the live scene on the player view (LIV-03); live mode, Go live and Blank TV controls in the DM view (LIV-04); undo (LIV-05); cameras (LIV-06); the ruler (LIV-07); pushing live setup edits as snapshots (LIV-04, G-019).
 - **Review:** `Surfaces: security, scope, ux`, `Touches red line: yes`, `Contract change: yes`, so prompt 2 (review) runs after implementation.
+- **Status (2026-09-26):** implemented, reviewed (prompt 2, fixes in D-111, Q-094 answered) and verified locally, uncommitted (`TRACEABILITY.md` LIV-02 `in progress`). Remaining before done: `make verify` green on both CI runners. The `main` ruleset no longer requires the two promoted tripwire jobs (owner, 2026-09-26; read back from the GitHub API: 21 required checks). The traffic test's `@gate:hidden-information` marker comes with undo (LIV-05, G-028).
 
 ## Next
 

@@ -14,7 +14,7 @@ import {
   type ImageIdParams,
   type ImageVariant,
 } from '@emberglass/shared';
-import { readImage, updateGridPreset } from '../db/images.js';
+import { isShownToPlayers, readImage, updateGridPreset } from '../db/images.js';
 import { readSettings } from '../db/settings.js';
 import { imageFilePath, removeImageFiles, storeUpload, UploadRejected } from '../images/store.js';
 import type { Logger } from '../log/logger.js';
@@ -24,9 +24,11 @@ import { ApiFailure } from './errors.js';
 // Images over REST and their files (SRV-04, specs/02-architecture.md §5, specs/05-assets-and-images.md
 // §6, §7, specs/07-security-and-access.md §5, D-021, D-032, D-044, D-080). The /api routes need a
 // DM session through the guard of auth.ts, which answers before a body is read. The files at
-// /images/<sha256>/<variant> are outside /api and check the session themselves: until LIV-02 adds
-// the players' entitlement to the live scene's display versions, a request without a DM session
-// is answered not found for every image, stored or not.
+// /images/<sha256>/<variant> are outside /api and check the session themselves: a DM session
+// fetches every version of every image; a request without one only the display version of the
+// live scene's map and of its visible tokens' images, read from the database on every request
+// (LIV-02, specs/07-security-and-access.md §5, G-020). Every other request is answered not found,
+// whether or not the image exists, so a player learns nothing from the answer.
 
 const notFound = (): ApiFailure => new ApiFailure(404, 'not_found', 'No such resource.');
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -115,9 +117,11 @@ export async function registerImages(app: FastifyInstance, { db, imagesDir, auth
   // rather than a validation failure that would describe the route.
   app.get<{ Params: { id: string; variant: string } }>(IMAGE_FILE_PATH, async (request, reply) => {
     reply.header('cache-control', 'no-store');
-    if (auth.sessionOf(request) === undefined) throw notFound();
     const { id, variant } = request.params;
     if (!SHA256.test(id) || !isVariant(variant)) throw notFound();
+    if (auth.sessionOf(request) === undefined && !(variant === 'display' && isShownToPlayers(db, id))) {
+      throw notFound();
+    }
     const image = readImage(db, id) ?? raise(notFound());
     let file;
     try {

@@ -138,3 +138,28 @@ export function deleteAllUnreferencedImages(db: Database.Database): string[] {
     deleteUnreferencedImages(db, db.prepare('SELECT id FROM image ORDER BY id').pluck().all() as string[]),
   )();
 }
+
+/**
+ * Whether a request without a DM session may fetch the image's display version
+ * (specs/07-security-and-access.md §5, Q-012, G-020): only while it is the live scene's map or the
+ * image of a visible token on the live scene. Read from the database on every request, never
+ * cached, so hiding a token, deactivating, activating another scene or replacing the live map
+ * revokes it at once, whatever else still uses the image.
+ */
+export function isShownToPlayers(db: Database.Database, id: string): boolean {
+  return (
+    db
+      .prepare(
+        `SELECT EXISTS (
+           SELECT 1 FROM settings JOIN scene ON scene.id = settings.live_scene_id WHERE scene.map_image_id = ?
+           UNION ALL
+           SELECT 1 FROM settings
+             JOIN token ON token.scene_id = settings.live_scene_id
+             JOIN asset ON asset.id = token.asset_id
+           WHERE token.hidden = 0 AND asset.image_id = ?
+         )`,
+      )
+      .pluck()
+      .get(id, id) === 1
+  );
+}

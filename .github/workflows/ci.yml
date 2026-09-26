@@ -136,7 +136,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        gate: [hidden-information, player-command-rejection, image-revocation, offline-e2e, external-url-build]
+        gate: [hidden-information, offline-e2e, external-url-build]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

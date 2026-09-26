@@ -1,5 +1,13 @@
 import type Database from 'better-sqlite3';
-import type { DmSnapshot, PlayerMap, PlayerSnapshot, PlayerToken, Room, SceneSnapshot } from '@emberglass/shared';
+import type {
+  DmSnapshot,
+  PlayerMap,
+  PlayerSnapshot,
+  PlayerToken,
+  Room,
+  SceneSnapshot,
+  SceneToken,
+} from '@emberglass/shared';
 import { readScene } from '../db/campaigns.js';
 import { readImage } from '../db/images.js';
 import { readSettings } from '../db/settings.js';
@@ -37,16 +45,25 @@ function readPlayers(db: Database.Database): PlayerSnapshot {
     scene: {
       map: map && playerMap(map),
       grid: { ...scene.grid },
-      tokens: visible.map((token, rank): PlayerToken => ({
-        id: token.id,
-        x: token.x,
-        y: token.y,
-        size: token.asset.size,
-        image_id: token.asset.image_id,
-        z_order: rank,
-        label: token.label,
-      })),
+      tokens: visible.map(toPlayerToken),
     },
+  };
+}
+
+/**
+ * A token as players receive it, field by field (specs/04-live-sync.md §4, Q-047): `rank` is its
+ * place among the visible tokens, bottom first, never the stored `z_order` (G-025). The live
+ * events build their players' tokens here too, so a snapshot and an event can never disagree.
+ */
+export function toPlayerToken(token: SceneToken, rank: number): PlayerToken {
+  return {
+    id: token.id,
+    x: token.x,
+    y: token.y,
+    size: token.asset.size,
+    image_id: token.asset.image_id,
+    z_order: rank,
+    label: token.label,
   };
 }
 

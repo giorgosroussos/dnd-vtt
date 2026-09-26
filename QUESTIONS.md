@@ -116,6 +116,7 @@ Every card opens `Blocking` and is answered before the specification proceeds. `
 - Q-091 — Remembering the token numbers already issued on a scene — data — Resolved
 - Q-092 — Token numbering that would reveal a hidden token — security — Resolved
 - Q-093 — Version numbers that would reveal a hidden token — security — Resolved
+- Q-094 — Labels that would hint at a hidden token — security — Resolved
 
 ## Blocking
 
@@ -1177,3 +1178,16 @@ None.
 - Recommendation: A, because it is the only option that keeps both the gap detection `04` §5 requires and the isolation `04` §4 requires, and it changes only where the counter lives, not what is stored.
 - Blocks: specification
 - Answer: A (2026-09-25; recommendation accepted)
+
+### Q-094 — Labels that would hint at a hidden token
+- Surface: security
+- Source: Raised by the LIV-02 review (security and correctness passes), 2026-09-26, both reproduced over the wire: numbering counted a hidden token the DM had relabelled (a hidden Goblin renamed "Boss" in preparation makes the first visible Goblin added live "Goblin 2"), and a hidden bare-named token whose asset was renamed (a hidden "Lurker" whose asset becomes "Shade" makes the next visible Shade "Shade 2"), because `numberingPeers` (D-099, D-100) left out only hidden tokens carrying the asset's current bare name. `04` §4 forbids anything from which a hidden token's existence can be learnt; LIV-02 is the first package that sends such labels to the TV as they happen.
+- Question: Which hidden tokens may numbering count, so that a label players see never hints at one?
+- Options:
+  - A) Count only what players could have seen numbered: every visible token, and a hidden one only when it carries a "<name> N" label; an asset rename carries its bare-named tokens' labels along → effect on security: both reproduced leaks close; a number gap left by a deleted token, or by one numbered and hidden again before the scene went live, still shows, and players cannot tell it from a deletion.
+  - B) Store per token whether players ever saw it (a migration) and number only from those → effect on security: also closes the gap of a token numbered and hidden in preparation; a new column and more rules; deletion gaps remain since numbers are never reused (Q-091).
+  - C) Keep numbering as it is and record an exception to `04` §4 → effect on security: the TV may show "Goblin 2" while one goblin is visible, telling players another exists.
+  - D) Defer to LIV-04 with the leak recorded as a gap → effect on security: live play from the DM view waits for the answer; LIV-02 merges with the leak.
+- Recommendation: A, because it closes every reproduced leak with a local change and no migration, and what remains is indistinguishable from a deletion, which numbers already show by design (Q-091).
+- Blocks: specification
+- Answer: A (2026-09-26; recommendation accepted)
