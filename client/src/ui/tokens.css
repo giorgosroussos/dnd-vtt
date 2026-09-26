@@ -211,8 +211,22 @@ main[tabindex='-1']:focus {
 }
 
 /* Player view: the idle screen, dark with the product name only (specs/08-ux-journeys.md §4). */
-main[data-view='player'] {
+main[data-view='player'],
+main[data-view='boot'] {
   height: 100%;
+}
+
+/* The DM view's loading and load-failure states, before its chunk arrives (G-007, D-113). */
+.eg-boot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: 40rem;
+  padding: var(--space-6);
+}
+
+.eg-boot__status {
+  color: var(--color-text-muted);
 }
 
 .eg-idle {

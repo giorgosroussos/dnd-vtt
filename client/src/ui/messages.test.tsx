@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { DmView } from '../dm/DmView.js';
 import { ScenePanel } from '../dm/ScenePanel.js';
 import { PlayerView } from '../player/PlayerView.js';
+import { BootScreen } from './BootScreen.js';
 import { DmErrorScreen } from './ErrorScreen.js';
 import { IdleScreen } from './IdleScreen.js';
 import { catalogue, t } from './messages.js';
@@ -162,6 +163,13 @@ describe('the rendered views', () => {
     ['the player view', PlayerView],
     ['the DM error screen', () => createElement(DmErrorScreen, { reload: () => undefined })],
     ['the player error screen', IdleScreen],
+    ['the DM view before its code arrives', () => createElement(BootScreen, { view: 'dm', state: 'loading' })],
+    ['the DM view when its code cannot load', () => createElement(BootScreen, { view: 'dm', state: 'failed' })],
+    ['the player view before its code arrives', () => createElement(BootScreen, { view: 'player', state: 'loading' })],
+    [
+      'the player view when its code cannot load',
+      () => createElement(BootScreen, { view: 'player', state: 'failed', reload: () => undefined }),
+    ],
   ])('show only catalogue text: %s', (_name, View) => {
     const { container, unmount } = render(View);
     expectCatalogueOnly(container);
@@ -223,6 +231,36 @@ it('show only catalogue text: the new-asset dialog, and a refused asset deletion
     await click(button(container, t('library.deleteOf', { name: t('app.name') })));
     await click(button(container.querySelector('dialog')!, t('assetDelete.confirm')));
     expect(container.querySelector('dialog')!.textContent).toContain(t('assetDelete.close'));
+    expectCatalogueOnly(container.querySelector('dialog')!);
+    unmount();
+  } finally {
+    server.uninstall();
+  }
+});
+
+// The Connect a screen panel (LIV-03), with addresses that are catalogue texts, then with none.
+it('show only catalogue text: the Connect a screen panel, with addresses and without', async () => {
+  installDialog();
+  const server = new FakeServer();
+  server.connect = {
+    addresses: [
+      { address: t('app.name'), url: t('app.name'), private: true },
+      { address: t('dm.role'), url: t('dm.role'), private: false },
+    ],
+    qr: server.connect.qr,
+  };
+  server.install();
+  try {
+    const { container, unmount } = render(DmView);
+    await settle();
+    await click(button(container, t('connect.open')));
+    await settle();
+    expect(container.querySelector('dialog svg')).not.toBeNull();
+    expectCatalogueOnly(container.querySelector('dialog')!);
+    await click(button(container.querySelector('dialog')!, t('connect.close')));
+    server.connect = { addresses: [], qr: null };
+    await click(button(container, t('connect.open')));
+    await settle();
     expectCatalogueOnly(container.querySelector('dialog')!);
     unmount();
   } finally {

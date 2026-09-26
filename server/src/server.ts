@@ -1,4 +1,5 @@
 import { loadConfig } from './config.js';
+import { connectBanner, connectInfo, systemInterfaces } from './connect.js';
 import { openDatabase } from './db/database.js';
 import { migrateDataDirectory } from './db/migrate.js';
 import { readPinHash } from './db/settings.js';
@@ -31,6 +32,17 @@ export async function start({ dev }: { dev: boolean }): Promise<void> {
       port: config.port,
       dataDir: config.dataDir,
     });
+    // The player view's URL and QR code for the TV, straight to the console: a QR code is not a
+    // log line (specs/09-operations.md §2, §4, specs/08-ux-journeys.md §5); the URLs are logged too.
+    const connect = connectInfo(systemInterfaces(), config.port);
+    logger.info(
+      'server.addresses',
+      `Player view: ${connect.addresses.map((entry) => entry.url).join(' ') || 'no network address'}`,
+      {
+        urls: connect.addresses.map((entry) => entry.url),
+      },
+    );
+    process.stdout.write(connectBanner(connect, process.platform));
     const hint = pinSetupHint(readPinHash(db), config.port);
     if (hint) logger.info('pin.unset', hint);
 

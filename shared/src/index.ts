@@ -191,3 +191,12 @@ export {
   type TokenUpdateBody,
 } from './tokens.js';
 export { nextLabel, numberingPeers, numberOf, type LabelledToken, type Numbering } from './numbering.js';
+export {
+  API_CONNECT_PATH,
+  ConnectAddressSchema,
+  ConnectInfoSchema,
+  QrCodeSchema,
+  type ConnectAddress,
+  type ConnectInfo,
+  type QrCode,
+} from './connect.js';

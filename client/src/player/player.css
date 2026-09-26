@@ -1,0 +1,6 @@
+/* The player view (LIV-03). The pointer is hidden once it has been still for two seconds
+   (specs/08-ux-journeys.md §9, Q-054), over the canvas as over the idle screen. */
+main[data-view='player'][data-cursor='hidden'],
+main[data-view='player'][data-cursor='hidden'] * {
+  cursor: none;
+}

@@ -186,7 +186,10 @@ describe('drawing tokens (specs/05-assets-and-images.md §2, specs/03-domain-mod
     expect(images.requested).not.toContain(imageFileUrl('b'.repeat(64), 'display'));
     expect(stage.find<Konva.Text>('Text').map((text) => text.text())).not.toContain('Goblin 2');
     expect(view.innerHTML).not.toContain('g2');
-    expect(view.querySelector('[data-tokens]')).toBeNull();
+    // What the end-to-end tests read (LIV-03): the visible tokens drawn, with no hidden flag.
+    const listed = JSON.parse(view.querySelector<HTMLElement>('[data-tokens]')!.dataset.tokens!) as object[];
+    expect(listed.map((box) => (box as { id: string }).id)).toEqual(['g1', 'h1']);
+    expect(listed.every((box) => !('hidden' in box))).toBe(true);
   });
 });
 

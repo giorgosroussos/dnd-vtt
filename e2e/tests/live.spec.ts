@@ -1,10 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
 import { openWorkspace, seedCampaign } from './dm.js';
 import { solidPng } from './png.js';
+import { commandFromPage, snapshotsOf } from './socket.js';
 
 // LIV-01: the live connection of both views against the production server (specs/04-live-sync.md
-// §1, §5, §6, specs/07-security-and-access.md §2). The player view shows the idle screen until
-// LIV-03; its `data-live` and `data-snapshots` attributes say how its connection stands.
+// §1, §5, §6, specs/07-security-and-access.md §2). The player view's `data-live` and
+// `data-snapshots` attributes say how its connection stands; what it draws is player.spec.ts's.
 
 const liveBar = (page: Page) => page.getByRole('region', { name: 'Live scene' }).getByRole('status');
 const player = (page: Page) => page.locator('main[data-view="player"]');
@@ -109,54 +110,9 @@ test('a DM view whose session is ended elsewhere goes back to the PIN form at on
 
 // LIV-02: a live command from the DM view's browser over the real socket (specs/04-live-sync.md
 // §2, §3, §4). The DM view has no Go live control until LIV-04, so the DM page speaks the Socket.io
-// wire protocol itself: its WebSocket carries the page's DM cookie and Origin, as the view's own
-// does. The player view still draws only the idle screen (LIV-03), so what it received is read from
-// its WebSocket frames.
-
-/** Sends one command from inside `page` over a WebSocket of its own and answers the acknowledgement. */
-function commandFromPage(page: Page, type: string, payload: object): Promise<unknown> {
-  return page.evaluate(
-    ([type, payload]) =>
-      new Promise((resolve, reject) => {
-        const socket = new WebSocket(`ws://${location.host}/socket.io/?EIO=4&transport=websocket`);
-        const timer = setTimeout(() => {
-          socket.close();
-          reject(new Error('no acknowledgement'));
-        }, 10_000);
-        socket.onmessage = ({ data }) => {
-          const frame = String(data);
-          if (frame === '2') socket.send('3');
-          else if (frame.startsWith('0')) socket.send('40');
-          else if (frame.startsWith('40')) socket.send(`421${JSON.stringify(['command', { type, payload }])}`);
-          else if (frame.startsWith('431')) {
-            clearTimeout(timer);
-            socket.close();
-            resolve((JSON.parse(frame.slice(3)) as unknown[])[0]);
-          }
-        };
-        socket.onerror = () => {
-          clearTimeout(timer);
-          socket.close();
-          reject(new Error('socket error'));
-        };
-      }),
-    [type, payload] as const,
-  );
-}
-
-/** The `scene.snapshot` payloads a page receives over its WebSocket, in order. */
-function snapshotsOf(page: Page): unknown[] {
-  const snapshots: unknown[] = [];
-  page.on('websocket', (socket) => {
-    socket.on('framereceived', ({ payload }) => {
-      const frame = String(payload);
-      if (!frame.startsWith('42')) return;
-      const [, event] = JSON.parse(frame.slice(2)) as [string, { type: string; payload: unknown }];
-      if (event.type === 'scene.snapshot') snapshots.push(event.payload);
-    });
-  });
-  return snapshots;
-}
+// wire protocol itself (socket.ts): its WebSocket carries the page's DM cookie and Origin, as the
+// view's own does. What the player view received is read here from its WebSocket frames; what it
+// draws from them is player.spec.ts's (LIV-03).
 
 test('a DM context activates a scene through the socket and a player context receives its snapshot, visible tokens only', async ({
   browser,

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { Scene } from '@emberglass/shared';
 import type { LiveStatus } from '../live/connection.js';
 import { errorMessage } from '../ui/errorMessage.js';
@@ -20,10 +20,13 @@ export function LiveBar({
   liveSceneId,
   refreshKey,
   connection,
+  actions,
 }: {
   liveSceneId: string | null | undefined;
   refreshKey: number;
   connection?: LiveStatus | undefined;
+  /** The bar's controls after its status, such as Connect a screen (LIV-03). */
+  actions?: ReactNode;
 }) {
   const [name, setName] = useState<{ id: string; name: string }>();
   const [failure, setFailure] = useState<string>();
@@ -74,6 +77,7 @@ export function LiveBar({
       >
         {text ?? t('dm.loading')}
       </p>
+      {actions ? <div className="eg-livebar__actions">{actions}</div> : null}
     </section>
   );
 }

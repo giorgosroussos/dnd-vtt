@@ -38,7 +38,7 @@ import './canvas.css';
 // `dm` adds the camera controls: wheel and keyboard zoom, drag and keyboard pan, and a reset
 // that fits the map; the overlay is drawn faintly when players do not see it (D-026). `player`
 // has no control and nothing that takes focus, always fits the map (specs/04-live-sync.md §9),
-// and draws no overlay when the grid is hidden for players. The player view uses it from LIV-03.
+// and draws no overlay when the grid is hidden for players. The player view uses it (LIV-03).
 //
 // While the DM calibrates by rectangle (PRP-03, specs/06-grid-and-measurement.md §1, D-094), a
 // drag on the map draws a rectangle instead of panning, reported in the original's pixels.
@@ -94,7 +94,7 @@ function useViewport(): [React.RefObject<HTMLDivElement | null>, Size] {
 
 /**
  * What the canvas needs of a map image: its id, its size and its display version's size. The
- * player view will build it from what its snapshot carries (LIV-03), never the DM's record.
+ * player view builds it from what its snapshot carries (LIV-03), never the DM's record.
  */
 export type CanvasMap = Pick<Image, 'id' | 'width' | 'height' | 'variants'>;
 
@@ -496,30 +496,30 @@ export function MapCanvas({
     'data-camera-scale': camera.scale,
     'data-grid': opacity === 0 ? 'none' : grid.visible ? 'shown' : 'faint',
   };
-  // Where each token is drawn, in screen pixels from the viewport's corner, for the end-to-end tests;
-  // the DM view's own tokens only. The player mode exposes none (LIV-03 decides what it may).
-  const tokenBoxes =
-    dm && frame
-      ? JSON.stringify(
-          tokens.map((token) => {
-            const at = toWorld(frame, token);
-            return {
-              id: token.id,
-              label: token.label,
-              hidden: token.hidden,
-              x: token.x,
-              y: token.y,
-              left: camera.x + at.x * camera.scale,
-              top: camera.y + at.y * camera.scale,
-              side: footprint(token.size) * frame.square * camera.scale,
-            };
-          }),
-        )
-      : undefined;
+  // Where each token is drawn, in screen pixels from the viewport's corner, for the end-to-end tests.
+  // The player mode lists the tokens it draws, visible ones only, with nothing a player's snapshot
+  // does not already carry (LIV-03).
+  const tokenBoxes = frame
+    ? JSON.stringify(
+        (dm ? tokens : tokens.filter((token) => !token.hidden)).map((token) => {
+          const at = toWorld(frame, token);
+          return {
+            id: token.id,
+            label: token.label,
+            ...(dm ? { hidden: token.hidden } : {}),
+            x: token.x,
+            y: token.y,
+            left: camera.x + at.x * camera.scale,
+            top: camera.y + at.y * camera.scale,
+            side: footprint(token.size) * frame.square * camera.scale,
+          };
+        }),
+      )
+    : undefined;
 
   if (!dm) {
     return (
-      <div ref={viewportRef} className="eg-canvas eg-canvas--player" {...state}>
+      <div ref={viewportRef} className="eg-canvas eg-canvas--player" {...state} data-tokens={tokenBoxes}>
         {stage}
       </div>
     );
