@@ -17,7 +17,7 @@ import {
 } from '@emberglass/shared';
 import { normalizeAddress } from '../auth/lockout.js';
 import { dispatchCommand, validateCommand, type CommandValidator } from '../domain/commands.js';
-import { applyLiveCommand, type LiveEffect, type LiveResult } from '../domain/live.js';
+import { createLiveCommands, type LiveEffect, type LiveResult } from '../domain/live.js';
 import { liveVersions, type VersionCounters } from '../domain/version.js';
 import { isSameOriginHeaders, type Auth } from '../http/auth.js';
 import { createLineLimiter, type LineLimiterOptions } from '../log/limiter.js';
@@ -44,7 +44,8 @@ import { readSnapshot } from './snapshot.js';
 // Commands (LIV-02): a DM command is validated against its payload schema and applied to the
 // database (`server/src/domain/live.ts`); each effect is projected into what each room receives
 // (`projection.ts`) and emitted to the room, and only then is the sender acknowledged, so the
-// events of its own command reach it before the answer does.
+// events of its own command reach it before the answer does. `undo` (LIV-05) is one more command:
+// the inverse it applies is projected and emitted as the command it stands for (D-040).
 //
 // REST changes (LIV-04): a route that can change what a room sees of the live scene runs its change
 // through `refresh`, which sends each room a fresh snapshot of the live scene when its view changed,
@@ -111,7 +112,8 @@ export function attachLiveSocket(
     logger,
     auth,
     versions = liveVersions,
-    commands = { validate: validateCommand, apply: (command) => applyLiveCommand(db, command) },
+    // One undo history per server process, in memory only (specs/04-live-sync.md §8, Q-005).
+    commands = { validate: validateCommand, apply: createLiveCommands(db).apply },
     foreignUpgrade = () => false,
     snapshotIntervalMs = SNAPSHOT_INTERVAL_MS,
     maxPendingPackets = MAX_PENDING_PACKETS,

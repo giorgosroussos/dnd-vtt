@@ -60,7 +60,7 @@ describe('tripwire', () => {
   });
 
   it('skips binary files and counts only text ones as scanned', () => {
-    const result = judge('hidden-information', { ...BASE, 'docs/map.png': null, 'e2e/fixture.webp': null });
+    const result = judge('external-url-build', { ...BASE, 'docs/map.png': null, 'e2e/fixture.webp': null });
     expect(result.status).toBe('absent');
     expect(result.lines.join('\n')).toContain('Proof: 3 text files scanned');
   });
@@ -74,8 +74,8 @@ describe('tripwire', () => {
   });
 
   it('ignores markers in documentation, the event log and the tripwire itself', () => {
-    const marker = markerFor('hidden-information');
-    const result = judge('hidden-information', {
+    const marker = markerFor('external-url-build');
+    const result = judge('external-url-build', {
       ...BASE,
       'README.md': marker,
       'specs/10-testing-acceptance.md': marker,
@@ -89,9 +89,9 @@ describe('tripwire', () => {
   });
 
   it('refuses to pass on a scan that missed the test roots', () => {
-    expect(judge('hidden-information', {}).status).toBe('error');
-    expect(judge('hidden-information', { 'e2e/tests/views.spec.ts': '' }).lines[0]).toContain('no Vitest tests');
-    expect(judge('hidden-information', { 'server/src/a.test.ts': '' }).lines[0]).toContain('no Playwright tests');
+    expect(judge('external-url-build', {}).status).toBe('error');
+    expect(judge('external-url-build', { 'e2e/tests/views.spec.ts': '' }).lines[0]).toContain('no Vitest tests');
+    expect(judge('external-url-build', { 'server/src/a.test.ts': '' }).lines[0]).toContain('no Playwright tests');
   });
 
   it('rejects an unknown gate', () => {

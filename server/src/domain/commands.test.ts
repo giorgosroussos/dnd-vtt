@@ -165,23 +165,33 @@ describe('command validation and dispatch', () => {
 });
 
 describe('the process command validator', () => {
-  // LIV-02 registers the live commands; every other command stays refused, whatever
-  // its content, until the package that implements it registers its payload: fail
+  // LIV-02 registers the live commands and LIV-05 `undo`; every other command stays refused,
+  // whatever its content, until the package that implements it registers its payload: fail
   // closed, never open.
-  const LIVE = ['token.add', 'token.move', 'token.setVisibility', 'token.delete', 'scene.activate', 'scene.deactivate'];
+  const LIVE = [
+    'token.add',
+    'token.move',
+    'token.setVisibility',
+    'token.delete',
+    'scene.activate',
+    'scene.deactivate',
+    'undo',
+  ];
+  // The commands whose payload is empty, so that `{}` is valid.
+  const EMPTY = ['scene.deactivate', 'undo'];
 
-  it('registers a payload schema for the live commands of LIV-02 and no other', () => {
+  it('registers a payload schema for the live commands of LIV-02 and LIV-05 and no other', () => {
     expect(Object.keys(COMMAND_PAYLOAD_SCHEMAS).sort()).toEqual([...LIVE].sort());
   });
 
   it('refuses a live command whose payload is incomplete, and applies nothing', () => {
     const { apply, send } = harness(validateCommand);
-    for (const type of LIVE.filter((each) => each !== 'scene.deactivate')) {
+    for (const type of LIVE.filter((each) => !EMPTY.includes(each))) {
       expect((send({ type, payload: {} }) as ErrorEnvelope).error.code, type).toBe('validation_failed');
     }
-    expect((send({ type: 'scene.deactivate', payload: { scene_id: 'x' } }) as ErrorEnvelope).error.code).toBe(
-      'validation_failed',
-    );
+    for (const type of EMPTY) {
+      expect((send({ type, payload: { scene_id: 'x' } }) as ErrorEnvelope).error.code, type).toBe('validation_failed');
+    }
     expect(apply).not.toHaveBeenCalled();
   });
 

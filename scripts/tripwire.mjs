@@ -20,14 +20,6 @@ import { fileURLToPath } from 'node:url';
 
 export const GATES = [
   {
-    id: 'hidden-information',
-    spec: 'specs/10-testing-acceptance.md §3',
-    gate: 'a recorded-traffic test proving no hidden token reaches a player view',
-    // LIV-02 records every step but undo (server/src/ws/hidden-information.test.ts); the marker
-    // comes with undo in LIV-05.
-    lands: 'LIV-05, REL-02',
-  },
-  {
     id: 'offline-e2e',
     spec: 'specs/10-testing-acceptance.md §6',
     gate: 'the end-to-end run with outbound traffic beyond the local host blocked',

@@ -10,8 +10,9 @@ import {
   type TokenMovePayload,
   type TokenSetVisibilityPayload,
 } from '@emberglass/shared';
-import { setLiveScene } from '../db/settings.js';
-import { createToken, deleteToken, updateToken } from '../db/tokens.js';
+import { readSettings, setLiveScene } from '../db/settings.js';
+import { createToken, deleteToken, readToken, restoreToken, updateToken } from '../db/tokens.js';
+import { inverseOf, UndoHistory, type Inverse } from './undo.js';
 
 // The live commands (LIV-02; specs/04-live-sync.md §2, specs/05-assets-and-images.md §3, §4,
 // Q-014, Q-092, D-064). Each is applied to the database in one transaction, last write wins: no
@@ -21,6 +22,10 @@ import { createToken, deleteToken, updateToken } from '../db/tokens.js';
 // that scene is no longer live. What changed is answered as effects, in the DM's terms; the socket
 // layer projects each into what each room receives (`server/src/ws/projection.ts`). A refused
 // command changes nothing and has no effect.
+//
+// Undo (LIV-05, specs/04-live-sync.md §8, D-040, D-117): `createLiveCommands` keeps the undo history
+// beside the database and answers `undo` by applying the most recent inverse through the same steps
+// as the command it stands for, so its effects, and what each room receives, are that command's.
 
 export type LiveEffect =
   /** A scene was made live: every client gets a fresh snapshot (D-039). */
@@ -80,9 +85,76 @@ export function applyLiveCommand(db: Database.Database, command: CommandEnvelope
       return result.outcome === 'set' && result.previous !== null ? [{ type: 'cleared' }] : [];
     }
     default:
-      // Validation refuses every type without a payload schema, so this is never reached.
+      // Validation refuses every type without a payload schema, and `undo` is answered by
+      // `createLiveCommands`, so this is never reached.
       return errorEnvelope('command_unsupported', 'This command is not supported yet.');
   }
+}
+
+/**
+ * Applies an inverse from the undo history as the command it is. The reveal that undoes a hide keeps
+ * the token's label: the token was shown with it, so it is not numbered as a first showing would be
+ * (specs/05-assets-and-images.md §3, Q-092, D-117), and a lone "Goblin" hidden and undone is "Goblin"
+ * again.
+ */
+export function applyInverse(db: Database.Database, inverse: Inverse): LiveResult {
+  if (inverse.type === 'token.setVisibility' && !inverse.payload.hidden) {
+    const current = readToken(db, inverse.payload.token_id);
+    if (current === undefined) return tokenNotFound();
+    const result = updateToken(db, current.id, { hidden: false, label: current.label }, 'live');
+    if (result.outcome === 'updated' && !result.before.hidden) return [];
+    return changed(result);
+  }
+  if (inverse.type !== 'token.add') return applyLiveCommand(db, inverse);
+  const result = restoreToken(db, inverse.restore, 'live');
+  switch (result.outcome) {
+    case 'restored':
+      return [{ type: 'token.added', token: result.token, relabelled: [] }];
+    case 'asset_not_found':
+      return errorEnvelope('reference_not_found', 'The asset does not exist.');
+    default:
+      return notLive();
+  }
+}
+
+export interface LiveCommands {
+  apply: (command: CommandEnvelope) => LiveResult;
+  /** The undo history, for the tests. */
+  history: UndoHistory;
+}
+
+/**
+ * The live commands with their undo history (LIV-05). An undoable command that changed something
+ * records its inverse for the live scene. Activating another scene, deactivating, and a live scene
+ * deleted over REST (seen as the live scene having changed when the history is next used) empty it
+ * (Q-005, D-117). `undo` with nothing to undo is acknowledged and tells nobody; an inverse that no
+ * longer applies (its token deleted by another DM browser, its asset deleted) is dropped and refused
+ * as the command it stands for would be, changing nothing.
+ */
+export function createLiveCommands(db: Database.Database, history = new UndoHistory()): LiveCommands {
+  const liveSceneId = () => readSettings(db).live_scene_id;
+  const apply = (command: CommandEnvelope): LiveResult => {
+    switch (command.type) {
+      case 'undo': {
+        const inverse = history.pop(liveSceneId());
+        return inverse === undefined ? [] : applyInverse(db, inverse);
+      }
+      case 'scene.activate':
+      case 'scene.deactivate': {
+        const result = applyLiveCommand(db, command);
+        if (Array.isArray(result)) history.keepOnly(liveSceneId());
+        return result;
+      }
+      default: {
+        const result = applyLiveCommand(db, command);
+        const live = liveSceneId();
+        const inverse = Array.isArray(result) ? inverseOf(command, result) : undefined;
+        if (inverse !== undefined && live !== null) history.record(live, inverse);
+        return result;
+      }
+    }
+  };
+  return { apply, history };
 }
 
 function changed(result: ReturnType<typeof updateToken>): LiveResult {

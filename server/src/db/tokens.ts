@@ -231,3 +231,49 @@ export function deleteToken(db: Database.Database, id: string, scope: TokenScope
     return { outcome: 'deleted', token };
   })();
 }
+
+export type TokenRestoreOutcome =
+  | { outcome: 'restored'; token: SceneToken }
+  | { outcome: 'not_found' }
+  | { outcome: 'asset_not_found' }
+  | { outcome: 'live' }
+  | { outcome: 'not_live' };
+
+/**
+ * Puts a deleted token back exactly as it was: its id, label, position, visibility and stacking
+ * order (LIV-05, undo of `token.delete`, specs/04-live-sync.md §8, D-117). No number is issued, and
+ * none is taken back: its label is the one it had. Refused when its scene is gone or not in `scope`,
+ * or its asset was deleted meanwhile. Each deletion's inverse is taken once, so its id is free; were
+ * it not, the primary key would refuse the insert and the transaction roll back.
+ */
+export function restoreToken(
+  db: Database.Database,
+  token: SceneToken,
+  scope: TokenScope = 'live',
+): TokenRestoreOutcome {
+  return db.transaction((): TokenRestoreOutcome => {
+    if (db.prepare('SELECT count(*) FROM scene WHERE id = ?').pluck().get(token.scene_id) === 0) {
+      return { outcome: 'not_found' };
+    }
+    const refused = refusal(db, token.scene_id, scope);
+    if (refused) return { outcome: refused };
+    if (db.prepare('SELECT count(*) FROM asset WHERE id = ?').pluck().get(token.asset_id) === 0) {
+      return { outcome: 'asset_not_found' };
+    }
+    db.prepare(
+      `INSERT INTO token (id, scene_id, asset_id, label, x, y, hidden, z_order, character_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      token.id,
+      token.scene_id,
+      token.asset_id,
+      token.label,
+      token.x,
+      token.y,
+      token.hidden ? 1 : 0,
+      token.z_order,
+      token.character_id,
+    );
+    return { outcome: 'restored', token: readToken(db, token.id)! };
+  })();
+}

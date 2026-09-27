@@ -61,6 +61,12 @@ import { toCanvasToken, useSceneTokens } from './tokens/useSceneTokens.js';
 // (map, players' grid, calibration) is still saved over REST in live mode (Q-015), and the server
 // pushes it to both rooms as a fresh snapshot (specs/04-live-sync.md §10).
 //
+// Undo (LIV-05, specs/04-live-sync.md §8, specs/08-ux-journeys.md §3, D-040, D-117): in live mode,
+// Ctrl+Z (Cmd+Z on a Mac) anywhere in the DM view sends `undo`; the server applies the most recent
+// inverse, and its events bring this canvas and the TV in step. A text field keeps its own undo and an
+// open dialog takes none; in prep mode nothing is sent. The status line says whether a change was
+// undone, read from whether the undo's events changed the live scene before its acknowledgement (D-111).
+//
 // The workspace keys this panel by scene: a request still running when another scene is
 // selected ends in a panel that is gone, so its answer changes nothing on screen. One change
 // runs at a time; while it does, the controls stay focusable but refuse, so keyboard focus
@@ -70,6 +76,27 @@ const ACCEPT = 'image/png,image/jpeg,image/webp';
 const imagePath = (id: string): string => API_IMAGE_PATHS.image.replace(':id', id);
 // Refusals of the file itself are shown beside the field (D-069); anything else above.
 const FILE_REFUSALS = new Set(['unsupported_media_type', 'payload_too_large']);
+
+// Fields whose own Ctrl+Z undoes typing, which the live scene's undo must leave alone.
+const TEXT_INPUTS = new Set(['', 'text', 'search', 'number', 'email', 'url', 'tel', 'password']);
+const typesText = (target: EventTarget | null): boolean =>
+  target instanceof HTMLElement &&
+  (target.isContentEditable ||
+    target instanceof HTMLTextAreaElement ||
+    (target instanceof HTMLInputElement && TEXT_INPUTS.has(target.type)));
+
+/**
+ * Ctrl+Z or Cmd+Z, without Shift (redo, elsewhere) or Alt. The letter is read from `key`, so that an
+ * AZERTY keyboard's Z counts; a layout whose letters are not Latin (Greek, Cyrillic) answers by the
+ * key's place, `KeyZ`.
+ */
+export function isUndoKey(
+  event: Pick<KeyboardEvent, 'key' | 'code' | 'ctrlKey' | 'metaKey' | 'shiftKey' | 'altKey'>,
+): boolean {
+  if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return false;
+  const key = event.key.toLowerCase();
+  return key === 'z' || (!/^[a-z]$/.test(key) && event.code === 'KeyZ');
+}
 
 export function ScenePanel({
   sceneId,
@@ -365,6 +392,28 @@ export function ScenePanel({
     const updated = live?.current()?.tokens.find((each) => each.id === token.id);
     if (ok && updated) announce(done(updated));
   }
+
+  async function undoLast() {
+    const before = live?.current();
+    if (!(await command('undo', {}, 'scene.undoFailed'))) return;
+    // The undo's own events arrived before its acknowledgement (D-111): none means nothing was left.
+    announce(t(live?.current() === before ? 'scene.nothingToUndo' : 'scene.undone'));
+  }
+
+  // Ctrl+Z in live mode, wherever focus is in the DM view but a text field or a dialog.
+  const undoKey = useRef<() => void>(undefined);
+  undoKey.current = () => void undoLast();
+  useEffect(() => {
+    if (!isLive) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || !isUndoKey(event) || typesText(event.target)) return;
+      if (document.querySelector('dialog[open]')) return;
+      event.preventDefault();
+      undoKey.current?.();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [isLive]);
 
   // Moves are announced too, since the canvas says nothing to assistive technology (review).
   const moved = (updated: SceneToken) =>
