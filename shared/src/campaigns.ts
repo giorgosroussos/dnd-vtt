@@ -67,11 +67,17 @@ export const SceneCreateBodySchema = Type.Object(
 // players see the overlay, and the calibration, in the original image's pixels: a decimal
 // square size, the x/y offset and the extent in squares. Calibration fields merge over the
 // scene's grid and are refused on a scene without a map (`calibration_needs_map`); saving them
-// also writes the image's preset (specs/03-domain-model.md §5, D-094). Feet per square is the
-// ruler's (LIV-07) and the type is `square` only, so both are refused here.
+// also writes the image's preset (specs/03-domain-model.md §5, D-094). Feet per square scales the
+// ruler (LIV-07, specs/06-grid-and-measurement.md §5, Q-087): a decimal within FEET_PER_SQUARE_BOUNDS,
+// accepted on any scene, and part of the map's calibration, so saving it on a map with a preset writes
+// the preset's too (D-121). The type is `square` only, so it is refused here.
+export const FEET_PER_SQUARE_BOUNDS = { min: 0.5, max: 100_000 } as const;
 export const SceneGridUpdateSchema = Type.Object(
   {
     visible: Type.Optional(Type.Boolean()),
+    feet_per_square: Type.Optional(
+      Type.Number({ minimum: FEET_PER_SQUARE_BOUNDS.min, maximum: FEET_PER_SQUARE_BOUNDS.max }),
+    ),
     size: Type.Optional(Type.Number({ exclusiveMinimum: 0, maximum: 1e6 })),
     offset_x: Type.Optional(Type.Number({ minimum: -1e6, maximum: 1e6 })),
     offset_y: Type.Optional(Type.Number({ minimum: -1e6, maximum: 1e6 })),

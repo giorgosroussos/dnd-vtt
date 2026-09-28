@@ -87,6 +87,9 @@ export function normalise(rect: Rect): Rect {
 const DECIMALS = 1e4;
 export const roundDecimal = (value: number): number => Math.round(value * DECIMALS) / DECIMALS;
 export const formatDecimal = (value: number): string => String(roundDecimal(value));
+/** A number for reading rather than typing: rounded as `formatDecimal`, with thousands separated (LIV-07). */
+export const formatNumber = (value: number): string =>
+  roundDecimal(value).toLocaleString('en', { maximumFractionDigits: 20 });
 
 /** A fine-tuning key step: 0.1 px, or 1 px with Shift. */
 export const FINE_STEP = 0.1;

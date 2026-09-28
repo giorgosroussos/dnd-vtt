@@ -13,8 +13,9 @@ import { applyPlayerEvent, startLive, type LiveHarness, type PlayerState } from 
 // same name: everything a player socket receives, every message and every image response, across a
 // scripted session of adding hidden tokens, revealing, hiding, moving, deleting, undoing each of those,
 // a hidden token's included (LIV-05), activating another scene, reconnecting, since LIV-04 editing the
-// live scene's setup and assets over REST and deleting the live scene, and since LIV-06 steering the
-// TV camera and screens reporting their viewports. It asserts that no hidden
+// live scene's setup and assets over REST and deleting the live scene, since LIV-06 steering the
+// TV camera and screens reporting their viewports, and since LIV-07 measuring with the ruler on the live
+// scene, and on a scene that is not live, which reaches players not at all. It asserts that no hidden
 // token's id, asset, image or name appears, and that the count of hidden tokens cannot be learnt
 // either: the whole recording is identical, byte for byte once identifiers are numbered by first
 // appearance, to the recording of the same session without any of the hidden-only steps
@@ -144,6 +145,33 @@ async function record(hidden: boolean): Promise<Recording> {
       camera: { centre_x: 0.4, centre_y: 0.5, width: 0.5, height: 0.375 },
     });
   });
+  // The ruler (LIV-07, specs/04-live-sync.md §11): a measurement on the live scene reaches players as two
+  // squares and a distance; one on a scene that is not live is refused and reaches them not at all (Q-086).
+  await step('the DM measures on the live scene and moves the end', async () => {
+    await send('ruler.update', { scene_id: sceneA.id, from: { column: 1, row: 1 }, to: { column: 4, row: 3 } });
+    await send('ruler.update', { scene_id: sceneA.id, from: { column: 1, row: 1 }, to: { column: 5, row: 5 } });
+  });
+  await step('the DM measures on a scene that is not live', async () => {
+    const ack = await live.command(dm, 'ruler.update', {
+      scene_id: sceneB.id,
+      from: { column: 0, row: 0 },
+      to: { column: 2, row: 1 },
+    });
+    expect((ack as { error: { code: string } }).error.code).toBe('scene_not_live');
+  });
+  await step('the DM clears the measurement', () => send('ruler.clear', { scene_id: sceneA.id }));
+  // A second DM browser measures and goes: its line leaves the TV with it (D-121, review T-M4).
+  await step('a second DM browser measures and disconnects', async () => {
+    const other = await live.connect({ cookie: live.cookie });
+    const ack = await live.command(other, 'ruler.update', {
+      scene_id: sceneA.id,
+      from: { column: 2, row: 0 },
+      to: { column: 2, row: 4 },
+    });
+    expect(ack).toEqual({ ok: true });
+    other.socket.disconnect();
+    await vi.waitFor(() => expect(tv.events.at(-1)?.type).toBe('ruler.cleared'));
+  });
   await step(
     'add a hidden lurker',
     async () =>
@@ -220,6 +248,10 @@ async function record(hidden: boolean): Promise<Recording> {
     true,
   );
   await step('undo the add of a visible wight', undo);
+  // A measurement still shown when the TV reconnects comes back with its snapshot.
+  await step('the DM measures on B', () =>
+    send('ruler.update', { scene_id: sceneB.id, from: { column: 0, row: 2 }, to: { column: 3, row: 0 } }),
+  );
   await step('reconnect', async () => {
     tv.socket.disconnect();
     // Back as the player view of the DM's own laptop: the DM cookie with the player view's hint
@@ -296,6 +328,26 @@ describe('what a player view receives across a live session (specs/10-testing-ac
     for (const { received } of withHidden.steps) {
       for (const entry of received as { status?: number }[]) if ('status' in entry) expect(entry.status).toBe(200);
     }
+
+    // The ruler's steps were recorded (LIV-07): the live measurement as two `ruler.shown`, the one made on a
+    // scene that is not live as nothing but the snapshot the step asked for (Q-086).
+    const eventsOf = (name: string) =>
+      (withHidden.steps.find((each) => each.step === name)!.received as { type?: string }[])
+        .map((entry) => entry.type)
+        .filter((type) => type !== undefined);
+    expect(eventsOf('the DM measures on the live scene and moves the end')).toEqual([
+      'ruler.shown',
+      'ruler.shown',
+      'scene.snapshot',
+    ]);
+    expect(eventsOf('the DM measures on a scene that is not live')).toEqual(['scene.snapshot']);
+    expect(eventsOf('the DM clears the measurement')).toEqual(['ruler.cleared', 'scene.snapshot']);
+    expect(eventsOf('a second DM browser measures and disconnects')).toEqual([
+      'ruler.shown',
+      'ruler.cleared',
+      'scene.snapshot',
+    ]);
+    expect(JSON.stringify(withHidden.steps.find((each) => each.step === 'reconnected'))).toContain('"ruler":{"from"');
 
     // The count: the same session without a single hidden-only step looks the same to players,
     // messages, versions and images alike.

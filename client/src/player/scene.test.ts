@@ -69,6 +69,7 @@ class Server {
         grid: GRID,
         tokens: this.visible().map((token) => this.player(token)),
         camera: FIT_CAMERA,
+        ruler: null,
       },
     };
   }
@@ -221,7 +222,7 @@ describe('the player camera (LIV-06, specs/04-live-sync.md §9)', () => {
   const steered = { centre_x: 0.25, centre_y: 0.75, width: 0.5, height: 0.25 };
   const base = (camera = FIT_CAMERA): PlayerSnapshot => ({
     role: 'players',
-    scene: { map: MAP, grid: GRID, tokens: [], camera },
+    scene: { map: MAP, grid: GRID, tokens: [], camera, ruler: null },
   });
 
   it('keeps the camera a snapshot carries, and fits the map when it carries none', () => {
@@ -241,5 +242,44 @@ describe('the player camera (LIV-06, specs/04-live-sync.md §9)', () => {
     expect(next?.tokens).toBe(scene?.tokens);
     expect(applyPlayerEvent(scene, { type: 'camera.player', version: 2, payload: {} })).toBe(scene);
     expect(applyPlayerEvent(null, { type: 'camera.player', version: 2, payload: { camera: steered } })).toBeNull();
+  });
+});
+
+describe('the ruler (LIV-07, specs/04-live-sync.md §11)', () => {
+  const measurement = { from: { column: 1, row: 2 }, to: { column: 3, row: 5 }, feet: 15 };
+  const base = (ruler: typeof measurement | null = null): PlayerSnapshot => ({
+    role: 'players',
+    scene: { map: MAP, grid: GRID, tokens: [], camera: FIT_CAMERA, ruler },
+  });
+
+  it('keeps the measurement a snapshot carries, or none', () => {
+    expect(fromSnapshot(base(measurement))?.ruler).toEqual(measurement);
+    expect(fromSnapshot(base())?.ruler).toBeNull();
+  });
+
+  it('takes the measurement of ruler.shown, only its fields, drops it on ruler.cleared, and skips a malformed one', () => {
+    const scene = fromSnapshot(base());
+    const shown = applyPlayerEvent(scene, {
+      type: 'ruler.shown',
+      version: 2,
+      payload: { ruler: { ...measurement, owner: 'x', from: { ...measurement.from, extra: 1 } } },
+    });
+    expect(shown?.ruler).toEqual(measurement);
+    expect(shown?.tokens).toBe(scene?.tokens);
+    expect(applyPlayerEvent(shown, { type: 'ruler.cleared', version: 3, payload: {} })?.ruler).toBeNull();
+    expect(applyPlayerEvent(scene, { type: 'ruler.shown', version: 2, payload: { ruler: { feet: 5 } } })).toBe(scene);
+    // A distance that is not a number, or a square that is not whole, is not drawn (review C-L3).
+    for (const ruler of [
+      { ...measurement, feet: undefined },
+      { ...measurement, feet: 'x' },
+      { ...measurement, feet: -5 },
+      { ...measurement, to: { column: 1.5, row: 2 } },
+    ]) {
+      expect(
+        applyPlayerEvent(scene, { type: 'ruler.shown', version: 2, payload: { ruler } }),
+        JSON.stringify(ruler),
+      ).toBe(scene);
+    }
+    expect(applyPlayerEvent(null, { type: 'ruler.shown', version: 2, payload: { ruler: measurement } })).toBeNull();
   });
 });

@@ -613,8 +613,8 @@ describe('player commands (specs/10-testing-acceptance.md §3, specs/07-security
       'scene.activate': { scene_id: w.sceneB.id },
       'scene.deactivate': {},
       'camera.setPlayer': { scene_id: w.sceneA.id, camera: { centre_x: 0.1, centre_y: 0.1, width: 0.2, height: 0.2 } },
-      'ruler.update': {},
-      'ruler.clear': {},
+      'ruler.update': { scene_id: w.sceneA.id, from: { column: 1, row: 1 }, to: { column: 4, row: 3 } },
+      'ruler.clear': { scene_id: w.sceneA.id },
       undo: {},
     };
     expect(Object.keys(valid).sort()).toEqual([...COMMAND_TYPES].sort());
@@ -632,6 +632,8 @@ describe('player commands (specs/10-testing-acceptance.md §3, specs/07-security
     for (const client of [dm, tv, laptopTv]) expect(await client.settle()).toEqual([]);
     // The player camera, held in memory rather than the database, is still fitted to the map (LIV-06).
     expect((tv.events.at(-1)!.payload as PlayerSnapshot).scene?.camera).toEqual(FIT_CAMERA);
+    // Nor does any measurement show, also held in memory (LIV-07).
+    expect((tv.events.at(-1)!.payload as PlayerSnapshot).scene?.ruler).toBeNull();
     // The same commands from the DM socket do run: the refusal is the room's, not the content's.
     await acknowledged(dm, 'token.move', valid['token.move']);
     expect(tokenRow(w.goblins[0]!.id)).toMatchObject({ x: 9, y: 9 });

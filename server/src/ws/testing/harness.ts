@@ -190,13 +190,14 @@ export async function startLive({
 /** A player's copy of the live scene, kept from its snapshot and events as a player client would. */
 export interface PlayerState {
   version: number;
-  scene: { map: unknown; grid: unknown; tokens: Record<string, unknown>[]; camera: unknown } | null;
+  scene: { map: unknown; grid: unknown; tokens: Record<string, unknown>[]; camera: unknown; ruler: unknown } | null;
 }
 
 /**
  * Applies the players' events as `shared/src/live.ts` states them: an added token goes in at its
  * rank, a removed one leaves, a moved one is replaced, a renamed one takes its new label, and
- * `camera.player` replaces the camera (LIV-06). Throws on a version that is not the next one,
+ * `camera.player` replaces the camera (LIV-06), `ruler.shown` and `ruler.cleared` the measurement
+ * (LIV-07). Throws on a version that is not the next one,
  * which is a gap.
  */
 export function applyPlayerEvent(state: PlayerState, event: EventEnvelope): PlayerState {
@@ -209,6 +210,14 @@ export function applyPlayerEvent(state: PlayerState, event: EventEnvelope): Play
   if (event.type === 'scene.cleared') return { ...next, scene: null };
   if (event.type === 'camera.player') {
     next.scene!.camera = structuredClone((event.payload as { camera: unknown }).camera);
+    return next;
+  }
+  if (event.type === 'ruler.shown') {
+    next.scene!.ruler = structuredClone((event.payload as { ruler: unknown }).ruler);
+    return next;
+  }
+  if (event.type === 'ruler.cleared') {
+    next.scene!.ruler = null;
     return next;
   }
   const tokens = next.scene!.tokens;

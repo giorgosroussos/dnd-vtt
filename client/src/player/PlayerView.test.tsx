@@ -12,6 +12,7 @@ import {
   type PlayerSnapshot,
   type PlayerToken,
 } from '@emberglass/shared';
+import { t } from '../ui/messages.js';
 import { fitCamera } from '../canvas/geometry.js';
 import { images, installCanvas2d, installImageLoading, installResizeObserver } from '../ui/testing/canvas2d.js';
 import { settle } from '../ui/testing/fakeServer.js';
@@ -50,7 +51,7 @@ const token = (n: number, label: string, z_order: number, x = n): PlayerToken =>
 
 const snapshot = (tokens: PlayerToken[], grid: Grid = GRID): PlayerSnapshot => ({
   role: 'players',
-  scene: { map: MAP, grid, tokens, camera: FIT_CAMERA },
+  scene: { map: MAP, grid, tokens, camera: FIT_CAMERA, ruler: null },
 });
 
 let fake: ReturnType<typeof installFakeSockets>;
@@ -212,6 +213,7 @@ describe('what the player view draws (specs/08-ux-journeys.md §4)', () => {
         tokens: [],
         camera: FIT_CAMERA,
         screen: null,
+        ruler: null,
       },
     };
     act(() => fake.sockets[0]!.deliver({ type: 'scene.snapshot', version: 2, payload: dm }));
@@ -319,7 +321,10 @@ describe('ordering and replacement', () => {
     images.requested = [];
     act(() =>
       fake.sockets[0]!.open(
-        { role: 'players', scene: { map: other, grid: GRID, tokens: [token(7, 'Dragon', 0)], camera: FIT_CAMERA } },
+        {
+          role: 'players',
+          scene: { map: other, grid: GRID, tokens: [token(7, 'Dragon', 0)], camera: FIT_CAMERA, ruler: null },
+        },
         5,
       ),
     );
@@ -376,5 +381,40 @@ describe('the player camera (LIV-06; specs/04-live-sync.md §5, §9, Q-038, D-11
     Object.assign(window, { innerWidth: width, innerHeight: height });
     // Nothing the TV shows came from its own report: it has no controls and draws what it is sent.
     expect(rendered.container.querySelectorAll(FOCUSABLE)).toHaveLength(0);
+  });
+});
+
+describe('the ruler on the TV (LIV-07, specs/04-live-sync.md §11, Q-027)', () => {
+  const measurement = { from: { column: 1, row: 2 }, to: { column: 4, row: 2 }, feet: 15 };
+  const drawnRuler = () =>
+    JSON.parse(rendered.container.querySelector<HTMLElement>('[data-ruler]')?.dataset.ruler ?? 'null') as {
+      from: unknown;
+      to: unknown;
+      feet: number;
+    } | null;
+  const distanceText = () =>
+    Konva.stages.at(-1)!.findOne<Konva.Label>('.ruler-distance')?.findOne<Konva.Text>('Text')!.text();
+
+  it('draws the measurement its snapshot carries, then each ruler.shown, and clears it on ruler.cleared', async () => {
+    await open({ role: 'players', scene: { ...snapshot([]).scene!, ruler: measurement } });
+    expect(drawnRuler()).toMatchObject(measurement);
+    expect(distanceText()).toBe(t('canvas.rulerDistance', { feet: '15' }));
+    const moved = { ...measurement, to: { column: 4, row: 6 }, feet: 20 };
+    await deliver('ruler.shown', 2, { ruler: moved });
+    expect(drawnRuler()).toMatchObject(moved);
+    expect(distanceText()).toBe(t('canvas.rulerDistance', { feet: '20' }));
+    await deliver('ruler.cleared', 3, {});
+    expect(drawnRuler()).toBeNull();
+    expect(distanceText()).toBeUndefined();
+    // A malformed event changes nothing, and the TV still has no control.
+    await deliver('ruler.shown', 4, { ruler: { feet: 5 } });
+    expect(drawnRuler()).toBeNull();
+    expect(rendered.container.querySelectorAll(FOCUSABLE)).toHaveLength(0);
+  });
+
+  it('draws none after an activation whose snapshot carries none', async () => {
+    await open({ role: 'players', scene: { ...snapshot([]).scene!, ruler: measurement } });
+    await deliver('scene.snapshot', 2, snapshot([]));
+    expect(drawnRuler()).toBeNull();
   });
 });

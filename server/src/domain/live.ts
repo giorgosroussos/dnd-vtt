@@ -4,6 +4,8 @@ import {
   type CameraSetPlayerPayload,
   type CommandEnvelope,
   type ErrorEnvelope,
+  type RulerClearPayload,
+  type RulerUpdatePayload,
   type SceneActivatePayload,
   type SceneToken,
   type TokenAddPayload,
@@ -14,6 +16,7 @@ import {
 import { readSettings, setLiveScene } from '../db/settings.js';
 import { createToken, deleteToken, readToken, restoreToken, updateToken } from '../db/tokens.js';
 import { PlayerCameraState, sameCamera } from './camera.js';
+import { RulerState, samePath } from './ruler.js';
 import { inverseOf, UndoHistory, type Inverse } from './undo.js';
 
 // The live commands (LIV-02; specs/04-live-sync.md §2, specs/05-assets-and-images.md §3, §4,
@@ -38,7 +41,11 @@ export type LiveEffect =
   | { type: 'token.updated'; before: SceneToken; token: SceneToken; relabelled: SceneToken[] }
   | { type: 'token.removed'; token: SceneToken }
   /** The player camera was set (LIV-06): both rooms receive `camera.player`. */
-  | { type: 'camera' };
+  | { type: 'camera' }
+  /** A measurement is shown on the live scene (LIV-07): both rooms receive `ruler.shown`. */
+  | { type: 'ruler' }
+  /** The measurement was taken off: both rooms receive `ruler.cleared`. */
+  | { type: 'ruler.cleared' };
 
 export type LiveResult = LiveEffect[] | ErrorEnvelope;
 
@@ -122,11 +129,16 @@ export function applyInverse(db: Database.Database, inverse: Inverse): LiveResul
 }
 
 export interface LiveCommands {
-  apply: (command: CommandEnvelope) => LiveResult;
+  /** Applies a valid command; `sender` names the DM socket it came from, which a measurement remembers. */
+  apply: (command: CommandEnvelope, sender?: string) => LiveResult;
+  /** A DM socket went: the measurement it drew, if still shown, is taken off the TV (D-121). */
+  release: (sender: string) => LiveEffect[];
   /** The undo history, for the tests. */
   history: UndoHistory;
   /** The player camera, which the snapshots read. */
   camera: PlayerCameraState;
+  /** The measurement shown on the TV, which the snapshots read. */
+  ruler: RulerState;
 }
 
 /**
@@ -141,14 +153,21 @@ export interface LiveCommands {
  * activation, of the live scene too, and every deactivation reset it to fit-to-map. `camera.setPlayer`
  * is refused as `scene_not_live` unless it names the live scene, tells nobody when the camera is
  * already that one, and is never undoable (§2).
+ *
+ * The ruler (LIV-07, specs/04-live-sync.md §2, §11, Q-027, Q-086, D-121) is kept there too, in memory
+ * only: `ruler.update` and `ruler.clear` are refused as `scene_not_live` unless they name the live
+ * scene, so a measurement on a scene that is not live never reaches the TV; a measurement already shown,
+ * or a clear with nothing shown, tells nobody; neither is undoable. Every activation and deactivation
+ * clear it, as does the DM socket that drew it going (`release`).
  */
 export function createLiveCommands(
   db: Database.Database,
   history = new UndoHistory(),
   camera = new PlayerCameraState(),
+  ruler = new RulerState(),
 ): LiveCommands {
   const liveSceneId = () => readSettings(db).live_scene_id;
-  const apply = (command: CommandEnvelope): LiveResult => {
+  const apply = (command: CommandEnvelope, sender?: string): LiveResult => {
     switch (command.type) {
       case 'undo': {
         const inverse = history.pop(liveSceneId());
@@ -160,8 +179,27 @@ export function createLiveCommands(
         if (Array.isArray(result)) {
           history.keepOnly(liveSceneId());
           camera.reset();
+          ruler.clear();
         }
         return result;
+      }
+      case 'ruler.update': {
+        const { scene_id, from, to } = command.payload as RulerUpdatePayload;
+        const live = liveSceneId();
+        if (live === null || live !== scene_id) return notLive();
+        const path = { from, to };
+        const shown = samePath(ruler.of(live), path);
+        // Whoever measured last owns the line, even when it is the same one (last write wins).
+        ruler.set(live, path, sender);
+        return shown ? [] : [{ type: 'ruler' }];
+      }
+      case 'ruler.clear': {
+        const { scene_id } = command.payload as RulerClearPayload;
+        const live = liveSceneId();
+        if (live === null || live !== scene_id) return notLive();
+        if (ruler.of(live) === null) return [];
+        ruler.clear();
+        return [{ type: 'ruler.cleared' }];
       }
       case 'camera.setPlayer': {
         const { scene_id, camera: next } = command.payload as CameraSetPlayerPayload;
@@ -180,7 +218,12 @@ export function createLiveCommands(
       }
     }
   };
-  return { apply, history, camera };
+  const release = (sender: string): LiveEffect[] => {
+    if (!ruler.drawnBy(liveSceneId(), sender)) return [];
+    ruler.clear();
+    return [{ type: 'ruler.cleared' }];
+  };
+  return { apply, release, history, camera, ruler };
 }
 
 function changed(result: ReturnType<typeof updateToken>): LiveResult {

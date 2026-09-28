@@ -1,9 +1,11 @@
+import { isMeasurement } from '@emberglass/shared';
 import type {
   DmCameraPayload,
   DmLiveScene,
   DmSnapshot,
   DmTokenEventPayload,
   EventEnvelope,
+  RulerShownPayload,
   SceneToken,
   TokenRemovedPayload,
 } from '@emberglass/shared';
@@ -16,6 +18,8 @@ import type {
 // `scene.cleared` means nothing is live. Tokens are held bottom of the stack first, as the server
 // lists them, so a live canvas draws what a fresh snapshot would. `camera.player` (LIV-06) replaces the
 // player camera and the screen shape the TV frame follows, so the frame follows another DM browser.
+// `ruler.shown` and `ruler.cleared` (LIV-07) replace and remove the measurement the TV shows, so the DM
+// sees what the TV sees, another DM browser's measurement included.
 
 /** The live scene, or null while nothing is live. */
 export type DmScene = DmLiveScene | null;
@@ -53,8 +57,16 @@ export function applyDmEvent(scene: DmScene, event: EventEnvelope): DmScene {
       if (!camera) return scene;
       return { ...scene, camera, screen: screen ?? null };
     }
+    case 'ruler.shown': {
+      const { ruler } = event.payload as unknown as Partial<RulerShownPayload>;
+      // A malformed measurement is skipped rather than drawn as "undefined ft" (review C-L3).
+      if (!isMeasurement(ruler)) return scene;
+      const { from, to, feet } = ruler;
+      return { ...scene, ruler: { from: { ...from }, to: { ...to }, feet } };
+    }
+    case 'ruler.cleared':
+      return { ...scene, ruler: null };
     default:
-      // The ruler is LIV-07's.
       return scene;
   }
 }

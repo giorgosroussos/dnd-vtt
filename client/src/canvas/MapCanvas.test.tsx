@@ -428,3 +428,253 @@ describe('measuring a rectangle for calibration (PRP-03, specs/06-grid-and-measu
     expect(player.stage.findOne('.measure')).toBeUndefined();
   });
 });
+
+describe('the ruler (LIV-07, specs/06-grid-and-measurement.md §5, specs/04-live-sync.md §11)', () => {
+  // GRID on MAP: the display version is half the original, so a square is 50 world pixels from (15, 125);
+  // the fitted camera draws the 2000 × 1500 world at 0.4 into 800 × 600, from the corner.
+  const SCALE = 0.4;
+  const centre = (column: number, row: number) => ({
+    x: (15 + (column + 0.5) * 50) * SCALE,
+    y: (125 + (row + 0.5) * 50) * SCALE,
+  });
+  const measurement = { from: { column: 2, row: 3 }, to: { column: 8, row: 5 }, feet: 30 };
+
+  function pointer(
+    stage: Konva.Stage,
+    type: 'pointerdown' | 'pointermove' | 'pointerup',
+    at: { x: number; y: number },
+  ) {
+    const evt = new MouseEvent(type, {
+      clientX: at.x,
+      clientY: at.y,
+      bubbles: true,
+      buttons: type === 'pointerup' ? 0 : 1,
+    });
+    act(() => {
+      stage.setPointersPositions(evt);
+      stage.fire(type, { evt, target: stage });
+    });
+  }
+  const press = (element: HTMLElement, key: string, shiftKey = false) =>
+    act(() => {
+      element.dispatchEvent(new KeyboardEvent('keydown', { key, shiftKey, bubbles: true, cancelable: true }));
+    });
+  const drawnLine = (stage: Konva.Stage) => stage.findOne<Konva.Line>('.ruler-line')?.points();
+  const drawnDistance = (stage: Konva.Stage) =>
+    stage.findOne<Konva.Label>('.ruler-distance')?.findOne<Konva.Text>('Text')!.text();
+
+  it('draws the measurement between the two square centres with its distance, in both views', async () => {
+    for (const mode of ['dm', 'player'] as const) {
+      const { view, stage } = await draw({ grid: GRID, map: MAP, mode, ruler: { shown: measurement } });
+      expect(drawnLine(stage)).toEqual([140, 300, 440, 400]);
+      expect(drawnDistance(stage)).toBe(t('canvas.rulerDistance', { feet: '30' }));
+      const state = JSON.parse(view.querySelector<HTMLElement>('[data-ruler]')!.dataset.ruler!) as {
+        start: { x: number; y: number };
+        end: { x: number; y: number };
+      };
+      expect(state.start.x).toBeCloseTo(centre(2, 3).x, 6);
+      expect(state.end.y).toBeCloseTo(centre(8, 5).y, 6);
+      rendered!.unmount();
+      rendered = undefined;
+    }
+    const { view, stage } = await draw({ grid: GRID, map: MAP, mode: 'player', ruler: { shown: null } });
+    expect(stage.findOne('.ruler-layer')).toBeUndefined();
+    expect(view.querySelector('[data-ruler]')).toBeNull();
+    // The player view has no ruler control.
+    expect(button(view, t('canvas.ruler'))).toBeUndefined();
+  });
+
+  it('shows a decimal distance as the catalogue formats it', async () => {
+    const { stage } = await draw({
+      grid: GRID,
+      map: MAP,
+      mode: 'player',
+      ruler: { shown: { ...measurement, feet: 7.5 } },
+    });
+    expect(drawnDistance(stage)).toBe('7.5 ft');
+  });
+
+  it('measures by dragging from square to square instead of panning, reporting each new square once', async () => {
+    const onMeasure = vi.fn();
+    const onToggle = vi.fn();
+    const { view, stage } = await draw({
+      grid: GRID,
+      map: MAP,
+      mode: 'dm',
+      ruler: { shown: null, tool: { on: true, onToggle, onMeasure, onClear: vi.fn() } },
+    });
+    expect(stage.draggable()).toBe(false);
+    expect(button(view, t('canvas.ruler'))!.getAttribute('aria-pressed')).toBe('true');
+    expect(document.getElementById(viewport(view).getAttribute('aria-describedby')!)!.textContent).toBe(
+      t('canvas.helpRuler'),
+    );
+    pointer(stage, 'pointerdown', centre(2, 3));
+    // Within the same square: nothing new.
+    pointer(stage, 'pointermove', { x: centre(2, 3).x + 5, y: centre(2, 3).y + 5 });
+    pointer(stage, 'pointermove', centre(5, 4));
+    pointer(stage, 'pointermove', centre(8, 5));
+    pointer(stage, 'pointerup', centre(8, 5));
+    expect(onMeasure.mock.calls).toEqual([
+      [{ from: { column: 2, row: 3 }, to: { column: 2, row: 3 } }, false],
+      [{ from: { column: 2, row: 3 }, to: { column: 5, row: 4 } }, false],
+      [{ from: { column: 2, row: 3 }, to: { column: 8, row: 5 } }, false],
+      [{ from: { column: 2, row: 3 }, to: { column: 8, row: 5 } }, true],
+    ]);
+    // A release the stage never sees ends the drag from the window.
+    pointer(stage, 'pointerdown', centre(1, 1));
+    act(() => {
+      window.dispatchEvent(new MouseEvent('pointerup'));
+    });
+    expect(onMeasure).toHaveBeenLastCalledWith({ from: { column: 1, row: 1 }, to: { column: 1, row: 1 } }, true);
+    expect(onToggle).not.toHaveBeenCalled();
+  });
+
+  it('is operated by keyboard: M, Enter at the centre of the view, arrows, Shift and Escape', async () => {
+    const onMeasure = vi.fn();
+    const onToggle = vi.fn();
+    const onClear = vi.fn();
+    const tool = { on: false, onToggle, onMeasure, onClear };
+    const { view } = await draw({ grid: GRID, map: MAP, mode: 'dm', ruler: { shown: null, tool } });
+    expect(button(view, t('canvas.ruler'))!.getAttribute('aria-pressed')).toBe('false');
+    press(viewport(view), 'm');
+    expect(onToggle).toHaveBeenLastCalledWith(true);
+    // While off, Enter measures nothing (and the arrows pan the view as ever).
+    press(viewport(view), 'Enter');
+    expect(onMeasure).not.toHaveBeenCalled();
+
+    const on = { ...tool, on: true };
+    act(() =>
+      rendered!.rerender(
+        createElement(MapCanvas, { grid: GRID, map: MAP, mode: 'dm', ruler: { shown: null, tool: on } }),
+      ),
+    );
+    await settle();
+    // The centre of the view, (400, 300) on screen, is world (1000, 750): square (19, 12).
+    press(viewport(view), 'Enter');
+    expect(onMeasure).toHaveBeenLastCalledWith({ from: { column: 19, row: 12 }, to: { column: 19, row: 12 } }, true);
+    press(viewport(view), 'ArrowDown');
+    expect(onMeasure).toHaveBeenLastCalledWith({ from: { column: 19, row: 12 }, to: { column: 19, row: 13 } }, true);
+    // Escape with nothing shown stops measuring.
+    press(viewport(view), 'Escape');
+    expect(onToggle).toHaveBeenLastCalledWith(false);
+
+    act(() =>
+      rendered!.rerender(
+        createElement(MapCanvas, { grid: GRID, map: MAP, mode: 'dm', ruler: { shown: measurement, tool: on } }),
+      ),
+    );
+    await settle();
+    press(viewport(view), 'ArrowRight');
+    expect(onMeasure).toHaveBeenLastCalledWith({ from: { column: 2, row: 3 }, to: { column: 9, row: 5 } }, true);
+    press(viewport(view), 'ArrowLeft', true);
+    expect(onMeasure).toHaveBeenLastCalledWith({ from: { column: 1, row: 3 }, to: { column: 7, row: 5 } }, true);
+    // Escape with a measurement shown clears it.
+    press(viewport(view), 'Escape');
+    expect(onClear).toHaveBeenCalledTimes(1);
+    press(viewport(view), 'M');
+    expect(onToggle).toHaveBeenLastCalledWith(false);
+  });
+
+  it('pans the view with a right- or middle-button drag while measuring, and measures nothing (review U-M2)', async () => {
+    const onMeasure = vi.fn();
+    const { view, stage } = await draw({
+      grid: GRID,
+      map: MAP,
+      mode: 'dm',
+      ruler: { shown: null, tool: { on: true, onToggle: vi.fn(), onMeasure, onClear: vi.fn() } },
+    });
+    const cameraX = () => Number(viewport(view).dataset.cameraX);
+    const before = cameraX();
+    for (const button of [2, 1]) {
+      const fire = (type: string, x: number, buttons: number) => {
+        const evt = new MouseEvent(type, { clientX: x, clientY: 100, button, buttons, bubbles: true });
+        act(() => {
+          stage.setPointersPositions(evt);
+          stage.fire(type, { evt, target: stage });
+        });
+      };
+      fire('pointerdown', 100, button === 2 ? 2 : 4);
+      fire('pointermove', 160, button === 2 ? 2 : 4);
+      fire('pointerup', 160, 0);
+    }
+    expect(cameraX()).toBeCloseTo(before + 120, 6);
+    expect(onMeasure).not.toHaveBeenCalled();
+    // A right-click opens no context menu while measuring.
+    const menu = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+    act(() => {
+      viewport(view).dispatchEvent(menu);
+    });
+    expect(menu.defaultPrevented).toBe(true);
+  });
+
+  it('keeps the distance label on the screen near the top and right edges (review U-M3)', async () => {
+    // The end at square (38, -2) lies near the top-right corner of the 800 × 600 view.
+    const { stage } = await draw({
+      grid: GRID,
+      map: MAP,
+      mode: 'player',
+      ruler: { shown: { from: { column: 30, row: 5 }, to: { column: 38, row: -2 }, feet: 40 } },
+    });
+    const label = stage.findOne<Konva.Label>('.ruler-distance')!;
+    // Flipped to the left of the end and below it.
+    expect(label.offsetX()).toBeGreaterThan(0);
+    expect(label.offsetY()).toBeLessThan(0);
+  });
+
+  it('leaves the TV frame alone while measuring (review T-M2)', async () => {
+    const { stage } = await draw({
+      grid: GRID,
+      map: MAP,
+      mode: 'dm',
+      tvFrame: {
+        camera: { centre_x: 0.5, centre_y: 0.5, width: 0.5, height: 0.5 },
+        screen: null,
+        offline: false,
+        steering: false,
+        onSteer: vi.fn(),
+        onChange: vi.fn(),
+      },
+      ruler: { shown: null, tool: { on: true, onToggle: vi.fn(), onMeasure: vi.fn(), onClear: vi.fn() } },
+    });
+    expect(stage.findOne('.tv-frame')!.draggable()).toBe(false);
+    expect(stage.findOne('.tv-frame-layer')!.listening()).toBe(false);
+  });
+
+  it('clears a shown measurement with Escape even while the ruler is off, and says so (review U-L4)', async () => {
+    const onClear = vi.fn();
+    const { view } = await draw({
+      grid: GRID,
+      map: MAP,
+      mode: 'dm',
+      ruler: { shown: measurement, tool: { on: false, onToggle: vi.fn(), onMeasure: vi.fn(), onClear } },
+    });
+    expect(document.getElementById(viewport(view).getAttribute('aria-describedby')!)!.textContent).toBe(
+      t('canvas.helpRulerShown'),
+    );
+    press(viewport(view), 'Escape');
+    expect(onClear).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves the tokens alone while measuring', async () => {
+    const onSelect = vi.fn();
+    const token = {
+      id: '00000000-0000-4000-8000-000000000001',
+      label: 'Goblin',
+      x: 2,
+      y: 3,
+      hidden: false,
+      z_order: 0,
+      size: 'medium' as const,
+      image_id: 'd'.repeat(64),
+    };
+    const { stage } = await draw({
+      grid: GRID,
+      map: MAP,
+      mode: 'dm',
+      tokens: [token],
+      tokenControls: { selectedId: undefined, onSelect, onMove: vi.fn(), onDeselect: vi.fn(), onDelete: vi.fn() },
+      ruler: { shown: null, tool: { on: true, onToggle: vi.fn(), onMeasure: vi.fn(), onClear: vi.fn() } },
+    });
+    expect(stage.find('.token').every((node) => !node.draggable())).toBe(true);
+  });
+});

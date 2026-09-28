@@ -350,6 +350,29 @@ textarea.eg-field__input {
   gap: var(--space-2) var(--space-3);
 }
 
+/* Feet per square (LIV-07): a short number field, saved on Enter and when it loses focus. Its label sits
+ * beside it in two short lines, so the setup keeps one row of the height the controls beside it have at
+ * 1,280 × 720 (G-022); a refusal takes a line of its own below. */
+.eg-scene__feet .eg-field {
+  flex-flow: row wrap;
+  align-items: center;
+  column-gap: var(--space-2);
+}
+
+.eg-scene__feet .eg-field > label {
+  max-width: 4.5rem;
+  font-size: var(--font-size-sm);
+  line-height: 1.2;
+}
+
+.eg-scene__feet .eg-field__input {
+  width: 4rem;
+}
+
+.eg-scene__feet .eg-field__error {
+  flex-basis: 100%;
+}
+
 .eg-scene__progress {
   display: flex;
   align-items: center;

@@ -24,6 +24,9 @@ import {
   PlayerCameraPayloadSchema,
   PlayerCameraSchema,
   ScreenSchema,
+  MeasurementSchema,
+  RulerClearedPayloadSchema,
+  RulerShownPayloadSchema,
 } from './index.js';
 
 // The first column of the table in one section of specs/04-live-sync.md, split
@@ -113,7 +116,9 @@ describe('snapshot payloads (specs/04-live-sync.md §4, LIV-01)', () => {
   });
 
   it('gives players no scene id or name and only the display version of the map', () => {
-    expect(Object.keys(PlayerLiveSceneSchema.properties).sort()).toEqual(['camera', 'grid', 'map', 'tokens']);
+    expect(Object.keys(PlayerLiveSceneSchema.properties).sort()).toEqual(['camera', 'grid', 'map', 'ruler', 'tokens']);
+    // A measurement is two squares and a distance: no scene, no token (LIV-07).
+    expect(Object.keys(MeasurementSchema.properties).sort()).toEqual(['feet', 'from', 'to']);
     // The players' camera is the rectangle alone: no screen of another viewer (D-119).
     expect(Object.keys(PlayerCameraSchema.properties).sort()).toEqual(['centre_x', 'centre_y', 'height', 'width']);
     expect(Object.keys(PlayerMapSchema.properties).sort()).toEqual(['height', 'id', 'variants', 'width']);
@@ -144,10 +149,13 @@ describe('live command and event payloads (specs/04-live-sync.md §2, §3, §4, 
   };
   const id = '00000000-0000-4000-8000-000000000001';
 
-  it('defines a payload for the commands LIV-02, LIV-05 and LIV-06 implement and no other', () => {
+  it('defines a payload for every command of specs/04-live-sync.md §2, LIV-07 the last', () => {
+    expect(Object.keys(LIVE_COMMAND_PAYLOAD_SCHEMAS).sort()).toEqual([...COMMAND_TYPES].sort());
     expect(Object.keys(LIVE_COMMAND_PAYLOAD_SCHEMAS).sort()).toEqual(
       [
         'camera.setPlayer',
+        'ruler.clear',
+        'ruler.update',
         'scene.activate',
         'scene.deactivate',
         'token.add',
@@ -170,6 +178,8 @@ describe('live command and event payloads (specs/04-live-sync.md §2, §3, §4, 
       PlayerCameraPayloadSchema,
       DmCameraPayloadSchema,
       ScreenSchema,
+      RulerShownPayloadSchema,
+      RulerClearedPayloadSchema,
     ] as object[]) {
       for (const object of objects(schema)) expect(object).toHaveProperty('additionalProperties', false);
     }
@@ -210,6 +220,33 @@ describe('live command and event payloads (specs/04-live-sync.md §2, §3, §4, 
     }
     const partial = { centre_x: camera.centre_x, centre_y: camera.centre_y, height: camera.height };
     expect(Value.Check(set, { scene_id: id, camera: partial })).toBe(false);
+  });
+
+  it('lets the ruler name the live scene and two whole squares within bounds, and nothing else (LIV-07)', () => {
+    const update = LIVE_COMMAND_PAYLOAD_SCHEMAS['ruler.update'];
+    const clear = LIVE_COMMAND_PAYLOAD_SCHEMAS['ruler.clear'];
+    const from = { column: 2, row: 3 };
+    const to = { column: -1, row: 7 };
+    expect(Value.Check(update, { scene_id: id, from, to })).toBe(true);
+    expect(Value.Check(update, { scene_id: id, from, to: from })).toBe(true);
+    expect(Value.Check(update, { scene_id: id, from: { column: 100_000, row: -100_000 }, to })).toBe(true);
+    for (const wrong of [
+      { from, to },
+      { scene_id: 'x', from, to },
+      { scene_id: id, from },
+      { scene_id: id, from: { column: 1.5, row: 3 }, to },
+      { scene_id: id, from: { column: 100_001, row: 3 }, to },
+      { scene_id: id, from: { column: 1 }, to },
+      { scene_id: id, from: { column: 1, row: 1, x: 0 }, to },
+      { scene_id: id, from, to, feet: 25 },
+      { scene_id: id, from, to, waypoints: [] },
+    ]) {
+      expect(Value.Check(update, wrong), JSON.stringify(wrong)).toBe(false);
+    }
+    expect(Value.Check(clear, { scene_id: id })).toBe(true);
+    for (const wrong of [{}, { scene_id: id, from }, { scene_id: 'x' }]) {
+      expect(Value.Check(clear, wrong), JSON.stringify(wrong)).toBe(false);
+    }
   });
 
   it('bounds a reported viewport to whole pixels within reason (LIV-06)', () => {

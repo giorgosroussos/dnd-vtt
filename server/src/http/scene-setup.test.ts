@@ -285,7 +285,7 @@ describe('grid visibility for players (specs/06-grid-and-measurement.md §2, D-0
     expect(ok<Image>(await get(`/api/images/${map.id}`)).grid_preset).toEqual(PRESET);
   });
 
-  it('refuses feet per square, the type, a null map, an unknown field and an empty body, changing nothing', async () => {
+  it('refuses feet per square out of bounds, the type, a null map, an unknown field and an empty body, changing nothing', async () => {
     const session = await newSession();
     const scene = await newScene(session.id, (await withPreset()).id);
     const before = countRows(data.db);
@@ -293,7 +293,11 @@ describe('grid visibility for players (specs/06-grid-and-measurement.md §2, D-0
       {},
       { grid: {} },
       { grid: { visible: 'yes' } },
-      { grid: { visible: true, feet_per_square: 10 } },
+      { grid: { visible: true, feet_per_square: 0 } },
+      { grid: { feet_per_square: 0.4 } },
+      { grid: { feet_per_square: 100_001 } },
+      { grid: { feet_per_square: '10' } },
+      { grid: { feet_per_square: null } },
       { grid: { size: 0 } },
       { grid: { size: null } },
       { grid: { columns: 2.5 } },
@@ -568,5 +572,68 @@ describe('hidden information (specs/07-security-and-access.md §5, §7)', () => 
     for (const variant of ['original', 'thumbnail'] as const) {
       expectFailure(await app.inject({ method: 'GET', url: imageFileUrl(map.id, variant) }), 404, 'not_found');
     }
+  });
+});
+
+describe('feet per square (LIV-07, specs/06-grid-and-measurement.md §5, Q-087, G-021, D-121)', () => {
+  const preset = async (imageId: string) => ok<Image>(await get(`/api/images/${imageId}`)).grid_preset;
+
+  it('is set on a scene without a map, within its bounds, and changes nothing else', async () => {
+    const session = await newSession();
+    const scene = await newScene(session.id);
+    for (const feet of [10, 2.5, 0.5, 100_000, 5]) {
+      expect((await update(scene.id, { grid: { feet_per_square: feet } })).grid).toEqual({
+        ...DEFAULTS,
+        feet_per_square: feet,
+      });
+    }
+    // A scene without a map has no calibration, but its scale is no calibration field.
+    expectFailure(
+      await patch(`/api/scenes/${scene.id}`, { grid: { feet_per_square: 10, size: 50 } }),
+      409,
+      'calibration_needs_map',
+    );
+    expect(ok<Scene>(await get(`/api/scenes/${scene.id}`)).grid.feet_per_square).toBe(5);
+  });
+
+  it('is carried by a calibration into the preset, and becomes the preset’s own when set alone on a calibrated map', async () => {
+    const session = await newSession();
+    const map = await uploaded(1000, 640);
+    const scene = await newScene(session.id, map.id);
+    const calibration = { size: 50, offset_x: 0, offset_y: 0, columns: 20, rows: 12 };
+    // Set with the calibration: the preset carries it.
+    const first = await update(scene.id, { grid: { ...calibration, feet_per_square: 10 } });
+    expect(first.grid.feet_per_square).toBe(10);
+    expect(await preset(map.id)).toEqual(first.grid);
+    // Set alone afterwards: the preset's scale follows, the rest of the preset is unchanged.
+    const second = await update(scene.id, { grid: { feet_per_square: 25 } });
+    expect(await preset(map.id)).toEqual(second.grid);
+    // A later scene of the map starts from it; an existing one keeps its own (Q-001).
+    const other = await newScene(session.id, map.id);
+    expect(other.grid.feet_per_square).toBe(25);
+    await update(scene.id, { grid: { feet_per_square: 5 } });
+    expect(ok<Scene>(await get(`/api/scenes/${other.id}`)).grid.feet_per_square).toBe(25);
+    expect((await preset(map.id))!.feet_per_square).toBe(5);
+  });
+
+  it('writes no preset for a map not yet calibrated, which the next calibration then carries', async () => {
+    const session = await newSession();
+    const map = await uploaded(1000, 640);
+    const scene = await newScene(session.id, map.id);
+    await update(scene.id, { grid: { feet_per_square: 10 } });
+    expect(await preset(map.id)).toBeNull();
+    const calibrated = await update(scene.id, { grid: { size: 40 } });
+    expect(calibrated.grid.feet_per_square).toBe(10);
+    expect((await preset(map.id))!.feet_per_square).toBe(10);
+  });
+
+  it("starts a new map from that map's preset scale, or 5 ft without a preset", async () => {
+    const session = await newSession();
+    const scene = await newScene(session.id);
+    await update(scene.id, { grid: { feet_per_square: 10 } });
+    expect((await update(scene.id, { map_image_id: (await uploaded()).id })).grid.feet_per_square).toBe(5);
+    expect((await update(scene.id, { map_image_id: (await withPreset()).id })).grid.feet_per_square).toBe(
+      PRESET.feet_per_square,
+    );
   });
 });

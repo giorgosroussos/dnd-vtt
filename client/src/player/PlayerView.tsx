@@ -11,7 +11,8 @@ export { CURSOR_IDLE_MS };
 // the map canvas in its player mode (D-090): the map's display version, framed by the player camera
 // the DM steers, fitted to the map on every activation (specs/04-live-sync.md §9, Q-038, LIV-06), the
 // grid only when players see it (§4), and the visible
-// tokens with their labels (Q-032). It has no controls and nothing that takes focus, and hides
+// tokens with their labels (Q-032), and the measurement the DM shows on the live scene, a line and its
+// distance (specs/04-live-sync.md §11, Q-027, LIV-07). It has no controls and nothing that takes focus, and hides
 // the pointer after two seconds still (Q-054). It keeps the live connection, reconnecting by
 // itself and resynchronising from a fresh snapshot (§5, §6); meanwhile it keeps its last picture
 // and says nothing, since nobody operates the TV (D-104). The data attributes are for the
@@ -30,7 +31,14 @@ export function PlayerView() {
       data-cursor={cursorHidden ? 'hidden' : 'shown'}
     >
       {scene ? (
-        <MapCanvas mode="player" map={scene.map} grid={scene.grid} tokens={tokens} camera={scene.camera} />
+        <MapCanvas
+          mode="player"
+          map={scene.map}
+          grid={scene.grid}
+          tokens={tokens}
+          camera={scene.camera}
+          ruler={{ shown: scene.ruler }}
+        />
       ) : (
         <IdleScreen />
       )}

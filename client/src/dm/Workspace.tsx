@@ -200,6 +200,7 @@ export function Workspace({ mainId, onSignedOut }: { mainId: string; onSignedOut
               sceneId={selected.id}
               name={selected.name}
               uploadLimit={settings?.upload_limit_bytes ?? DEFAULT_SETTINGS.upload_limit_bytes}
+              rulerRule={settings?.ruler_rule ?? DEFAULT_SETTINGS.ruler_rule}
               live={live}
             />
           ) : (

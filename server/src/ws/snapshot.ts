@@ -1,10 +1,12 @@
 import type Database from 'better-sqlite3';
 import type {
   DmSnapshot,
+  Measurement,
   PlayerMap,
   PlayerSnapshot,
   PlayerToken,
   Room,
+  Scene,
   SceneSnapshot,
   SceneToken,
 } from '@emberglass/shared';
@@ -13,11 +15,22 @@ import { readImage } from '../db/images.js';
 import { readSettings } from '../db/settings.js';
 import { listTokens } from '../db/tokens.js';
 import type { PlayerCameraState, ScreenRegistry } from '../domain/camera.js';
+import { measurementOf, type RulerState } from '../domain/ruler.js';
 
-/** What the snapshots read from the server's memory rather than the database (LIV-06). */
+/** What the snapshots read from the server's memory rather than the database (LIV-06, LIV-07). */
 export interface LiveMemory {
   camera: PlayerCameraState;
   screens: ScreenRegistry;
+  ruler: RulerState;
+}
+
+/**
+ * The measurement shown on the live scene `scene`, its distance counted now by the server-wide rule and
+ * the scene's feet per square (LIV-07, specs/06-grid-and-measurement.md §5), or null.
+ */
+export function liveMeasurement(db: Database.Database, scene: Scene, memory: LiveMemory): Measurement | null {
+  const path = memory.ruler.of(scene.id);
+  return path && measurementOf(path, scene.grid, readSettings(db).ruler_rule);
 }
 
 // The `scene.snapshot` of each room (specs/04-live-sync.md §3, §4, §5; LIV-01, D-104), read
@@ -28,7 +41,8 @@ export interface LiveMemory {
 // (G-025). Nothing of the scene record reaches players but its grid and the map's display size.
 // Both rooms receive the player camera (LIV-06, specs/04-live-sync.md §9), so a screen connecting or
 // reconnecting shows what the others show; only the DM's carries the screen shape the TV frame
-// follows (D-119).
+// follows (D-119). Both carry the measurement shown on the TV (LIV-07), so a screen reconnecting, or
+// asking again after a gap, keeps the line the others show; a measurement names no token (D-121).
 
 export function readSnapshot(db: Database.Database, role: 'dm', memory: LiveMemory): DmSnapshot;
 export function readSnapshot(db: Database.Database, role: 'players', memory: LiveMemory): PlayerSnapshot;
@@ -43,7 +57,12 @@ function readDm(db: Database.Database, memory: LiveMemory): DmSnapshot {
   if (!live) return { role: 'dm', scene: null };
   return {
     role: 'dm',
-    scene: { ...live, camera: { ...memory.camera.of(live.scene.id) }, screen: memory.screens.chosen() },
+    scene: {
+      ...live,
+      camera: { ...memory.camera.of(live.scene.id) },
+      screen: memory.screens.chosen(),
+      ruler: liveMeasurement(db, live.scene, memory),
+    },
   };
 }
 
@@ -60,6 +79,7 @@ function readPlayers(db: Database.Database, memory: LiveMemory): PlayerSnapshot 
       grid: { ...scene.grid },
       tokens: visible.map(toPlayerToken),
       camera: { ...memory.camera.of(scene.id) },
+      ruler: liveMeasurement(db, scene, memory),
     },
   };
 }

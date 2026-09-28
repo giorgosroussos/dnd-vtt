@@ -165,9 +165,9 @@ describe('command validation and dispatch', () => {
 });
 
 describe('the process command validator', () => {
-  // LIV-02 registers the live commands, LIV-05 `undo` and LIV-06 `camera.setPlayer`; every other command stays refused,
-  // whatever its content, until the package that implements it registers its payload: fail
-  // closed, never open.
+  // LIV-02 registers the live commands, LIV-05 `undo`, LIV-06 `camera.setPlayer` and LIV-07 the ruler: every
+  // command of specs/04-live-sync.md §2. A command whose type registers no payload is refused whatever its
+  // content (fail closed, never open), which the validator of `token.move` alone above proves.
   const LIVE = [
     'token.add',
     'token.move',
@@ -176,13 +176,16 @@ describe('the process command validator', () => {
     'scene.activate',
     'scene.deactivate',
     'camera.setPlayer',
+    'ruler.update',
+    'ruler.clear',
     'undo',
   ];
   // The commands whose payload is empty, so that `{}` is valid.
   const EMPTY = ['scene.deactivate', 'undo'];
 
-  it('registers a payload schema for the live commands of LIV-02, LIV-05 and LIV-06 and no other', () => {
+  it('registers a payload schema for every command of specs/04-live-sync.md §2 and no other', () => {
     expect(Object.keys(COMMAND_PAYLOAD_SCHEMAS).sort()).toEqual([...LIVE].sort());
+    expect([...LIVE].sort()).toEqual([...COMMAND_TYPES].sort());
   });
 
   it('refuses a live command whose payload is incomplete, and applies nothing', () => {
@@ -196,13 +199,24 @@ describe('the process command validator', () => {
     expect(apply).not.toHaveBeenCalled();
   });
 
-  it.each(COMMAND_TYPES.filter((type) => !LIVE.includes(type)))('refuses %s as unsupported', (type) => {
-    const { board, apply, send } = harness(validateCommand);
-    const before = structuredClone(board);
-    expect(send({ type, payload: {} })).toEqual({
-      error: { code: 'command_unsupported', message: 'This command is not supported yet.' },
-    });
+  it('refuses a ruler command with a square off the whole grid, a distance of its own or waypoints (LIV-07)', () => {
+    const { apply, send } = harness(validateCommand);
+    const scene_id = '00000000-0000-4000-8000-000000000001';
+    const from = { column: 1, row: 1 };
+    for (const payload of [
+      { scene_id, from, to: { column: 2.5, row: 1 } },
+      { scene_id, from, to: { column: 1, row: 1e9 } },
+      { scene_id, from, to: from, feet: 5 },
+      { scene_id, from, to: from, waypoints: [from] },
+    ]) {
+      expect((send({ type: 'ruler.update', payload }) as ErrorEnvelope).error.code).toBe('validation_failed');
+    }
+    expect((send({ type: 'ruler.clear', payload: { scene_id, all: true } }) as ErrorEnvelope).error.code).toBe(
+      'validation_failed',
+    );
     expect(apply).not.toHaveBeenCalled();
-    expect(board).toEqual(before);
+    expect(send({ type: 'ruler.update', payload: { scene_id, from, to: { column: 4, row: 5 } } })).toEqual({
+      ok: true,
+    });
   });
 });

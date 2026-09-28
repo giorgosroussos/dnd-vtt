@@ -1,8 +1,12 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import {
   API_IMAGE_PATHS,
+  FEET_PER_SQUARE_BOUNDS,
   FIT_CAMERA,
+  rulerFeet,
   type CommandType,
+  type Measurement,
+  type RulerRule,
   type PlayerCamera,
   type Image,
   type LibraryAsset,
@@ -11,8 +15,16 @@ import {
   type SceneToken,
   type TokenUpdateBody,
 } from '@emberglass/shared';
-import { formatDecimal } from '../canvas/calibration.js';
-import { MapCanvas, type CanvasTokenControls, type Measure, type Placing, type TvFrame } from '../canvas/MapCanvas.js';
+import { formatDecimal, formatNumber } from '../canvas/calibration.js';
+import {
+  MapCanvas,
+  type CanvasTokenControls,
+  type Measure,
+  type Placing,
+  type RulerTool,
+  type TvFrame,
+} from '../canvas/MapCanvas.js';
+import { samePath, type RulerPath } from '../canvas/ruler.js';
 import { Button } from '../ui/Button.js';
 import { Dialog } from '../ui/Dialog.js';
 import { Notice } from '../ui/Notice.js';
@@ -78,6 +90,15 @@ import { toCanvasToken, useSceneTokens } from './tokens/useSceneTokens.js';
 // it was put until the server answers, and a refusal says why above the canvas. The DM's own view does
 // not move. Setting the TV camera is not undoable (specs/04-live-sync.md §2).
 //
+// The ruler (LIV-07, specs/06-grid-and-measurement.md §5, specs/04-live-sync.md §11, Q-027, Q-086, D-121):
+// the canvas's Ruler measures between square centres by the server-wide diagonal rule and the scene's feet
+// per square, which the setup sets. In prep mode the measurement stays in this view: nothing is sent. In
+// live mode each new measurement sends `ruler.update` and clearing it `ruler.clear`, at most one command
+// in flight and the latest waiting, so a fast drag never queues a command per square; the canvas shows
+// what this view sent until it is answered, and then what the server says the TV shows, another DM
+// browser's measurement included. Turning the ruler off clears the measurement. The ruler, steering the
+// TV, placing and a selected token take the pointer and the keys in turn.
+//
 // The workspace keys this panel by scene: a request still running when another scene is
 // selected ends in a panel that is gone, so its answer changes nothing on screen. One change
 // runs at a time; while it does, the controls stay focusable but refuse, so keyboard focus
@@ -135,11 +156,14 @@ export function ScenePanel({
   sceneId,
   name,
   uploadLimit,
+  rulerRule = 'phb',
   live,
 }: {
   sceneId: string;
   name: string;
   uploadLimit: number;
+  /** The server-wide diagonal rule the ruler measures by (specs/06-grid-and-measurement.md §5, Q-037). */
+  rulerRule?: RulerRule | undefined;
   /** The workspace's live connection: whether this scene is live, and the commands (LIV-04). */
   live?: DmLive | undefined;
 }) {
@@ -164,6 +188,12 @@ export function ScenePanel({
   const [progress, setProgress] = useState<number>();
   // The value being saved, shown at once; the server's answer replaces it, a refusal drops it.
   const [savingGrid, setSavingGrid] = useState<boolean>();
+  // Feet per square as typed, until saved (LIV-07); undefined shows the scene's own.
+  const [feetText, setFeetText] = useState<string>();
+  const [feetError, setFeetError] = useState<string>();
+  const [savingFeet, setSavingFeet] = useState(false);
+  // Read by a second save started before the first has rendered (Enter, then leaving the field; review C-L4).
+  const savingFeetNow = useRef(false);
   const [status, setStatus] = useState<'attached' | 'calibrated' | { message: string; n: number }>();
   // Each announcement is a new node, so a message equal to the last one is still read out (review U1).
   const announced = useRef(0);
@@ -195,11 +225,40 @@ export function ScenePanel({
   }
   const [pendingCamera, setPendingCamera] = useState<{ seq: number; camera: PlayerCamera }>();
   const cameraSeq = useRef(0);
+  // The ruler (LIV-07): whether it measures, the measurement kept in this view in prep mode, and in live
+  // mode the one sent and not yet answered (null: a clear). Going live or back to prep starts afresh, so
+  // nothing measured in preparation ever reaches the TV (Q-086).
+  const [rulerOn, setRulerOn] = useState(false);
+  const [prepPath, setPrepPath] = useState<RulerPath | null>(null);
+  const [rulerDraft, setRulerDraft] = useState<RulerPath | null>();
+  const rulerQueue = useRef<{ busy: boolean; next: RulerPath | null | undefined }>({ busy: false, next: undefined });
+  // The measurement this panel last had shown on the TV: leaving the scene takes it off, unless the TV
+  // shows another by then (D-121, review C-L2).
+  const sentPath = useRef<RulerPath | null>(null);
+  // What to announce once the server has shown it: a measurement, or null for a clear (review U-L2).
+  const toAnnounce = useRef<RulerPath | null | undefined>(undefined);
+  // Whether the scene is live now, for a ruler command sent from an earlier render (review C-L1).
+  const liveNow = useRef(isLive);
+  liveNow.current = isLive;
+  const [rulerMode, setRulerMode] = useState(isLive);
+  if (rulerMode !== isLive) {
+    setRulerMode(isLive);
+    setRulerOn(false);
+    setPrepPath(null);
+    setRulerDraft(undefined);
+    rulerQueue.current.next = undefined;
+    toAnnounce.current = undefined;
+  }
   const [selectedToken, setSelectedToken] = useState<string>();
-  // Choosing a token gives the arrow keys back to it, and placing one ends steering (review U-M4).
+  // Choosing a token gives the arrow keys back to it, and placing one ends steering (review U-M4) and
+  // measuring.
   const selectToken = (id: string | undefined) => {
     setSelectedToken(id);
-    if (id !== undefined) setSteering(false);
+    if (id !== undefined) {
+      setSteering(false);
+      // Ending measuring takes the measurement off, on the TV too (review C-M1).
+      stopMeasuring();
+    }
   };
   const [picking, setPicking] = useState(false);
   const [placingAsset, setPlacingAsset] = useState<LibraryAsset>();
@@ -325,8 +384,48 @@ export function ScenePanel({
     }
   }
 
+  // Feet per square scales the ruler (specs/06-grid-and-measurement.md §5, Q-087); on the live scene the
+  // server pushes it to both rooms in a snapshot, with the distance shown recounted (D-121).
+  // Saved on Enter and when focus leaves the field, only when the DM typed something. A value out of bounds
+  // is refused beside the field on Enter, where focus still is; on leaving the field it is put back to the
+  // stored value and the status line says so, since the field's own error would not be heard (review U-L1).
+  // Its save does not hold the other setup controls, and what is typed meanwhile is kept for the next save.
+  async function saveFeet(event?: FormEvent, leaving = false) {
+    event?.preventDefault();
+    if (!scene || savingFeetNow.current || feetText === undefined) return;
+    const text = feetText.trim();
+    const feet = Number(text);
+    const { min, max } = FEET_PER_SQUARE_BOUNDS;
+    if (text === '' || !Number.isFinite(feet) || feet < min || feet > max) {
+      const bounds = { min: formatNumber(min), max: formatNumber(max) };
+      if (!leaving) return setFeetError(t('sceneGrid.feetInvalid', bounds));
+      setFeetText(undefined);
+      setFeetError(undefined);
+      announce(t('sceneGrid.feetRestored', { ...bounds, feet: formatNumber(scene.grid.feet_per_square) }));
+      return;
+    }
+    const keepTyped = (current: string | undefined) => (current === feetText ? undefined : current);
+    if (feet === scene.grid.feet_per_square) return setFeetText(keepTyped);
+    savingFeetNow.current = true;
+    setSavingFeet(true);
+    setFailure(undefined);
+    setStatus(undefined);
+    try {
+      const saved = await request<Scene>('PATCH', entityPath('scene', scene.id), { grid: { feet_per_square: feet } });
+      setScene(saved);
+      setFeetText(keepTyped);
+      announce(t('sceneGrid.feetSaved', { feet: formatNumber(saved.grid.feet_per_square) }));
+    } catch (error) {
+      setFailure(errorMessage(errorCode(error)));
+    } finally {
+      savingFeetNow.current = false;
+      setSavingFeet(false);
+    }
+  }
+
   function startCalibration(target: Image) {
     if (!scene || busy) return;
+    stopMeasuring();
     setStatus(undefined);
     setFailure(undefined);
     setDraft(startDraft(scene.grid, { width: target.width, height: target.height }));
@@ -372,6 +471,7 @@ export function ScenePanel({
     setStatus(undefined);
     setPlacingAsset(asset);
     setSteering(false);
+    stopMeasuring();
     refocus.current = 'canvas';
   }
 
@@ -465,10 +565,132 @@ export function ScenePanel({
           screen: liveScene.screen,
           offline,
           steering,
-          onSteer: setSteering,
+          onSteer: (on) => {
+            setSteering(on);
+            if (on) stopMeasuring();
+          },
           onChange: (camera) => void steerTv(camera),
         }
       : undefined;
+
+  // The ruler. In live mode the latest measurement is sent once the one in flight is answered.
+  const feetPerSquare = scene?.grid.feet_per_square ?? 5;
+  const measured = (path: RulerPath): Measurement => ({
+    ...path,
+    feet: rulerFeet(path.from, path.to, rulerRule, feetPerSquare),
+  });
+  const announceDistance = (path: RulerPath) =>
+    announce(t('ruler.distance', { feet: formatNumber(measured(path).feet) }));
+  const announcePath = (path: RulerPath | null) => (path ? announceDistance(path) : announce(t('ruler.cleared')));
+
+  async function sendRuler(next: RulerPath | null) {
+    const queue = rulerQueue.current;
+    queue.next = next;
+    if (queue.busy) return;
+    queue.busy = true;
+    while (queue.next !== undefined) {
+      const path = queue.next;
+      queue.next = undefined;
+      // Back in prep mode meanwhile (another browser's Blank TV): nothing more is sent (review C-L1).
+      if (!liveNow.current) break;
+      const ok = path
+        ? await command('ruler.update', { scene_id: sceneId, ...path }, 'scene.rulerFailed')
+        : await command('ruler.clear', { scene_id: sceneId }, 'scene.rulerFailed');
+      if (!liveNow.current) {
+        // A refusal because the scene stopped being live says nothing over a panel now in prep mode.
+        setLiveFailure(undefined);
+        break;
+      }
+      if (ok) {
+        sentPath.current = path;
+        const waiting = toAnnounce.current;
+        // Announced once the TV shows it, and only when nothing newer waits (review U-L2).
+        if (waiting !== undefined && queue.next === undefined && samePath(waiting, path)) {
+          toAnnounce.current = undefined;
+          announcePath(path);
+        }
+      } else {
+        // A refusal drops what waits too: the canvas shows what the TV shows.
+        queue.next = undefined;
+        toAnnounce.current = undefined;
+      }
+    }
+    queue.next = undefined;
+    queue.busy = false;
+    setRulerDraft(undefined);
+  }
+
+  function measureRuler(path: RulerPath, final: boolean) {
+    if (!isLive) {
+      setPrepPath(path);
+      if (final) announceDistance(path);
+      return;
+    }
+    // Not connected: nothing is sent and nothing is drawn as if the TV showed it (D-116, D-120).
+    if (offline) {
+      if (final) announce(t('scene.rulerOffline'));
+      return;
+    }
+    const shown = rulerDraft !== undefined ? rulerDraft : (liveScene?.ruler ?? null);
+    if (!samePath(path, shown)) {
+      if (final) toAnnounce.current = path;
+      setRulerDraft(path);
+      void sendRuler(path);
+    } else if (rulerQueue.current.busy) {
+      // Already on its way: announced once it is shown.
+      if (final) toAnnounce.current = path;
+    } else if (final) {
+      announceDistance(path);
+    }
+  }
+
+  function clearMeasurement() {
+    if (!isLive) {
+      if (prepPath) announce(t('ruler.cleared'));
+      setPrepPath(null);
+      return;
+    }
+    const shown = rulerDraft !== undefined ? rulerDraft : (liveScene?.ruler ?? null);
+    if (shown === null && !rulerQueue.current.busy) return;
+    if (offline) return announce(t('scene.rulerOffline'));
+    toAnnounce.current = null;
+    setRulerDraft(null);
+    void sendRuler(null);
+  }
+
+  function stopMeasuring() {
+    if (!rulerOn) return;
+    setRulerOn(false);
+    clearMeasurement();
+  }
+
+  // Leaving the scene, or the view, takes this panel's measurement off the TV: nobody would see it here.
+  const leave = useRef<() => void>(undefined);
+  leave.current = () => {
+    const shown = liveScene?.ruler;
+    if (isLive && shown && samePath(shown, sentPath.current)) void live?.command('ruler.clear', { scene_id: sceneId });
+  };
+  useEffect(() => () => leave.current?.(), []);
+
+  const rulerTool: RulerTool | undefined = draft
+    ? undefined
+    : {
+        on: rulerOn,
+        onToggle: (on) => {
+          if (!on) return stopMeasuring();
+          setRulerOn(true);
+          setSteering(false);
+          setSelectedToken(undefined);
+        },
+        onMeasure: measureRuler,
+        onClear: clearMeasurement,
+      };
+  const livePath = rulerDraft !== undefined ? rulerDraft : undefined;
+  const shownRuler: Measurement | null = !isLive
+    ? prepPath && measured(prepPath)
+    : livePath !== undefined
+      ? livePath && measured(livePath)
+      : (liveScene?.ruler ?? null);
 
   // One undo at a time: Ctrl+Z pressed again, or held down, before the server answers is ignored,
   // so a held key never unwinds the live scene one change after another (LIV-05 review U5).
@@ -674,6 +896,24 @@ export function ScenePanel({
                 />
                 <label htmlFor={gridId}>{t('sceneGrid.visible')}</label>
               </div>
+              <form className="eg-scene__feet" onSubmit={(event) => void saveFeet(event)} noValidate>
+                <TextField
+                  type="number"
+                  inputMode="decimal"
+                  step="any"
+                  min={FEET_PER_SQUARE_BOUNDS.min}
+                  max={FEET_PER_SQUARE_BOUNDS.max}
+                  label={t('sceneGrid.feet')}
+                  value={feetText ?? String(scene.grid.feet_per_square)}
+                  error={feetError}
+                  aria-busy={savingFeet || undefined}
+                  onChange={(event) => {
+                    setFeetText(event.target.value);
+                    setFeetError(undefined);
+                  }}
+                  onBlur={() => void saveFeet(undefined, true)}
+                />
+              </form>
               {map ? (
                 <Button ref={calibrateRef} aria-disabled={busy || undefined} onClick={() => startCalibration(map)}>
                   {t('calibration.open')}
@@ -714,6 +954,7 @@ export function ScenePanel({
                   tokenControls={tokenControls}
                   placing={placing}
                   tvFrame={tvFrame}
+                  ruler={{ shown: shownRuler, tool: rulerTool }}
                 />
                 {map && draft ? <CornerMagnifier map={map} calibration={draft.calibration} /> : null}
               </div>

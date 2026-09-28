@@ -6,12 +6,13 @@ import {
   imageFileUrl,
   type Grid,
   type Image,
+  type Measurement,
   type PlayerCamera,
   type Screen,
   type TokenSize,
 } from '@emberglass/shared';
 import { Button } from '../ui/Button.js';
-import { formatDecimal, normalise, type Rect as Box } from './calibration.js';
+import { formatDecimal, formatNumber, normalise, type Rect as Box } from './calibration.js';
 import { t } from '../ui/messages.js';
 import {
   boundFrame,
@@ -26,6 +27,7 @@ import {
   frameOf,
   gridLines,
   mapInfo,
+  panBy,
   rectOf,
   resizeBox,
   scaleBox,
@@ -38,6 +40,7 @@ import {
   type Camera,
   type Size,
 } from './geometry.js';
+import { labelOffset, rulerForKey, sameSquare, squareAt, squareCentre, type RulerPath } from './ruler.js';
 import { TokenLayer, type TokenControls } from './TokenLayer.js';
 import {
   clampToWorld,
@@ -68,6 +71,14 @@ import './canvas.css';
 // on the drop. The DM's own camera never moves with it. While steering is on (the toolbar's Steer the
 // TV), the view's keys and buttons move and zoom the frame instead of the DM's view.
 //
+// The ruler (LIV-07, specs/06-grid-and-measurement.md §5, specs/04-live-sync.md §11, Q-027, Q-048): both
+// modes draw the measurement they are given, a line between two square centres and its distance beside
+// the end. In the DM mode the Ruler toggle (or M on the canvas) turns measuring on: a drag on the map
+// then measures from the square pressed to the square under the pointer instead of panning, tokens and
+// the TV frame are left alone, and the arrow keys move the end a square (Shift, the whole ruler), Enter
+// starts again at the centre of the view and Escape clears, then stops measuring. What a measurement
+// does beyond this canvas, and whether it reaches the TV, is the caller's.
+//
 // While the DM calibrates by rectangle (PRP-03, specs/06-grid-and-measurement.md §1, D-094), a
 // drag on the map draws a rectangle instead of panning, reported in the original's pixels.
 //
@@ -95,6 +106,11 @@ const FRAME_GRIP_PX = 14;
 // A press-and-release shorter than this, in screen pixels either way, is a click, not a rectangle.
 const MIN_RECT_PX = 4;
 export const GRID_OPACITY = { shown: 0.7, faint: 0.25 } as const;
+// The ruler's distance label, larger on the TV to be read across the room (LIV-07), and its gap to the end.
+const RULER_LABEL = {
+  dm: { fontSize: 14, padding: 4, gap: { x: 12, y: 8 } },
+  player: { fontSize: 32, padding: 8, gap: { x: 18, y: 8 } },
+} as const;
 
 type Mode = 'dm' | 'player';
 
@@ -172,6 +188,22 @@ const cornerOf = (box: WorldBox, corner: Corner) => ({
 });
 const OPPOSITE: Record<Corner, Corner> = { nw: 'se', ne: 'sw', sw: 'ne', se: 'nw' };
 
+/** The ruler (LIV-07): what is drawn, and in the DM view the tool that measures. */
+export interface RulerView {
+  /** The measurement drawn, its distance already counted, or null. */
+  shown: Measurement | null;
+  /** DM view only: measuring with the pointer and the keys. */
+  tool?: RulerTool | undefined;
+}
+
+export interface RulerTool {
+  on: boolean;
+  onToggle: (on: boolean) => void;
+  /** A new measurement: while a drag goes on (`final` false), and on its release or a key (true). */
+  onMeasure: (path: RulerPath, final: boolean) => void;
+  onClear: () => void;
+}
+
 /** A rectangle measured on the map during calibration, in the original image's pixels. */
 export interface Measure {
   rect: Box | undefined;
@@ -219,6 +251,7 @@ export function MapCanvas({
   toolbar,
   camera: playerCamera,
   tvFrame,
+  ruler,
 }: {
   grid: Grid;
   /** The scene's map image, or null for a scene without a map. */
@@ -241,6 +274,8 @@ export function MapCanvas({
   camera?: PlayerCamera | undefined;
   /** DM view in live mode only: the frame of what the TV sees, which steers it. */
   tvFrame?: TvFrame | undefined;
+  /** The measurement drawn, and in the DM view the ruler tool (LIV-07). */
+  ruler?: RulerView | undefined;
 }) {
   const helpId = useId();
   const [viewportRef, viewport] = useViewport();
@@ -286,8 +321,11 @@ export function MapCanvas({
   const frame = ready ? gridFrame(grid, info) : undefined;
   const place = dm && !measuring && placing && frame ? { ...placing, frame } : undefined;
   const placingNow = place !== undefined;
+  // The ruler measures only when neither calibration nor placing has the pointer, on a drawn grid.
+  const rulerTool = dm && !measuring && !placingNow && frame ? ruler?.tool : undefined;
+  const rulerOn = rulerTool?.on === true;
   // Tokens are selected and dragged only when nothing else uses the pointer.
-  const controls = dm && !measuring && !placingNow ? tokenControls : undefined;
+  const controls = dm && !measuring && !placingNow && !rulerOn ? tokenControls : undefined;
   const selected = controls && tokens.find((token) => token.id === controls.selectedId);
   // The TV frame, in world pixels: the one being dragged, or the player camera widened to the TV's shape.
   const [frameDraft, setFrameDraft] = useState<WorldBox>();
@@ -298,8 +336,8 @@ export function MapCanvas({
   const limits = tv ? frameLimits(world, aspect, tv.screen) : undefined;
   const frameBox = tv && limits ? boundFrame(frameOf(tv.camera, world, aspect), aspect, limits) : undefined;
   const shownFrame = tv ? (frameDraft ?? frameBox) : undefined;
-  const steering = tv?.steering === true && !measuring && !placingNow;
-  const frameMovable = tv !== undefined && !tv.offline && !measuring && !placingNow;
+  const steering = tv?.steering === true && !measuring && !placingNow && !rulerOn;
+  const frameMovable = tv !== undefined && !tv.offline && !measuring && !placingNow && !rulerOn;
   // The camera that shows `box`; nothing is sent when that is the camera already (review C-M2, U-M1).
   const cameraFor = (box: WorldBox | 'fit'): PlayerCamera =>
     box === 'fit' || !limits ? FIT_CAMERA : rectOf(boundFrame(box, aspect, limits), world);
@@ -327,6 +365,28 @@ export function MapCanvas({
     y: (viewport.height / 2 - camera.y) / camera.scale,
   });
 
+  // The measurement drawn: its ends' centres in the world, and the path the keys move from.
+  const shownRuler = frame && ruler?.shown ? ruler.shown : undefined;
+  const rulerEnds =
+    shownRuler && frame ? [squareCentre(frame, shownRuler.from), squareCentre(frame, shownRuler.to)] : [];
+  const shownPath: RulerPath | null = shownRuler ? { from: shownRuler.from, to: shownRuler.to } : null;
+  const distanceText = shownRuler ? t('canvas.rulerDistance', { feet: formatNumber(shownRuler.feet) }) : '';
+  // Kept inside the view, so the distance is readable wherever the end lies (review U-M3). The label's width
+  // is estimated from its text, bold digits being about 0.62 of the font size wide.
+  const labelStyle = RULER_LABEL[mode];
+  const distanceOffset =
+    rulerEnds.length === 2
+      ? labelOffset(
+          { x: camera.x + rulerEnds[1]!.x * camera.scale, y: camera.y + rulerEnds[1]!.y * camera.scale },
+          {
+            width: distanceText.length * labelStyle.fontSize * 0.62 + labelStyle.padding * 2,
+            height: labelStyle.fontSize + labelStyle.padding * 2,
+          },
+          viewport,
+          labelStyle.gap,
+        )
+      : { offsetX: 0, offsetY: 0 };
+
   const ARROWS: Record<string, [number, number]> = {
     ArrowLeft: [-1, 0],
     ArrowRight: [1, 0],
@@ -347,6 +407,40 @@ export function MapCanvas({
         place.onCancel();
         return;
       }
+    }
+    // M turns the ruler on and off from the canvas itself, as T does steering (LIV-07).
+    if (rulerTool && (event.key === 'm' || event.key === 'M')) {
+      event.preventDefault();
+      if (!event.repeat) rulerTool.onToggle(!rulerOn);
+      return;
+    }
+    if (rulerOn && frame) {
+      const centre = squareAt(frame, centreWorld());
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        if (shownPath) rulerTool.onClear();
+        else rulerTool.onToggle(false);
+        return;
+      }
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        rulerTool.onMeasure({ from: centre, to: centre }, true);
+        return;
+      }
+      const next = rulerForKey(shownPath, event.key, event.shiftKey, centre);
+      if (next) {
+        event.preventDefault();
+        rulerTool.onMeasure(next, true);
+        return;
+      }
+    }
+    // With the ruler off, Escape still takes a measurement off, another browser's too (review U-L4), unless
+    // Escape means something else here first (steering, a selected token).
+    const rulerEscape = rulerTool && !rulerOn && shownPath && !steering && !selected && event.key === 'Escape';
+    if (rulerEscape) {
+      event.preventDefault();
+      rulerTool.onClear();
+      return;
     }
     // T turns steering the TV on and off from the canvas itself (review U-M5).
     if (tv && !measuring && !placingNow && (event.key === 't' || event.key === 'T')) {
@@ -452,6 +546,70 @@ export function MapCanvas({
     measure.onDraw(scaled(box, info.original.width / info.display.width));
   }
 
+  // A ruler drag: from the square pressed to the square under the pointer, reported on each new square. A
+  // drag with the right or middle button pans the view instead, so the DM can reach squares off screen
+  // while measuring (review U-M2).
+  const rulerDrag = useRef<RulerPath>(undefined);
+  const rulerPan = useRef<{ x: number; y: number }>(undefined);
+  const [rulerDragging, setRulerDragging] = useState(false);
+  function onRulerDown(event: Konva.KonvaEventObject<PointerEvent>) {
+    const at = worldPoint(event);
+    if (!at || !frame || !rulerTool) return;
+    const content = event.target.getStage()?.content;
+    if (typeof event.evt.pointerId === 'number') content?.setPointerCapture?.(event.evt.pointerId);
+    if (event.evt.button === 1 || event.evt.button === 2) {
+      event.evt.preventDefault();
+      rulerPan.current = { x: event.evt.clientX, y: event.evt.clientY };
+      setRulerDragging(true);
+      return;
+    }
+    const square = squareAt(frame, at);
+    rulerDrag.current = { from: square, to: square };
+    setRulerDragging(true);
+    rulerTool.onMeasure(rulerDrag.current, false);
+  }
+  function onRulerMove(event: Konva.KonvaEventObject<PointerEvent>) {
+    const pan = rulerPan.current;
+    if (pan) {
+      if (event.evt.buttons === 0) return finishRuler();
+      const { clientX, clientY } = event.evt;
+      rulerPan.current = { x: clientX, y: clientY };
+      changeCamera((current) => panBy(current, clientX - pan.x, clientY - pan.y));
+      return;
+    }
+    const current = rulerDrag.current;
+    if (!current || !frame || !rulerTool) return;
+    if (event.evt.buttons === 0) return finishRuler();
+    const at = worldPoint(event);
+    if (!at) return;
+    const square = squareAt(frame, at);
+    if (sameSquare(square, current.to)) return;
+    rulerDrag.current = { from: current.from, to: square };
+    rulerTool.onMeasure(rulerDrag.current, false);
+  }
+  function finishRuler() {
+    if (rulerPan.current) {
+      rulerPan.current = undefined;
+      setRulerDragging(false);
+      return;
+    }
+    const current = rulerDrag.current;
+    rulerDrag.current = undefined;
+    setRulerDragging(false);
+    if (current) rulerTool?.onMeasure(current, true);
+  }
+  const rulerReleased = useEffectEvent(() => finishRuler());
+  useEffect(() => {
+    if (!rulerDragging) return;
+    const up = () => rulerReleased();
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+    return () => {
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+    };
+  }, [rulerDragging]);
+
   const releasedElsewhere = useEffectEvent(() => finishMeasure(undefined));
   const cancelled = useEffectEvent(() => setDragging(undefined));
   const isDragging = dragging !== undefined;
@@ -520,7 +678,9 @@ export function MapCanvas({
           onPointerMove: onMeasureMove,
           onPointerUp: (event: Konva.KonvaEventObject<PointerEvent>) => finishMeasure(worldPoint(event) ?? undefined),
         }
-      : { onWheel, onDragMove: onDrag, onDragEnd: onDrag, onClick: onStageClick };
+      : rulerOn
+        ? { onWheel, onPointerDown: onRulerDown, onPointerMove: onRulerMove, onPointerUp: () => finishRuler() }
+        : { onWheel, onDragMove: onDrag, onDragEnd: onDrag, onClick: onStageClick };
 
   const centre = { x: viewport.width / 2, y: viewport.height / 2 };
   const stage = (
@@ -531,7 +691,7 @@ export function MapCanvas({
       y={camera.y}
       scaleX={camera.scale}
       scaleY={camera.scale}
-      draggable={dm && !measuring}
+      draggable={dm && !measuring && !rulerOn}
       listening={dm}
       {...handlers}
     >
@@ -687,6 +847,50 @@ export function MapCanvas({
           })}
         </Layer>
       ) : null}
+      {shownRuler && rulerEnds.length === 2 ? (
+        // The measurement: a line between the two square centres over a dark halo, its ends marked, and
+        // the distance beside the end, upright and readable at any zoom; larger on the TV (LIV-07).
+        <Layer name="ruler-layer" listening={false}>
+          <Line
+            name="ruler-halo"
+            points={[rulerEnds[0]!.x, rulerEnds[0]!.y, rulerEnds[1]!.x, rulerEnds[1]!.y]}
+            stroke={CANVAS_COLOURS.halo}
+            strokeWidth={dm ? 6 : 10}
+            lineCap="round"
+            strokeScaleEnabled={false}
+          />
+          <Line
+            name="ruler-line"
+            points={[rulerEnds[0]!.x, rulerEnds[0]!.y, rulerEnds[1]!.x, rulerEnds[1]!.y]}
+            stroke={CANVAS_COLOURS.measure}
+            strokeWidth={dm ? 3 : 5}
+            lineCap="round"
+            strokeScaleEnabled={false}
+          />
+          {rulerEnds.map((end, index) => (
+            <Group key={index} name="ruler-end" {...end} scaleX={1 / camera.scale} scaleY={1 / camera.scale}>
+              <Circle radius={dm ? 6 : 10} fill={CANVAS_COLOURS.measure} stroke={CANVAS_COLOURS.halo} strokeWidth={2} />
+            </Group>
+          ))}
+          <Label
+            name="ruler-distance"
+            x={rulerEnds[1]!.x}
+            y={rulerEnds[1]!.y}
+            {...distanceOffset}
+            scaleX={1 / camera.scale}
+            scaleY={1 / camera.scale}
+          >
+            <Tag fill={CANVAS_COLOURS.halo} cornerRadius={4} />
+            <Text
+              text={distanceText}
+              fill={CANVAS_COLOURS.grid}
+              fontSize={RULER_LABEL[mode].fontSize}
+              fontStyle="bold"
+              padding={RULER_LABEL[mode].padding}
+            />
+          </Label>
+        </Layer>
+      ) : null}
       {place ? (
         // Where Enter places the token: the centre of the view, marked while placing (review).
         <Layer listening={false}>
@@ -721,6 +925,19 @@ export function MapCanvas({
         'data-tv-steering': steering ? 'on' : 'off',
       }
     : {};
+  // The measurement drawn, its squares, distance and ends in screen pixels, for the end-to-end tests (LIV-07).
+  const rulerState =
+    shownRuler && rulerEnds.length === 2
+      ? {
+          'data-ruler': JSON.stringify({
+            from: shownRuler.from,
+            to: shownRuler.to,
+            feet: shownRuler.feet,
+            start: { x: camera.x + rulerEnds[0]!.x * camera.scale, y: camera.y + rulerEnds[0]!.y * camera.scale },
+            end: { x: camera.x + rulerEnds[1]!.x * camera.scale, y: camera.y + rulerEnds[1]!.y * camera.scale },
+          }),
+        }
+      : {};
   // Where each token is drawn, in screen pixels from the viewport's corner, for the end-to-end tests.
   // The player mode lists the tokens it draws, visible ones only, with nothing a player's snapshot
   // does not already carry (LIV-03).
@@ -744,7 +961,13 @@ export function MapCanvas({
 
   if (!dm) {
     return (
-      <div ref={viewportRef} className="eg-canvas eg-canvas--player" {...state} data-tokens={tokenBoxes}>
+      <div
+        ref={viewportRef}
+        className="eg-canvas eg-canvas--player"
+        {...state}
+        {...rulerState}
+        data-tokens={tokenBoxes}
+      >
         {stage}
       </div>
     );
@@ -754,6 +977,12 @@ export function MapCanvas({
       <div className="eg-canvas__toolbar">
         {toolbar}
         <div className="eg-canvas__view" role="group" aria-label={t('canvas.controls')}>
+          {rulerTool ? (
+            // Pressed only while measuring is in effect, as Steer the TV is.
+            <Button size="small" aria-pressed={rulerOn} onClick={() => rulerTool.onToggle(!rulerOn)}>
+              {t('canvas.ruler')}
+            </Button>
+          ) : null}
           {tv ? (
             // Pressed only while steering is in effect: never while placing or measuring (review U-M3).
             <Button size="small" aria-pressed={steering} onClick={() => tv.onSteer(!steering)}>
@@ -789,18 +1018,26 @@ export function MapCanvas({
             ? t('canvas.helpMeasure')
             : placingNow
               ? t('canvas.helpPlace')
-              : steering
-                ? t('canvas.helpSteer')
-                : selected
-                  ? t('canvas.helpToken', { label: selected.label })
-                  : tv
-                    ? t('canvas.helpLive')
-                    : t('canvas.help')}
+              : rulerOn
+                ? t(tv ? 'canvas.helpRulerLive' : 'canvas.helpRuler')
+                : rulerTool && shownPath && !steering && !selected
+                  ? t('canvas.helpRulerShown')
+                  : steering
+                    ? t('canvas.helpSteer')
+                    : selected
+                      ? t('canvas.helpToken', { label: selected.label })
+                      : tv
+                        ? t('canvas.helpLive')
+                        : t('canvas.help')}
         </p>
       </div>
       <div
         ref={viewportRef}
-        className={measuring || placingNow ? 'eg-canvas__viewport eg-canvas__viewport--measure' : 'eg-canvas__viewport'}
+        className={
+          measuring || placingNow || rulerOn
+            ? 'eg-canvas__viewport eg-canvas__viewport--measure'
+            : 'eg-canvas__viewport'
+        }
         role="application"
         aria-label={label}
         aria-describedby={helpId}
@@ -808,6 +1045,10 @@ export function MapCanvas({
         onKeyDown={onKeyDown}
         {...state}
         {...frameState}
+        {...rulerState}
+        data-ruler-tool={rulerTool ? (rulerOn ? 'on' : 'off') : undefined}
+        // A right-button drag pans while measuring, so it opens no context menu (review U-M2).
+        onContextMenu={rulerOn ? (event) => event.preventDefault() : undefined}
         data-tokens={tokenBoxes}
       >
         {stage}

@@ -12,6 +12,7 @@ import {
   SessionUpdateBodySchema,
   isCalendarDate,
   CALIBRATION_FIELDS,
+  FEET_PER_SQUARE_BOUNDS,
 } from './index.js';
 
 const UUID = '00000000-0000-4000-8000-000000000001';
@@ -55,7 +56,7 @@ describe('campaign, session and scene bodies (D-078)', () => {
       expect(isCalendarDate(date), date).toBe(false);
   });
 
-  it('takes a scene map, grid.visible and the calibration fields in an update (PRP-03, D-094)', () => {
+  it('takes a scene map, grid.visible, the calibration fields and feet per square in an update (PRP-03, D-094, LIV-07)', () => {
     const map = 'a'.repeat(64);
     expect(Value.Check(SceneUpdateBodySchema, { map_image_id: map })).toBe(true);
     expect(Value.Check(SceneUpdateBodySchema, { grid: { visible: false } })).toBe(true);
@@ -71,9 +72,17 @@ describe('campaign, session and scene bodies (D-078)', () => {
     expect(Value.Check(SceneUpdateBodySchema, { map_image_id: null })).toBe(false);
     expect(Value.Check(SceneUpdateBodySchema, { map_image_id: 'A'.repeat(64) })).toBe(false);
     expect(Value.Check(SceneUpdateBodySchema, { grid: {} })).toBe(false);
-    // Feet per square is the ruler's (LIV-07); the type is square only; unknown fields are refused.
-    for (const field of ['feet_per_square', 'type', 'colour']) {
+    // The type is square only; unknown fields are refused.
+    for (const field of ['type', 'colour']) {
       expect(Value.Check(SceneUpdateBodySchema, { grid: { visible: true, [field]: 1 } }), field).toBe(false);
+    }
+    // Feet per square scales the ruler (LIV-07): a decimal within its bounds, alone or with the rest.
+    for (const feet of [FEET_PER_SQUARE_BOUNDS.min, 5, 2.5, 10, 5280, FEET_PER_SQUARE_BOUNDS.max]) {
+      expect(Value.Check(SceneUpdateBodySchema, { grid: { feet_per_square: feet } }), String(feet)).toBe(true);
+    }
+    expect(Value.Check(SceneUpdateBodySchema, { grid: { ...calibration, feet_per_square: 10 } })).toBe(true);
+    for (const feet of [0, -5, 0.4, FEET_PER_SQUARE_BOUNDS.max + 1, '5', null]) {
+      expect(Value.Check(SceneUpdateBodySchema, { grid: { feet_per_square: feet } }), String(feet)).toBe(false);
     }
     // A square has a positive size, the extent whole squares, every value a finite bound.
     for (const grid of [
