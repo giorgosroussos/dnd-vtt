@@ -242,7 +242,8 @@ export type TokenRestoreOutcome =
 /**
  * Puts a deleted token back exactly as it was: its id, label, position, visibility and stacking
  * order (LIV-05, undo of `token.delete`, specs/04-live-sync.md §8, D-117). No number is issued, and
- * none is taken back: its label is the one it had. Refused when its scene is gone or not in `scope`,
+ * none is taken back: its label is the one it had, or the asset's current name if it carried the
+ * asset's bare name and the asset was renamed since. Refused when its scene is gone or not in `scope`,
  * or its asset was deleted meanwhile. Each deletion's inverse is taken once, so its id is free; were
  * it not, the primary key would refuse the insert and the transaction roll back.
  */
@@ -257,9 +258,12 @@ export function restoreToken(
     }
     const refused = refusal(db, token.scene_id, scope);
     if (refused) return { outcome: refused };
-    if (db.prepare('SELECT count(*) FROM asset WHERE id = ?').pluck().get(token.asset_id) === 0) {
-      return { outcome: 'asset_not_found' };
-    }
+    const name = db.prepare('SELECT name FROM asset WHERE id = ?').pluck().get(token.asset_id) as string | undefined;
+    if (name === undefined) return { outcome: 'asset_not_found' };
+    // A token that carried its asset's bare name carries the asset's name now: an asset renamed since
+    // renames its bare-named tokens (D-111), and this one would otherwise keep the old name, which
+    // numbering would then take for a label the DM typed (Q-094, LIV-05 review C2).
+    const label = token.label === token.asset.name ? name : token.label;
     db.prepare(
       `INSERT INTO token (id, scene_id, asset_id, label, x, y, hidden, z_order, character_id)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -267,7 +271,7 @@ export function restoreToken(
       token.id,
       token.scene_id,
       token.asset_id,
-      token.label,
+      label,
       token.x,
       token.y,
       token.hidden ? 1 : 0,

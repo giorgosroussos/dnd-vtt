@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { selectScene, viewport } from './canvas-view.js';
+import { nameButton, selectScene, viewport } from './canvas-view.js';
 import { openWorkspace, seedCampaign } from './dm.js';
 import { solidPng } from './png.js';
 import { commandFromPage } from './socket.js';
@@ -22,12 +22,17 @@ interface Drawn {
   y: number;
 }
 
+async function dmTokens(page: Page): Promise<Drawn[]> {
+  const raw = await viewport(page).getAttribute('data-tokens');
+  return raw ? (JSON.parse(raw) as Drawn[]) : [];
+}
+
 async function tvTokens(page: Page): Promise<Drawn[]> {
   const raw = await tvCanvas(page).getAttribute('data-tokens');
   return raw ? (JSON.parse(raw) as Drawn[]) : [];
 }
 
-test('Ctrl+Z in live mode undoes a move, a reveal and a deletion on the TV, and sends nothing in prep mode', async ({
+test('Ctrl+Z in live mode undoes a move, a reveal and a deletion on the TV, and sends nothing while preparing another scene', async ({
   browser,
 }) => {
   const dmContext = await browser.newContext();
@@ -49,6 +54,11 @@ test('Ctrl+Z in live mode undoes a move, a reveal and a deletion on the TV, and 
   const scene = (await (
     await dm.request.post(`/api/sessions/${session!.id}/scenes`, { data: { name: names.scene } })
   ).json()) as { id: string };
+  // A second scene, prepared while the first is live: Ctrl+Z there must not undo the live one.
+  const antechamber = 'Antechamber of doubt';
+  expect((await dm.request.post(`/api/sessions/${session!.id}/scenes`, { data: { name: antechamber } })).ok()).toBe(
+    true,
+  );
   const map = await upload(600, 400, [40, 60, 40]);
   expect(
     (
@@ -102,10 +112,11 @@ test('Ctrl+Z in live mode undoes a move, a reveal and a deletion on the TV, and 
     await tokenBar(dm).getByLabel('Selected token').selectOption({ label: ogreToken.label });
     await viewport(dm).focus();
     await dm.keyboard.press('ArrowRight');
+    await expect(panel(dm).getByRole('status')).toHaveText(`${ogreToken.label} moved to column 4, row 3.`);
     await expect.poll(async () => (await tvTokens(tv)).find((each) => each.id === ogreToken.id)?.x).toBe(3);
     await dm.keyboard.press('Control+z');
     await expect.poll(async () => (await tvTokens(tv)).find((each) => each.id === ogreToken.id)?.x).toBe(2);
-    await expect(panel(dm).getByRole('status')).toHaveText('The last change on the live scene was undone.');
+    await expect(panel(dm).getByRole('status')).toHaveText(`Undone: ${ogreToken.label} moved back to column 3, row 3.`);
 
     // Move the hidden wraith and undo it: nothing of it reaches the TV.
     await tokenBar(dm)
@@ -113,9 +124,15 @@ test('Ctrl+Z in live mode undoes a move, a reveal and a deletion on the TV, and 
       .selectOption({ label: `${wraithToken.label} (hidden)` });
     await viewport(dm).focus();
     await dm.keyboard.press('ArrowDown');
+    // Announced once the server answered: the canvas draws a move before that (D-115).
+    await expect(panel(dm).getByRole('status')).toHaveText(`${wraithToken.label} moved to column 6, row 5.`);
+    expect((await dmTokens(dm)).find((each) => each.id === wraithToken.id)?.y).toBe(4);
     await dm.keyboard.press('Control+z');
-    await expect.poll(undoFrames).toBe(2);
-    await expect(panel(dm).getByRole('status')).toHaveText('The last change on the live scene was undone.');
+    await expect.poll(async () => (await dmTokens(dm)).find((each) => each.id === wraithToken.id)?.y).toBe(3);
+    await expect(panel(dm).getByRole('status')).toHaveText(
+      `Undone: ${wraithToken.label} moved back to column 6, row 4.`,
+    );
+    expect(undoFrames()).toBe(2);
     for (const secret of [wraithToken.id, wraith.id, wraith.image_id, 'Wraith of LIV-05']) {
       expect(frames.join('\n'), secret).not.toContain(secret);
     }
@@ -144,18 +161,31 @@ test('Ctrl+Z in live mode undoes a move, a reveal and a deletion on the TV, and 
       .poll(async () => (await tvTokens(tv)).map(({ id, label, x, y }) => ({ id, label, x, y })))
       .toEqual([{ id: ogreToken.id, label: ogreToken.label, x: 2, y: 2 }]);
 
-    // Blank TV, then Ctrl+Z in prep mode: nothing is sent, and the database keeps the ogre.
-    await liveBar(dm).getByRole('button', { name: 'Blank TV' }).click();
-    await expect(player(tv)).toHaveAttribute('data-scene', 'idle');
+    // Move the ogre again, then Ctrl+Z while preparing the other scene: nothing is sent, and the move
+    // stands. Blank TV is then sent on the same socket, after anything the key presses sent.
+    await tokenBar(dm).getByLabel('Selected token').selectOption({ label: ogreToken.label });
+    await viewport(dm).focus();
+    await dm.keyboard.press('ArrowRight');
+    await expect(panel(dm).getByRole('status')).toHaveText(`${ogreToken.label} moved to column 4, row 3.`);
+    await expect.poll(async () => (await tvTokens(tv)).find((each) => each.id === ogreToken.id)?.x).toBe(3);
+    await nameButton(dm, antechamber).click();
+    await expect(dm.getByRole('heading', { level: 1 })).toHaveText(antechamber);
     await expect(panel(dm)).toHaveAttribute('data-mode', 'prep');
-    const before = undoFrames();
+    const from = sent.length;
     await viewport(dm).focus();
     await dm.keyboard.press('Control+z');
     await dm.keyboard.press('Control+z');
-    // Round trip a request so that anything the key presses sent has been sent.
-    const tokens = (await (await dm.request.get(`/api/scenes/${scene.id}/tokens`)).json()) as { id: string }[];
-    expect(tokens.map((each) => each.id).sort()).toEqual([ogreToken.id, wraithToken.id].sort());
-    expect(undoFrames()).toBe(before);
+    await liveBar(dm).getByRole('button', { name: 'Blank TV' }).click();
+    await expect(player(tv)).toHaveAttribute('data-scene', 'idle');
+    await expect.poll(() => sent.slice(from).some((frame) => frame.includes('"scene.deactivate"'))).toBe(true);
+    const after = sent.slice(from);
+    const blank = after.findIndex((frame) => frame.includes('"scene.deactivate"'));
+    expect(after.slice(0, blank).filter((frame) => frame.includes('"undo"'))).toEqual([]);
+    const tokens = (await (await dm.request.get(`/api/scenes/${scene.id}/tokens`)).json()) as {
+      id: string;
+      x: number;
+    }[];
+    expect(tokens.find((each) => each.id === ogreToken.id)?.x).toBe(3);
   } finally {
     await commandFromPage(dm, 'scene.deactivate', {}).catch(() => undefined);
     await dmContext.close();

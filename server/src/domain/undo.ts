@@ -31,7 +31,8 @@ export const UNDO_LIMIT = 100;
 
 /**
  * The inverse of an applied command, from what it changed; undefined when there is nothing to undo:
- * a command that is not undoable, or one that changed nothing (hiding a hidden token), which would
+ * a command that is not undoable, or one that changed nothing (hiding a hidden token, moving a token
+ * to where it was), which would
  * otherwise make the next Ctrl+Z do nothing visible.
  */
 export function inverseOf(command: CommandEnvelope, effects: readonly LiveEffect[]): Inverse | undefined {
@@ -43,7 +44,9 @@ export function inverseOf(command: CommandEnvelope, effects: readonly LiveEffect
         ? { type: 'token.delete', payload: { token_id: effect.token.id } }
         : undefined;
     case 'token.move':
-      return effect.type === 'token.updated'
+      // A drop back where the token was (a drag that snapped to its own square) moved nothing.
+      return effect.type === 'token.updated' &&
+        (effect.before.x !== effect.token.x || effect.before.y !== effect.token.y)
         ? { type: 'token.move', payload: { token_id: effect.token.id, x: effect.before.x, y: effect.before.y } }
         : undefined;
     case 'token.setVisibility':

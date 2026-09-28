@@ -81,6 +81,10 @@ describe('the inverse of each undoable command (specs/04-live-sync.md §8)', () 
   });
 
   it('has nothing to undo for a command that changed nothing, or one that is not undoable', () => {
+    const still = token();
+    expect(
+      inverseOf(command('token.move'), [{ type: 'token.updated', before: still, token: { ...still }, relabelled: [] }]),
+    ).toBeUndefined();
     expect(inverseOf(command('token.setVisibility'), [])).toBeUndefined();
     expect(inverseOf(command('scene.activate'), [{ type: 'activated' }])).toBeUndefined();
     expect(inverseOf(command('scene.deactivate'), [{ type: 'cleared' }])).toBeUndefined();
@@ -228,6 +232,36 @@ describe('undo with the live commands, against a real SQLite file (specs/04-live
     effects(undo());
     expect(live.history.size).toBe(0);
     expect(effects(undo())).toEqual([]);
+  });
+
+  it('records nothing for a drop back where the token was, so Ctrl+Z undoes the move before it (review C1)', () => {
+    const placed = add(goblin, 1, 1);
+    effects(live.apply(command('token.move', { token_id: placed.id, x: 4, y: 4 })));
+    const size = live.history.size;
+    effects(live.apply(command('token.move', { token_id: placed.id, x: 4, y: 4 })));
+    expect(live.history.size).toBe(size);
+    expect(effects(undo())[0]).toMatchObject({ type: 'token.updated', token: { id: placed.id, x: 1, y: 1 } });
+  });
+
+  it("restores a bare-named token with its asset's current name when the asset was renamed since (review C2)", async () => {
+    const hidden = add(lurker);
+    const numbered = [add(goblin, 1, 1), add(goblin, 2, 2)][1]!;
+    expect(hidden.label).toBe('Lurker');
+    expect(numbered.label).toBe('Goblin 2');
+    effects(live.apply(command('token.delete', { token_id: hidden.id })));
+    effects(live.apply(command('token.delete', { token_id: numbered.id })));
+    for (const [asset, name] of [
+      [lurker, 'Shade'],
+      [goblin, 'Hobgoblin'],
+    ] as const) {
+      ok(await h.inject({ method: 'PATCH', url: `/api/assets/${asset.id}`, payload: { name } }));
+    }
+    // A numbered label was shown to players and stays; a bare name follows the asset (D-111, Q-094).
+    expect(effects(undo())[0]).toMatchObject({ type: 'token.added', token: { id: numbered.id, label: 'Goblin 2' } });
+    expect(effects(undo())[0]).toMatchObject({ type: 'token.added', token: { id: hidden.id, label: 'Shade' } });
+    // Revealed, it is numbered as a first showing, being the bare name of its asset (Q-092).
+    const [revealed] = effects(live.apply(command('token.setVisibility', { token_id: hidden.id, hidden: false })));
+    expect((revealed as { token: SceneToken }).token.label).toBe('Shade');
   });
 
   it('records nothing for a refused command', () => {

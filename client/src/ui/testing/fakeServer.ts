@@ -121,6 +121,8 @@ export class FakeServer {
    * inverse of each token command that changed something, emptied when the live scene changes.
    */
   private undoHistory: (CommandEnvelope | { type: 'restore'; token: SceneToken })[] = [];
+  /** The live scene the undo history belongs to; a history used with another scene live is emptied. */
+  private undoScene: string | null = null;
   before: Interceptor | undefined;
   private restore: (() => void) | undefined;
 
@@ -377,29 +379,42 @@ export class FakeServer {
       const p = envelope.payload;
       const was = before.get(String(p.token_id));
       const added = this.sceneTokens.find((token) => !before.has(token.id));
+      const now = this.sceneTokens.find((token) => token.id === was?.id);
+      const moved = was !== undefined && now !== undefined && (now.x !== was.x || now.y !== was.y);
       const inverse =
         envelope.type === 'token.add' && added
           ? { type: 'token.delete' as const, payload: { token_id: added.id } }
-          : envelope.type === 'token.move' && was
+          : envelope.type === 'token.move' && was && moved
             ? { type: 'token.move' as const, payload: { token_id: was.id, x: was.x, y: was.y } }
             : envelope.type === 'token.setVisibility' && was
               ? { type: 'token.setVisibility' as const, payload: { token_id: was.id, hidden: was.hidden } }
               : envelope.type === 'token.delete' && was
                 ? { type: 'restore' as const, token: was }
                 : undefined;
-      if (inverse) this.undoHistory.push(inverse);
+      if (inverse && live !== null) {
+        if (this.undoScene !== live) this.undoHistory = [];
+        this.undoScene = live;
+        this.undoHistory.push(inverse);
+        if (this.undoHistory.length > 100) this.undoHistory.shift();
+      }
     }
     return ack;
   }
 
   /** Applies the most recent inverse as the command it is; a reveal keeps the label (D-117). */
   private undo(): CommandAck {
+    // As the server's history: it belongs to one live scene, and the live scene deleted or replaced
+    // since leaves nothing to undo (D-117).
+    if (this.undoScene !== this.liveSceneId) this.undoHistory = [];
     const inverse = this.undoHistory.pop();
     if (!inverse) return { ok: true };
     if (inverse.type === 'restore') {
-      if (inverse.token.scene_id !== this.liveSceneId) return { error: { code: 'scene_not_live', message: 'test' } };
-      this.sceneTokens.push(structuredClone(inverse.token));
-      this.deliver('token.added', { token: this.withAsset(inverse.token), relabelled: [] });
+      const asset = this.assets.find((each) => each.id === inverse.token.asset_id);
+      if (!asset) return { error: { code: 'reference_not_found', message: 'test' } };
+      const label = inverse.token.label === inverse.token.asset.name ? asset.name : inverse.token.label;
+      const token = { ...structuredClone(inverse.token), label };
+      this.sceneTokens.push(token);
+      this.deliver('token.added', { token: this.withAsset(token), relabelled: [] });
       return { ok: true };
     }
     const token = this.sceneTokens.find((each) => each.id === inverse.payload.token_id);

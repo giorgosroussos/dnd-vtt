@@ -196,6 +196,21 @@ describe('undo over the wire (specs/04-live-sync.md §8, D-040)', () => {
   it('keeps both rooms’ copies, built from the events alone, equal to a fresh snapshot through a run of undos', async () => {
     const w = await world();
     let player: PlayerState = applyPlayerEvent({ version: 0, scene: null }, (await requestSnapshot(w.tv))!);
+    // The DM's copy, kept as the DM view keeps it: a token event replaces its token and the ones it
+    // renamed, a removal drops it.
+    const dm = new Map(
+      ((await requestSnapshot(w.dm))!.payload as DmSnapshot).scene!.tokens.map((token) => [token.id, token]),
+    );
+    const applyDm = (events: EventEnvelope[]) => {
+      for (const event of events) {
+        if (event.type === 'token.removed') dm.delete((event.payload as { id: string }).id);
+        else if (event.type === 'token.added' || event.type === 'token.updated') {
+          const { token, relabelled } = event.payload as TokenChange;
+          for (const each of [token, ...relabelled]) dm.set(each.id, each);
+        } else throw new Error(`unexpected ${event.type}`);
+      }
+    };
+    const byId = (tokens: Iterable<SceneToken>) => [...tokens].sort((a, b) => a.id.localeCompare(b.id));
     const commands: [string, object][] = [
       ['token.add', { scene_id: w.sceneA.id, asset_id: w.lurker.id, x: 2, y: 2 }],
       ['token.add', { scene_id: w.sceneA.id, asset_id: w.goblin.id, x: 3, y: 3 }],
@@ -204,16 +219,36 @@ describe('undo over the wire (specs/04-live-sync.md §8, D-040)', () => {
       ['token.delete', { token_id: w.first.id }],
     ];
     for (const [type, payload] of commands) {
-      for (const event of (await step(w, type, payload)).tv) player = applyPlayerEvent(player, event);
+      const events = await step(w, type, payload);
+      applyDm(events.dm);
+      for (const event of events.tv) player = applyPlayerEvent(player, event);
     }
     for (let n = 0; n < commands.length; n++) {
-      for (const event of (await undo(w)).tv) player = applyPlayerEvent(player, event);
+      const events = await undo(w);
+      expect(events.dm, `undo ${n + 1}`).toHaveLength(1);
+      applyDm(events.dm);
+      for (const event of events.tv) player = applyPlayerEvent(player, event);
       const fresh = (await requestSnapshot(w.tv))!.payload as PlayerSnapshot;
       expect(player.scene).toEqual(fresh.scene);
       const dmFresh = (await requestSnapshot(w.dm))!.payload as DmSnapshot;
-      expect(dmFresh.scene?.tokens.every((token) => token.scene_id === w.sceneA.id)).toBe(true);
+      expect(byId(dm.values())).toEqual(byId(dmFresh.scene!.tokens));
     }
     expect(player.scene?.tokens.map((token) => token.id)).toEqual([w.first.id]);
+  });
+
+  it('refuses an invalid undo payload in the envelope, and leaves the history to the next valid undo', async () => {
+    const w = await world();
+    await step(w, 'token.move', { token_id: w.first.id, x: 4, y: 4 });
+    const before = dump();
+    for (const payload of [{ steps: 1 }, { token_id: w.first.id }, null, 'undo']) {
+      const ack = (await h.command(w.dm, 'undo', payload)) as ErrorEnvelope;
+      expect(ack.error.code, JSON.stringify(payload)).toBe('validation_failed');
+    }
+    expect(dump()).toEqual(before);
+    expect(await w.dm.settle()).toEqual([]);
+    expect(await w.tv.settle()).toEqual([]);
+    await undo(w);
+    expect(h.data.db.prepare('SELECT x, y FROM token WHERE id = ?').get(w.first.id)).toEqual({ x: 1, y: 1 });
   });
 
   it('is shared by every DM browser: one undoes the other’s most recent command', async () => {
