@@ -22,6 +22,7 @@ import { CalibrationPanel } from './calibration/CalibrationPanel.js';
 import { CornerMagnifier } from './calibration/CornerMagnifier.js';
 import { startDraft, withRect, type Draft } from './calibration/draft.js';
 import { megabytes } from './library/labels.js';
+import type { DmScene } from './live/dmScene.js';
 import type { DmLive } from './live/useDmLive.js';
 import { entityPath } from './tree/paths.js';
 import { DeleteTokenDialog, RenameDialog, TokenBar } from './tokens/TokenBar.js';
@@ -61,6 +62,13 @@ import { toCanvasToken, useSceneTokens } from './tokens/useSceneTokens.js';
 // (map, players' grid, calibration) is still saved over REST in live mode (Q-015), and the server
 // pushes it to both rooms as a fresh snapshot (specs/04-live-sync.md §10).
 //
+// Undo (LIV-05, specs/04-live-sync.md §8, specs/08-ux-journeys.md §3, D-040, D-117): in live mode,
+// Ctrl+Z (Cmd+Z on a Mac) anywhere in the DM view sends `undo`; the server applies the most recent
+// inverse, and its events bring this canvas and the TV in step. A text field keeps its own undo and an
+// open dialog takes none; in prep mode, while calibrating and while not connected nothing is sent, and
+// a held or repeated Ctrl+Z waits for the answer to the first. The status line names what the undo's
+// events changed before its acknowledgement (D-111), or says that nothing was left (D-118).
+//
 // The workspace keys this panel by scene: a request still running when another scene is
 // selected ends in a panel that is gone, so its answer changes nothing on screen. One change
 // runs at a time; while it does, the controls stay focusable but refuse, so keyboard focus
@@ -70,6 +78,49 @@ const ACCEPT = 'image/png,image/jpeg,image/webp';
 const imagePath = (id: string): string => API_IMAGE_PATHS.image.replace(':id', id);
 // Refusals of the file itself are shown beside the field (D-069); anything else above.
 const FILE_REFUSALS = new Set(['unsupported_media_type', 'payload_too_large']);
+
+// Fields whose own Ctrl+Z undoes typing, which the live scene's undo must leave alone.
+const TEXT_INPUTS = new Set(['', 'text', 'search', 'number', 'email', 'url', 'tel', 'password']);
+const typesText = (target: EventTarget | null): boolean =>
+  target instanceof HTMLElement &&
+  (target.isContentEditable ||
+    target instanceof HTMLTextAreaElement ||
+    (target instanceof HTMLInputElement && TEXT_INPUTS.has(target.type)));
+
+// An undo refused because its change no longer applies: it was dropped, and the next Ctrl+Z undoes
+// the change before it (D-117). Reloading would not help, so the reason says so (review U4).
+const STALE_UNDO = new Set(['not_found', 'reference_not_found', 'scene_not_live']);
+
+/** What an undo changed on the live scene, named as the other token announcements are (review U2). */
+function undoneMessage(before: DmScene | undefined, after: DmScene | undefined): string {
+  if (after === before) return t('scene.nothingToUndo');
+  const was = new Map((before?.tokens ?? []).map((token) => [token.id, token]));
+  const now = new Map((after?.tokens ?? []).map((token) => [token.id, token]));
+  for (const [id, token] of was) if (!now.has(id)) return t('scene.undoneRemoved', { label: token.label });
+  for (const [id, token] of now) {
+    const old = was.get(id);
+    const label = token.label;
+    if (!old) return t(token.hidden ? 'scene.undoneRestoredHidden' : 'scene.undoneRestored', { label });
+    if (old.hidden !== token.hidden) return t(token.hidden ? 'scene.undoneHidden' : 'scene.undoneShown', { label });
+    if (old.x !== token.x || old.y !== token.y) {
+      return t('scene.undoneMoved', { label, column: formatDecimal(token.x + 1), row: formatDecimal(token.y + 1) });
+    }
+  }
+  return t('scene.undone');
+}
+
+/**
+ * Ctrl+Z or Cmd+Z, without Shift (redo, elsewhere) or Alt. The letter is read from `key`, so that an
+ * AZERTY keyboard's Z counts; a layout whose letters are not Latin (Greek, Cyrillic) answers by the
+ * key's place, `KeyZ`.
+ */
+export function isUndoKey(
+  event: Pick<KeyboardEvent, 'key' | 'code' | 'ctrlKey' | 'metaKey' | 'shiftKey' | 'altKey'>,
+): boolean {
+  if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return false;
+  const key = event.key.toLowerCase();
+  return key === 'z' || (!/^[a-z]$/.test(key) && event.code === 'KeyZ');
+}
 
 export function ScenePanel({
   sceneId,
@@ -104,7 +155,9 @@ export function ScenePanel({
   const [progress, setProgress] = useState<number>();
   // The value being saved, shown at once; the server's answer replaces it, a refusal drops it.
   const [savingGrid, setSavingGrid] = useState<boolean>();
-  const [status, setStatus] = useState<'attached' | 'calibrated' | { message: string }>();
+  const [status, setStatus] = useState<'attached' | 'calibrated' | { message: string; n: number }>();
+  // Each announcement is a new node, so a message equal to the last one is still read out (review U1).
+  const announced = useRef(0);
   const [mapFailedFor, setMapFailedFor] = useState<string>();
   const [draft, setDraft] = useState<Draft>();
   const [savingCalibration, setSavingCalibration] = useState(false);
@@ -338,7 +391,7 @@ export function ScenePanel({
     }
   }
 
-  const announce = (message: string) => setStatus({ message });
+  const announce = (message: string) => setStatus({ message, n: ++announced.current });
 
   async function changeToken(token: SceneToken, body: TokenUpdateBody, done: (updated: SceneToken) => string) {
     if (isLive) return changeLive(token, body, done);
@@ -365,6 +418,49 @@ export function ScenePanel({
     const updated = live?.current()?.tokens.find((each) => each.id === token.id);
     if (ok && updated) announce(done(updated));
   }
+
+  // One undo at a time: Ctrl+Z pressed again, or held down, before the server answers is ignored,
+  // so a held key never unwinds the live scene one change after another (LIV-05 review U5).
+  const undoing = useRef(false);
+
+  async function undoLast() {
+    // While calibrating, Ctrl+Z is not the token history's: nothing is sent (review U6).
+    if (draft || undoing.current) return;
+    setLiveFailure(undefined);
+    // Not connected: nothing is sent, and the head already says why (D-116, review U3).
+    if (offline || !live) return announce(t('scene.undoOffline'));
+    undoing.current = true;
+    // Cleared first, so the answer is a new message even when it reads as the last one (review U11).
+    setStatus(undefined);
+    const before = live.current();
+    const outcome = await live.command('undo', {});
+    undoing.current = false;
+    if (!outcome.ok) {
+      setLiveFailure(
+        STALE_UNDO.has(outcome.code)
+          ? t('scene.undoStale')
+          : t('scene.undoFailed', { reason: errorMessage(outcome.code) }),
+      );
+      return;
+    }
+    // The undo's own events arrived before its acknowledgement (D-111): none means nothing was left.
+    announce(undoneMessage(before, live.current()));
+  }
+
+  // Ctrl+Z in live mode, wherever focus is in the DM view but a text field or a dialog.
+  const undoKey = useRef<() => void>(undefined);
+  undoKey.current = () => void undoLast();
+  useEffect(() => {
+    if (!isLive) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || !isUndoKey(event) || typesText(event.target)) return;
+      if (document.querySelector('dialog[open]')) return;
+      event.preventDefault();
+      if (!event.repeat) undoKey.current?.();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [isLive]);
 
   // Moves are announced too, since the canvas says nothing to assistive technology (review).
   const moved = (updated: SceneToken) =>
@@ -475,7 +571,7 @@ export function ScenePanel({
           ) : status === 'calibrated' ? (
             <span>{t('calibration.saved')}</span>
           ) : typeof status === 'object' ? (
-            <span>{status.message}</span>
+            <span key={status.n}>{status.message}</span>
           ) : null}
         </div>
       </div>

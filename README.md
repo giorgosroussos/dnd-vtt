@@ -34,7 +34,6 @@ GitHub Actions, `.github/workflows/ci.yml` (FND-02, `specs/13-implementation-pla
 | `check-docs · linux`, `check-docs · windows` | both | `make check-docs` |
 | `audit · linux`, `audit · windows` | both | `make audit` |
 | `scan-secrets · linux`, `scan-secrets · windows` | both | `make scan-secrets` |
-| `tripwire · hidden-information (absent)` | `ubuntu-latest` | `make tripwire GATE=hidden-information` |
 | `tripwire · offline-e2e (absent)` | `ubuntu-latest` | `make tripwire GATE=offline-e2e` |
 | `tripwire · external-url-build (absent)` | `ubuntu-latest` | `make tripwire GATE=external-url-build` |
 

@@ -134,9 +134,17 @@ describe('live command and event payloads (specs/04-live-sync.md §2, §3, §4, 
   };
   const id = '00000000-0000-4000-8000-000000000001';
 
-  it('defines a payload for the commands LIV-02 implements and no other', () => {
+  it('defines a payload for the commands LIV-02 and LIV-05 implement and no other', () => {
     expect(Object.keys(LIVE_COMMAND_PAYLOAD_SCHEMAS).sort()).toEqual(
-      ['scene.activate', 'scene.deactivate', 'token.add', 'token.delete', 'token.move', 'token.setVisibility'].sort(),
+      [
+        'scene.activate',
+        'scene.deactivate',
+        'token.add',
+        'token.delete',
+        'token.move',
+        'token.setVisibility',
+        'undo',
+      ].sort(),
     );
     for (const type of Object.keys(LIVE_COMMAND_PAYLOAD_SCHEMAS)) expect(COMMAND_TYPES).toContain(type);
   });
@@ -164,6 +172,14 @@ describe('live command and event payloads (specs/04-live-sync.md §2, §3, §4, 
     expect(Value.Check(LIVE_COMMAND_PAYLOAD_SCHEMAS['token.move'], { token_id: id, x: 1, y: 1, label: 'x' })).toBe(
       false,
     );
+  });
+
+  it("lets undo name nothing: the inverse is the server's, never the client's (D-040)", () => {
+    const undo = LIVE_COMMAND_PAYLOAD_SCHEMAS.undo;
+    expect(Value.Check(undo, {})).toBe(true);
+    for (const extra of [{ token_id: id }, { steps: 2 }, { inverse: { type: 'token.delete' } }]) {
+      expect(Value.Check(undo, extra), JSON.stringify(extra)).toBe(false);
+    }
   });
 
   it('gives players tokens of the player shape only, and the id alone on removal, whether hidden or deleted', () => {

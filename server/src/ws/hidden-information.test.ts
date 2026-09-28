@@ -9,15 +9,17 @@ import {
 } from '@emberglass/shared';
 import { applyPlayerEvent, startLive, type LiveHarness, type PlayerState } from './testing/harness.js';
 
-// The recorded-traffic test of specs/10-testing-acceptance.md §3 (Q-067, D-042), as far as LIV-02
-// reaches: everything a player socket receives, every message and every image response, across a
-// scripted session of adding hidden tokens, revealing, hiding, moving, deleting, activating another
-// scene, reconnecting, and, since LIV-04, editing the live scene's setup and assets over REST and
-// deleting the live scene. It asserts that no hidden token's id, asset, image or name appears, and
-// that the count of hidden tokens cannot be learnt either: the whole recording is identical, byte
-// for byte once identifiers are numbered by first appearance, to the recording of the same session
-// without any of the hidden-only steps. Undo joins the script with LIV-05, which then marks it as that gate
-// (the hidden-information gate of the tripwires; specs/04-live-sync.md §4, specs/07-security-and-access.md §5).
+// The recorded-traffic test of specs/10-testing-acceptance.md §3 (Q-067, D-042), and the gate of the
+// same name: everything a player socket receives, every message and every image response, across a
+// scripted session of adding hidden tokens, revealing, hiding, moving, deleting, undoing each of those,
+// a hidden token's included (LIV-05), activating another scene, reconnecting, and, since LIV-04, editing
+// the live scene's setup and assets over REST and deleting the live scene. It asserts that no hidden
+// token's id, asset, image or name appears, and that the count of hidden tokens cannot be learnt
+// either: the whole recording is identical, byte for byte once identifiers are numbered by first
+// appearance, to the recording of the same session without any of the hidden-only steps
+// (specs/04-live-sync.md §4, specs/07-security-and-access.md §5, D-110, D-117). Undo takes back the most
+// recent command, so an undo whose command was hidden-only is itself a hidden-only step: in the session
+// without hidden tokens neither happens, and every other undo takes back the same visible command in both.
 
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 60_000 });
 
@@ -156,6 +158,19 @@ async function record(hidden: boolean): Promise<Recording> {
   await step('delete a hidden kobold', () => send('token.delete', { token_id: extraKobold!.id }), true);
   await step('delete a visible goblin', () => send('token.delete', { token_id: secondGoblin }));
   await step('reveal the goblin again', () => send('token.setVisibility', { token_id: firstGoblin.id, hidden: false }));
+  // Undo (LIV-05, specs/04-live-sync.md §8): the history above, taken back from the most recent command.
+  const undo = () => send('undo', {});
+  await step('undo the reveal of the goblin', undo);
+  await step('undo the delete of a visible goblin', undo);
+  await step('undo the delete of a hidden kobold', undo, true);
+  await step('undo the hide of a goblin', undo);
+  await step('undo the move of a visible goblin', undo);
+  await step('undo the add of a hidden kobold', undo, true);
+  await step('undo the reveal of the kobold', undo);
+  await step('undo the move of the hidden lurker', undo, true);
+  await step('undo the add of a visible goblin', undo);
+  await step('undo the add of a hidden lurker', undo, true);
+  await step('undo with nothing left to undo', undo);
   await step('activate B', () => send('scene.activate', { scene_id: sceneB.id }));
   await step('rename the kobold asset, now visible by default', async () => {
     const response = await live.inject({
@@ -175,6 +190,15 @@ async function record(hidden: boolean): Promise<Recording> {
     },
     true,
   );
+  await step(
+    'undo the delete and the add of the hidden lurker on B',
+    async () => {
+      await undo();
+      await undo();
+    },
+    true,
+  );
+  await step('undo the add of a visible wight', undo);
   await step('reconnect', async () => {
     tv.socket.disconnect();
     // Back as the player view of the DM's own laptop: the DM cookie with the player view's hint
@@ -230,7 +254,7 @@ function normalise(recording: Recording['steps']): string {
 }
 
 describe('what a player view receives across a live session (specs/10-testing-acceptance.md §3, specs/04-live-sync.md §4)', () => {
-  it('records every message and image response a player socket receives and finds no hidden token, id, asset, image, name or count in it', async () => {
+  it('@gate:hidden-information records every message and image response a player socket receives and finds no hidden token, id, asset, image, name or count in it', async () => {
     const withHidden = await record(true);
     await h!.close();
     h = undefined;

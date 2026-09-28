@@ -465,3 +465,250 @@ describe('a DM view demoted to players (G-027, review M1)', () => {
     expect(drawn().sort()).toEqual(['Goblin', 'Lurker']);
   });
 });
+
+describe('Ctrl+Z in live mode undoes the last change on the live scene (04 §8, 08 §3, LIV-05)', () => {
+  function undoKey(target: EventTarget, init: KeyboardEventInit = {}) {
+    act(() => {
+      target.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'z',
+          code: 'KeyZ',
+          ctrlKey: true,
+          bubbles: true,
+          cancelable: true,
+          ...init,
+        }),
+      );
+    });
+  }
+  const tokenAt = (view: HTMLElement, id: string) =>
+    (JSON.parse(viewport(view).dataset.tokens ?? '[]') as { id: string; x: number; y: number }[]).find(
+      (each) => each.id === id,
+    );
+  const status = (view: HTMLElement) => view.querySelector('[role="status"].eg-scene__progress')?.textContent;
+  const undos = () => commands().filter((command) => command.type === 'undo');
+
+  it('sends undo, and the canvas follows the events it brings; with nothing left it says so', async () => {
+    server.liveSceneId = cave.id;
+    const view = await open();
+    await selectScene(view, cave);
+    await selectToken(view, caveGoblin.id);
+    press(viewport(view), 'ArrowRight');
+    await settle();
+    expect(tokenAt(view, caveGoblin.id)).toMatchObject({ x: 3, y: 2 });
+
+    undoKey(viewport(view));
+    await settle();
+    expect(commands().at(-1)).toEqual({ type: 'undo', payload: {} });
+    expect(tokenAt(view, caveGoblin.id)).toMatchObject({ x: 2, y: 2 });
+    expect(server.sceneTokens.find((each) => each.id === caveGoblin.id)).toMatchObject({ x: 2, y: 2 });
+    expect(status(view)).toBe(t('scene.undoneMoved', { label: 'Goblin', column: '3', row: '3' }));
+
+    undoKey(viewport(view));
+    await settle();
+    expect(undos()).toHaveLength(2);
+    expect(status(view)).toBe(t('scene.nothingToUndo'));
+    expect(tokenWrites()).toEqual([]);
+  });
+
+  it('undoes a delete and a hide from anywhere in the DM view, by Cmd+Z too, and on a Greek keyboard', async () => {
+    server.liveSceneId = cave.id;
+    const view = await open();
+    await selectScene(view, cave);
+    await selectToken(view, caveGoblin.id);
+    await click(button(bar(view), t('tokens.hide')));
+    await click(button(bar(view), t('tokens.delete')));
+    await click(button(picker(), t('tokens.deleteDialog.confirm')));
+    expect(drawn()).not.toContain('Goblin');
+
+    // Focus on the token bar's Add button, not the canvas; Cmd+Z as on a Mac.
+    undoKey(button(bar(view), t('tokens.add'))!, { ctrlKey: false, metaKey: true });
+    await settle();
+    expect(drawn()).toContain('Goblin');
+    expect(server.sceneTokens.find((each) => each.id === caveGoblin.id)).toMatchObject({ hidden: true });
+
+    // A Greek layout reports ζ for the Z key.
+    undoKey(document.body, { key: 'ζ' });
+    await settle();
+    expect(server.sceneTokens.find((each) => each.id === caveGoblin.id)).toMatchObject({ hidden: false });
+    expect(undos()).toHaveLength(2);
+  });
+
+  it('sends nothing in prep mode', async () => {
+    const view = await open();
+    await selectScene(view, cave);
+    expect(mode(view)).toBe('prep');
+    await selectToken(view, caveGoblin.id);
+    undoKey(viewport(view));
+    undoKey(document.body);
+    await settle();
+    expect(commands()).toEqual([]);
+  });
+
+  it('leaves a text field its own undo, and sends nothing with Shift or Alt, or while a dialog is open', async () => {
+    server.liveSceneId = cave.id;
+    const view = await open();
+    await selectScene(view, cave);
+    const field = document.createElement('input');
+    field.type = 'text';
+    view.appendChild(field);
+    undoKey(field);
+    undoKey(viewport(view), { shiftKey: true });
+    undoKey(viewport(view), { altKey: true });
+    undoKey(viewport(view), { key: 'y' });
+    await selectToken(view, caveGoblin.id);
+    await click(button(bar(view), t('tokens.delete')));
+    undoKey(picker());
+    await settle();
+    expect(undos()).toEqual([]);
+  });
+
+  it('says why an undo was refused: a change that no longer applies was skipped, anything else with its reason', async () => {
+    server.liveSceneId = cave.id;
+    const view = await open();
+    await selectScene(view, cave);
+    for (const code of ['not_found', 'reference_not_found', 'scene_not_live'] as const) {
+      server.beforeCommand = (command) => (command.type === 'undo' ? { error: { code, message: 'test' } } : undefined);
+      undoKey(viewport(view));
+      await settle();
+      expect(view.querySelector('[role="alert"]')?.textContent, code).toBe(t('scene.undoStale'));
+    }
+    server.beforeCommand = (command) =>
+      command.type === 'undo' ? { error: { code: 'internal_error', message: 'test' } } : undefined;
+    undoKey(viewport(view));
+    await settle();
+    expect(view.querySelector('[role="alert"]')?.textContent).toBe(
+      t('scene.undoFailed', { reason: t('error.code.internal_error') }),
+    );
+  });
+
+  it('names what each undo changed: a token removed, back, back hidden, hidden again or shown again (review U2)', async () => {
+    server.liveSceneId = cave.id;
+    const view = await open();
+    await selectScene(view, cave);
+    const undone = async () => {
+      undoKey(viewport(view));
+      await settle();
+      return status(view);
+    };
+    await selectToken(view, caveGoblin.id);
+    await click(button(bar(view), t('tokens.hide')));
+    await selectToken(view, caveLurker.id);
+    await click(button(bar(view), t('tokens.delete')));
+    await click(button(picker(), t('tokens.deleteDialog.confirm')));
+    await click(button(view, t('tokens.add')));
+    await click(button(picker(), t('tokens.picker.chooseOf', { name: 'Goblin' })));
+    press(viewport(view), 'Enter');
+    await settle();
+    const placed = server.sceneTokens.at(-1)!;
+    expect(await undone()).toBe(t('scene.undoneRemoved', { label: placed.label }));
+    expect(await undone()).toBe(t('scene.undoneRestoredHidden', { label: 'Lurker' }));
+    expect(await undone()).toBe(t('scene.undoneShown', { label: 'Goblin' }));
+    await selectToken(view, caveGoblin.id);
+    await click(button(bar(view), t('tokens.hide')));
+    await click(button(bar(view), t('tokens.reveal')));
+    // An ordinary reveal numbers the bare-named goblin (Q-096); undoing it hides it under that label.
+    const label = server.sceneTokens.find((each) => each.id === caveGoblin.id)!.label;
+    expect(await undone()).toBe(t('scene.undoneHidden', { label }));
+  });
+
+  it('sends one undo at a time: a second Ctrl+Z before the answer, and a held key, send nothing (review U5)', async () => {
+    server.liveSceneId = cave.id;
+    const view = await open();
+    await selectScene(view, cave);
+    await selectToken(view, caveGoblin.id);
+    press(viewport(view), 'ArrowRight');
+    await settle();
+    expect(status(view)).toContain('Goblin');
+    let answer: (ack: CommandAck) => void = () => {};
+    server.beforeCommand = (command) =>
+      command.type === 'undo' ? new Promise<undefined>((resolve) => (answer = () => resolve(undefined))) : undefined;
+    undoKey(viewport(view));
+    undoKey(viewport(view));
+    undoKey(viewport(view), { repeat: true });
+    await settle();
+    expect(undos()).toHaveLength(1);
+    // While it waits, the move's announcement is no longer shown as if it were the answer (review U11).
+    expect(status(view)).toBe('');
+    answer({ ok: true });
+    await settle();
+    expect(tokenAt(view, caveGoblin.id)).toMatchObject({ x: 2, y: 2 });
+    server.beforeCommand = undefined;
+    // A held key repeats: only its first press counts, and it sends nothing more once answered.
+    undoKey(viewport(view), { repeat: true });
+    await settle();
+    expect(undos()).toHaveLength(1);
+    undoKey(viewport(view));
+    await settle();
+    expect(undos()).toHaveLength(2);
+    expect(status(view)).toBe(t('scene.nothingToUndo'));
+  });
+
+  it('announces a repeated answer again, as a new node of the status line (review U1)', async () => {
+    server.liveSceneId = cave.id;
+    const view = await open();
+    await selectScene(view, cave);
+    const node = () => view.querySelector('[role="status"].eg-scene__progress span');
+    undoKey(viewport(view));
+    await settle();
+    const first = node();
+    expect(first?.textContent).toBe(t('scene.nothingToUndo'));
+    undoKey(viewport(view));
+    await settle();
+    expect(node()?.textContent).toBe(t('scene.nothingToUndo'));
+    expect(node()).not.toBe(first);
+  });
+
+  it('sends nothing while not connected, and says so without an alert (review U3)', async () => {
+    server.liveSceneId = cave.id;
+    const view = await open();
+    await selectScene(view, cave);
+    act(() => server.sockets[0]!.drop());
+    await settle();
+    undoKey(viewport(view));
+    await settle();
+    expect(undos()).toEqual([]);
+    expect(status(view)).toBe(t('scene.undoOffline'));
+    expect(view.querySelector('.eg-scene [role="alert"]')).toBeNull();
+    // Pressed again, the same words are a new node, read out again (review U1).
+    const node = () => view.querySelector('[role="status"].eg-scene__progress span');
+    const first = node();
+    undoKey(viewport(view));
+    await settle();
+    expect(node()?.textContent).toBe(t('scene.undoOffline'));
+    expect(node()).not.toBe(first);
+  });
+
+  it('sends nothing while calibrating the live scene’s grid (review U6)', async () => {
+    server.liveSceneId = cave.id;
+    const view = await open();
+    await selectScene(view, cave);
+    await click(button(view, t('calibration.open')));
+    undoKey(viewport(view));
+    undoKey(document.body);
+    await settle();
+    expect(undos()).toEqual([]);
+  });
+
+  it('has nothing to undo once the live scene was deleted and another went live (review T5)', async () => {
+    server.liveSceneId = cave.id;
+    const view = await open();
+    await selectScene(view, hall);
+    await click(button(view, t('liveBar.showLive')));
+    await selectToken(view, caveGoblin.id);
+    press(viewport(view), 'ArrowRight');
+    await settle();
+    // The live scene deleted over REST from another browser: the server clears it and says so.
+    act(() => {
+      server.liveSceneId = null;
+      server.deliver('scene.cleared', {});
+    });
+    await settle();
+    await selectScene(view, hall);
+    await goLive(view);
+    undoKey(viewport(view));
+    await settle();
+    expect(undos()).toHaveLength(1);
+    expect(status(view)).toBe(t('scene.nothingToUndo'));
+  });
+});

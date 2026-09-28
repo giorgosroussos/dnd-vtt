@@ -147,6 +147,8 @@ describe('payload schemas (specs/04-live-sync.md §2, specs/07-security-and-acce
       ['scene.activate', {}],
       ['scene.activate', { scene_id: w.sceneB.id, role: 'dm' }],
       ['scene.deactivate', { scene_id: w.sceneA.id }],
+      ['undo', { steps: 1 }],
+      ['undo', { token_id: token }],
     ];
     for (const [type, payload] of cases) await refused(dm, type, payload, 'validation_failed');
     expect(dump()).toEqual(before);

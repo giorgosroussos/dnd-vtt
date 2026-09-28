@@ -89,8 +89,8 @@ export function createCommandValidator(payloadSchemas: CommandPayloadSchemas): C
   };
 }
 
-// The live commands of LIV-02 (specs/04-live-sync.md §2); `camera.setPlayer`, the ruler and `undo`
-// stay refused as unsupported until LIV-05 to LIV-07 register theirs.
+// The live commands of LIV-02 and `undo` of LIV-05 (specs/04-live-sync.md §2, §8); `camera.setPlayer`
+// and the ruler stay refused as unsupported until LIV-06 and LIV-07 register theirs.
 export const COMMAND_PAYLOAD_SCHEMAS: CommandPayloadSchemas = { ...LIVE_COMMAND_PAYLOAD_SCHEMAS };
 
 export const validateCommand: CommandValidator = createCommandValidator(COMMAND_PAYLOAD_SCHEMAS);

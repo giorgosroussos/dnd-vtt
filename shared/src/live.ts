@@ -199,7 +199,9 @@ export type SnapshotAck = { ok: true };
 // the scene, and `token.add` is refused when that scene is not the live one, so a placement meant
 // for the scene that was live a moment ago never lands on the one another DM browser just made
 // live. A new token's label and visibility come from the server (specs/05-assets-and-images.md §3,
-// §4, Q-092), as in preparation. `camera.setPlayer`, the ruler and `undo` are LIV-05 to LIV-07's.
+// §4, Q-092), as in preparation. `undo` (LIV-05) carries nothing: the server applies the most recent
+// inverse from its own history (specs/04-live-sync.md §8, D-040). `camera.setPlayer` and the ruler
+// are LIV-06 and LIV-07's.
 
 const Coordinate = TokenCreateBodySchema.properties.x;
 
@@ -212,8 +214,9 @@ export const TokenSetVisibilityPayloadSchema = Type.Object({ token_id: UuidSchem
 export const TokenDeletePayloadSchema = Type.Object({ token_id: UuidSchema }, strict);
 export const SceneActivatePayloadSchema = Type.Object({ scene_id: UuidSchema }, strict);
 export const SceneDeactivatePayloadSchema = Type.Object({}, strict);
+export const UndoPayloadSchema = Type.Object({}, strict);
 
-/** The payload schema of every command LIV-02 implements; the server registers exactly these. */
+/** The payload schema of every live command implemented so far; the server registers exactly these. */
 export const LIVE_COMMAND_PAYLOAD_SCHEMAS = {
   'token.add': TokenAddPayloadSchema,
   'token.move': TokenMovePayloadSchema,
@@ -221,6 +224,7 @@ export const LIVE_COMMAND_PAYLOAD_SCHEMAS = {
   'token.delete': TokenDeletePayloadSchema,
   'scene.activate': SceneActivatePayloadSchema,
   'scene.deactivate': SceneDeactivatePayloadSchema,
+  undo: UndoPayloadSchema,
 } as const satisfies Partial<Record<CommandType, object>>;
 
 export type TokenAddPayload = Static<typeof TokenAddPayloadSchema>;
@@ -229,6 +233,7 @@ export type TokenSetVisibilityPayload = Static<typeof TokenSetVisibilityPayloadS
 export type TokenDeletePayload = Static<typeof TokenDeletePayloadSchema>;
 export type SceneActivatePayload = Static<typeof SceneActivatePayloadSchema>;
 export type SceneDeactivatePayload = Static<typeof SceneDeactivatePayloadSchema>;
+export type UndoPayload = Static<typeof UndoPayloadSchema>;
 
 // What each room's events carry (specs/04-live-sync.md §3, §4; D-049, Q-083, G-023, G-025). One
 // event per room per command, as the table of §3 has it. The DM's token events carry the token in
