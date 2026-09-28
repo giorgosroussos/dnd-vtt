@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { EventEnvelope, Grid, PlayerMap, PlayerSnapshot, PlayerToken } from '@emberglass/shared';
+import {
+  FIT_CAMERA,
+  type EventEnvelope,
+  type Grid,
+  type PlayerMap,
+  type PlayerSnapshot,
+  type PlayerToken,
+} from '@emberglass/shared';
 import { applyPlayerEvent, fromSnapshot, type PlayerScene } from './scene.js';
 
 // The player view's drawn state kept in step from the players' events (LIV-03, specs/04-live-sync.md
@@ -57,7 +64,12 @@ class Server {
   snapshot(): PlayerSnapshot {
     return {
       role: 'players',
-      scene: { map: MAP, grid: GRID, tokens: this.visible().map((token) => this.player(token)) },
+      scene: {
+        map: MAP,
+        grid: GRID,
+        tokens: this.visible().map((token) => this.player(token)),
+        camera: FIT_CAMERA,
+      },
     };
   }
   event(type: EventEnvelope['type'], payload: object): EventEnvelope {
@@ -202,5 +214,32 @@ describe('the players’ events applied to the drawn state', () => {
       ['B', 0],
       ['A', 1],
     ]);
+  });
+});
+
+describe('the player camera (LIV-06, specs/04-live-sync.md §9)', () => {
+  const steered = { centre_x: 0.25, centre_y: 0.75, width: 0.5, height: 0.25 };
+  const base = (camera = FIT_CAMERA): PlayerSnapshot => ({
+    role: 'players',
+    scene: { map: MAP, grid: GRID, tokens: [], camera },
+  });
+
+  it('keeps the camera a snapshot carries, and fits the map when it carries none', () => {
+    expect(fromSnapshot(base(steered))?.camera).toEqual(steered);
+    const old = { role: 'players', scene: { map: MAP, grid: GRID, tokens: [] } } as unknown as PlayerSnapshot;
+    expect(fromSnapshot(old)?.camera).toEqual(FIT_CAMERA);
+  });
+
+  it('takes the camera of camera.player, only its four fields, and skips a malformed one', () => {
+    const scene = fromSnapshot(base());
+    const next = applyPlayerEvent(scene, {
+      type: 'camera.player',
+      version: 2,
+      payload: { camera: { ...steered, secret: 'x' } },
+    });
+    expect(next?.camera).toEqual(steered);
+    expect(next?.tokens).toBe(scene?.tokens);
+    expect(applyPlayerEvent(scene, { type: 'camera.player', version: 2, payload: {} })).toBe(scene);
+    expect(applyPlayerEvent(null, { type: 'camera.player', version: 2, payload: { camera: steered } })).toBeNull();
   });
 });

@@ -712,3 +712,159 @@ describe('Ctrl+Z in live mode undoes the last change on the live scene (04 §8, 
     expect(status(view)).toBe(t('scene.nothingToUndo'));
   });
 });
+
+describe('the TV frame steers the player camera (LIV-06; 04 §9, 08 §2, Q-080, D-046, D-119)', () => {
+  // The map's display version is 2000 × 1500 world pixels in an 800 × 600 viewport, so the DM's own
+  // camera fits it at 0.4 from the corner. With no screen reported the TV is 16:9: the fitted frame is
+  // the whole map widened to 2666.67 × 1500, centred.
+  const WORLD = { width: 2000, height: 1500 };
+  const status = (view: HTMLElement) => view.querySelector('[role="status"].eg-scene__progress')?.textContent;
+  const frameOnScreen = (view: HTMLElement) =>
+    JSON.parse(viewport(view).dataset.tvFrame ?? 'null') as {
+      left: number;
+      top: number;
+      width: number;
+      height: number;
+    } | null;
+  const dmCamera = (view: HTMLElement) => {
+    const { cameraX, cameraY, cameraScale } = viewport(view).dataset;
+    return { x: Number(cameraX), y: Number(cameraY), scale: Number(cameraScale) };
+  };
+  const cameras = () =>
+    commands()
+      .filter((each) => each.type === 'camera.setPlayer')
+      .map((each) => each.payload);
+  const frameNode = () => stage().findOne<Konva.Rect>('.tv-frame');
+  const handle = (corner: string) => stage().findOne<Konva.Rect>(`.tv-frame-handle-${corner}`)!;
+  const steerButton = (view: HTMLElement) => button(view, t('canvas.steerTv'))!;
+
+  async function liveCave(): Promise<HTMLElement> {
+    server.liveSceneId = cave.id;
+    const view = await open();
+    await selectScene(view, cave);
+    expect(mode(view)).toBe('live');
+    return view;
+  }
+
+  async function drag(node: Konva.Node, to: { x: number; y: number }) {
+    act(() => {
+      node.fire('dragstart', { target: node, evt: new MouseEvent('mousedown') });
+      node.position(to);
+      node.fire('dragmove', { target: node, evt: new MouseEvent('mousemove') });
+      node.fire('dragend', { target: node, evt: new MouseEvent('mouseup') });
+    });
+    await settle();
+  }
+
+  it('is shown in live mode only, fitted to the map in the TV’s shape', async () => {
+    const view = await open();
+    await selectScene(view, hall);
+    expect(frameOnScreen(view)).toBeNull();
+    expect(frameNode()).toBeUndefined();
+    expect(button(view, t('canvas.steerTv'))).toBeUndefined();
+    await selectScene(view, cave);
+    await goLive(view);
+    const frame = frameOnScreen(view)!;
+    expect(frame.width / frame.height).toBeCloseTo(16 / 9, 6);
+    expect(frame.height).toBeCloseTo(1500 * 0.4, 6);
+    expect(frame.left + frame.width / 2).toBeCloseTo(400, 6);
+    expect(frameNode()).toBeDefined();
+    expect(steerButton(view).getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('dragging its edge sends camera.setPlayer for the live scene, moves the frame and leaves the DM’s own view where it was', async () => {
+    const view = await liveCave();
+    const before = dmCamera(view);
+    const width = 1500 * (16 / 9);
+    await drag(frameNode()!, { x: 200, y: 100 });
+    expect(cameras()).toEqual([
+      {
+        scene_id: cave.id,
+        camera: {
+          centre_x: Number(((200 + width / 2) / WORLD.width).toFixed(6)),
+          centre_y: Number(((100 + 750) / WORLD.height).toFixed(6)),
+          width: Number((width / WORLD.width).toFixed(6)),
+          height: 1,
+        },
+      },
+    ]);
+    expect(dmCamera(view)).toEqual(before);
+    expect(frameOnScreen(view)!.left).toBeCloseTo(200 * 0.4, 3);
+    expect(frameOnScreen(view)!.top).toBeCloseTo(100 * 0.4, 3);
+    expect(server.playerCamera).toEqual((cameras()[0] as { camera: object }).camera);
+    expect(status(view)).toBe(t('scene.tvSteered'));
+  });
+
+  it('dragging a corner zooms the TV, keeping its shape and the opposite corner', async () => {
+    const view = await liveCave();
+    const before = frameOnScreen(view)!;
+    await drag(handle('se'), { x: 1000, y: 800 });
+    const { camera } = cameras()[0] as { camera: { width: number; height: number } };
+    // The frame keeps 16:9 in world pixels, and its top-left corner stays put.
+    expect((camera.width * WORLD.width) / (camera.height * WORLD.height)).toBeCloseTo(16 / 9, 4);
+    const after = frameOnScreen(view)!;
+    expect(after.left).toBeCloseTo(before.left, 3);
+    expect(after.top).toBeCloseTo(before.top, 3);
+    expect(after.width).toBeLessThan(before.width);
+    expect(after.width / after.height).toBeCloseTo(16 / 9, 4);
+  });
+
+  it('follows another DM browser’s steering and the shape of the screen the server says it follows', async () => {
+    const view = await liveCave();
+    act(() =>
+      server.steerElsewhere({ centre_x: 0.5, centre_y: 0.5, width: 0.5, height: 0.5 }, { width: 1024, height: 768 }),
+    );
+    await settle();
+    const frame = frameOnScreen(view)!;
+    // 1000 × 750 world pixels is already 4:3, the reported screen's shape.
+    expect(frame.width).toBeCloseTo(1000 * 0.4, 3);
+    expect(frame.height).toBeCloseTo(750 * 0.4, 3);
+    expect(cameras()).toEqual([]);
+  });
+
+  it('is steered by keyboard: Steer the TV, then arrows, + and −, 0 and Escape, the DM’s view unchanged', async () => {
+    const view = await liveCave();
+    const before = dmCamera(view);
+    await click(steerButton(view));
+    expect(steerButton(view).getAttribute('aria-pressed')).toBe('true');
+    expect(viewport(view).dataset.tvSteering).toBe('on');
+    expect(view.querySelector('.eg-canvas__help')!.textContent).toBe(t('canvas.helpSteer'));
+    press(viewport(view), 'ArrowRight');
+    await settle();
+    press(viewport(view), '+');
+    await settle();
+    press(viewport(view), '0');
+    await settle();
+    const sent = (cameras() as { camera: { centre_x: number; width: number } }[]).map((each) => each.camera);
+    expect(sent).toHaveLength(3);
+    expect(sent[0]!.centre_x).toBeGreaterThan(0.5);
+    expect(sent[1]!.width).toBeLessThan(sent[0]!.width);
+    expect(sent[2]).toEqual({ centre_x: 0.5, centre_y: 0.5, width: 1, height: 1 });
+    expect(status(view)).toBe(t('scene.tvFitted'));
+    expect(dmCamera(view)).toEqual(before);
+    // The view's buttons steer the TV too while steering.
+    await click(button(view, t('canvas.tvZoomIn')));
+    expect(cameras()).toHaveLength(4);
+    press(viewport(view), 'Escape');
+    await settle();
+    expect(steerButton(view).getAttribute('aria-pressed')).toBe('false');
+    // Once steering stops, the keys move the DM's own view again and send nothing.
+    press(viewport(view), 'ArrowRight');
+    await settle();
+    expect(cameras()).toHaveLength(4);
+    expect(dmCamera(view).x).toBe(before.x - 64);
+  });
+
+  it('puts the frame back and says why when the server refuses the camera', async () => {
+    const view = await liveCave();
+    const before = frameOnScreen(view)!;
+    server.beforeCommand = (command) =>
+      command.type === 'camera.setPlayer' ? { error: { code: 'scene_not_live', message: 'test' } } : undefined;
+    await drag(frameNode()!, { x: 300, y: 300 });
+    expect(cameras()).toHaveLength(1);
+    expect(frameOnScreen(view)).toEqual(before);
+    expect(view.querySelector('.eg-scene [role="alert"]')?.textContent).toBe(
+      t('scene.tvFailed', { reason: t('error.code.scene_not_live') }),
+    );
+  });
+});

@@ -165,7 +165,7 @@ describe('command validation and dispatch', () => {
 });
 
 describe('the process command validator', () => {
-  // LIV-02 registers the live commands and LIV-05 `undo`; every other command stays refused,
+  // LIV-02 registers the live commands, LIV-05 `undo` and LIV-06 `camera.setPlayer`; every other command stays refused,
   // whatever its content, until the package that implements it registers its payload: fail
   // closed, never open.
   const LIVE = [
@@ -175,12 +175,13 @@ describe('the process command validator', () => {
     'token.delete',
     'scene.activate',
     'scene.deactivate',
+    'camera.setPlayer',
     'undo',
   ];
   // The commands whose payload is empty, so that `{}` is valid.
   const EMPTY = ['scene.deactivate', 'undo'];
 
-  it('registers a payload schema for the live commands of LIV-02 and LIV-05 and no other', () => {
+  it('registers a payload schema for the live commands of LIV-02, LIV-05 and LIV-06 and no other', () => {
     expect(Object.keys(COMMAND_PAYLOAD_SCHEMAS).sort()).toEqual([...LIVE].sort());
   });
 

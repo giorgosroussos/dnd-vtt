@@ -9,13 +9,19 @@ import {
   ROOMS,
   SOCKET_CHANNELS,
   SOCKET_PATH,
+  ScreenSchema,
   type CommandAck,
   type CommandEnvelope,
   type Room,
   type SnapshotAck,
+  type Screen,
   type SnapshotEvent,
+  type ViewportAck,
 } from '@emberglass/shared';
 import { normalizeAddress } from '../auth/lockout.js';
+import { readScene } from '../db/campaigns.js';
+import { readSettings } from '../db/settings.js';
+import { PlayerCameraState, ScreenRegistry, sameScreen } from '../domain/camera.js';
 import { dispatchCommand, validateCommand, type CommandValidator } from '../domain/commands.js';
 import { createLiveCommands, type LiveEffect, type LiveResult } from '../domain/live.js';
 import { liveVersions, type VersionCounters } from '../domain/version.js';
@@ -23,7 +29,8 @@ import { isSameOriginHeaders, type Auth } from '../http/auth.js';
 import { createLineLimiter, type LineLimiterOptions } from '../log/limiter.js';
 import type { Logger } from '../log/logger.js';
 import { project } from './projection.js';
-import { readSnapshot } from './snapshot.js';
+import { compileSchema, formatAjvErrors } from '../validation.js';
+import { readSnapshot, type LiveMemory } from './snapshot.js';
 
 // The WebSocket of the live scene (LIV-01; specs/04-live-sync.md §1, §2, §5, §6,
 // specs/07-security-and-access.md §2, §3, §7, §8; D-064, D-104).
@@ -57,6 +64,15 @@ import { readSnapshot } from './snapshot.js';
 // takes the next version of each room it is sent to, so players, who receive nothing about
 // hidden tokens, see no hole either.
 //
+// Cameras (LIV-06; specs/04-live-sync.md §9, Q-038, D-018, D-119): the player camera lives in memory
+// beside the live commands, and both rooms' snapshots carry it. A players socket may report its
+// viewport on SOCKET_CHANNELS.viewport, which is not a command and changes nothing players receive:
+// the DM room is told, as `camera.player` with the camera unchanged, when the shape of the screen
+// connected longest changes while a scene is live, since the TV frame follows it. Reports are
+// validated like any command and served at most one per snapshot interval per socket, the latest
+// winning. A REST change that gives the live scene another world (a new map, or a first map for a
+// map-less scene) fits the camera again, since the old frame was of a world that is gone.
+//
 // Abuse limits (LIV-01 review, D-106): an HTTP upgrade to any other path is answered 404 and
 // closed at once, as Fastify answered it before there was a WebSocket, except Vite's own in
 // development; a socket's snapshot requests are served at most one per interval, the rest
@@ -69,6 +85,9 @@ export interface LiveSocketOptions {
   auth: Auth;
   /** The process's version counters, one per room; tests pass their own. */
   versions?: VersionCounters | undefined;
+  /** The player camera and the screens that reported; tests pass their own. */
+  camera?: PlayerCameraState | undefined;
+  screens?: ScreenRegistry | undefined;
   /** Command validation and the step that applies a valid command; tests only replace them. */
   commands?: { validate: CommandValidator; apply: (command: CommandEnvelope) => LiveResult | void } | undefined;
   /** Upgrades on other paths that belong to someone else: Vite's hot reload in development. */
@@ -112,8 +131,11 @@ export function attachLiveSocket(
     logger,
     auth,
     versions = liveVersions,
+    // One player camera per server process, in memory only (specs/04-live-sync.md §9, Q-038).
+    camera = new PlayerCameraState(),
+    screens = new ScreenRegistry(),
     // One undo history per server process, in memory only (specs/04-live-sync.md §8, Q-005).
-    commands = { validate: validateCommand, apply: createLiveCommands(db).apply },
+    commands = { validate: validateCommand, apply: createLiveCommands(db, undefined, camera).apply },
     foreignUpgrade = () => false,
     snapshotIntervalMs = SNAPSHOT_INTERVAL_MS,
     maxPendingPackets = MAX_PENDING_PACKETS,
@@ -121,6 +143,7 @@ export function attachLiveSocket(
   }: LiveSocketOptions,
 ): LiveSocket {
   for (const counter of Object.values(versions)) if (counter.current() === 0) counter.next();
+  const memory: LiveMemory = { camera, screens };
 
   const io = new Server(app.server, {
     path: SOCKET_PATH,
@@ -178,7 +201,7 @@ export function attachLiveSocket(
     const event: SnapshotEvent = {
       type: 'scene.snapshot',
       version: versions[role].current(),
-      payload: readSnapshot(db, role),
+      payload: readSnapshot(db, role, memory),
     };
     socket.emit(SOCKET_CHANNELS.event, event);
   };
@@ -201,9 +224,13 @@ export function attachLiveSocket(
   // hidden token (a renamed or re-imaged asset whose live tokens are all hidden): the DM's room gets
   // its snapshot, theirs stays silent and keeps its version (specs/04-live-sync.md §4, §5, Q-093).
   const refresh = <T>(work: () => T): T => {
-    const before = { dm: readSnapshot(db, 'dm'), players: readSnapshot(db, 'players') };
+    const before = { dm: readSnapshot(db, 'dm', memory), players: readSnapshot(db, 'players', memory) };
+    const world = liveWorld(db);
     const result = work();
-    const after = { dm: readSnapshot(db, 'dm'), players: readSnapshot(db, 'players') };
+    // Another world for the same live scene: the camera fits it again (LIV-06, D-119).
+    const now = liveWorld(db);
+    if (world !== undefined && now !== undefined && world !== now) camera.reset();
+    const after = { dm: readSnapshot(db, 'dm', memory), players: readSnapshot(db, 'players', memory) };
     if (before.dm.scene !== null && after.dm.scene === null) {
       publish([{ type: 'cleared' }]);
       return result;
@@ -218,12 +245,22 @@ export function attachLiveSocket(
 
   const publish = (effects: readonly LiveEffect[]): void => {
     for (const effect of effects) {
-      const events = project(db, effect);
+      const events = project(db, effect, memory);
       for (const room of ROOMS) {
         const event = events[room];
         if (event) broadcast(room, event);
       }
     }
+  };
+
+  // The DM room hears of a new shape for the TV frame while a scene is live; otherwise the next
+  // activation's snapshot carries it. Players never hear of screens.
+  const screenChanged = (before: Screen | null): void => {
+    const after = screens.chosen();
+    if (sameScreen(before, after)) return;
+    const live = readSettings(db).live_scene_id;
+    if (live === null) return;
+    broadcast('dm', { type: 'camera.player', payload: { camera: { ...camera.of(live) }, screen: after } });
   };
 
   io.on('connection', (socket) => {
@@ -246,6 +283,7 @@ export function attachLiveSocket(
       });
     }
 
+    if (role === 'players') screens.connected(socket.id);
     sendSnapshot(socket, role);
 
     socket.on(SOCKET_CHANNELS.command, (...args: unknown[]) => {
@@ -302,8 +340,54 @@ export function attachLiveSocket(
       else scheduled = setTimeout(serve, wait);
     });
 
+    // Viewport reports (LIV-06): a players socket only, validated, at most one per interval, the
+    // latest winning; any more meanwhile are merged into it.
+    let lastReported = -Infinity;
+    let reportTimer: NodeJS.Timeout | undefined;
+    let reported: Screen | undefined;
+    const takeReport = (): void => {
+      reportTimer = undefined;
+      lastReported = Date.now();
+      if (reported === undefined) return;
+      const before = screens.chosen();
+      screens.report(socket.id, reported);
+      reported = undefined;
+      screenChanged(before);
+    };
+    socket.on(SOCKET_CHANNELS.viewport, (...args: unknown[]) => {
+      if (overloaded(socket)) return;
+      const reply = acknowledgement<ViewportAck>(args);
+      if (role !== 'players') {
+        reply(errorEnvelope('forbidden', 'Only a player view reports its viewport.'));
+        return;
+      }
+      const raw = typeof args[0] === 'function' ? undefined : args[0];
+      if (!validateScreen(raw)) {
+        reply(
+          errorEnvelope(
+            'validation_failed',
+            'The viewport does not match its schema.',
+            formatAjvErrors(validateScreen.errors),
+          ),
+        );
+        return;
+      }
+      reported = { width: raw.width, height: raw.height };
+      reply({ ok: true });
+      if (reportTimer) return;
+      const wait = lastReported + snapshotIntervalMs - Date.now();
+      if (wait <= 0) takeReport();
+      else reportTimer = setTimeout(takeReport, wait);
+    });
+
     socket.on('disconnect', () => {
       clearTimeout(scheduled);
+      clearTimeout(reportTimer);
+      if (role === 'players') {
+        const before = screens.chosen();
+        screens.disconnected(socket.id);
+        screenChanged(before);
+      }
       if (session !== undefined) {
         const sockets = bySession.get(session);
         sockets?.delete(socket);
@@ -329,6 +413,19 @@ export function attachLiveSocket(
   });
 
   return { io, count: (room) => io.sockets.adapter.rooms.get(room)?.size ?? 0, refresh };
+}
+
+const validateScreen = compileSchema<Screen>(ScreenSchema);
+
+/**
+ * What the live scene's world is, its map, or none; undefined while nothing is live. A map-less
+ * scene's extent cannot change while it has no map (`calibration_needs_map`), so its map is all.
+ */
+function liveWorld(db: Database.Database): string | undefined {
+  const id = readSettings(db).live_scene_id;
+  const scene = id === null ? undefined : readScene(db, id);
+  if (!scene) return undefined;
+  return `${scene.id}:${scene.map_image_id ?? 'none'}`;
 }
 
 /** The acknowledgement a client passed as the last argument, or a no-op when it passed none. */

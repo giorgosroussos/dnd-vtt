@@ -208,3 +208,42 @@ describe('commands from the DM view (LIV-04, specs/04-live-sync.md §2)', () => 
     expect(dm.connects).toBe(1);
   });
 });
+
+describe('viewport reports (LIV-06, D-119)', () => {
+  const reports = (target: FakeSocket) =>
+    target.emitted.filter(({ event }) => event === SOCKET_CHANNELS.viewport).map(({ args }) => args[0]);
+
+  it('sends the player view’s size once connected, again on every connection, and only when it changed', () => {
+    const connection = connectLive('player', { onStatus: () => {}, onSnapshot: () => {}, onEvent: () => {} });
+    const own = fake.sockets.at(-1)!;
+    connection.reportViewport({ width: 1920.4, height: 1080 });
+    // Not connected yet: kept for the connection.
+    expect(reports(own)).toEqual([]);
+    own.open(idle, 1);
+    expect(reports(own)).toEqual([{ width: 1920, height: 1080 }]);
+    connection.reportViewport({ width: 1920, height: 1080 });
+    expect(reports(own)).toHaveLength(1);
+    connection.reportViewport({ width: 1280, height: 720 });
+    // The server forgets a socket's report when it goes: a reconnection sends it again.
+    own.drop();
+    own.open(idle, 1);
+    expect(reports(own)).toEqual([
+      { width: 1920, height: 1080 },
+      { width: 1280, height: 720 },
+      { width: 1280, height: 720 },
+    ]);
+    // A size that is not a screen is never sent.
+    connection.reportViewport({ width: 0, height: 720 });
+    expect(reports(own)).toHaveLength(3);
+    connection.close();
+  });
+
+  it('is never sent by the DM view', () => {
+    const connection = connectLive('dm', { onStatus: () => {}, onSnapshot: () => {}, onEvent: () => {} });
+    const own = fake.sockets.at(-1)!;
+    own.open({ role: 'dm', scene: null }, 1);
+    connection.reportViewport({ width: 1920, height: 1080 });
+    expect(reports(own)).toEqual([]);
+    connection.close();
+  });
+});

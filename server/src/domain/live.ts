@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import {
   errorEnvelope,
+  type CameraSetPlayerPayload,
   type CommandEnvelope,
   type ErrorEnvelope,
   type SceneActivatePayload,
@@ -12,6 +13,7 @@ import {
 } from '@emberglass/shared';
 import { readSettings, setLiveScene } from '../db/settings.js';
 import { createToken, deleteToken, readToken, restoreToken, updateToken } from '../db/tokens.js';
+import { PlayerCameraState, sameCamera } from './camera.js';
 import { inverseOf, UndoHistory, type Inverse } from './undo.js';
 
 // The live commands (LIV-02; specs/04-live-sync.md §2, specs/05-assets-and-images.md §3, §4,
@@ -34,7 +36,9 @@ export type LiveEffect =
   | { type: 'cleared' }
   | { type: 'token.added'; token: SceneToken; relabelled: SceneToken[] }
   | { type: 'token.updated'; before: SceneToken; token: SceneToken; relabelled: SceneToken[] }
-  | { type: 'token.removed'; token: SceneToken };
+  | { type: 'token.removed'; token: SceneToken }
+  /** The player camera was set (LIV-06): both rooms receive `camera.player`. */
+  | { type: 'camera' };
 
 export type LiveResult = LiveEffect[] | ErrorEnvelope;
 
@@ -121,6 +125,8 @@ export interface LiveCommands {
   apply: (command: CommandEnvelope) => LiveResult;
   /** The undo history, for the tests. */
   history: UndoHistory;
+  /** The player camera, which the snapshots read. */
+  camera: PlayerCameraState;
 }
 
 /**
@@ -130,8 +136,17 @@ export interface LiveCommands {
  * (Q-005, D-117). `undo` with nothing to undo is acknowledged and tells nobody; an inverse that no
  * longer applies (its token deleted by another DM browser, its asset deleted) is dropped and refused
  * as the command it stands for would be, changing nothing.
+ *
+ * The player camera (LIV-06, specs/04-live-sync.md §9, Q-038, D-018) is kept beside it: every
+ * activation, of the live scene too, and every deactivation reset it to fit-to-map. `camera.setPlayer`
+ * is refused as `scene_not_live` unless it names the live scene, tells nobody when the camera is
+ * already that one, and is never undoable (§2).
  */
-export function createLiveCommands(db: Database.Database, history = new UndoHistory()): LiveCommands {
+export function createLiveCommands(
+  db: Database.Database,
+  history = new UndoHistory(),
+  camera = new PlayerCameraState(),
+): LiveCommands {
   const liveSceneId = () => readSettings(db).live_scene_id;
   const apply = (command: CommandEnvelope): LiveResult => {
     switch (command.type) {
@@ -142,8 +157,19 @@ export function createLiveCommands(db: Database.Database, history = new UndoHist
       case 'scene.activate':
       case 'scene.deactivate': {
         const result = applyLiveCommand(db, command);
-        if (Array.isArray(result)) history.keepOnly(liveSceneId());
+        if (Array.isArray(result)) {
+          history.keepOnly(liveSceneId());
+          camera.reset();
+        }
         return result;
+      }
+      case 'camera.setPlayer': {
+        const { scene_id, camera: next } = command.payload as CameraSetPlayerPayload;
+        const live = liveSceneId();
+        if (live === null || live !== scene_id) return notLive();
+        if (sameCamera(camera.of(live), next)) return [];
+        camera.set(live, next);
+        return [{ type: 'camera' }];
       }
       default: {
         const result = applyLiveCommand(db, command);
@@ -154,7 +180,7 @@ export function createLiveCommands(db: Database.Database, history = new UndoHist
       }
     }
   };
-  return { apply, history };
+  return { apply, history, camera };
 }
 
 function changed(result: ReturnType<typeof updateToken>): LiveResult {

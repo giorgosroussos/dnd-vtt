@@ -16,6 +16,7 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
   - Playwright: moving and resizing the frame in a DM context changes what a player context shows, and the DM's view does not move; activating another scene resets the TV to fit; `make verify` exit 0 on both CI runners; `TRACEABILITY.md` LIV-06 row with test names.
 - **Non-goals:** a stored player camera (Q-038); the ruler (LIV-07); the LIV-05 residuals G-034 and the LIV-04 residuals G-032 and G-033 (REL-02).
 - **Review:** `Contract change: yes` (the `camera.setPlayer` and `camera.player` payloads), so prompt 2 (review) runs after implementation.
+- **Status (2026-09-28):** implemented on branch `liv-06-cameras` (D-119); every acceptance item above passes locally (`TRACEABILITY.md` LIV-06). Remaining before it is done: `make verify` green on both CI runners and the review (prompt 2).
 
 ## Next
 

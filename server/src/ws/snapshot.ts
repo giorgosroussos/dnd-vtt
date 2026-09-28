@@ -12,6 +12,13 @@ import { readScene } from '../db/campaigns.js';
 import { readImage } from '../db/images.js';
 import { readSettings } from '../db/settings.js';
 import { listTokens } from '../db/tokens.js';
+import type { PlayerCameraState, ScreenRegistry } from '../domain/camera.js';
+
+/** What the snapshots read from the server's memory rather than the database (LIV-06). */
+export interface LiveMemory {
+  camera: PlayerCameraState;
+  screens: ScreenRegistry;
+}
 
 // The `scene.snapshot` of each room (specs/04-live-sync.md §3, §4, §5; LIV-01, D-104), read
 // from the database whenever one is sent, so that it is the stored live scene and nothing a
@@ -19,22 +26,28 @@ import { listTokens } from '../db/tokens.js';
 // tokens only, each with exactly the fields of §4, and a stacking order that is the token's
 // rank among the visible tokens, so a hidden token between two visible ones leaves no trace
 // (G-025). Nothing of the scene record reaches players but its grid and the map's display size.
+// Both rooms receive the player camera (LIV-06, specs/04-live-sync.md §9), so a screen connecting or
+// reconnecting shows what the others show; only the DM's carries the screen shape the TV frame
+// follows (D-119).
 
-export function readSnapshot(db: Database.Database, role: 'dm'): DmSnapshot;
-export function readSnapshot(db: Database.Database, role: 'players'): PlayerSnapshot;
-export function readSnapshot(db: Database.Database, role: Room): SceneSnapshot;
-export function readSnapshot(db: Database.Database, role: Room): SceneSnapshot {
+export function readSnapshot(db: Database.Database, role: 'dm', memory: LiveMemory): DmSnapshot;
+export function readSnapshot(db: Database.Database, role: 'players', memory: LiveMemory): PlayerSnapshot;
+export function readSnapshot(db: Database.Database, role: Room, memory: LiveMemory): SceneSnapshot;
+export function readSnapshot(db: Database.Database, role: Room, memory: LiveMemory): SceneSnapshot {
   // One transaction, so the scene, its map and its tokens are read at the same moment.
-  return db.transaction(() => (role === 'dm' ? readDm(db) : readPlayers(db)))();
+  return db.transaction(() => (role === 'dm' ? readDm(db, memory) : readPlayers(db, memory)))();
 }
 
-function readDm(db: Database.Database): DmSnapshot {
+function readDm(db: Database.Database, memory: LiveMemory): DmSnapshot {
   const live = readLive(db);
   if (!live) return { role: 'dm', scene: null };
-  return { role: 'dm', scene: live };
+  return {
+    role: 'dm',
+    scene: { ...live, camera: { ...memory.camera.of(live.scene.id) }, screen: memory.screens.chosen() },
+  };
 }
 
-function readPlayers(db: Database.Database): PlayerSnapshot {
+function readPlayers(db: Database.Database, memory: LiveMemory): PlayerSnapshot {
   const live = readLive(db);
   if (!live) return { role: 'players', scene: null };
   const { scene, map, tokens } = live;
@@ -46,6 +59,7 @@ function readPlayers(db: Database.Database): PlayerSnapshot {
       map: map && playerMap(map),
       grid: { ...scene.grid },
       tokens: visible.map(toPlayerToken),
+      camera: { ...memory.camera.of(scene.id) },
     },
   };
 }

@@ -58,12 +58,15 @@ export function ok<T>(response: LightMyRequestResponse, status = 200): T {
   return (status === 204 ? undefined : response.json<T>()) as T;
 }
 
-export async function startLive(): Promise<LiveHarness> {
+export async function startLive({
+  snapshotIntervalMs = 0,
+}: { snapshotIntervalMs?: number } = {}): Promise<LiveHarness> {
   const data = createTestData('emberglass-liv02-');
   const versions = createVersionCounters();
-  // Snapshot requests unthrottled: the tests use one after each step to know that every event the
-  // step caused has arrived (Socket.io keeps a socket's messages in order).
-  const app = await buildTestApp(data, { versions, liveLimits: { snapshotIntervalMs: 0 } });
+  // Snapshot requests unthrottled unless a test says otherwise: the tests use one after each step to
+  // know that every event the step caused has arrived (Socket.io keeps a socket's messages in order).
+  // The same interval bounds viewport reports (LIV-06).
+  const app = await buildTestApp(data, { versions, liveLimits: { snapshotIntervalMs } });
   const cookie = await setUpPin(app, '4826');
   await app.listen({ port: 0, host: '127.0.0.1' });
   const url = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
@@ -187,13 +190,14 @@ export async function startLive(): Promise<LiveHarness> {
 /** A player's copy of the live scene, kept from its snapshot and events as a player client would. */
 export interface PlayerState {
   version: number;
-  scene: { map: unknown; grid: unknown; tokens: Record<string, unknown>[] } | null;
+  scene: { map: unknown; grid: unknown; tokens: Record<string, unknown>[]; camera: unknown } | null;
 }
 
 /**
  * Applies the players' events as `shared/src/live.ts` states them: an added token goes in at its
- * rank, a removed one leaves, a moved one is replaced, a renamed one takes its new label. Throws on
- * a version that is not the next one, which is a gap.
+ * rank, a removed one leaves, a moved one is replaced, a renamed one takes its new label, and
+ * `camera.player` replaces the camera (LIV-06). Throws on a version that is not the next one,
+ * which is a gap.
  */
 export function applyPlayerEvent(state: PlayerState, event: EventEnvelope): PlayerState {
   if (event.type === 'scene.snapshot') {
@@ -203,6 +207,10 @@ export function applyPlayerEvent(state: PlayerState, event: EventEnvelope): Play
   if (event.version !== state.version + 1) throw new Error(`gap: ${state.version} then ${event.version}`);
   const next: PlayerState = { version: event.version, scene: structuredClone(state.scene) };
   if (event.type === 'scene.cleared') return { ...next, scene: null };
+  if (event.type === 'camera.player') {
+    next.scene!.camera = structuredClone((event.payload as { camera: unknown }).camera);
+    return next;
+  }
   const tokens = next.scene!.tokens;
   const payload = event.payload as { id?: string; token?: { id: string; z_order: number }; relabelled?: [] };
   const at = (id: string) => tokens.findIndex((token) => token.id === id);

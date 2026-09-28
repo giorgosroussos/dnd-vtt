@@ -1,4 +1,5 @@
 import type {
+  DmCameraPayload,
   DmLiveScene,
   DmSnapshot,
   DmTokenEventPayload,
@@ -13,7 +14,8 @@ import type {
 // (specs/04-live-sync.md §10). `token.added` and `token.updated` carry the token in the DM's shape
 // and `relabelled`, the lone token renamed "<name> 1" beside it; `token.removed` names the token;
 // `scene.cleared` means nothing is live. Tokens are held bottom of the stack first, as the server
-// lists them, so a live canvas draws what a fresh snapshot would.
+// lists them, so a live canvas draws what a fresh snapshot would. `camera.player` (LIV-06) replaces the
+// player camera and the screen shape the TV frame follows, so the frame follows another DM browser.
 
 /** The live scene, or null while nothing is live. */
 export type DmScene = DmLiveScene | null;
@@ -46,8 +48,13 @@ export function applyDmEvent(scene: DmScene, event: EventEnvelope): DmScene {
       const { id } = event.payload as unknown as TokenRemovedPayload;
       return { ...scene, tokens: scene.tokens.filter((each) => each.id !== id) };
     }
+    case 'camera.player': {
+      const { camera, screen } = event.payload as unknown as Partial<DmCameraPayload>;
+      if (!camera) return scene;
+      return { ...scene, camera, screen: screen ?? null };
+    }
     default:
-      // The camera and the ruler are LIV-06 and LIV-07's.
+      // The ruler is LIV-07's.
       return scene;
   }
 }

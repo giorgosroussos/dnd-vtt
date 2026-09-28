@@ -1,7 +1,9 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import {
   API_IMAGE_PATHS,
+  FIT_CAMERA,
   type CommandType,
+  type PlayerCamera,
   type Image,
   type LibraryAsset,
   type Scene,
@@ -10,7 +12,8 @@ import {
   type TokenUpdateBody,
 } from '@emberglass/shared';
 import { formatDecimal } from '../canvas/calibration.js';
-import { MapCanvas, type CanvasTokenControls, type Measure, type Placing } from '../canvas/MapCanvas.js';
+import { screenAspect } from '../canvas/geometry.js';
+import { MapCanvas, type CanvasTokenControls, type Measure, type Placing, type TvFrame } from '../canvas/MapCanvas.js';
 import { Button } from '../ui/Button.js';
 import { Dialog } from '../ui/Dialog.js';
 import { Notice } from '../ui/Notice.js';
@@ -68,6 +71,13 @@ import { toCanvasToken, useSceneTokens } from './tokens/useSceneTokens.js';
 // open dialog takes none; in prep mode, while calibrating and while not connected nothing is sent, and
 // a held or repeated Ctrl+Z waits for the answer to the first. The status line names what the undo's
 // events changed before its acknowledgement (D-111), or says that nothing was left (D-118).
+//
+// The TV camera (LIV-06, specs/04-live-sync.md §9, specs/08-ux-journeys.md §2, Q-080, D-119): in live
+// mode the canvas shows the frame of what the TV sees, in the shape of the screen the server says it
+// follows, from the live scene, so it follows another DM browser's steering. Dropping the frame, a key
+// press while steering, or a view button while steering sends `camera.setPlayer`; the frame stays where
+// it was put until the server answers, and a refusal says why above the canvas. The DM's own view does
+// not move. Setting the TV camera is not undoable (specs/04-live-sync.md §2).
 //
 // The workspace keys this panel by scene: a request still running when another scene is
 // selected ends in a panel that is gone, so its answer changes nothing on screen. One change
@@ -175,6 +185,10 @@ export function ScenePanel({
   >({});
   const pendingSeq = useRef(0);
   const [liveFailure, setLiveFailure] = useState<string>();
+  // Steering the TV with the keys (LIV-06), and the camera sent and not yet answered.
+  const [steering, setSteering] = useState(false);
+  const [pendingCamera, setPendingCamera] = useState<{ seq: number; camera: PlayerCamera }>();
+  const cameraSeq = useRef(0);
   const [selectedToken, setSelectedToken] = useState<string>();
   const [picking, setPicking] = useState(false);
   const [placingAsset, setPlacingAsset] = useState<LibraryAsset>();
@@ -419,6 +433,28 @@ export function ScenePanel({
     if (ok && updated) announce(done(updated));
   }
 
+  // The TV camera from the frame: shown at once, settled by the answer, whose event brought the live
+  // scene's camera in step (D-111), or whose refusal leaves the frame where it was.
+  async function steerTv(camera: PlayerCamera) {
+    const seq = ++cameraSeq.current;
+    setPendingCamera({ seq, camera });
+    const ok = await command('camera.setPlayer', { scene_id: sceneId, camera }, 'scene.tvFailed');
+    setPendingCamera((current) => (current?.seq === seq ? undefined : current));
+    if (!ok) return;
+    const fitted = (Object.keys(FIT_CAMERA) as (keyof PlayerCamera)[]).every((key) => camera[key] === FIT_CAMERA[key]);
+    announce(t(fitted ? 'scene.tvFitted' : 'scene.tvSteered'));
+  }
+  const tvFrame: TvFrame | undefined =
+    liveScene && !draft
+      ? {
+          camera: pendingCamera?.camera ?? liveScene.camera,
+          aspect: screenAspect(liveScene.screen),
+          steering,
+          onSteer: setSteering,
+          onChange: (camera) => void steerTv(camera),
+        }
+      : undefined;
+
   // One undo at a time: Ctrl+Z pressed again, or held down, before the server answers is ignored,
   // so a held key never unwinds the live scene one change after another (LIV-05 review U5).
   const undoing = useRef(false);
@@ -662,6 +698,7 @@ export function ScenePanel({
                   tokens={tokens?.map(toCanvasToken) ?? []}
                   tokenControls={tokenControls}
                   placing={placing}
+                  tvFrame={tvFrame}
                 />
                 {map && draft ? <CornerMagnifier map={map} calibration={draft.calibration} /> : null}
               </div>
