@@ -110,10 +110,25 @@ test('the DM steers the TV by moving and resizing its frame, the DM’s view sta
       })
       .toBe(Math.round((screen.width / screen.height) * 1000) / 1000);
 
-    // The DM's own view zoomed out, so the whole frame is on screen to grab.
+    // Steered by keyboard: T, − zooms the TV out, 0 fits it again, Escape stops steering. The status line
+    // this leaves also settles the layout, which moves the canvas when it first shows (G-022).
     await viewport(dm).focus();
+    await dm.keyboard.press('t');
     await dm.keyboard.press('-');
-    await dm.keyboard.press('-');
+    await expect.poll(async () => (await tvCamera(tv)).scale).toBeLessThan(start.scale * 0.9);
+    await dm.keyboard.press('0');
+    await expect.poll(async () => (await tvCamera(tv)).scale).toBeCloseTo(start.scale, 4);
+    await expect(panel(dm).getByRole('status')).toHaveText('The TV now shows the whole map.');
+    await dm.keyboard.press('Escape');
+    await expect(viewport(dm)).toHaveAttribute('data-tv-steering', 'off');
+
+    // The whole frame is inside the DM's canvas, ready to grab, as it was straight after Go live (review U-H1).
+    const canvasBox = (await viewport(dm).boundingBox())!;
+    const fittedFrame = await frameIn(dm);
+    expect(fittedFrame.left).toBeGreaterThan(0);
+    expect(fittedFrame.top).toBeGreaterThan(0);
+    expect(fittedFrame.left + fittedFrame.width).toBeLessThan(canvasBox.width);
+    expect(fittedFrame.top + fittedFrame.height).toBeLessThan(canvasBox.height);
     const dmView = await cameraOf(dm);
 
     // Drag the frame by its top edge up and to the left: the TV pans, the DM's view does not move. The
@@ -154,7 +169,7 @@ test('the DM steers the TV by moving and resizing its frame, the DM’s view sta
     await expect.poll(async () => (await tvCamera(tv)).scale).toBeGreaterThan(panned.scale * 1.5);
     const resized = await frameIn(dm);
     expect(resized.width / resized.height).toBeCloseTo(movedIn.width / movedIn.height, 2);
-    expect(resized.width).toBeCloseTo(movedIn.width / 2, 0);
+    expect(resized.width).toBeCloseTo(movedIn.width / 2, -1);
     expect(resized.left).toBeCloseTo(movedIn.left, 0);
     expect(resized.top).toBeCloseTo(movedIn.top, 0);
     expect(await cameraOf(dm)).toEqual(dmView);

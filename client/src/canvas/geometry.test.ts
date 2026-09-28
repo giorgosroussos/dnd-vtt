@@ -3,7 +3,11 @@ import { CAMERA_BOUNDS, FIT_CAMERA, type Grid, type Image } from '@emberglass/sh
 import {
   CELL_PX,
   DEFAULT_ASPECT,
+  boundFrame,
+  fitBox,
   frameForKey,
+  frameLimits,
+  liveFitBox,
   frameOf,
   rectOf,
   resizeBox,
@@ -194,16 +198,61 @@ describe('the player camera (LIV-06, specs/04-live-sync.md §9, Q-038, D-119)', 
     expect(rectOf({ x: 0, y: 0, width: 10, height: 10 }, { width: 0, height: 0 })).toEqual(FIT_CAMERA);
   });
 
-  it('resizes from a corner keeping the TV’s shape and the opposite corner, never below a minimum', () => {
+  it('resizes from a corner keeping the TV’s shape and the opposite corner, within the frame’s limits', () => {
+    const limits = frameLimits(mapWorld, 16 / 9, tv);
     const anchor = { x: 100, y: 100 };
-    const box = resizeBox(anchor, { x: 900, y: 300 }, 16 / 9, mapWorld);
+    const box = resizeBox(anchor, { x: 900, y: 300 }, 16 / 9, limits);
     expect(box).toMatchObject({ x: 100, y: 100, width: 800 });
     expect(box.height).toBeCloseTo(450, 9);
-    const up = resizeBox(anchor, { x: 0, y: -500 }, 16 / 9, mapWorld);
+    const up = resizeBox(anchor, { x: 0, y: -500 }, 16 / 9, limits);
     expect(up.x + up.width).toBeCloseTo(100, 9);
     expect(up.y + up.height).toBeCloseTo(100, 9);
     expect(up.width).toBeCloseTo(600 * (16 / 9), 9);
-    expect(resizeBox(anchor, anchor, 16 / 9, mapWorld).width).toBe(100);
+    // Never narrower than the TV can zoom to: 1920 ÷ 8 = 240 world pixels.
+    expect(resizeBox(anchor, anchor, 16 / 9, limits).width).toBe(240);
+  });
+
+  it('keeps the frame between what the TV can zoom to and what the contract allows, in the TV’s shape (review C-M1, C-M2)', () => {
+    const limits = frameLimits(mapWorld, 16 / 9, tv);
+    expect(limits.min).toBe(1920 / MAX_SCALE);
+    expect(limits.max).toBe(1920 / MIN_SCALE);
+    // A frame the TV could not show that small is widened about its centre, keeping its shape.
+    const tiny = boundFrame({ x: 1000, y: 700, width: 16, height: 9 }, 16 / 9, limits);
+    expect(tiny.width).toBe(240);
+    expect(tiny.width / tiny.height).toBeCloseTo(16 / 9, 9);
+    expect(tiny.x + tiny.width / 2).toBeCloseTo(1008, 9);
+    // Zooming out stops at one factor for both sides: the camera keeps the TV's shape to the end.
+    let box = frameOf(FIT_CAMERA, { width: 1000, height: 1000 }, 16 / 9);
+    const square = frameLimits({ width: 1000, height: 1000 }, 16 / 9, tv);
+    for (let n = 0; n < 60; n++) box = boundFrame(scaleBox(box, 1.25), 16 / 9, square);
+    const camera = rectOf(box, { width: 1000, height: 1000 });
+    expect(camera.width / camera.height).toBeCloseTo(16 / 9, 4);
+    expect(Math.max(camera.width, camera.height)).toBeLessThanOrEqual(CAMERA_BOUNDS.maxSize);
+    // Without a reported screen the limits assume a 1920-pixel TV.
+    expect(frameLimits(mapWorld, 16 / 9, null).min).toBe(240);
+    expect(frameLimits(mapWorld, 16 / 9, { width: 3840, height: 2160 }).min).toBe(480);
+  });
+
+  it('fits the DM’s view in live mode to the map and the TV’s fitted frame, with room around them (review U-H1)', () => {
+    const box = liveFitBox(mapWorld, 16 / 9);
+    const frame = frameOf(FIT_CAMERA, mapWorld, 16 / 9);
+    for (const [x, y] of [
+      [frame.x, frame.y],
+      [frame.x + frame.width, frame.y + frame.height],
+      [0, 0],
+      [mapWorld.width, mapWorld.height],
+    ] as const) {
+      expect(x).toBeGreaterThan(box.x);
+      expect(x).toBeLessThan(box.x + box.width);
+      expect(y).toBeGreaterThan(box.y);
+      expect(y).toBeLessThan(box.y + box.height);
+    }
+    const view = fitBox(box, { width: 800, height: 600 });
+    expect(view.x + frame.x * view.scale).toBeGreaterThan(0);
+    expect(view.x + (frame.x + frame.width) * view.scale).toBeLessThan(800);
+    expect(fitBox({ x: 0, y: 0, ...mapWorld }, { width: 800, height: 600 })).toEqual(
+      fitCamera(mapWorld, { width: 800, height: 600 }),
+    );
   });
 
   it('moves and zooms the frame by key, and 0 fits the TV to the map', () => {

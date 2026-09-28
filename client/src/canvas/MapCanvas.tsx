@@ -1,13 +1,27 @@
 import { useEffect, useEffectEvent, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type Konva from 'konva';
 import { Circle, Group, Image as KonvaImage, Label, Layer, Line, Rect, Stage, Tag, Text } from 'react-konva';
-import { FIT_CAMERA, imageFileUrl, type Grid, type Image, type PlayerCamera, type TokenSize } from '@emberglass/shared';
+import {
+  FIT_CAMERA,
+  imageFileUrl,
+  type Grid,
+  type Image,
+  type PlayerCamera,
+  type Screen,
+  type TokenSize,
+} from '@emberglass/shared';
 import { Button } from '../ui/Button.js';
 import { formatDecimal, normalise, type Rect as Box } from './calibration.js';
 import { t } from '../ui/messages.js';
 import {
+  boundFrame,
   cameraForKey,
+  fitBox,
   fitCamera,
+  frameLimits,
+  liveFitBox,
+  sameRect,
+  screenAspect,
   frameForKey,
   frameOf,
   gridLines,
@@ -139,8 +153,10 @@ export interface CanvasTokenControls extends TokenControls {
 /** The frame of what the TV sees, in live mode (LIV-06). */
 export interface TvFrame {
   camera: PlayerCamera;
-  /** The TV's width ÷ height, which the frame keeps. */
-  aspect: number;
+  /** The screen the frame follows, whose shape it keeps; null while none has reported (16:9). */
+  screen: Screen | null;
+  /** The live connection is down: the frame is shown but cannot be moved (D-116). */
+  offline: boolean;
   /** While on, the view's keys and buttons steer the TV instead of the DM's own view. */
   steering: boolean;
   onSteer: (on: boolean) => void;
@@ -238,7 +254,11 @@ export function MapCanvas({
   // The DM's own camera, kept only for the world it was set on: another scene or map fits again.
   const worldKey = `${map?.id ?? 'none'}:${world.width}x${world.height}`;
   const [manual, setManual] = useState<{ key: string; camera: Camera }>();
-  const fitted = fitCamera(world, viewport);
+  // In live mode the DM's view fits the map and the TV's fitted frame, with room around them, so the
+  // frame's edges and corners can be grabbed (LIV-06 review U-H1); it never follows the TV's camera.
+  const liveAspect = mode === 'dm' && ready && tvFrame ? screenAspect(tvFrame.screen) : undefined;
+  const fitted =
+    liveAspect === undefined ? fitCamera(world, viewport) : fitBox(liveFitBox(world, liveAspect), viewport);
   const camera =
     mode === 'dm'
       ? manual?.key === worldKey
@@ -273,11 +293,21 @@ export function MapCanvas({
   const [frameDraft, setFrameDraft] = useState<WorldBox>();
   const frameAnchor = useRef<{ x: number; y: number }>(undefined);
   const tv = dm && ready && tvFrame ? tvFrame : undefined;
-  const frameBox = tv ? frameOf(tv.camera, world, tv.aspect) : undefined;
+  const aspect = liveAspect ?? 1;
+  // The frame is never narrower than the TV can zoom to, nor wider than it can show (review C-M1, C-M2).
+  const limits = tv ? frameLimits(world, aspect, tv.screen) : undefined;
+  const frameBox = tv && limits ? boundFrame(frameOf(tv.camera, world, aspect), aspect, limits) : undefined;
   const shownFrame = tv ? (frameDraft ?? frameBox) : undefined;
   const steering = tv?.steering === true && !measuring && !placingNow;
-  const frameMovable = tv !== undefined && !measuring && !placingNow;
-  const steerTo = (box: WorldBox | 'fit') => tv?.onChange(box === 'fit' ? FIT_CAMERA : rectOf(box, world));
+  const frameMovable = tv !== undefined && !tv.offline && !measuring && !placingNow;
+  // The camera that shows `box`; nothing is sent when that is the camera already (review C-M2, U-M1).
+  const cameraFor = (box: WorldBox | 'fit'): PlayerCamera =>
+    box === 'fit' || !limits ? FIT_CAMERA : rectOf(boundFrame(box, aspect, limits), world);
+  const steerTo = (box: WorldBox | 'fit') => {
+    if (!tv) return;
+    const next = cameraFor(box);
+    if (!sameRect(next, tv.camera)) tv.onChange(next);
+  };
   // The drag being measured: the ref is what the handlers read, the state what is drawn, so a
   // release seen twice (by the stage and by the window) reports once.
   const dragRef = useRef<Drag>(undefined);
@@ -318,6 +348,12 @@ export function MapCanvas({
         return;
       }
     }
+    // T turns steering the TV on and off from the canvas itself (review U-M5).
+    if (tv && !measuring && !placingNow && (event.key === 't' || event.key === 'T')) {
+      event.preventDefault();
+      if (!event.repeat) tv.onSteer(!steering);
+      return;
+    }
     if (steering && frameBox) {
       if (event.key === 'Escape') {
         event.preventDefault();
@@ -327,8 +363,15 @@ export function MapCanvas({
       const next = frameForKey(frameBox, event.key, event.shiftKey);
       if (next) {
         event.preventDefault();
-        steerTo(next);
+        // A held key sends once, not a command per repeat (review U-M1).
+        if (!event.repeat) steerTo(next);
       }
+      return;
+    }
+    // Fit, in live mode, fits the map and the TV's frame (review U-H1).
+    if (event.key === '0' && !event.shiftKey) {
+      event.preventDefault();
+      setManual(undefined);
       return;
     }
     if (controls && selected) {
@@ -451,10 +494,10 @@ export function MapCanvas({
   function frameDropped(node: Konva.Node, box: WorldBox, at: (placed: WorldBox) => { x: number; y: number }) {
     setFrameDraft(undefined);
     frameAnchor.current = undefined;
-    if (!tv) return;
-    const next = rectOf(box, world);
-    node.position(at(frameOf(next, world, tv.aspect)));
-    tv.onChange(next);
+    if (!tv || !limits) return;
+    const next = cameraFor(box);
+    node.position(at(boundFrame(frameOf(next, world, aspect), aspect, limits)));
+    if (!sameRect(next, tv.camera)) tv.onChange(next);
   }
 
   // A click that did not drag the view: places the token being placed, or lets the selection go.
@@ -560,7 +603,7 @@ export function MapCanvas({
       </Layer>
       {frame ? <TokenLayer tokens={tokens} frame={frame} scale={camera.scale} mode={mode} controls={controls} /> : null}
       {tv && shownFrame ? (
-        <Layer name="tv-frame-layer" listening={frameMovable}>
+        <Layer name="tv-frame-layer" listening={frameMovable} opacity={tv.offline ? 0.5 : 1}>
           <Rect
             name="tv-frame-halo"
             {...shownFrame}
@@ -631,11 +674,11 @@ export function MapCanvas({
                 }}
                 onDragMove={(event) => {
                   const anchor = frameAnchor.current ?? cornerOf(frameBox!, OPPOSITE[corner]);
-                  setFrameDraft(resizeBox(anchor, event.target.position(), tv.aspect, world));
+                  setFrameDraft(resizeBox(anchor, event.target.position(), aspect, limits!));
                 }}
                 onDragEnd={(event) => {
                   const anchor = frameAnchor.current ?? cornerOf(frameBox!, OPPOSITE[corner]);
-                  frameDropped(event.target, resizeBox(anchor, event.target.position(), tv.aspect, world), (placed) =>
+                  frameDropped(event.target, resizeBox(anchor, event.target.position(), aspect, limits!), (placed) =>
                     cornerOf(placed, corner),
                   );
                 }}
@@ -711,8 +754,9 @@ export function MapCanvas({
       <div className="eg-canvas__toolbar">
         {toolbar}
         <div className="eg-canvas__view" role="group" aria-label={t('canvas.controls')}>
-          {tvFrame ? (
-            <Button size="small" aria-pressed={tvFrame.steering} onClick={() => tvFrame.onSteer(!tvFrame.steering)}>
+          {tv ? (
+            // Pressed only while steering is in effect: never while placing or measuring (review U-M3).
+            <Button size="small" aria-pressed={steering} onClick={() => tv.onSteer(!steering)}>
               {t('canvas.steerTv')}
             </Button>
           ) : null}

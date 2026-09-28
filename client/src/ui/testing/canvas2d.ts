@@ -19,6 +19,8 @@ export function installCanvas2d(): void {
           return (...size: number[]) => ({ data: new Uint8ClampedArray(4 * (size[2] ?? 1) * (size[3] ?? 1)) });
         }
         if (key === 'getLineDash') return () => [];
+        // Konva reads the transform to draw a semi-transparent shape through a buffer canvas (LIV-06).
+        if (key === 'getTransform') return () => ({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 });
         if (key === 'createLinearGradient' || key === 'createRadialGradient' || key === 'createPattern') {
           return () => ({ addColorStop: noop });
         }

@@ -12,7 +12,6 @@ import {
   type TokenUpdateBody,
 } from '@emberglass/shared';
 import { formatDecimal } from '../canvas/calibration.js';
-import { screenAspect } from '../canvas/geometry.js';
 import { MapCanvas, type CanvasTokenControls, type Measure, type Placing, type TvFrame } from '../canvas/MapCanvas.js';
 import { Button } from '../ui/Button.js';
 import { Dialog } from '../ui/Dialog.js';
@@ -187,9 +186,21 @@ export function ScenePanel({
   const [liveFailure, setLiveFailure] = useState<string>();
   // Steering the TV with the keys (LIV-06), and the camera sent and not yet answered.
   const [steering, setSteering] = useState(false);
+  // Steering ends whenever the frame goes: Blank TV, another scene live, or calibration (review U-M3).
+  const steerable = liveScene !== undefined && draft === undefined;
+  const [wasSteerable, setWasSteerable] = useState(steerable);
+  if (steerable !== wasSteerable) {
+    setWasSteerable(steerable);
+    if (!steerable) setSteering(false);
+  }
   const [pendingCamera, setPendingCamera] = useState<{ seq: number; camera: PlayerCamera }>();
   const cameraSeq = useRef(0);
   const [selectedToken, setSelectedToken] = useState<string>();
+  // Choosing a token gives the arrow keys back to it, and placing one ends steering (review U-M4).
+  const selectToken = (id: string | undefined) => {
+    setSelectedToken(id);
+    if (id !== undefined) setSteering(false);
+  };
   const [picking, setPicking] = useState(false);
   const [placingAsset, setPlacingAsset] = useState<LibraryAsset>();
   const [renaming, setRenaming] = useState<SceneToken>();
@@ -360,6 +371,7 @@ export function ScenePanel({
     setPicking(false);
     setStatus(undefined);
     setPlacingAsset(asset);
+    setSteering(false);
     refocus.current = 'canvas';
   }
 
@@ -436,6 +448,8 @@ export function ScenePanel({
   // The TV camera from the frame: shown at once, settled by the answer, whose event brought the live
   // scene's camera in step (D-111), or whose refusal leaves the frame where it was.
   async function steerTv(camera: PlayerCamera) {
+    // Not connected: nothing is sent, and the head already says why, as for undo (D-116, review U-M2).
+    if (offline) return announce(t('scene.tvOffline'));
     const seq = ++cameraSeq.current;
     setPendingCamera({ seq, camera });
     const ok = await command('camera.setPlayer', { scene_id: sceneId, camera }, 'scene.tvFailed');
@@ -448,7 +462,8 @@ export function ScenePanel({
     liveScene && !draft
       ? {
           camera: pendingCamera?.camera ?? liveScene.camera,
-          aspect: screenAspect(liveScene.screen),
+          screen: liveScene.screen,
+          offline,
           steering,
           onSteer: setSteering,
           onChange: (camera) => void steerTv(camera),
@@ -517,7 +532,7 @@ export function ScenePanel({
     ? undefined
     : {
         selectedId: selectedToken,
-        onSelect: setSelectedToken,
+        onSelect: selectToken,
         onDeselect: () => setSelectedToken(undefined),
         onMove: (id, at) => {
           const token = tokens?.find((each) => each.id === id);
@@ -552,7 +567,7 @@ export function ScenePanel({
       <TokenBar
         tokens={tokens}
         selectedId={selected?.id}
-        onSelect={setSelectedToken}
+        onSelect={selectToken}
         onAdd={() => {
           setStatus(undefined);
           setPicking(true);

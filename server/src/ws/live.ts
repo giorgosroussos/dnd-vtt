@@ -206,10 +206,19 @@ export function attachLiveSocket(
     socket.emit(SOCKET_CHANNELS.event, event);
   };
 
+  // The screen shape the DM room was last told, in a snapshot or a `camera.player` (LIV-06).
+  let toldScreen: Screen | null = null;
+
   // One event to every socket of a room, each version taken once for the room. A socket that left
   // too much unread is dropped rather than buffered for, as for snapshots.
   const broadcast = (room: Room, event: { type: string; payload: object }): void => {
     const versioned = { ...event, version: versions[room].next() };
+    // What the DM room was last told of the screen the frame follows, so a shape it already has is not
+    // sent again (review S-M1).
+    if (room === 'dm' && event.type === 'scene.snapshot') {
+      const scene = (event.payload as { scene: { screen: Screen | null } | null }).scene;
+      if (scene) toldScreen = scene.screen;
+    }
     for (const id of io.sockets.adapter.rooms.get(room) ?? []) {
       const socket = io.sockets.sockets.get(id);
       if (socket && !overloaded(socket)) socket.emit(SOCKET_CHANNELS.event, versioned);
@@ -254,13 +263,28 @@ export function attachLiveSocket(
   };
 
   // The DM room hears of a new shape for the TV frame while a scene is live; otherwise the next
-  // activation's snapshot carries it. Players never hear of screens.
-  const screenChanged = (before: Screen | null): void => {
-    const after = screens.chosen();
-    if (sameScreen(before, after)) return;
+  // activation's snapshot carries it. Players never hear of screens. However many player sockets report
+  // or leave, the DM room is told at most once per interval, with the shape chosen by then, so no number
+  // of LAN browsers can flood it (LIV-06 review S-M1).
+  let lastShapeTold = -Infinity;
+  let shapeTimer: NodeJS.Timeout | undefined;
+  const tellShape = (): void => {
+    shapeTimer = undefined;
+    lastShapeTold = Date.now();
     const live = readSettings(db).live_scene_id;
-    if (live === null) return;
-    broadcast('dm', { type: 'camera.player', payload: { camera: { ...camera.of(live) }, screen: after } });
+    const chosen = screens.chosen();
+    if (live === null || sameScreen(chosen, toldScreen)) return;
+    toldScreen = chosen;
+    broadcast('dm', { type: 'camera.player', payload: { camera: { ...camera.of(live) }, screen: chosen } });
+  };
+  // Nothing is scheduled once the server is closing: the sockets it drops then must not wake a timer
+  // after the database has closed.
+  let closing = false;
+  const screenChanged = (): void => {
+    if (shapeTimer || closing) return;
+    const wait = lastShapeTold + snapshotIntervalMs - Date.now();
+    if (wait <= 0) tellShape();
+    else shapeTimer = setTimeout(tellShape, wait);
   };
 
   io.on('connection', (socket) => {
@@ -349,10 +373,9 @@ export function attachLiveSocket(
       reportTimer = undefined;
       lastReported = Date.now();
       if (reported === undefined) return;
-      const before = screens.chosen();
       screens.report(socket.id, reported);
       reported = undefined;
-      screenChanged(before);
+      screenChanged();
     };
     socket.on(SOCKET_CHANNELS.viewport, (...args: unknown[]) => {
       if (overloaded(socket)) return;
@@ -384,9 +407,8 @@ export function attachLiveSocket(
       clearTimeout(scheduled);
       clearTimeout(reportTimer);
       if (role === 'players') {
-        const before = screens.chosen();
         screens.disconnected(socket.id);
-        screenChanged(before);
+        screenChanged();
       }
       if (session !== undefined) {
         const sockets = bySession.get(session);
@@ -405,6 +427,8 @@ export function attachLiveSocket(
   // Before Fastify closes the HTTP server: open WebSockets would keep it waiting.
   app.addHook('preClose', (done) => {
     unsubscribe();
+    closing = true;
+    clearTimeout(shapeTimer);
     app.server.off('upgrade', onUpgrade);
     lines.flush();
     io.disconnectSockets(true);

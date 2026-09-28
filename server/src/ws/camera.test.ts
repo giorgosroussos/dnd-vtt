@@ -227,6 +227,27 @@ describe('viewport reports and the shape the TV frame follows (D-119)', () => {
     expect(snapshotOf<DmSnapshot>(dm).scene?.screen).toBeNull();
   });
 
+  it('tells the DM room at most once per interval however many screens change it, ending on the shape chosen (review S-M1)', async () => {
+    const { dm } = await liveScene(200);
+    const screens: Client[] = [];
+    for (let n = 0; n < 20; n++) screens.push(await h.connect());
+    await dm.settle();
+    const start = dm.events.length;
+    // Reported newest first, so each report makes another socket the one connected longest.
+    for (let n = screens.length - 1; n >= 0; n--) await report(screens[n]!, { width: 100 + n, height: 1000 });
+    const told = () => dm.events.slice(start).filter((event) => event.type === 'camera.player');
+    await vi.waitFor(
+      () => expect(told().at(-1)?.payload).toEqual({ camera: FIT_CAMERA, screen: { width: 100, height: 1000 } }),
+      {
+        timeout: 3_000,
+      },
+    );
+    // Twenty changes in well under a second reached the DM room as at most a few events.
+    expect(told().length).toBeLessThanOrEqual(3);
+    const versions = told().map((event) => event.version);
+    expect(new Set(versions).size).toBe(versions.length);
+  });
+
   it('takes at most one report per interval from a socket, the latest winning', async () => {
     const { dm, tv } = await liveScene(200);
     await report(tv, { width: 1000, height: 1000 });
