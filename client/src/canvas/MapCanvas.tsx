@@ -12,7 +12,7 @@ import {
   type TokenSize,
 } from '@emberglass/shared';
 import { Button } from '../ui/Button.js';
-import { formatDecimal, normalise, type Rect as Box } from './calibration.js';
+import { formatDecimal, formatNumber, normalise, type Rect as Box } from './calibration.js';
 import { t } from '../ui/messages.js';
 import {
   boundFrame,
@@ -27,6 +27,7 @@ import {
   frameOf,
   gridLines,
   mapInfo,
+  panBy,
   rectOf,
   resizeBox,
   scaleBox,
@@ -39,7 +40,7 @@ import {
   type Camera,
   type Size,
 } from './geometry.js';
-import { rulerForKey, sameSquare, squareAt, squareCentre, type RulerPath } from './ruler.js';
+import { labelOffset, rulerForKey, sameSquare, squareAt, squareCentre, type RulerPath } from './ruler.js';
 import { TokenLayer, type TokenControls } from './TokenLayer.js';
 import {
   clampToWorld,
@@ -105,6 +106,11 @@ const FRAME_GRIP_PX = 14;
 // A press-and-release shorter than this, in screen pixels either way, is a click, not a rectangle.
 const MIN_RECT_PX = 4;
 export const GRID_OPACITY = { shown: 0.7, faint: 0.25 } as const;
+// The ruler's distance label, larger on the TV to be read across the room (LIV-07), and its gap to the end.
+const RULER_LABEL = {
+  dm: { fontSize: 14, padding: 4, gap: { x: 12, y: 8 } },
+  player: { fontSize: 32, padding: 8, gap: { x: 18, y: 8 } },
+} as const;
 
 type Mode = 'dm' | 'player';
 
@@ -364,6 +370,22 @@ export function MapCanvas({
   const rulerEnds =
     shownRuler && frame ? [squareCentre(frame, shownRuler.from), squareCentre(frame, shownRuler.to)] : [];
   const shownPath: RulerPath | null = shownRuler ? { from: shownRuler.from, to: shownRuler.to } : null;
+  const distanceText = shownRuler ? t('canvas.rulerDistance', { feet: formatNumber(shownRuler.feet) }) : '';
+  // Kept inside the view, so the distance is readable wherever the end lies (review U-M3). The label's width
+  // is estimated from its text, bold digits being about 0.62 of the font size wide.
+  const labelStyle = RULER_LABEL[mode];
+  const distanceOffset =
+    rulerEnds.length === 2
+      ? labelOffset(
+          { x: camera.x + rulerEnds[1]!.x * camera.scale, y: camera.y + rulerEnds[1]!.y * camera.scale },
+          {
+            width: distanceText.length * labelStyle.fontSize * 0.62 + labelStyle.padding * 2,
+            height: labelStyle.fontSize + labelStyle.padding * 2,
+          },
+          viewport,
+          labelStyle.gap,
+        )
+      : { offsetX: 0, offsetY: 0 };
 
   const ARROWS: Record<string, [number, number]> = {
     ArrowLeft: [-1, 0],
@@ -411,6 +433,14 @@ export function MapCanvas({
         rulerTool.onMeasure(next, true);
         return;
       }
+    }
+    // With the ruler off, Escape still takes a measurement off, another browser's too (review U-L4), unless
+    // Escape means something else here first (steering, a selected token).
+    const rulerEscape = rulerTool && !rulerOn && shownPath && !steering && !selected && event.key === 'Escape';
+    if (rulerEscape) {
+      event.preventDefault();
+      rulerTool.onClear();
+      return;
     }
     // T turns steering the TV on and off from the canvas itself (review U-M5).
     if (tv && !measuring && !placingNow && (event.key === 't' || event.key === 'T')) {
@@ -516,20 +546,37 @@ export function MapCanvas({
     measure.onDraw(scaled(box, info.original.width / info.display.width));
   }
 
-  // A ruler drag: from the square pressed to the square under the pointer, reported on each new square.
+  // A ruler drag: from the square pressed to the square under the pointer, reported on each new square. A
+  // drag with the right or middle button pans the view instead, so the DM can reach squares off screen
+  // while measuring (review U-M2).
   const rulerDrag = useRef<RulerPath>(undefined);
+  const rulerPan = useRef<{ x: number; y: number }>(undefined);
   const [rulerDragging, setRulerDragging] = useState(false);
   function onRulerDown(event: Konva.KonvaEventObject<PointerEvent>) {
     const at = worldPoint(event);
     if (!at || !frame || !rulerTool) return;
     const content = event.target.getStage()?.content;
     if (typeof event.evt.pointerId === 'number') content?.setPointerCapture?.(event.evt.pointerId);
+    if (event.evt.button === 1 || event.evt.button === 2) {
+      event.evt.preventDefault();
+      rulerPan.current = { x: event.evt.clientX, y: event.evt.clientY };
+      setRulerDragging(true);
+      return;
+    }
     const square = squareAt(frame, at);
     rulerDrag.current = { from: square, to: square };
     setRulerDragging(true);
     rulerTool.onMeasure(rulerDrag.current, false);
   }
   function onRulerMove(event: Konva.KonvaEventObject<PointerEvent>) {
+    const pan = rulerPan.current;
+    if (pan) {
+      if (event.evt.buttons === 0) return finishRuler();
+      const { clientX, clientY } = event.evt;
+      rulerPan.current = { x: clientX, y: clientY };
+      changeCamera((current) => panBy(current, clientX - pan.x, clientY - pan.y));
+      return;
+    }
     const current = rulerDrag.current;
     if (!current || !frame || !rulerTool) return;
     if (event.evt.buttons === 0) return finishRuler();
@@ -541,6 +588,11 @@ export function MapCanvas({
     rulerTool.onMeasure(rulerDrag.current, false);
   }
   function finishRuler() {
+    if (rulerPan.current) {
+      rulerPan.current = undefined;
+      setRulerDragging(false);
+      return;
+    }
     const current = rulerDrag.current;
     rulerDrag.current = undefined;
     setRulerDragging(false);
@@ -824,18 +876,17 @@ export function MapCanvas({
             name="ruler-distance"
             x={rulerEnds[1]!.x}
             y={rulerEnds[1]!.y}
-            offsetX={dm ? -12 : -18}
-            offsetY={dm ? 30 : 56}
+            {...distanceOffset}
             scaleX={1 / camera.scale}
             scaleY={1 / camera.scale}
           >
             <Tag fill={CANVAS_COLOURS.halo} cornerRadius={4} />
             <Text
-              text={t('canvas.rulerDistance', { feet: formatDecimal(shownRuler.feet) })}
+              text={distanceText}
               fill={CANVAS_COLOURS.grid}
-              fontSize={dm ? 14 : 32}
+              fontSize={RULER_LABEL[mode].fontSize}
               fontStyle="bold"
-              padding={dm ? 4 : 8}
+              padding={RULER_LABEL[mode].padding}
             />
           </Label>
         </Layer>
@@ -969,13 +1020,15 @@ export function MapCanvas({
               ? t('canvas.helpPlace')
               : rulerOn
                 ? t(tv ? 'canvas.helpRulerLive' : 'canvas.helpRuler')
-                : steering
-                  ? t('canvas.helpSteer')
-                  : selected
-                    ? t('canvas.helpToken', { label: selected.label })
-                    : tv
-                      ? t('canvas.helpLive')
-                      : t('canvas.help')}
+                : rulerTool && shownPath && !steering && !selected
+                  ? t('canvas.helpRulerShown')
+                  : steering
+                    ? t('canvas.helpSteer')
+                    : selected
+                      ? t('canvas.helpToken', { label: selected.label })
+                      : tv
+                        ? t('canvas.helpLive')
+                        : t('canvas.help')}
         </p>
       </div>
       <div
@@ -994,6 +1047,8 @@ export function MapCanvas({
         {...frameState}
         {...rulerState}
         data-ruler-tool={rulerTool ? (rulerOn ? 'on' : 'off') : undefined}
+        // A right-button drag pans while measuring, so it opens no context menu (review U-M2).
+        onContextMenu={rulerOn ? (event) => event.preventDefault() : undefined}
         data-tokens={tokenBoxes}
       >
         {stage}

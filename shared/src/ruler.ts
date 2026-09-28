@@ -14,6 +14,18 @@ export interface RulerSquare {
   row: number;
 }
 
+/** Whether `value` is a measurement as the events carry it: two whole squares and a distance (LIV-07 review C-L3). */
+export function isMeasurement(value: unknown): value is { from: RulerSquare; to: RulerSquare; feet: number } {
+  const square = (each: unknown) =>
+    typeof each === 'object' &&
+    each !== null &&
+    Number.isInteger((each as RulerSquare).column) &&
+    Number.isInteger((each as RulerSquare).row);
+  if (typeof value !== 'object' || value === null) return false;
+  const { from, to, feet } = value as Record<string, unknown>;
+  return square(from) && square(to) && typeof feet === 'number' && Number.isFinite(feet) && feet >= 0;
+}
+
 /** The squares moved from `from` to `to` under `rule`. */
 export function rulerSquares(from: RulerSquare, to: RulerSquare, rule: RulerRule): number {
   const dx = Math.abs(to.column - from.column);

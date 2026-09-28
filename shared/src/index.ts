@@ -92,7 +92,7 @@ export {
   type RulerShownPayload,
   type RulerUpdatePayload,
 } from './live.js';
-export { rulerFeet, rulerSquares, type RulerSquare } from './ruler.js';
+export { isMeasurement, rulerFeet, rulerSquares, type RulerSquare } from './ruler.js';
 export {
   ASSET_CATEGORIES,
   AssetSchema,

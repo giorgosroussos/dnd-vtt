@@ -1180,14 +1180,133 @@ describe('the ruler (LIV-07, specs/06-grid-and-measurement.md §5, specs/04-live
     expect(viewport(view).dataset.tvSteering).toBe('on');
     await click(rulerButton(view));
     expect(viewport(view).dataset.tvSteering).toBe('off');
+    // Choosing a token ends measuring and takes the measurement off the TV (review C-M1).
+    press(viewport(view), 'Enter');
+    await settle();
+    expect(server.ruler).not.toBeNull();
     await selectToken(view, caveGoblin.id);
     expect(viewport(view).dataset.rulerTool).toBe('off');
+    expect(server.ruler).toBeNull();
+    expect(rulers().at(-1)?.type).toBe('ruler.clear');
+    expect(shown(view)).toBeNull();
     await click(rulerButton(view));
     press(viewport(view), 'Enter');
     await settle();
     await click(button(view, t('calibration.open')));
     expect(server.ruler).toBeNull();
     expect(rulers().at(-1)?.type).toBe('ruler.clear');
+  });
+
+  it('leaving the live scene takes its measurement off the TV, unless another browser measured over it (review T-M1, C-L2)', async () => {
+    server.liveSceneId = cave.id;
+    const view = await open();
+    await selectScene(view, cave);
+    await measureByKeys(view, 'ArrowRight');
+    expect(server.ruler).not.toBeNull();
+    await selectScene(view, hall);
+    await settle();
+    expect(rulers().at(-1)).toEqual({ type: 'ruler.clear', payload: { scene_id: cave.id } });
+    expect(server.ruler).toBeNull();
+
+    await selectScene(view, cave);
+    await measureByKeys(view, 'ArrowRight');
+    const theirs = { from: { column: 0, row: 0 }, to: { column: 1, row: 1 } };
+    act(() => server.measureElsewhere(theirs));
+    await settle();
+    const sent = rulers().length;
+    await selectScene(view, hall);
+    await settle();
+    expect(rulers()).toHaveLength(sent);
+    expect(server.ruler).toEqual(theirs);
+  });
+
+  it('drops the measurement waiting behind one refused, and announces a distance only once shown (review T-M3, U-L2)', async () => {
+    server.liveSceneId = cave.id;
+    const view = await open();
+    await selectScene(view, cave);
+    let answer: ((ack: CommandAck | undefined) => void) | undefined;
+    server.beforeCommand = (command) =>
+      command.type === 'ruler.update' && !answer ? new Promise((resolve) => (answer = resolve)) : undefined;
+    await click(rulerButton(view));
+    press(viewport(view), 'Enter');
+    press(viewport(view), 'ArrowRight');
+    await settle();
+    expect(rulers()).toHaveLength(1);
+    // Not yet shown on the TV, so not yet announced.
+    expect(status(view)).not.toBe(distance(5));
+    await act(async () => {
+      answer!({ error: { code: 'scene_not_live', message: 'test' } });
+      await Promise.resolve();
+    });
+    await settle();
+    expect(rulers()).toHaveLength(1);
+    expect(shown(view)).toBeNull();
+    // Refused: the alert says why, and no distance is announced.
+    expect(status(view) ?? '').not.toMatch(/^Distance/);
+    expect(view.querySelector('.eg-scene [role="alert"]')).not.toBeNull();
+    // Accepted: a new measurement from the centre, announced once the answer is in.
+    press(viewport(view), 'ArrowRight');
+    await settle();
+    expect(rulers()).toHaveLength(2);
+    expect(status(view)).toBe(distance(5));
+  });
+
+  it('sends nothing more, and shows no refusal, once another browser has blanked the TV (review C-L1)', async () => {
+    server.liveSceneId = cave.id;
+    const view = await open();
+    await selectScene(view, cave);
+    let answer: ((ack: CommandAck | undefined) => void) | undefined;
+    server.beforeCommand = (command) =>
+      command.type === 'ruler.update' && !answer ? new Promise((resolve) => (answer = resolve)) : undefined;
+    await measureByKeys(view, 'ArrowRight', 'ArrowRight');
+    expect(rulers()).toHaveLength(1);
+    // Another browser's Blank TV: the scene is no longer live when the first answer comes.
+    act(() => {
+      server.liveSceneId = null;
+      server.ruler = null;
+      server.deliver('scene.cleared', {});
+    });
+    await settle();
+    expect(mode(view)).toBe('prep');
+    await act(async () => {
+      answer!({ error: { code: 'scene_not_live', message: 'test' } });
+      await Promise.resolve();
+    });
+    await settle();
+    expect(rulers()).toHaveLength(1);
+    expect(view.querySelector('.eg-scene [role="alert"]')).toBeNull();
+  });
+
+  it('with the ruler off, Escape on the map takes a shown measurement off; with nothing shown it sends nothing (review U-L4, T-L2)', async () => {
+    server.liveSceneId = cave.id;
+    const view = await open();
+    await selectScene(view, cave);
+    await click(rulerButton(view));
+    press(viewport(view), 'Escape');
+    await settle();
+    expect(rulers()).toEqual([]);
+    expect(viewport(view).dataset.rulerTool).toBe('off');
+    act(() => server.measureElsewhere({ from: { column: 0, row: 0 }, to: { column: 2, row: 0 } }));
+    await settle();
+    press(viewport(view), 'Escape');
+    await settle();
+    expect(rulers()).toEqual([{ type: 'ruler.clear', payload: { scene_id: cave.id } }]);
+    expect(server.ruler).toBeNull();
+    expect(status(view)).toBe(t('ruler.cleared'));
+  });
+
+  it('the DM socket going takes its measurement off, and the canvas follows the snapshot on reconnection (review T-M6)', async () => {
+    server.liveSceneId = cave.id;
+    const view = await open();
+    await selectScene(view, cave);
+    await measureByKeys(view, 'ArrowRight');
+    expect(server.ruler).not.toBeNull();
+    act(() => server.sockets[0]!.drop());
+    await settle();
+    expect(server.ruler).toBeNull();
+    act(() => server.sockets[0]!.open(server.dmSnapshot(), 99));
+    await settle();
+    expect(shown(view)).toBeNull();
   });
 
   it('going live or back to prep drops a measurement made in the other mode', async () => {
@@ -1222,7 +1341,7 @@ describe('the ruler (LIV-07, specs/06-grid-and-measurement.md §5, specs/04-live
       typeInto(wrong);
       await submit(field.form);
       expect(field.getAttribute('aria-invalid'), wrong).toBe('true');
-      expect(view.textContent).toContain(t('sceneGrid.feetInvalid', { min: '0.5', max: '100000' }));
+      expect(view.textContent).toContain(t('sceneGrid.feetInvalid', { min: '0.5', max: '100,000' }));
     }
     expect(patches()).toEqual([]);
     typeInto('2.5');
@@ -1240,6 +1359,92 @@ describe('the ruler (LIV-07, specs/06-grid-and-measurement.md §5, specs/04-live
     });
     await settle();
     expect(patches()).toHaveLength(1);
+  });
+
+  describe('saving feet per square (review U-L1, C-L4)', () => {
+    const feetField = (view: HTMLElement) =>
+      [...view.querySelectorAll('input')].find((each) => each.labels?.[0]?.textContent === t('sceneGrid.feet'))!;
+    const typeInto = (field: HTMLInputElement, value: string) =>
+      act(() => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, value);
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    const patches = () => server.calls.filter((call) => call.method === 'PATCH');
+
+    it('puts a value out of bounds back when focus leaves the field, and says so in the status line', async () => {
+      const view = await open();
+      await selectScene(view, cave);
+      const field = feetField(view);
+      typeInto(field, '0');
+      act(() => {
+        field.focus();
+        field.blur();
+      });
+      await settle();
+      expect(field.value).toBe('5');
+      expect(field.getAttribute('aria-invalid')).toBeNull();
+      expect(status(view)).toBe(t('sceneGrid.feetRestored', { min: '0.5', max: '100,000', feet: '5' }));
+      expect(patches()).toEqual([]);
+    });
+
+    it('sends one save for Enter then leaving the field', async () => {
+      const view = await open();
+      await selectScene(view, cave);
+      const field = feetField(view);
+      typeInto(field, '10');
+      act(() => {
+        field.focus();
+        field.form!.requestSubmit();
+        field.blur();
+      });
+      await settle();
+      expect(patches().map((call) => call.body)).toEqual([{ grid: { feet_per_square: 10 } }]);
+    });
+
+    it('keeps what is typed while a save runs, and leaves Calibrate usable meanwhile', async () => {
+      const view = await open();
+      await selectScene(view, cave);
+      const field = feetField(view);
+      let release: (() => void) | undefined;
+      server.before = (call) =>
+        call.method === 'PATCH' && !release
+          ? new Promise<undefined>((resolve) => (release = () => resolve(undefined)))
+          : undefined;
+      typeInto(field, '10');
+      await submit(field.form);
+      expect(release).toBeDefined();
+      typeInto(field, '20');
+      await click(button(view, t('calibration.open')));
+      expect(view.querySelector('.eg-calibration')).not.toBeNull();
+      await act(async () => {
+        release!();
+        await Promise.resolve();
+      });
+      await settle();
+      expect(server.scenes.find((each) => each.id === cave.id)!.grid.feet_per_square).toBe(10);
+    });
+
+    it('keeps the value typed during a save in the field once the save lands', async () => {
+      const view = await open();
+      await selectScene(view, cave);
+      const field = feetField(view);
+      let release: (() => void) | undefined;
+      server.before = (call) =>
+        call.method === 'PATCH' && !release
+          ? new Promise<undefined>((resolve) => (release = () => resolve(undefined)))
+          : undefined;
+      typeInto(field, '10');
+      await submit(field.form);
+      typeInto(field, '20');
+      await act(async () => {
+        release!();
+        await Promise.resolve();
+      });
+      await settle();
+      expect(field.value).toBe('20');
+      await submit(field.form);
+      expect(server.scenes.find((each) => each.id === cave.id)!.grid.feet_per_square).toBe(20);
+    });
   });
 
   it('follows the feet per square set in the scene’s setup, which the snapshot recounts on the live scene', async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { rulerFeet, rulerSquares } from './ruler.js';
+import { isMeasurement, rulerFeet, rulerSquares } from './ruler.js';
 
 // Ruler distances (LIV-07; specs/06-grid-and-measurement.md §5, specs/10-testing-acceptance.md §2, Q-048,
 // Q-087, D-045): between the centres of two squares, by the PHB 2014 rule and the optional DMG rule, and
@@ -64,5 +64,23 @@ describe('ruler distances (specs/06-grid-and-measurement.md §5)', () => {
     // No float noise: 0.1 × 3 is 0.30000000000000004 in binary.
     expect(rulerFeet(at(0, 0), at(3, 0), 'phb', 0.1)).toBe(0.3);
     expect(rulerFeet(at(0, 0), at(2, 0), 'phb', 5280)).toBe(10_560);
+  });
+});
+
+describe('what a measurement event must carry (LIV-07 review C-L3)', () => {
+  it('takes two whole squares and a finite distance of zero or more', () => {
+    expect(isMeasurement({ from: at(0, 0), to: at(2, -1), feet: 10 })).toBe(true);
+    expect(isMeasurement({ from: at(0, 0), to: at(0, 0), feet: 0 })).toBe(true);
+    for (const wrong of [
+      null,
+      'x',
+      { from: at(0, 0), to: at(1, 1) },
+      { from: at(0, 0), to: at(1, 1), feet: Number.NaN },
+      { from: at(0, 0), to: at(1, 1), feet: -1 },
+      { from: at(0.5, 0), to: at(1, 1), feet: 5 },
+      { from: { column: 1 }, to: at(1, 1), feet: 5 },
+    ]) {
+      expect(isMeasurement(wrong), JSON.stringify(wrong)).toBe(false);
+    }
   });
 });

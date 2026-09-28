@@ -83,6 +83,8 @@ describe('the ruler in the DM live scene (LIV-07)', () => {
     expect(shown?.tokens).toBe(live?.tokens);
     expect(applyDmEvent(shown, event('ruler.cleared', {}))?.ruler).toBeNull();
     expect(applyDmEvent(live, event('ruler.shown', {}))).toBe(live);
+    expect(applyDmEvent(live, event('ruler.shown', { ruler: { ...measurement, feet: undefined } }))).toBe(live);
+    expect(applyDmEvent(live, event('ruler.shown', { ruler: { from: measurement.from, feet: 5 } }))).toBe(live);
     expect(applyDmEvent(null, event('ruler.shown', { ruler: measurement }))).toBeNull();
   });
 });

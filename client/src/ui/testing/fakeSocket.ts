@@ -21,6 +21,8 @@ export class FakeSocket implements LiveSocketLike {
   readonly emitted: { event: string; args: unknown[] }[] = [];
   /** Answers each command as the server would; without it a command stays unanswered (LIV-04). */
   onCommand: ((command: CommandEnvelope, ack: (answer: CommandAck) => void) => void) | undefined;
+  /** The server side of the connection going, as the server's `disconnect` (LIV-07 review T-M6). */
+  onGone: (() => void) | undefined;
   private readonly listeners = new Map<string, Listener[]>();
 
   on(event: string, listener: Listener): this {
@@ -44,7 +46,10 @@ export class FakeSocket implements LiveSocketLike {
   disconnect(): this {
     const was = this.connected;
     this.connected = false;
-    if (was) this.fire('disconnect', 'io client disconnect');
+    if (was) {
+      this.onGone?.();
+      this.fire('disconnect', 'io client disconnect');
+    }
     return this;
   }
 
@@ -62,7 +67,9 @@ export class FakeSocket implements LiveSocketLike {
   }
 
   drop(reason = 'transport close'): void {
+    const was = this.connected;
     this.connected = false;
+    if (was) this.onGone?.();
     this.fire('disconnect', reason);
   }
 

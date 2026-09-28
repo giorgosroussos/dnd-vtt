@@ -575,6 +575,86 @@ describe('the ruler (LIV-07, specs/06-grid-and-measurement.md §5, specs/04-live
     expect(onToggle).toHaveBeenLastCalledWith(false);
   });
 
+  it('pans the view with a right- or middle-button drag while measuring, and measures nothing (review U-M2)', async () => {
+    const onMeasure = vi.fn();
+    const { view, stage } = await draw({
+      grid: GRID,
+      map: MAP,
+      mode: 'dm',
+      ruler: { shown: null, tool: { on: true, onToggle: vi.fn(), onMeasure, onClear: vi.fn() } },
+    });
+    const cameraX = () => Number(viewport(view).dataset.cameraX);
+    const before = cameraX();
+    for (const button of [2, 1]) {
+      const fire = (type: string, x: number, buttons: number) => {
+        const evt = new MouseEvent(type, { clientX: x, clientY: 100, button, buttons, bubbles: true });
+        act(() => {
+          stage.setPointersPositions(evt);
+          stage.fire(type, { evt, target: stage });
+        });
+      };
+      fire('pointerdown', 100, button === 2 ? 2 : 4);
+      fire('pointermove', 160, button === 2 ? 2 : 4);
+      fire('pointerup', 160, 0);
+    }
+    expect(cameraX()).toBeCloseTo(before + 120, 6);
+    expect(onMeasure).not.toHaveBeenCalled();
+    // A right-click opens no context menu while measuring.
+    const menu = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+    act(() => {
+      viewport(view).dispatchEvent(menu);
+    });
+    expect(menu.defaultPrevented).toBe(true);
+  });
+
+  it('keeps the distance label on the screen near the top and right edges (review U-M3)', async () => {
+    // The end at square (38, -2) lies near the top-right corner of the 800 × 600 view.
+    const { stage } = await draw({
+      grid: GRID,
+      map: MAP,
+      mode: 'player',
+      ruler: { shown: { from: { column: 30, row: 5 }, to: { column: 38, row: -2 }, feet: 40 } },
+    });
+    const label = stage.findOne<Konva.Label>('.ruler-distance')!;
+    // Flipped to the left of the end and below it.
+    expect(label.offsetX()).toBeGreaterThan(0);
+    expect(label.offsetY()).toBeLessThan(0);
+  });
+
+  it('leaves the TV frame alone while measuring (review T-M2)', async () => {
+    const { stage } = await draw({
+      grid: GRID,
+      map: MAP,
+      mode: 'dm',
+      tvFrame: {
+        camera: { centre_x: 0.5, centre_y: 0.5, width: 0.5, height: 0.5 },
+        screen: null,
+        offline: false,
+        steering: false,
+        onSteer: vi.fn(),
+        onChange: vi.fn(),
+      },
+      ruler: { shown: null, tool: { on: true, onToggle: vi.fn(), onMeasure: vi.fn(), onClear: vi.fn() } },
+    });
+    expect(stage.findOne('.tv-frame')!.draggable()).toBe(false);
+    expect(stage.findOne('.tv-frame-layer')!.listening()).toBe(false);
+  });
+
+  it('clears a shown measurement with Escape even while the ruler is off, and says so (review U-L4)', async () => {
+    const onClear = vi.fn();
+    const { view } = await draw({
+      grid: GRID,
+      map: MAP,
+      mode: 'dm',
+      ruler: { shown: measurement, tool: { on: false, onToggle: vi.fn(), onMeasure: vi.fn(), onClear } },
+    });
+    expect(document.getElementById(viewport(view).getAttribute('aria-describedby')!)!.textContent).toBe(
+      t('canvas.helpRulerShown'),
+    );
+    press(viewport(view), 'Escape');
+    expect(onClear).toHaveBeenCalledTimes(1);
+  });
+
   it('leaves the tokens alone while measuring', async () => {
     const onSelect = vi.fn();
     const token = {

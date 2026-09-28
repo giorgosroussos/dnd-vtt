@@ -1,3 +1,4 @@
+import { isMeasurement } from '@emberglass/shared';
 import type {
   DmCameraPayload,
   DmLiveScene,
@@ -58,8 +59,10 @@ export function applyDmEvent(scene: DmScene, event: EventEnvelope): DmScene {
     }
     case 'ruler.shown': {
       const { ruler } = event.payload as unknown as Partial<RulerShownPayload>;
-      if (!ruler) return scene;
-      return { ...scene, ruler };
+      // A malformed measurement is skipped rather than drawn as "undefined ft" (review C-L3).
+      if (!isMeasurement(ruler)) return scene;
+      const { from, to, feet } = ruler;
+      return { ...scene, ruler: { from: { ...from }, to: { ...to }, feet } };
     }
     case 'ruler.cleared':
       return { ...scene, ruler: null };

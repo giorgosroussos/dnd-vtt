@@ -133,6 +133,8 @@ export class FakeServer {
    */
   ruler: { from: RulerSquare; to: RulerSquare } | null = null;
   rulerRule: RulerRule = 'phb';
+  /** The socket that last measured, whose going clears the measurement. */
+  private rulerOwner: FakeSocket | undefined;
   /** The `dm` room's version counter (D-108). */
   private dmVersion = 1;
   /**
@@ -305,7 +307,16 @@ export class FakeServer {
     const original = globalThis.fetch;
     const fakeSockets = installFakeSockets((socket) => {
       socket.onCommand = (command, ack) => {
-        void Promise.resolve(this.beforeCommand?.(command)).then((answer) => ack(answer ?? this.command(command)));
+        void Promise.resolve(this.beforeCommand?.(command)).then((answer) =>
+          ack(answer ?? this.command(command, socket)),
+        );
+      };
+      // The DM socket that drew the measurement going takes it off the TV, as the server's release does (D-121).
+      socket.onGone = () => {
+        if (socket.view === 'dm' && this.ruler && this.rulerOwner === socket) {
+          this.rulerOwner = undefined;
+          this.measureElsewhere(null);
+        }
       };
     });
     this.sockets = fakeSockets.sockets;
@@ -384,8 +395,10 @@ export class FakeServer {
 
   /** Another DM browser measured on the live scene, or took its measurement off. */
   measureElsewhere(path: { from: RulerSquare; to: RulerSquare } | null): void {
-    const scene = this.scenes.find((each) => each.id === this.liveSceneId)!;
+    const scene = this.scenes.find((each) => each.id === this.liveSceneId);
+    if (!scene) throw new Error('Nothing is live to measure on.');
     this.ruler = path && structuredClone(path);
+    this.rulerOwner = undefined;
     if (path) this.deliver('ruler.shown', { ruler: this.measurement(scene) });
     else this.deliver('ruler.cleared', {});
   }
@@ -420,11 +433,13 @@ export class FakeServer {
     for (const socket of this.sockets) if (socket.connected && socket.view === 'dm') socket.deliver(event);
   }
 
-  private command(envelope: CommandEnvelope): CommandAck {
+  private command(envelope: CommandEnvelope, sender?: FakeSocket): CommandAck {
     const live = this.liveSceneId;
     const before = new Map(this.sceneTokens.map((token) => [token.id, structuredClone(token)]));
     const version = this.dmVersion;
     const ack = this.apply(envelope);
+    // As the server does: whoever measured last owns the line, even when it was already shown.
+    if ('ok' in ack && envelope.type === 'ruler.update') this.rulerOwner = sender;
     if (this.liveSceneId !== live) this.undoHistory = [];
     else if ('ok' in ack && this.dmVersion !== version && envelope.type !== 'undo') {
       const p = envelope.payload;
@@ -562,7 +577,8 @@ export class FakeServer {
       case 'ruler.update': {
         if (this.liveSceneId === null || p.scene_id !== this.liveSceneId) return refuse('scene_not_live');
         const path = { from: p.from as RulerSquare, to: p.to as RulerSquare };
-        if (JSON.stringify(path) === JSON.stringify(this.ruler)) return { ok: true };
+        const same = (a: RulerSquare, b: RulerSquare) => a.column === b.column && a.row === b.row;
+        if (this.ruler && same(path.from, this.ruler.from) && same(path.to, this.ruler.to)) return { ok: true };
         this.measureElsewhere(path);
         return { ok: true };
       }

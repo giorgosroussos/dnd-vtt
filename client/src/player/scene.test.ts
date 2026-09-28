@@ -268,6 +268,18 @@ describe('the ruler (LIV-07, specs/04-live-sync.md §11)', () => {
     expect(shown?.tokens).toBe(scene?.tokens);
     expect(applyPlayerEvent(shown, { type: 'ruler.cleared', version: 3, payload: {} })?.ruler).toBeNull();
     expect(applyPlayerEvent(scene, { type: 'ruler.shown', version: 2, payload: { ruler: { feet: 5 } } })).toBe(scene);
+    // A distance that is not a number, or a square that is not whole, is not drawn (review C-L3).
+    for (const ruler of [
+      { ...measurement, feet: undefined },
+      { ...measurement, feet: 'x' },
+      { ...measurement, feet: -5 },
+      { ...measurement, to: { column: 1.5, row: 2 } },
+    ]) {
+      expect(
+        applyPlayerEvent(scene, { type: 'ruler.shown', version: 2, payload: { ruler } }),
+        JSON.stringify(ruler),
+      ).toBe(scene);
+    }
     expect(applyPlayerEvent(null, { type: 'ruler.shown', version: 2, payload: { ruler: measurement } })).toBeNull();
   });
 });

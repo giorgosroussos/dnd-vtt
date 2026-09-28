@@ -1,5 +1,6 @@
 import {
   FIT_CAMERA,
+  isMeasurement,
   type EventEnvelope,
   type Measurement,
   type PlayerCameraPayload,
@@ -96,7 +97,7 @@ export function applyPlayerEvent(scene: PlayerScene, event: EventEnvelope): Play
     }
     case 'ruler.shown': {
       const { ruler } = event.payload as unknown as Partial<RulerShownPayload>;
-      if (!ruler?.from || !ruler.to) return scene;
+      if (!isMeasurement(ruler)) return scene;
       return { ...scene, ruler: measurement(ruler) };
     }
     case 'ruler.cleared':

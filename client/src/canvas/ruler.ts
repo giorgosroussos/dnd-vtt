@@ -52,3 +52,28 @@ export function rulerForKey(
   const moved = (square: RulerSquare) => ({ column: square.column + dx, row: square.row + dy });
   return shift ? { from: moved(current.from), to: moved(current.to) } : { from: current.from, to: moved(current.to) };
 }
+
+/** A point or a size on screen, in CSS pixels. */
+interface Screen2d {
+  x: number;
+  y: number;
+}
+
+/**
+ * Where the distance label goes beside the measurement's end, as the Konva label's offsets in screen
+ * pixels (LIV-07 review U-M3): above and to the right, flipped below when that would leave the top of
+ * the view and to the left when it would leave the right edge, so players can always read it.
+ */
+export function labelOffset(
+  end: Screen2d,
+  label: { width: number; height: number },
+  viewport: { width: number; height: number },
+  gap: Screen2d,
+): { offsetX: number; offsetY: number } {
+  const above = end.y - gap.y - label.height >= 0;
+  const right = end.x + gap.x + label.width <= viewport.width;
+  return {
+    offsetX: right ? -gap.x : gap.x + label.width,
+    offsetY: above ? gap.y + label.height : -gap.y,
+  };
+}

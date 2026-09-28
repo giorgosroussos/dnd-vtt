@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Grid } from '@emberglass/shared';
 import { CELL_PX } from './geometry.js';
-import { rulerForKey, samePath, squareAt, squareCentre } from './ruler.js';
+import { labelOffset, rulerForKey, samePath, squareAt, squareCentre } from './ruler.js';
 import { gridFrame } from './tokens.js';
 
 // The ruler's geometry (LIV-07, specs/06-grid-and-measurement.md §5, Q-048): the end points taken at
@@ -77,5 +77,21 @@ describe('the keyboard ruler (specs/08-ux-journeys.md §8)', () => {
     expect(samePath(path, { ...path, to: { column: 3, row: 3 } })).toBe(false);
     expect(samePath(null, null)).toBe(true);
     expect(samePath(path, null)).toBe(false);
+  });
+});
+
+describe('where the distance label goes (LIV-07 review U-M3)', () => {
+  const label = { width: 100, height: 48 };
+  const view = { width: 1280, height: 720 };
+  const gap = { x: 18, y: 8 };
+
+  it('sits above and to the right of the end, in screen pixels', () => {
+    expect(labelOffset({ x: 400, y: 300 }, label, view, gap)).toEqual({ offsetX: -18, offsetY: 56 });
+  });
+
+  it('flips below near the top and to the left near the right edge, so it stays on the screen', () => {
+    expect(labelOffset({ x: 400, y: 30 }, label, view, gap)).toEqual({ offsetX: -18, offsetY: -8 });
+    expect(labelOffset({ x: 1200, y: 300 }, label, view, gap)).toEqual({ offsetX: 118, offsetY: 56 });
+    expect(labelOffset({ x: 1250, y: 10 }, label, view, gap)).toEqual({ offsetX: 118, offsetY: -8 });
   });
 });

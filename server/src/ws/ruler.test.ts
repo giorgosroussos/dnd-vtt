@@ -295,3 +295,63 @@ describe('what takes a measurement off the TV (D-121)', () => {
     expect(types(events)).toEqual(['ruler.cleared']);
   });
 });
+
+describe('ruler edge cases (LIV-07 review)', () => {
+  it('shows none after the live scene is deleted over REST, and the drawing socket going then sends nothing (T-M5)', async () => {
+    const { scene, other, dm, tv } = await liveScene();
+    await measure(dm, scene);
+    await tv.settle();
+    const summary = await h.inject({ method: 'GET', url: `/api/scenes/${scene.id}/deletion` });
+    const deleted = await h.inject({
+      method: 'DELETE',
+      url: `/api/scenes/${scene.id}`,
+      payload: { confirm: summary.json<object>() },
+    });
+    expect(deleted.statusCode, deleted.body).toBe(204);
+    expect(types(await tv.settle())).toEqual(['scene.cleared']);
+    await h.command(dm, 'scene.activate', { scene_id: other.id });
+    const events = await tv.settle();
+    expect((events.at(-1)!.payload as PlayerSnapshot).scene?.ruler).toBeNull();
+    dm.socket.disconnect();
+    expect(await tv.settle()).toEqual([]);
+  });
+
+  it('gives the line to the last socket to send it, even when it is the one already shown (T-L1)', async () => {
+    const { scene, dm, tv } = await liveScene();
+    const second = await h.connect({ cookie: h.cookie });
+    await measure(dm, scene);
+    await tv.settle();
+    // The same path from another DM socket tells nobody, but that socket now owns the line.
+    await measure(second, scene);
+    expect(await tv.settle()).toEqual([]);
+    dm.socket.disconnect();
+    expect(await tv.settle()).toEqual([]);
+    second.socket.disconnect();
+    expect(types(await tv.settle())).toEqual(['ruler.cleared']);
+  });
+
+  it('measures on a map-less live scene by its own feet per square (T-L3)', async () => {
+    h = await startLive();
+    const fog = await h.scene('The fog');
+    ok<Scene>(
+      await h.inject({ method: 'PATCH', url: `/api/scenes/${fog.id}`, payload: { grid: { feet_per_square: 10 } } }),
+    );
+    const dm = await h.connect({ cookie: h.cookie });
+    const tv = await h.connect();
+    await h.command(dm, 'scene.activate', { scene_id: fog.id });
+    await tv.settle();
+    expect(await measure(dm, fog, { from: { column: 29, row: 19 }, to: { column: 0, row: 0 } })).toEqual({ ok: true });
+    expect((await tv.settle())[0]!.payload).toEqual({
+      ruler: { from: { column: 29, row: 19 }, to: { column: 0, row: 0 }, feet: 290 },
+    });
+  });
+
+  it('never tells players which socket drew the line (T-L7)', async () => {
+    const { scene, dm, tv } = await liveScene();
+    await measure(dm, scene);
+    const received = JSON.stringify(await tv.settle()) + JSON.stringify(tv.events.at(-1));
+    expect(dm.socket.id).toBeDefined();
+    expect(received).not.toContain(dm.socket.id!);
+    expect(received).not.toContain('owner');
+  });
+});
