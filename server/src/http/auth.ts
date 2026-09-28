@@ -190,6 +190,14 @@ export function registerAuth(
       const seconds = attempt.lockedMs / 1000;
       logger.warn('pin.locked', `PIN entry from ${address} is locked for ${seconds} s.`, { address, seconds });
     }
+    if (attempt.paused !== null) {
+      const seconds = attempt.paused.ms / 1000;
+      logger.warn(
+        'pin.paused',
+        `PIN entry is paused for ${seconds} s from every address but this PC, after many failed attempts.`,
+        { seconds, addresses: attempt.paused.addresses },
+      );
+    }
     throw pinIncorrect();
   };
 

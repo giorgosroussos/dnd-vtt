@@ -157,6 +157,7 @@ export function ScenePanel({
   name,
   uploadLimit,
   rulerRule = 'phb',
+  onRulerOn,
   live,
 }: {
   sceneId: string;
@@ -164,6 +165,8 @@ export function ScenePanel({
   uploadLimit: number;
   /** The server-wide diagonal rule the ruler measures by (specs/06-grid-and-measurement.md §5, Q-037). */
   rulerRule?: RulerRule | undefined;
+  /** Told when measuring starts, so the workspace reads the rule again: another browser may have changed it (G-036). */
+  onRulerOn?: (() => void) | undefined;
   /** The workspace's live connection: whether this scene is live, and the commands (LIV-04). */
   live?: DmLive | undefined;
 }) {
@@ -679,6 +682,7 @@ export function ScenePanel({
         onToggle: (on) => {
           if (!on) return stopMeasuring();
           setRulerOn(true);
+          onRulerOn?.();
           setSteering(false);
           setSelectedToken(undefined);
         },

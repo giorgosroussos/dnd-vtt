@@ -147,6 +147,7 @@ export {
   type PinChangeBody,
   type SetupState,
 } from './auth.js';
+export { DISPLAY_SIZE_BOUNDS, SettingsUpdateSchema, UPLOAD_LIMIT_BOUNDS, type SettingsUpdate } from './settings.js';
 export {
   API_STRUCTURE_PATHS,
   CALENDAR_DATE_PATTERN,

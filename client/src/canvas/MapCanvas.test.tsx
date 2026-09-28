@@ -104,6 +104,16 @@ describe('the map and the grid overlay (specs/06-grid-and-measurement.md §2)', 
     expect(images.requested).toEqual([imageFileUrl(MAP.id, 'display')]);
   });
 
+  it('requests the display version again when it was regenerated at another size, drawn at the new size (REL-01)', async () => {
+    const { stage } = await draw({ grid: GRID, map: MAP, mode: 'player' });
+    const smaller = { ...MAP, variants: { ...MAP.variants, display: { width: 1000, height: 750 } } };
+    act(() => rendered!.rerender(createElement(MapCanvas, { grid: GRID, map: smaller, mode: 'player' })));
+    await settle();
+    expect(images.requested).toEqual([imageFileUrl(MAP.id, 'display'), imageFileUrl(MAP.id, 'display')]);
+    const background = stage.findOne<Konva.Image>('.map')!;
+    expect([background.width(), background.height()]).toEqual([1000, 750]);
+  });
+
   it('loads only the display version in the player view too (review L-8)', async () => {
     const { stage } = await draw({ grid: GRID, map: MAP, mode: 'player' });
     expect(images.requested).toEqual([imageFileUrl(MAP.id, 'display')]);

@@ -1061,6 +1061,32 @@ describe('the ruler (LIV-07, specs/06-grid-and-measurement.md §5, specs/04-live
     expect(status(view)).toBe(distance(15));
   });
 
+  it('measures by a rule another browser saved while this view was open, read again when the ruler is turned on (G-036)', async () => {
+    const view = await open();
+    await selectScene(view, cave);
+    // Saved from another DM browser: this view learns it when measuring starts.
+    server.rulerRule = 'dmg';
+    const reads = server.calls.filter((call) => call.path === '/api/settings').length;
+    await measureByKeys(view, 'ArrowRight', 'ArrowDown', 'ArrowRight', 'ArrowDown');
+    expect(server.calls.filter((call) => call.path === '/api/settings')).toHaveLength(reads + 1);
+    expect(shown(view)?.feet).toBe(15);
+    expect(status(view)).toBe(distance(15));
+  });
+
+  it('counts the measurement shown again by a rule saved in this view’s Settings, without a reload', async () => {
+    const view = await open();
+    await selectScene(view, cave);
+    await measureByKeys(view, 'ArrowRight', 'ArrowDown', 'ArrowRight', 'ArrowDown');
+    expect(shown(view)?.feet).toBe(10);
+    await click(button(view, t('settings.open')));
+    const dialog = view.querySelector('dialog')!;
+    await click(dialog.querySelector<HTMLInputElement>('input[value="dmg"]'));
+    await submit(dialog.querySelector('form'));
+    expect(server.rulerRule).toBe('dmg');
+    await click(button(dialog, t('settings.close')));
+    expect(shown(view)?.feet).toBe(15);
+  });
+
   it('in live mode sends ruler.update for each measurement and ruler.clear to end it; the canvas shows what the TV shows', async () => {
     server.liveSceneId = cave.id;
     const view = await open();

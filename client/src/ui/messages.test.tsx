@@ -122,10 +122,8 @@ describe('the catalogue', () => {
   });
 
   it('fills placeholders and leaves unknown ones visible', () => {
-    expect(t('signIn.lockedOut', { seconds: 30 })).toBe(
-      'Too many wrong PINs from this device. Try again in 30 seconds.',
-    );
-    expect(t('signIn.lockedOut')).toBe('Too many wrong PINs from this device. Try again in {seconds} seconds.');
+    expect(t('signIn.lockedOut', { seconds: 30 })).toBe('Too many wrong PINs. Try again in 30 seconds.');
+    expect(t('signIn.lockedOut')).toBe('Too many wrong PINs. Try again in {seconds} seconds.');
     expect(t('app.name')).toBe('Emberglass');
   });
 });

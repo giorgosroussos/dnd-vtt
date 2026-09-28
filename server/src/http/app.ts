@@ -15,7 +15,9 @@ import { registerConnect } from './connect.js';
 import type { NetworkInterfaces } from '../connect.js';
 import { registerTokens } from './tokens.js';
 import { imageFileRemover, registerImages } from './images.js';
+import { createDisplayRegenerator, type DisplayRegenerator } from '../images/regenerator.js';
 import { imagesDirOf, prepareImagesDir } from '../images/store.js';
+import { registerSettings } from './settings.js';
 import type { VersionCounters } from '../domain/version.js';
 import { attachLiveSocket, isViteUpgrade, type LiveSocket, type LiveSocketOptions } from '../ws/live.js';
 import { createFailureLog, installErrorHandling, sendFailure, type RejectedLineLimits } from './errors.js';
@@ -55,6 +57,8 @@ declare module 'fastify' {
     auth: Auth;
     // The Socket.io server of the live scene, on the same HTTP server (LIV-01).
     live: LiveSocket;
+    // The worker that keeps display versions at the display-size setting (REL-01).
+    regenerator: DisplayRegenerator;
     // Every route declared, HEAD routes included: the tests that check every
     // /api route read it, so a new route cannot escape them.
     declaredRoutes: readonly { method: string; url: string }[];
@@ -121,7 +125,10 @@ export async function buildApp({
   registerAssets(app, db, removeImages, live.refresh);
   registerTokens(app, db);
   registerConnect(app, networkInterfaces);
-  await registerImages(app, { db, imagesDir, auth });
+  const regenerator = createDisplayRegenerator({ db, imagesDir, logger, commit: live.refresh });
+  app.addHook('onClose', () => regenerator.stop());
+  registerSettings(app, { db, logger, live, regenerator });
+  await registerImages(app, { db, imagesDir, auth, regenerator });
   const sendIndex = client.kind === 'static' ? await serveBuild(app, client.dist) : await serveVite(app, client.root);
 
   // Both views come from one client build: the player view at /, the DM view at /dm.
@@ -130,6 +137,7 @@ export async function buildApp({
   app.get(`${VIEW_PATHS.dm}/*`, sendIndex);
   app.decorate('auth', auth);
   app.decorate('live', live);
+  app.decorate('regenerator', regenerator);
   app.decorate('declaredRoutes', declaredRoutes);
   return app;
 }

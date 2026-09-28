@@ -1,0 +1,243 @@
+// @vitest-environment jsdom
+import { act } from 'react';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { t } from '../ui/messages.js';
+import { installCanvas2d, installImageLoading, installResizeObserver } from '../ui/testing/canvas2d.js';
+import {
+  button,
+  click,
+  FakeServer,
+  installDialog,
+  settle,
+  submit,
+  type,
+  type Reply,
+} from '../ui/testing/fakeServer.js';
+import { render, type Rendered } from '../ui/testing/render.js';
+import { DmView } from './DmView.js';
+
+// The Settings dialog of the DM view (REL-01, specs/09-operations.md §7, specs/07-security-and-access.md
+// §1, Q-051): the upload limit, the display size and the ruler's rule, saved without a restart, and the
+// PIN change. The server's checks are server/src/http/settings.test.ts and auth.test.ts.
+
+const MB = 1024 * 1024;
+let server: FakeServer;
+let rendered: Rendered | undefined;
+
+beforeEach(() => {
+  installDialog();
+  installCanvas2d();
+  installResizeObserver({ width: 800, height: 600 });
+  installImageLoading();
+  server = new FakeServer().install();
+});
+
+afterEach(() => {
+  rendered?.unmount();
+  rendered = undefined;
+  server.uninstall();
+});
+
+async function openDialog(): Promise<HTMLDialogElement> {
+  rendered = render(DmView);
+  await settle();
+  await click(button(rendered.container, t('settings.open')));
+  await settle();
+  return rendered.container.querySelector('dialog')!;
+}
+
+/** An input by its visible label. */
+function field(container: ParentNode, label: string): HTMLInputElement {
+  const found = [...container.querySelectorAll('label')].find((each) => each.textContent === label);
+  if (!found) throw new Error(`no field labelled ${label}`);
+  return document.getElementById(found.htmlFor) as HTMLInputElement;
+}
+const settingsForm = (dialog: HTMLDialogElement) => dialog.querySelectorAll('form')[0]!;
+const pinForm = (dialog: HTMLDialogElement) => dialog.querySelectorAll('form')[1]!;
+const patches = () => server.calls.filter((call) => call.method === 'PATCH' && call.path === '/api/settings');
+const described = (input: HTMLInputElement) =>
+  (input.getAttribute('aria-describedby') ?? '')
+    .split(' ')
+    .map((id) => document.getElementById(id)?.textContent)
+    .join(' ');
+
+describe('Settings', () => {
+  it('shows the three settings as the server holds them', async () => {
+    server.uploadLimit = 20 * MB;
+    server.displaySize = 2048;
+    server.rulerRule = 'dmg';
+    const dialog = await openDialog();
+    expect(dialog.open).toBe(true);
+    expect(dialog.querySelector('h2')!.textContent).toBe(t('settings.heading'));
+    expect(field(dialog, t('settings.uploadLimit')).value).toBe('20');
+    expect(field(dialog, t('settings.displaySize')).value).toBe('2048');
+    expect(dialog.querySelector<HTMLInputElement>('input[value="dmg"]')!.checked).toBe(true);
+    expect(dialog.querySelector<HTMLInputElement>('input[value="phb"]')!.checked).toBe(false);
+    expect(dialog.querySelector('legend')!.textContent).toBe(t('settings.rulerRule'));
+    expect(described(field(dialog, t('settings.displaySize')))).toContain(
+      t('settings.displaySizeHint', { min: 512, max: 16383 }),
+    );
+  });
+
+  it('saves every change at once, says a new display size is applied in the background, and the workspace follows', async () => {
+    const dialog = await openDialog();
+    await type(field(dialog, t('settings.uploadLimit')), '10');
+    await type(field(dialog, t('settings.displaySize')), '2048');
+    await click(dialog.querySelector<HTMLInputElement>('input[value="dmg"]'));
+    await submit(settingsForm(dialog));
+    expect(patches().map((call) => call.body)).toEqual([
+      { upload_limit_bytes: 10 * MB, display_variant_size: 2048, ruler_rule: 'dmg' },
+    ]);
+    expect([server.uploadLimit, server.displaySize, server.rulerRule]).toEqual([10 * MB, 2048, 'dmg']);
+    expect(settingsForm(dialog).querySelector('[role="status"]')!.textContent).toBe(t('settings.savedRegenerating'));
+    // The same size again: nothing is regenerated, so the message does not say so.
+    await submit(settingsForm(dialog));
+    expect(settingsForm(dialog).querySelector('[role="status"]')!.textContent).toBe(t('settings.saved'));
+  });
+
+  it('refuses a value out of bounds beside its field, and sends nothing', async () => {
+    const dialog = await openDialog();
+    for (const [limit, display] of [
+      ['0', '511'],
+      ['1025', '16384'],
+      ['2.5', 'big'],
+      ['', ''],
+    ] as const) {
+      await type(field(dialog, t('settings.uploadLimit')), limit);
+      await type(field(dialog, t('settings.displaySize')), display);
+      await submit(settingsForm(dialog));
+      const limitInput = field(dialog, t('settings.uploadLimit'));
+      const displayInput = field(dialog, t('settings.displaySize'));
+      expect(limitInput.getAttribute('aria-invalid')).toBe('true');
+      expect(described(limitInput)).toContain(t('settings.uploadLimitInvalid', { min: 1, max: 1024 }));
+      expect(displayInput.getAttribute('aria-invalid')).toBe('true');
+      expect(described(displayInput)).toContain(t('settings.displaySizeInvalid', { min: 512, max: 16383 }));
+    }
+    expect(patches()).toEqual([]);
+    // The bounds themselves are accepted.
+    await type(field(dialog, t('settings.uploadLimit')), '1024');
+    await type(field(dialog, t('settings.displaySize')), '512');
+    await submit(settingsForm(dialog));
+    expect(patches()).toHaveLength(1);
+    expect(field(dialog, t('settings.uploadLimit')).getAttribute('aria-invalid')).toBeNull();
+  });
+
+  it('says it is loading, and names the reason when the settings cannot be read', async () => {
+    let release: (reply?: Reply) => void = () => {};
+    rendered = render(DmView);
+    await settle();
+    server.before = (call) =>
+      call.path === '/api/settings' ? new Promise<Reply | undefined>((resolve) => (release = resolve)) : undefined;
+    await click(button(rendered.container, t('settings.open')));
+    const dialog = rendered.container.querySelector('dialog')!;
+    expect(dialog.querySelector('[role="status"]')!.textContent).toBe(t('settings.loading'));
+    expect(dialog.querySelectorAll('form')).toHaveLength(1);
+    release({ status: 500, body: { error: { code: 'internal_error', message: 'x' } } });
+    await settle();
+    expect(dialog.querySelector('[role="alert"]')!.textContent).toBe(
+      t('settings.loadFailed', { reason: t('error.code.internal_error') }),
+    );
+  });
+
+  it('shows Saving while the server answers, with Save off, and names the reason when it refuses', async () => {
+    const dialog = await openDialog();
+    let release: (reply?: Reply) => void = () => {};
+    server.before = (call) =>
+      call.method === 'PATCH' ? new Promise<Reply | undefined>((resolve) => (release = resolve)) : undefined;
+    act(() => {
+      settingsForm(dialog).requestSubmit();
+    });
+    await settle();
+    const save = button(dialog, t('settings.save'))!;
+    expect(save.disabled).toBe(true);
+    expect(settingsForm(dialog).querySelector('[role="status"]')!.textContent).toBe(t('settings.saving'));
+    expect(settingsForm(dialog).getAttribute('aria-busy')).toBe('true');
+    release({ status: 400, body: { error: { code: 'validation_failed', message: 'x' } } });
+    await settle();
+    expect(save.disabled).toBe(false);
+    expect(settingsForm(dialog).querySelector('[role="alert"]')!.textContent).toBe(
+      t('settings.saveFailed', { reason: t('error.code.validation_failed') }),
+    );
+    expect(settingsForm(dialog).querySelector('[role="status"]')!.textContent).toBe('');
+  });
+
+  it('is operated by keyboard: Enter in a field saves, and Escape closes it and gives focus back', async () => {
+    const dialog = await openDialog();
+    const limit = field(dialog, t('settings.uploadLimit'));
+    await type(limit, '30');
+    // Enter in a text field submits its form: the browser's implicit submission.
+    await submit(limit.form);
+    expect(patches()).toHaveLength(1);
+    act(() => {
+      dialog.dispatchEvent(new Event('cancel', { cancelable: true }));
+    });
+    await settle();
+    expect(rendered!.container.querySelector('dialog')).toBeNull();
+    expect(document.activeElement).toBe(button(rendered!.container, t('settings.open')));
+  });
+
+  it('gives the upload limit saved to the library at once, which then refuses a larger file before sending', async () => {
+    const dialog = await openDialog();
+    await type(field(dialog, t('settings.uploadLimit')), '1');
+    await submit(settingsForm(dialog));
+    await click(button(dialog, t('settings.close')));
+    expect(server.uploadLimit).toBe(MB);
+    expect(document.activeElement).toBe(button(rendered!.container, t('settings.open')));
+
+    await click(button(rendered!.container, t('library.new')));
+    const form = rendered!.container.querySelector('dialog')!;
+    const input = field(form, t('assetForm.image'));
+    act(() => {
+      const file = new File([new Uint8Array(1.5 * MB)], 'map.png', { type: 'image/png' });
+      Object.defineProperty(input, 'files', { value: [file], configurable: true });
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await settle();
+    expect(form.textContent).toContain(t('assetForm.tooLarge', { size: '1.5', limit: '1' }));
+  });
+});
+
+describe('Change the PIN (specs/07-security-and-access.md §1)', () => {
+  async function fill(dialog: HTMLDialogElement, current: string, next: string, confirm = next) {
+    await type(field(dialog, t('settings.currentPin')), current);
+    await type(field(dialog, t('settings.newPin')), next);
+    await type(field(dialog, t('settings.confirmPin')), confirm);
+    await submit(pinForm(dialog));
+  }
+  const pinCalls = () => server.calls.filter((call) => call.path === '/api/settings/pin');
+
+  it('changes it with the current PIN and says other browsers were signed out', async () => {
+    const dialog = await openDialog();
+    expect(pinForm(dialog).getAttribute('aria-labelledby')).toBeTruthy();
+    await fill(dialog, '4826', '73019264');
+    expect(pinCalls().map((call) => call.body)).toEqual([{ current_pin: '4826', new_pin: '73019264' }]);
+    expect(server.pin).toBe('73019264');
+    expect(pinForm(dialog).querySelector('[role="status"]')!.textContent).toBe(t('settings.pinChanged'));
+    // No PIN is left in the form.
+    expect([...pinForm(dialog).querySelectorAll('input')].map((input) => input.value)).toEqual(['', '', '']);
+  });
+
+  it('refuses a PIN that is not 4 to 8 digits, or two new PINs that differ, beside the field', async () => {
+    const dialog = await openDialog();
+    await fill(dialog, '12', '123456789');
+    expect(field(dialog, t('settings.currentPin')).getAttribute('aria-invalid')).toBe('true');
+    expect(field(dialog, t('settings.newPin')).getAttribute('aria-invalid')).toBe('true');
+    await fill(dialog, '4826', '591837', '591838');
+    expect(field(dialog, t('settings.confirmPin')).getAttribute('aria-invalid')).toBe('true');
+    expect(described(field(dialog, t('settings.confirmPin')))).toContain(t('setup.mismatch'));
+    expect(pinCalls()).toEqual([]);
+  });
+
+  it('says a wrong current PIN beside its field, and a lockout with its wait', async () => {
+    const dialog = await openDialog();
+    await fill(dialog, '0000', '591837');
+    expect(described(field(dialog, t('settings.currentPin')))).toContain(t('error.code.pin_incorrect'));
+    expect(server.pin).toBe('4826');
+    server.lockedFor = 600;
+    await fill(dialog, '4826', '591837');
+    expect(pinForm(dialog).querySelector('[role="alert"]')!.textContent).toBe(
+      t('settings.pinFailed', { reason: t('signIn.lockedOut', { seconds: 600 }) }),
+    );
+    expect(server.pin).toBe('4826');
+  });
+});

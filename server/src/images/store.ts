@@ -275,33 +275,70 @@ export function removeImageFiles(imagesDir: string, ids: readonly string[]): str
   return failed;
 }
 
+/** Whether an image's display version is the one `displaySize` gives: its long edge is the setting's, or the original's. */
+export function isDisplayCurrent(image: Pick<Image, 'width' | 'height' | 'variants'>, displaySize: number): boolean {
+  const { display } = image.variants;
+  if (!display) return false;
+  const expected = Math.min(Math.max(image.width, image.height), displayEdge(displaySize));
+  return Math.max(display.width, display.height) === expected;
+}
+
+/** Runs the step that stores a new display version; the live socket's `refresh` in the server (REL-01). */
+export type Commit = (work: () => void) => void;
+
+/**
+ * Writes one image's display version again at `displaySize`, unless it is already that size
+ * (specs/05-assets-and-images.md §7, D-021). The new file and its dimensions are stored in one
+ * synchronous step, inside `commit`, so a deletion cannot interleave and the live scene's rooms
+ * can be told of the new size. A failure keeps the previous display version.
+ */
+export async function regenerateDisplayVersion(
+  db: Database.Database,
+  imagesDir: string,
+  id: string,
+  displaySize: number,
+  commit: Commit = (work) => work(),
+): Promise<'regenerated' | 'current' | 'gone' | 'failed'> {
+  const image = readImage(db, id);
+  if (!image) return 'gone';
+  if (isDisplayCurrent(image, displaySize)) return 'current';
+  const staged = path.join(imagesDir, INCOMING_DIR, `${randomUUID()}.webp`);
+  try {
+    const display = await writeVersion(imageFilePath(imagesDir, id, 'original'), displayEdge(displaySize), staged);
+    let outcome: 'regenerated' | 'gone' = 'gone';
+    commit(() => {
+      if (!imageExists(db, id)) return;
+      renameSync(staged, imageFilePath(imagesDir, id, 'display'));
+      setDisplayVariant(db, id, display);
+      outcome = 'regenerated';
+    });
+    return outcome;
+  } catch {
+    return imageExists(db, id) ? 'failed' : 'gone';
+  } finally {
+    rmSync(staged, { force: true });
+  }
+}
+
 /**
  * Writes every image's display version again at `displaySize`, one image at a time, after the
- * setting changed (specs/05-assets-and-images.md §7, D-021). The settings screen (REL-01) runs
- * it without waiting; an image deleted meanwhile is skipped. Returns what was regenerated and
- * what failed, which keeps its previous display version.
+ * setting changed (specs/05-assets-and-images.md §7, D-021). The server runs it through the
+ * display regenerator (regenerator.ts), without waiting; an image deleted meanwhile, or already
+ * at that size, is skipped. Returns what was regenerated and what failed, which keeps its previous
+ * display version.
  */
 export async function regenerateDisplayVersions(
   db: Database.Database,
   imagesDir: string,
   displaySize: number,
+  commit?: Commit,
 ): Promise<{ regenerated: string[]; failed: string[] }> {
   const regenerated: string[] = [];
   const failed: string[] = [];
   for (const id of listImageIds(db)) {
-    const staged = path.join(imagesDir, INCOMING_DIR, `${randomUUID()}.webp`);
-    try {
-      const display = await writeVersion(imageFilePath(imagesDir, id, 'original'), displayEdge(displaySize), staged);
-      // Synchronous from here: a deletion cannot interleave.
-      if (!imageExists(db, id)) continue;
-      renameSync(staged, imageFilePath(imagesDir, id, 'display'));
-      setDisplayVariant(db, id, display);
-      regenerated.push(id);
-    } catch {
-      if (imageExists(db, id)) failed.push(id);
-    } finally {
-      rmSync(staged, { force: true });
-    }
+    const outcome = await regenerateDisplayVersion(db, imagesDir, id, displaySize, commit);
+    if (outcome === 'regenerated') regenerated.push(id);
+    else if (outcome === 'failed') failed.push(id);
   }
   return { regenerated, failed };
 }

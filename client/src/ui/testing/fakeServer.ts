@@ -4,6 +4,8 @@ import {
   FEET_PER_SQUARE_BOUNDS,
   FIT_CAMERA,
   LIVE_COMMAND_PAYLOAD_SCHEMAS,
+  PinChangeBodySchema,
+  SettingsUpdateSchema,
   rulerFeet,
   TokenCreateBodySchema,
   TokenUpdateBodySchema,
@@ -95,6 +97,7 @@ export class FakeServer {
   tokens: Record<string, number> = {};
   liveSceneId: string | null = null;
   uploadLimit = 50 * 1024 * 1024;
+  displaySize = 4096;
   assets: LibraryAsset[] = [];
   images: Image[] = [];
   /** Scenes whose tokens use an asset, which refuse its deletion (D-083). */
@@ -795,13 +798,28 @@ export class FakeServer {
     if (!this.signedIn) return failure(401, 'unauthorized');
     if (path === '/api/connect' && method === 'GET') return json(200, this.connect);
     if (path === '/api/settings') {
+      // PATCH, as the server checks it (REL-01): strict and bounded, all or nothing.
+      if (method === 'PATCH') {
+        if (!Value.Check(SettingsUpdateSchema, b)) return failure(400, 'validation_failed');
+        const update = b;
+        this.uploadLimit = update.upload_limit_bytes ?? this.uploadLimit;
+        this.displaySize = update.display_variant_size ?? this.displaySize;
+        this.rulerRule = update.ruler_rule ?? this.rulerRule;
+      }
       return json(200, {
         id: '00000000-0000-4000-8000-00000000ffff',
         live_scene_id: this.liveSceneId,
         ruler_rule: this.rulerRule,
         upload_limit_bytes: this.uploadLimit,
-        display_variant_size: 4096,
+        display_variant_size: this.displaySize,
       });
+    }
+    if (path === '/api/settings/pin' && method === 'PUT') {
+      if (!Value.Check(PinChangeBodySchema, b)) return failure(400, 'validation_failed');
+      if (this.lockedFor !== undefined) return failure(429, 'locked_out', { 'retry-after': String(this.lockedFor) });
+      if (b.current_pin !== this.pin) return failure(401, 'pin_incorrect');
+      this.pin = String(b.new_pin);
+      return json(204);
     }
     if (path === '/api/images' && method === 'POST') {
       this.uploads.push(body);

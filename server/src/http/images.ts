@@ -17,6 +17,7 @@ import {
 import { isShownToPlayers, readImage, updateGridPreset } from '../db/images.js';
 import { readSettings } from '../db/settings.js';
 import { imageFilePath, removeImageFiles, storeUpload, UploadRejected } from '../images/store.js';
+import type { DisplayRegenerator } from '../images/regenerator.js';
 import type { Logger } from '../log/logger.js';
 import type { Auth } from './auth.js';
 import { ApiFailure } from './errors.js';
@@ -65,9 +66,14 @@ export interface ImageRoutesOptions {
   db: Database.Database;
   imagesDir: string;
   auth: Auth;
+  /** Told when an upload's display version was made at a size that is no longer the setting (G-015). */
+  regenerator: Pick<DisplayRegenerator, 'kick'>;
 }
 
-export async function registerImages(app: FastifyInstance, { db, imagesDir, auth }: ImageRoutesOptions): Promise<void> {
+export async function registerImages(
+  app: FastifyInstance,
+  { db, imagesDir, auth, regenerator }: ImageRoutesOptions,
+): Promise<void> {
   // The upload takes the file's bytes as its body, whatever Content-Type the browser gave it,
   // so its route has a scope of its own with one parser that hands over the unread stream.
   await app.register((scope, _options, ready) => {
@@ -89,6 +95,9 @@ export async function registerImages(app: FastifyInstance, { db, imagesDir, auth
         const body = request.body instanceof Readable ? request.body : Readable.from([]);
         try {
           const { image, created } = await storeUpload(db, imagesDir, body, { limit, displaySize });
+          // The setting changed while this upload was received or processed: a regeneration
+          // already running would have missed it (G-015).
+          if (created && readSettings(db).display_variant_size !== displaySize) regenerator.kick();
           return reply.code(created ? 201 : 200).send(image);
         } catch (error) {
           discardRest(request.raw);

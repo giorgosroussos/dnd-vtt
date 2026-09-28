@@ -3,10 +3,14 @@ import { dmCookieValues } from '../http/auth.js';
 import {
   createLockout,
   FAILURES_PER_LOCKOUT,
+  GLOBAL_FAILURES_PER_PAUSE,
+  GLOBAL_WINDOW_MS,
   isLoopback,
   lockoutDuration,
+  lockoutKey,
   MAX_TRACKED_ADDRESSES,
   normalizeAddress,
+  pauseDuration,
 } from './lockout.js';
 import { hashPin, SCRYPT_PARAMS, verifyPin } from './pin-hash.js';
 import { createSessionStore, SESSION_ID_PATTERN } from './sessions.js';
@@ -45,21 +49,22 @@ describe('lockout (specs/07-security-and-access.md §6)', () => {
     let time = 0;
     const lockout = createLockout(() => time);
     for (let n = 1; n < FAILURES_PER_LOCKOUT; n++)
-      expect(lockout.begin('a')).toEqual({ allowed: true, failures: n, lockedMs: null });
-    expect(lockout.begin('a')).toEqual({ allowed: true, failures: 5, lockedMs: 60_000 });
+      expect(lockout.begin('a')).toEqual({ allowed: true, failures: n, lockedMs: null, paused: null });
+    expect(lockout.begin('a')).toEqual({ allowed: true, failures: 5, lockedMs: 60_000, paused: null });
     time = 30_000;
     expect(lockout.begin('a')).toEqual({ allowed: false, retryAfterMs: 30_000 });
     time = 60_000;
-    expect(lockout.begin('a')).toEqual({ allowed: true, failures: 6, lockedMs: null });
+    expect(lockout.begin('a')).toEqual({ allowed: true, failures: 6, lockedMs: null, paused: null });
   });
 
   it('bounds how many addresses it remembers', () => {
     const lockout = createLockout(() => 0);
-    for (let n = 0; n < 5; n++) lockout.begin('first');
-    expect(lockout.begin('first').allowed).toBe(false);
-    for (let n = 0; n < MAX_TRACKED_ADDRESSES; n++) lockout.begin(`10.${n >> 16}.${(n >> 8) & 255}.${n & 255}`);
+    // Loopback addresses, which the server-wide budget leaves out, so that only the per-address limit acts.
+    for (let n = 0; n < 5; n++) lockout.begin('127.200.0.1');
+    expect(lockout.begin('127.200.0.1').allowed).toBe(false);
+    for (let n = 0; n < MAX_TRACKED_ADDRESSES; n++) lockout.begin(`127.${n >> 16}.${(n >> 8) & 255}.${n & 255}`);
     // The oldest entry made room; memory stays bounded.
-    expect(lockout.begin('first').allowed).toBe(true);
+    expect(lockout.begin('127.200.0.1').allowed).toBe(true);
   });
 
   it.each([
@@ -69,6 +74,80 @@ describe('lockout (specs/07-security-and-access.md §6)', () => {
     [undefined, 'unknown'],
   ])('spells %s as %s', (address, normal) => {
     expect(normalizeAddress(address)).toBe(normal);
+  });
+
+  it('pauses every address but loopback after 20 failures from any addresses within 10 minutes (Q-097)', () => {
+    let time = 0;
+    const lockout = createLockout(() => time);
+    // Four failures each from five addresses: none is locked on its own.
+    for (let n = 0; n < GLOBAL_FAILURES_PER_PAUSE - 1; n++) {
+      expect(lockout.begin(`10.0.0.${n % 5}`)).toMatchObject({ allowed: true, paused: null });
+    }
+    const last = lockout.begin('10.0.0.4');
+    expect(last).toMatchObject({ allowed: true, lockedMs: null });
+    expect(last.allowed && last.paused).toEqual({
+      ms: 600_000,
+      addresses: ['10.0.0.0', '10.0.0.1', '10.0.0.2', '10.0.0.3', '10.0.0.4'],
+    });
+    time = 1_000;
+    expect(lockout.begin('10.0.0.99')).toEqual({ allowed: false, retryAfterMs: 599_000 });
+    expect(lockout.begin('127.0.0.1')).toMatchObject({ allowed: true, paused: null });
+    expect(lockout.begin('::1')).toMatchObject({ allowed: true, paused: null });
+    time = 600_000;
+    expect(lockout.begin('10.0.0.99')).toMatchObject({ allowed: true, paused: null });
+  });
+
+  it('doubles the pause on each further run, and counts only failures within the window', () => {
+    expect([1, 2, 3].map(pauseDuration)).toEqual([600_000, 1_200_000, 2_400_000]);
+    let time = 0;
+    const lockout = createLockout(() => time);
+    const fail = (count: number): ReturnType<typeof lockout.begin>[] =>
+      Array.from({ length: count }, (_, n) => lockout.begin(`10.1.${n >> 8}.${n & 255}`));
+    fail(GLOBAL_FAILURES_PER_PAUSE - 1);
+    // The first nineteen fall out of the window: no pause.
+    time = GLOBAL_WINDOW_MS;
+    expect(fail(GLOBAL_FAILURES_PER_PAUSE - 1).every((start) => start.allowed && start.paused === null)).toBe(true);
+    const first = fail(1)[0]!;
+    expect(first.allowed && first.paused?.ms).toBe(600_000);
+    time += 600_000;
+    const second = fail(GLOBAL_FAILURES_PER_PAUSE).at(-1)!;
+    expect(second.allowed && second.paused?.ms).toBe(1_200_000);
+  });
+
+  it('never counts failures from loopback towards the pause', () => {
+    const lockout = createLockout(() => 0);
+    for (let n = 0; n < 100; n++) lockout.begin(`127.0.${n >> 8}.${n & 255}`);
+    expect(lockout.begin('10.0.0.1')).toMatchObject({ allowed: true, paused: null });
+  });
+
+  it('takes a correct PIN out of the budget', () => {
+    const lockout = createLockout(() => 0);
+    for (let n = 0; n < GLOBAL_FAILURES_PER_PAUSE - 1; n++) {
+      lockout.begin(`10.2.0.${n}`);
+      lockout.succeeded(`10.2.0.${n}`);
+    }
+    expect(lockout.begin('10.2.0.200')).toMatchObject({ allowed: true, paused: null });
+  });
+
+  it.each([
+    ['2001:db8:1:2:3:4:5:6', '2001:db8:1:2::/64'],
+    ['2001:0DB8:0001:0002:ffff::1', '2001:db8:1:2::/64'],
+    ['2001:db8::1', '2001:db8:0:0::/64'],
+    ['fe80::1%eth0', 'fe80:0:0:0::/64'],
+    ['64:ff9b::192.0.2.1', '64:ff9b:0:0::/64'],
+    ['::1', '::1'],
+    ['192.168.1.5', '192.168.1.5'],
+    ['2001:db8:::1', '2001:db8:::1'],
+    ['unknown', 'unknown'],
+  ])('counts %s as %s', (address, key) => {
+    expect(lockoutKey(address)).toBe(key);
+  });
+
+  it('locks a whole IPv6 /64 as one client (Q-097)', () => {
+    const lockout = createLockout(() => 0);
+    for (let n = 1; n <= FAILURES_PER_LOCKOUT; n++) lockout.begin(`2001:db8:1:2::${n.toString(16)}`);
+    expect(lockout.begin('2001:db8:1:2:ffff::9').allowed).toBe(false);
+    expect(lockout.begin('2001:db8:1:3::1').allowed).toBe(true);
   });
 
   it('knows the loopback addresses', () => {
