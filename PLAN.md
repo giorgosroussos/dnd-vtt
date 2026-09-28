@@ -4,20 +4,20 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
 
 ## Now
 
-### LIV-05 — Undo
+### LIV-06 — Cameras
 
-- **Outcome:** the server keeps, in memory only, the inverse of every undoable DM command on the live scene (`token.add`, `token.move`, `token.setVisibility`, `token.delete`), bounded to the last 100, cleared when another scene is activated and on restart (`04` §8, Q-005), with what undo does after Blank TV or the live scene's deletion recorded as a decision; Ctrl+Z in the DM view's live mode sends `undo`, and the server applies the most recent inverse through the ordinary command path, so each room receives exactly what the inverse command would send (D-040); setup edits to the live scene are not undoable (Q-050); undo joins the recorded-traffic test, which then carries the hidden-information gate (`10` §3, G-028).
-- **Specs:** `13` §6 LIV-05, `04` §2, `04` §3, `04` §4, `04` §8, `08` §3, `10` §2, `10` §3; D-040, D-109, D-110, D-115; Q-005, Q-050, Q-067.
-- **Dependencies:** LIV-04 (live mode sends the live commands from the DM view, D-115, D-116).
+- **Outcome:** the DM view and the player view have independent cameras (`04` §9); the player camera is held in server memory for the live scene and reset to fit-to-map, or to the grid extent of a map-less scene, on every activation (Q-038, D-018); `camera.setPlayer` sets it from the DM view and reaches both rooms as `camera.player` (`04` §2, §3); in live mode the DM view shows the frame of what the TV sees, which the DM moves and resizes to steer the player camera without changing the DM's own camera (`08` §2, Q-080); a player view connecting or reconnecting receives the current player camera with its snapshot (`04` §5, §6); how the frame's shape follows the TV's viewport, with several screens connected, is recorded as a decision.
+- **Specs:** `13` §6 LIV-06, `04` §2, `04` §3, `04` §5, `04` §6, `04` §9, `08` §2, `08` §8; D-018, D-104, D-109, D-115; Q-038, Q-080.
+- **Dependencies:** LIV-05 (the live command path with undo, D-117, D-118); `camera.setPlayer` is not undoable (`04` §2).
 - **Acceptance (executable):**
-  - Vitest (server, unit): the inverse of each undoable command, a hidden token's included; the history bounded at 100; cleared on activation of another scene, and the recorded behaviour after Blank TV and deletion; `undo` with an empty history acknowledged and telling nobody.
-  - Vitest (server, real SQLite file and socket): undoing each token command restores the database and sends each room what the inverse command sends: undoing the add of a hidden token, or the move of one, sends players nothing; undoing a reveal sends them `token.removed`; a player socket's `undo` is refused (the player-command gate still passes).
-  - The recorded-traffic test adds undo of each token command, of a hidden token included, to its script, stays equal to the session without hidden-only steps, and carries `@gate:hidden-information`; its tripwire is promoted out of `scripts/tripwire.mjs`, CI and the README (G-028, D-110).
-  - Vitest (client) and Playwright: Ctrl+Z in live mode sends `undo` and the player context's drawing follows; Ctrl+Z in prep mode sends nothing; `make verify` exit 0 on both CI runners; `TRACEABILITY.md` LIV-05 row with test names.
-- **Non-goals:** undo of setup edits (Q-050) or of preparation writes; the player camera (LIV-06); the ruler (LIV-07); the LIV-04 residuals G-032 and G-033 (REL-02).
-- **Review:** `Contract change: yes` (the `undo` payload), so prompt 2 (review) runs after implementation.
+  - Vitest (server, unit): the fit-to-map camera of a scene with a map and of a map-less scene; the camera reset on activation of any scene and kept on a command that does not change it; the `camera.setPlayer` payload validated, strict, and a camera outside sane bounds refused.
+  - Vitest (server, real SQLite file and socket): `camera.setPlayer` reaches both rooms as `camera.player` with one version each; a player socket's `camera.setPlayer` is refused (the player-command gate still passes); a connecting player view receives the current camera; nothing about hidden tokens changes what players receive (the recorded-traffic gate adds a camera step and stays equal to the session without hidden-only steps).
+  - Vitest (client): the player view applies `camera.player` and its reset; the DM view's frame is shown only in live mode, moving or resizing it sends `camera.setPlayer`, and the DM's own camera does not change; the frame follows another DM browser's camera; keyboard operation of the frame.
+  - Playwright: moving and resizing the frame in a DM context changes what a player context shows, and the DM's view does not move; activating another scene resets the TV to fit; `make verify` exit 0 on both CI runners; `TRACEABILITY.md` LIV-06 row with test names.
+- **Non-goals:** a stored player camera (Q-038); the ruler (LIV-07); the LIV-05 residuals G-034 and the LIV-04 residuals G-032 and G-033 (REL-02).
+- **Review:** `Contract change: yes` (the `camera.setPlayer` and `camera.player` payloads), so prompt 2 (review) runs after implementation.
 
 ## Next
 
-1. **LIV-06 — Cameras.** The player camera held in server memory, reset to fit on activation, and set from the DM view's frame of what the TV sees without moving the DM's own camera (`13` §6, `04` §9, `08` §2, Q-038).
-2. **LIV-07 — Ruler.** A two-point ruler with the PHB and DMG diagonal rules and the scene's feet per square, set in the DM view, shown on the TV for the live scene and never sent for a scene that is not live (G-021; `13` §6, `06` §5, `04` §11, Q-027, Q-086, Q-087).
+1. **LIV-07 — Ruler.** A two-point ruler with the PHB and DMG diagonal rules and the scene's feet per square, set in the DM view, shown on the TV for the live scene and never sent for a scene that is not live (G-021; `13` §6, `06` §5, `04` §11, Q-027, Q-086, Q-087).
+2. **REL-01 — Operations and repository documents.** Install and start from source, migrations at start, the data directory, configuration and logging, the settings screen for the upload limit, display size and ruler rule, and the README with firewall guidance and network exposure (G-008, G-010, G-015, G-017; `13` §7, `09` §1, `09` §2, `09` §4, `09` §5, `09` §6, `09` §7, `09` §8).
