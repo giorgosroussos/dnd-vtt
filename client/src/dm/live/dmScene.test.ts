@@ -20,7 +20,7 @@ const token = (id: string, z_order: number, fields: Partial<SceneToken> = {}): S
 });
 const snapshot = (tokens: SceneToken[]): DmSnapshot => ({
   role: 'dm',
-  scene: { scene, map: null, tokens, camera: FIT_CAMERA, screen: null },
+  scene: { scene, map: null, tokens, camera: FIT_CAMERA, screen: null, ruler: null },
 });
 let version = 1;
 const event = (type: EventEnvelope['type'], payload: object): EventEnvelope =>
@@ -69,5 +69,20 @@ describe('the DM live scene', () => {
     expect(
       ids(applyDmEvent(live, event('token.updated', { token: token('a', 0), relabelled: [token('z', 9)] }))),
     ).toEqual(['a']);
+  });
+});
+
+describe('the ruler in the DM live scene (LIV-07)', () => {
+  const measurement = { from: { column: 0, row: 0 }, to: { column: 2, row: 2 }, feet: 10 };
+
+  it('follows ruler.shown and ruler.cleared, keeping the tokens, and skips a malformed event', () => {
+    const live = fromDmSnapshot(snapshot([token('a', 0)]));
+    expect(live?.ruler).toBeNull();
+    const shown = applyDmEvent(live, event('ruler.shown', { ruler: measurement }));
+    expect(shown?.ruler).toEqual(measurement);
+    expect(shown?.tokens).toBe(live?.tokens);
+    expect(applyDmEvent(shown, event('ruler.cleared', {}))?.ruler).toBeNull();
+    expect(applyDmEvent(live, event('ruler.shown', {}))).toBe(live);
+    expect(applyDmEvent(null, event('ruler.shown', { ruler: measurement }))).toBeNull();
   });
 });

@@ -1,12 +1,14 @@
 import {
   FIT_CAMERA,
   type EventEnvelope,
+  type Measurement,
   type PlayerCameraPayload,
   type PlayerLiveScene,
   type PlayerSnapshot,
   type PlayerToken,
   type PlayerTokenAddedPayload,
   type PlayerTokenUpdatedPayload,
+  type RulerShownPayload,
   type TokenRemovedPayload,
 } from '@emberglass/shared';
 
@@ -17,8 +19,9 @@ import {
 // gap, so the ranks held always equal those of a fresh snapshot (G-025). A moved token is
 // replaced; a relabelled one keeps its place and takes its new label. `scene.cleared` returns to
 // the idle screen. `camera.player` replaces the camera the TV shows (LIV-06, specs/04-live-sync.md
-// §9); a snapshot brings the current one, fitted to the map after an activation. Only the player
-// fields are kept, whatever an event carried.
+// §9); a snapshot brings the current one, fitted to the map after an activation. `ruler.shown` and
+// `ruler.cleared` (LIV-07, §11) replace and remove the measurement drawn; a snapshot brings the one
+// shown, if any. Only the player fields are kept, whatever an event carried.
 
 /** The live scene the player view draws, or null for the idle screen. */
 export type PlayerScene = PlayerLiveScene | null;
@@ -43,14 +46,21 @@ function placed(tokens: readonly PlayerToken[], token: PlayerToken): PlayerToken
   return ranked(rest);
 }
 
+const measurement = ({ from, to, feet }: Measurement): Measurement => ({
+  from: { column: from.column, row: from.row },
+  to: { column: to.column, row: to.row },
+  feet,
+});
+
 export function fromSnapshot(snapshot: PlayerSnapshot): PlayerScene {
   if (snapshot.scene === null) return null;
-  const { map, grid, tokens, camera } = snapshot.scene;
+  const { map, grid, tokens, camera, ruler } = snapshot.scene;
   return {
     map,
     grid,
     tokens: ranked([...tokens].sort((a, b) => a.z_order - b.z_order).map(playerToken)),
     camera: camera ? { ...camera } : FIT_CAMERA,
+    ruler: ruler ? measurement(ruler) : null,
   };
 }
 
@@ -84,8 +94,14 @@ export function applyPlayerEvent(scene: PlayerScene, event: EventEnvelope): Play
       const { centre_x, centre_y, width, height } = camera;
       return { ...scene, camera: { centre_x, centre_y, width, height } };
     }
+    case 'ruler.shown': {
+      const { ruler } = event.payload as unknown as Partial<RulerShownPayload>;
+      if (!ruler?.from || !ruler.to) return scene;
+      return { ...scene, ruler: measurement(ruler) };
+    }
+    case 'ruler.cleared':
+      return { ...scene, ruler: null };
     default:
-      // The ruler is LIV-07's.
       return scene;
   }
 }

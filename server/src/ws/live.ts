@@ -24,6 +24,7 @@ import { readSettings } from '../db/settings.js';
 import { PlayerCameraState, ScreenRegistry, sameScreen } from '../domain/camera.js';
 import { dispatchCommand, validateCommand, type CommandValidator } from '../domain/commands.js';
 import { createLiveCommands, type LiveEffect, type LiveResult } from '../domain/live.js';
+import { RulerState } from '../domain/ruler.js';
 import { liveVersions, type VersionCounters } from '../domain/version.js';
 import { isSameOriginHeaders, type Auth } from '../http/auth.js';
 import { createLineLimiter, type LineLimiterOptions } from '../log/limiter.js';
@@ -73,6 +74,11 @@ import { readSnapshot, type LiveMemory } from './snapshot.js';
 // winning. A REST change that gives the live scene another world (a new map, or a first map for a
 // map-less scene) fits the camera again, since the old frame was of a world that is gone.
 //
+// The ruler (LIV-07; specs/04-live-sync.md §11, Q-027, Q-086, D-121): the measurement shown on the TV
+// lives in memory beside the camera, both rooms' snapshots carry it, and the same new world takes it
+// off. A DM socket that goes takes off the measurement it drew, if still shown, so a DM laptop that
+// sleeps or a session that ends leaves no line on the TV.
+//
 // Abuse limits (LIV-01 review, D-106): an HTTP upgrade to any other path is answered 404 and
 // closed at once, as Fastify answered it before there was a WebSocket, except Vite's own in
 // development; a socket's snapshot requests are served at most one per interval, the rest
@@ -88,8 +94,17 @@ export interface LiveSocketOptions {
   /** The player camera and the screens that reported; tests pass their own. */
   camera?: PlayerCameraState | undefined;
   screens?: ScreenRegistry | undefined;
+  /** The measurement shown on the TV (LIV-07); tests pass their own. */
+  ruler?: RulerState | undefined;
   /** Command validation and the step that applies a valid command; tests only replace them. */
-  commands?: { validate: CommandValidator; apply: (command: CommandEnvelope) => LiveResult | void } | undefined;
+  commands?:
+    | {
+        validate: CommandValidator;
+        apply: (command: CommandEnvelope, sender?: string) => LiveResult | void;
+        /** What a DM socket going takes off the TV. */
+        release?: (sender: string) => readonly LiveEffect[];
+      }
+    | undefined;
   /** Upgrades on other paths that belong to someone else: Vite's hot reload in development. */
   foreignUpgrade?: ((request: IncomingMessage) => boolean) | undefined;
   /** At most one requested snapshot per socket per this many milliseconds. */
@@ -134,8 +149,10 @@ export function attachLiveSocket(
     // One player camera per server process, in memory only (specs/04-live-sync.md §9, Q-038).
     camera = new PlayerCameraState(),
     screens = new ScreenRegistry(),
+    // One measurement per server process, in memory only (specs/04-live-sync.md §11).
+    ruler = new RulerState(),
     // One undo history per server process, in memory only (specs/04-live-sync.md §8, Q-005).
-    commands = { validate: validateCommand, apply: createLiveCommands(db, undefined, camera).apply },
+    commands = { validate: validateCommand, ...createLiveCommands(db, undefined, camera, ruler) },
     foreignUpgrade = () => false,
     snapshotIntervalMs = SNAPSHOT_INTERVAL_MS,
     maxPendingPackets = MAX_PENDING_PACKETS,
@@ -143,7 +160,7 @@ export function attachLiveSocket(
   }: LiveSocketOptions,
 ): LiveSocket {
   for (const counter of Object.values(versions)) if (counter.current() === 0) counter.next();
-  const memory: LiveMemory = { camera, screens };
+  const memory: LiveMemory = { camera, screens, ruler };
 
   const io = new Server(app.server, {
     path: SOCKET_PATH,
@@ -238,7 +255,11 @@ export function attachLiveSocket(
     const result = work();
     // Another world for the same live scene: the camera fits it again (LIV-06, D-119).
     const now = liveWorld(db);
-    if (world !== undefined && now !== undefined && world !== now) camera.reset();
+    if (world !== undefined && now !== undefined && world !== now) {
+      camera.reset();
+      // A measurement between squares of a map that is gone means nothing on the new one (D-121).
+      ruler.clear();
+    }
     const after = { dm: readSnapshot(db, 'dm', memory), players: readSnapshot(db, 'players', memory) };
     if (before.dm.scene !== null && after.dm.scene === null) {
       publish([{ type: 'cleared' }]);
@@ -328,7 +349,7 @@ export function attachLiveSocket(
           typeof args[0] === 'function' ? undefined : args[0],
           commands.validate,
           (command) => {
-            const result = commands.apply(command);
+            const result = commands.apply(command, socket.id);
             if (Array.isArray(result)) effects = result;
             else return result;
           },
@@ -414,6 +435,16 @@ export function attachLiveSocket(
         const sockets = bySession.get(session);
         sockets?.delete(socket);
         if (sockets?.size === 0) bySession.delete(session);
+      }
+      // The measurement this DM socket drew leaves the TV with it (D-121); not once the server is closing.
+      if (role === 'dm' && !closing) {
+        try {
+          publish(commands.release?.(socket.id) ?? []);
+        } catch (error) {
+          logger.error('ws.release_failed', 'Taking a measurement off the TV failed.', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
       }
       if (lines.admit(address)) {
         logger.info('ws.disconnected', `A ${role === 'dm' ? 'DM view' : 'player view'} disconnected (${address}).`, {

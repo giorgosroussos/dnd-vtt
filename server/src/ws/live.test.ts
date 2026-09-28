@@ -525,10 +525,10 @@ describe('commands from the players room (specs/04-live-sync.md §2, specs/07-se
     expect((await requestSnapshot(dm)).payload.role).toBe('dm');
   });
 
-  it('validates a DM command in the envelope: a command of a later package is unsupported', async () => {
+  it('validates a DM command in the envelope and its payload', async () => {
     const dm = await connect({ cookie });
     expect(((await command(dm.socket, { type: 'ruler.update', payload: {} })) as ErrorEnvelope).error.code).toBe(
-      'command_unsupported',
+      'validation_failed',
     );
     expect(((await command(dm.socket, { type: 'nope', payload: {} })) as ErrorEnvelope).error.code).toBe(
       'validation_failed',

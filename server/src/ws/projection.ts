@@ -3,7 +3,8 @@ import type { DmEvent, EventType, PlayerEvent, PlayerToken, SceneToken } from '@
 import { readSettings } from '../db/settings.js';
 import { listTokens } from '../db/tokens.js';
 import type { LiveEffect } from '../domain/live.js';
-import { readSnapshot, toPlayerToken, type LiveMemory } from './snapshot.js';
+import { readScene } from '../db/campaigns.js';
+import { liveMeasurement, readSnapshot, toPlayerToken, type LiveMemory } from './snapshot.js';
 
 // The role-filtered projection of the live commands' effects (LIV-02; specs/04-live-sync.md §3,
 // §4; D-039, D-049, Q-083, G-023, G-025). Built on the server, before anything is emitted, and
@@ -12,8 +13,8 @@ import { readSnapshot, toPlayerToken, type LiveMemory } from './snapshot.js';
 // `token.added` and hiding one as `token.removed`, with exactly what a deletion sends. Its tokens
 // are built by `toPlayerToken`, as the snapshot's are, with their rank among the visible tokens read
 // from the database after the change. Called in the same synchronous step as the command, so the
-// database it reads is the state the command left. The player camera (LIV-06) reaches both rooms
-// alike: it says nothing of any token.
+// database it reads is the state the command left. The player camera (LIV-06) and the ruler (LIV-07)
+// reach both rooms alike: they say nothing of any token.
 
 /** An event before it takes its room's version. */
 export type Unversioned<E> = E extends { type: infer T; payload: infer P }
@@ -40,6 +41,19 @@ export function project(db: Database.Database, effect: LiveEffect, memory: LiveM
     }
     case 'cleared':
       return { dm: { type: 'scene.cleared', payload: {} }, players: { type: 'scene.cleared', payload: {} } };
+    case 'ruler': {
+      // The same measurement to both rooms (specs/04-live-sync.md §3, §11): two squares and the feet.
+      const id = readSettings(db).live_scene_id;
+      const scene = id === null ? undefined : readScene(db, id);
+      const ruler = scene && liveMeasurement(db, scene, memory);
+      if (!ruler) return {};
+      return {
+        dm: { type: 'ruler.shown', payload: { ruler } },
+        players: { type: 'ruler.shown', payload: { ruler: structuredClone(ruler) } },
+      };
+    }
+    case 'ruler.cleared':
+      return { dm: { type: 'ruler.cleared', payload: {} }, players: { type: 'ruler.cleared', payload: {} } };
     case 'token.added': {
       const dm = { type: 'token.added', payload: { token: effect.token, relabelled: effect.relabelled } } as const;
       if (effect.token.hidden) return { dm };

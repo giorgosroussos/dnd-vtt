@@ -1,8 +1,10 @@
 import { act } from 'react';
 import { Value } from 'typebox/value';
 import {
+  FEET_PER_SQUARE_BOUNDS,
   FIT_CAMERA,
   LIVE_COMMAND_PAYLOAD_SCHEMAS,
+  rulerFeet,
   TokenCreateBodySchema,
   TokenUpdateBodySchema,
   type CommandAck,
@@ -22,6 +24,8 @@ import {
   type Scene,
   type SceneToken,
   type PlayerCamera,
+  type RulerRule,
+  type RulerSquare,
   type Screen,
   type Session,
 } from '@emberglass/shared';
@@ -123,6 +127,12 @@ export class FakeServer {
    */
   playerCamera: PlayerCamera = FIT_CAMERA;
   screen: Screen | null = null;
+  /**
+   * The measurement shown on the TV (LIV-07, D-121): cleared by `ruler.clear`, every activation and
+   * deactivation, and a new map; its feet counted by `rulerRule`, the setting GET /api/settings answers.
+   */
+  ruler: { from: RulerSquare; to: RulerSquare } | null = null;
+  rulerRule: RulerRule = 'phb';
   /** The `dm` room's version counter (D-108). */
   private dmVersion = 1;
   /**
@@ -326,7 +336,10 @@ export class FakeServer {
     if (call.method === 'GET') return this.handle(call);
     const before = this.dmSnapshot();
     const reply = this.handle(call);
-    if (before.scene !== null && before.scene.scene.map_image_id !== this.liveMap()) this.playerCamera = FIT_CAMERA;
+    if (before.scene !== null && before.scene.scene.map_image_id !== this.liveMap()) {
+      this.playerCamera = FIT_CAMERA;
+      this.ruler = null;
+    }
     const after = this.dmSnapshot();
     if (before.scene !== null && after.scene === null) this.deliver('scene.cleared', {});
     else if (JSON.stringify(before) !== JSON.stringify(after)) this.deliver('scene.snapshot', after);
@@ -358,8 +371,23 @@ export class FakeServer {
         tokens: this.tokensOf(scene.id).map((token) => this.withAsset(token)),
         camera: { ...this.playerCamera },
         screen: this.screen && { ...this.screen },
+        ruler: this.measurement(scene),
       },
     };
+  }
+
+  private measurement(scene: Scene) {
+    if (!this.ruler) return null;
+    const { from, to } = this.ruler;
+    return { from: { ...from }, to: { ...to }, feet: rulerFeet(from, to, this.rulerRule, scene.grid.feet_per_square) };
+  }
+
+  /** Another DM browser measured on the live scene, or took its measurement off. */
+  measureElsewhere(path: { from: RulerSquare; to: RulerSquare } | null): void {
+    const scene = this.scenes.find((each) => each.id === this.liveSceneId)!;
+    this.ruler = path && structuredClone(path);
+    if (path) this.deliver('ruler.shown', { ruler: this.measurement(scene) });
+    else this.deliver('ruler.cleared', {});
   }
 
   private withAsset(token: SceneToken): SceneToken {
@@ -455,7 +483,7 @@ export class FakeServer {
     if (!this.signedIn) return refuse('forbidden');
     // The contract's own payload schemas, as the server validates a command before applying it (D-109).
     if (!(type in LIVE_COMMAND_PAYLOAD_SCHEMAS)) return refuse('command_unsupported');
-    const schema = LIVE_COMMAND_PAYLOAD_SCHEMAS[type as keyof typeof LIVE_COMMAND_PAYLOAD_SCHEMAS];
+    const schema = LIVE_COMMAND_PAYLOAD_SCHEMAS[type];
     const body: unknown = payload;
     if (!Value.Check(schema, body)) return refuse('validation_failed');
     const p = payload;
@@ -468,6 +496,7 @@ export class FakeServer {
         if (!this.scenes.some((each) => each.id === p.scene_id)) return refuse('not_found');
         this.liveSceneId = String(p.scene_id);
         this.playerCamera = FIT_CAMERA;
+        this.ruler = null;
         this.deliver('scene.snapshot', this.dmSnapshot());
         return { ok: true };
       }
@@ -475,6 +504,7 @@ export class FakeServer {
         if (this.liveSceneId === null) return { ok: true };
         this.liveSceneId = null;
         this.playerCamera = FIT_CAMERA;
+        this.ruler = null;
         this.deliver('scene.cleared', {});
         return { ok: true };
       }
@@ -527,6 +557,19 @@ export class FakeServer {
         if (JSON.stringify(camera) === JSON.stringify(this.playerCamera)) return { ok: true };
         this.playerCamera = { ...camera };
         this.deliver('camera.player', { camera: { ...camera }, screen: this.screen });
+        return { ok: true };
+      }
+      case 'ruler.update': {
+        if (this.liveSceneId === null || p.scene_id !== this.liveSceneId) return refuse('scene_not_live');
+        const path = { from: p.from as RulerSquare, to: p.to as RulerSquare };
+        if (JSON.stringify(path) === JSON.stringify(this.ruler)) return { ok: true };
+        this.measureElsewhere(path);
+        return { ok: true };
+      }
+      case 'ruler.clear': {
+        if (this.liveSceneId === null || p.scene_id !== this.liveSceneId) return refuse('scene_not_live');
+        if (this.ruler === null) return { ok: true };
+        this.measureElsewhere(null);
         return { ok: true };
       }
       case 'undo':
@@ -618,6 +661,13 @@ export class FakeServer {
           (whole ? Number.isInteger(value) && value >= 1 : true);
         if (!valid) return failure(400, 'validation_failed');
       }
+      const feet = grid.feet_per_square;
+      if (
+        feet !== undefined &&
+        !(typeof feet === 'number' && feet >= FEET_PER_SQUARE_BOUNDS.min && feet <= FEET_PER_SQUARE_BOUNDS.max)
+      ) {
+        return failure(400, 'validation_failed');
+      }
     }
     if (calibrating && (map ?? scene.map_image_id) === null) return failure(409, 'calibration_needs_map');
     if (map !== undefined && map !== scene.map_image_id) {
@@ -640,6 +690,9 @@ export class FakeServer {
       if (calibrating && image) {
         scene.grid.size ??= image.width / scene.grid.columns;
         image.grid_preset = { ...scene.grid, size: scene.grid.size };
+      } else if (typeof grid.feet_per_square === 'number' && image?.grid_preset) {
+        // As D-121 does: the scale joins a preset already there.
+        image.grid_preset = { ...image.grid_preset, feet_per_square: grid.feet_per_square };
       }
     }
     return json(200, { ...scene, grid: { ...scene.grid } });
@@ -729,7 +782,7 @@ export class FakeServer {
       return json(200, {
         id: '00000000-0000-4000-8000-00000000ffff',
         live_scene_id: this.liveSceneId,
-        ruler_rule: 'phb',
+        ruler_rule: this.rulerRule,
         upload_limit_bytes: this.uploadLimit,
         display_variant_size: 4096,
       });

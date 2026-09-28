@@ -304,7 +304,8 @@ class TooFine extends Error {}
  * overlay reads it (D-090), and the whole calibrated grid becomes the image's preset,
  * so later scenes of the map start from it while other existing scenes keep their own
  * (§5, Q-001, D-094); a scene without a map has no calibration (specs/06-grid-and-measurement.md
- * §1). The previous map is deleted when nothing references it any more (§7, Q-002); its
+ * §1). Feet per square applies to any scene; on its own it also becomes the preset's feet per square
+ * when the map has a preset, and with a calibration it is part of the grid the preset copies (D-121). The previous map is deleted when nothing references it any more (§7, Q-002); its
  * files are the caller's to remove. Nothing changes when the scene or the image does not
  * exist, when a scene without a map is calibrated, or when the calibrated size would give more
  * than MAX_GRID_LINES_PER_AXIS squares across the map (D-096).
@@ -365,6 +366,7 @@ function transactUpdate(
       const current = readScene(db, id)!;
       const grid: Grid = { ...current.grid };
       if (fields.grid.visible !== undefined) grid.visible = fields.grid.visible;
+      if (fields.grid.feet_per_square !== undefined) grid.feet_per_square = fields.grid.feet_per_square;
       for (const field of CALIBRATION_FIELDS) {
         const value = fields.grid[field];
         if (value !== undefined) grid[field] = value;
@@ -378,11 +380,26 @@ function transactUpdate(
         grid.size ??= image.width / grid.columns;
         if (Math.max(image.width, image.height) / grid.size > MAX_GRID_LINES_PER_AXIS) throw new TooFine();
         updateGridPreset(db, mapId, { ...grid, size: grid.size });
+      } else if (fields.grid.feet_per_square !== undefined && current.map_image_id !== null) {
+        // The map's scale is part of its calibration: a preset already there takes it, so later scenes
+        // of the map measure the same (LIV-07, D-121); a map not yet calibrated has no preset to take it.
+        db.prepare(
+          'UPDATE image SET grid_preset_feet_per_square = ? WHERE id = ? AND grid_preset_size IS NOT NULL',
+        ).run(grid.feet_per_square, current.map_image_id);
       }
       db.prepare(
-        `UPDATE scene SET grid_size = ?, grid_offset_x = ?, grid_offset_y = ?, grid_visible = ?, grid_columns = ?,
-          grid_rows = ? WHERE id = ?`,
-      ).run(grid.size, grid.offset_x, grid.offset_y, grid.visible ? 1 : 0, grid.columns, grid.rows, id);
+        `UPDATE scene SET grid_size = ?, grid_offset_x = ?, grid_offset_y = ?, grid_visible = ?,
+          grid_feet_per_square = ?, grid_columns = ?, grid_rows = ? WHERE id = ?`,
+      ).run(
+        grid.size,
+        grid.offset_x,
+        grid.offset_y,
+        grid.visible ? 1 : 0,
+        grid.feet_per_square,
+        grid.columns,
+        grid.rows,
+        id,
+      );
     }
     return { outcome: 'updated', scene: readScene(db, id)!, removedImages };
   })();

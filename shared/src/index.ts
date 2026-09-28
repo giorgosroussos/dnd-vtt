@@ -80,7 +80,19 @@ export {
   type TokenMovePayload,
   type TokenRemovedPayload,
   type TokenSetVisibilityPayload,
+  MeasurementSchema,
+  RulerClearPayloadSchema,
+  RulerClearedPayloadSchema,
+  RulerShownPayloadSchema,
+  RulerSquareSchema,
+  RulerUpdatePayloadSchema,
+  type Measurement,
+  type RulerClearPayload,
+  type RulerClearedPayload,
+  type RulerShownPayload,
+  type RulerUpdatePayload,
 } from './live.js';
+export { rulerFeet, rulerSquares, type RulerSquare } from './ruler.js';
 export {
   ASSET_CATEGORIES,
   AssetSchema,
@@ -139,6 +151,7 @@ export {
   API_STRUCTURE_PATHS,
   CALENDAR_DATE_PATTERN,
   CALIBRATION_FIELDS,
+  FEET_PER_SQUARE_BOUNDS,
   MAX_GRID_LINES_PER_AXIS,
   CampaignCreateBodySchema,
   CampaignUpdateBodySchema,

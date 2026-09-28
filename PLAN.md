@@ -16,8 +16,9 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
   - Playwright: a measurement in a DM context on the live scene shows its line and distance in a player context and clearing it removes them; a measurement in prep mode reaches no player context; `make verify` exit 0 on both CI runners; `TRACEABILITY.md` LIV-07 row with test names.
 - **Non-goals:** waypoints (Q-048); the settings screen that changes the diagonal rule (REL-01); area templates and ping (`01` §6); the residuals G-032 to G-035 (REL-02).
 - **Review:** `Contract change: yes` (the ruler payloads and events), so prompt 2 (review) runs after implementation.
+- **Remaining (2026-09-28):** implemented on branch `liv-07-ruler` with every acceptance above passing locally (`make verify` exit 0; `TRACEABILITY.md` LIV-07 row, D-121, G-021 closed). Still to do: push the branch and read `make verify` green on both CI runners, then run the review (prompt 2); LIV-07 leaves `Now` once both are recorded.
 
 ## Next
 
-1. **REL-01 — Operations and repository documents.** Install and start from source, migrations at start, the data directory, configuration and logging, the settings screen for the upload limit, display size and ruler rule, and the README with firewall guidance and network exposure (G-008, G-010, G-015, G-017; `13` §7, `09` §1, `09` §2, `09` §4, `09` §5, `09` §6, `09` §7, `09` §8).
+1. **REL-01 — Operations and repository documents.** Install and start from source, migrations at start, the data directory, configuration and logging, the settings screen for the upload limit, display size and ruler rule, and the README with firewall guidance and network exposure (G-008, G-010, G-015, G-017, G-036; `13` §7, `09` §1, `09` §2, `09` §4, `09` §5, `09` §6, `09` §7, `09` §8).
 2. **REL-02 — Acceptance suite and system matrix.** The acceptance scenarios, the offline run and the external-URL build check, the large-scene fixture, server acceptance on Windows and Linux and the browser matrix, and the residuals it closes or accepts (G-003, G-018, G-022, G-026, G-029, G-031 to G-035; `13` §7, `10` §3, `10` §4, `10` §5, `10` §6).
