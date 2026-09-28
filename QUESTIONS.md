@@ -119,6 +119,7 @@ Every card opens `Blocking` and is answered before the specification proceeds. `
 - Q-094 — Labels that would hint at a hidden token — security — Resolved
 - Q-095 — Where a token revealed live sits in the stacking order — security — Resolved
 - Q-096 — A lone token hidden and revealed again comes back numbered — ux — Blocking
+- Q-097 — PIN guessing from many LAN addresses — security — Blocking
 
 ## Blocking
 
@@ -132,6 +133,18 @@ Every card opens `Blocking` and is answered before the specification proceeds. `
   - C) Without a migration, keep the bare name on reveal when the scene has issued exactly one number for the asset and no other token of it is shown → effect on ux: the common case comes back as "Goblin", but a hidden Goblin placed after the first one was deleted is revealed as "Goblin" instead of "Goblin 2", against Q-091's example.
 - Recommendation: B, because it is the only option that makes the code do what `05` §3 already says, and the rename happens in front of players on the token they were watching, unlike the gap Q-094 B would have closed.
 - Blocks: specification
+
+### Q-097 — PIN guessing from many LAN addresses
+- Surface: security
+- Source: G-010, found by the SRV-02 review, 2026-09-24: `07` §6 [Q-009] bounds failed PIN attempts per client address only (`server/src/auth/lockout.ts`: 5 failures, then 1 minute, doubling), so a device on the Wi-Fi that changes its IPv4 address gets 5 fresh guesses per address, about 1,250 in the first minute from a /24, and a 4-digit PIN within hours. Nothing bounds failures across addresses. IPv6 cannot reach the server today (it listens on `0.0.0.0`); if it ever listens on `::`, keying by the full /128 would make the per-address lockout trivial to bypass. A signed-in DM session is what reveals hidden tokens, so a guessed PIN defeats the isolation of `04` §4. REL-01 must close G-010 by an owner decision and its test.
+- Question: How should the server bound PIN guesses that come from many LAN addresses at once?
+- Options:
+  - A) Add a server-wide failure budget beside the per-address one. After 20 failed attempts across all addresses within 10 minutes, PIN entry is refused from every address except the server PC's own (loopback) for 10 minutes, doubling on each further run. Any future IPv6 address is keyed by its /64. The README states both limits → effect on security: an address-hopping device gets about 20 guesses per 10 minutes, then fewer and fewer, so even a 4-digit PIN takes days rather than hours. Anyone on the Wi-Fi can deliberately pause sign-in from other browsers, but DM browsers already signed in keep their sessions, the DM can always sign in on the server PC, and each pause is logged with its addresses. `07` §6 gains the rule (a spec amendment carrying this card's tag) and `lockout.ts` gains its test.
+  - B) Accept the residual risk. The README states that the lockout is per address, that a determined device on the Wi-Fi can guess a short PIN in an evening, and recommends a PIN of 6 to 8 digits and a home network without untrusted devices → effect on security: no code change. A 4-digit PIN stays guessable within hours by address hopping, and an 8-digit one in months. The protection depends on the DM following the README.
+  - C) Both A and B: the server-wide budget, and the README's advice to choose 6 to 8 digits → effect on security: A's bound, plus longer PINs for DMs who read the README. The work is A's with one more README paragraph, and the 4-to-8-digit rule of Q-009 is unchanged.
+- Recommendation: C, because the PIN is the only thing between a guest's phone and every hidden token, a pause that the DM can always get past on the server PC costs little at a home table, and the README advice is free.
+- Blocks: specification
+- Answer: C (2026-09-28; recommendation accepted)
 
 ## Open
 
