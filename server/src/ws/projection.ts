@@ -1,8 +1,9 @@
 import type Database from 'better-sqlite3';
 import type { DmEvent, EventType, PlayerEvent, PlayerToken, SceneToken } from '@emberglass/shared';
+import { readSettings } from '../db/settings.js';
 import { listTokens } from '../db/tokens.js';
 import type { LiveEffect } from '../domain/live.js';
-import { readSnapshot, toPlayerToken } from './snapshot.js';
+import { readSnapshot, toPlayerToken, type LiveMemory } from './snapshot.js';
 
 // The role-filtered projection of the live commands' effects (LIV-02; specs/04-live-sync.md §3,
 // §4; D-039, D-049, Q-083, G-023, G-025). Built on the server, before anything is emitted, and
@@ -11,7 +12,8 @@ import { readSnapshot, toPlayerToken } from './snapshot.js';
 // `token.added` and hiding one as `token.removed`, with exactly what a deletion sends. Its tokens
 // are built by `toPlayerToken`, as the snapshot's are, with their rank among the visible tokens read
 // from the database after the change. Called in the same synchronous step as the command, so the
-// database it reads is the state the command left.
+// database it reads is the state the command left. The player camera (LIV-06) reaches both rooms
+// alike: it says nothing of any token.
 
 /** An event before it takes its room's version. */
 export type Unversioned<E> = E extends { type: infer T; payload: infer P }
@@ -20,13 +22,22 @@ export type Unversioned<E> = E extends { type: infer T; payload: infer P }
 
 export type RoomEvents = { dm?: Unversioned<DmEvent>; players?: Unversioned<PlayerEvent> };
 
-export function project(db: Database.Database, effect: LiveEffect): RoomEvents {
+export function project(db: Database.Database, effect: LiveEffect, memory: LiveMemory): RoomEvents {
   switch (effect.type) {
     case 'activated':
       return {
-        dm: { type: 'scene.snapshot', payload: readSnapshot(db, 'dm') },
-        players: { type: 'scene.snapshot', payload: readSnapshot(db, 'players') },
+        dm: { type: 'scene.snapshot', payload: readSnapshot(db, 'dm', memory) },
+        players: { type: 'scene.snapshot', payload: readSnapshot(db, 'players', memory) },
       };
+    case 'camera': {
+      // The camera of the live scene, to both rooms (specs/04-live-sync.md §3); the screen shape the
+      // frame follows to the DM's only (D-119).
+      const camera = memory.camera.of(readSettings(db).live_scene_id);
+      return {
+        dm: { type: 'camera.player', payload: { camera: { ...camera }, screen: memory.screens.chosen() } },
+        players: { type: 'camera.player', payload: { camera: { ...camera } } },
+      };
+    }
     case 'cleared':
       return { dm: { type: 'scene.cleared', payload: {} }, players: { type: 'scene.cleared', payload: {} } };
     case 'token.added': {

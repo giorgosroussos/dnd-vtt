@@ -1,7 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import type { Grid, Image } from '@emberglass/shared';
+import { CAMERA_BOUNDS, FIT_CAMERA, type Grid, type Image } from '@emberglass/shared';
 import {
   CELL_PX,
+  DEFAULT_ASPECT,
+  boundFrame,
+  fitBox,
+  frameForKey,
+  frameLimits,
+  liveFitBox,
+  frameOf,
+  rectOf,
+  resizeBox,
+  scaleBox,
+  screenAspect,
+  viewOf,
   MAX_LINES_PER_AXIS,
   MAX_SCALE,
   MIN_SCALE,
@@ -128,5 +140,137 @@ describe('the camera (specs/08-ux-journeys.md §3, specs/04-live-sync.md §9)', 
     const moved = { x: -500, y: 40, scale: 3 };
     expect(cameraForKey(moved, '0', false, world, viewport)).toEqual(camera);
     expect(cameraForKey(camera, 'a', false, world, viewport)).toBeUndefined();
+  });
+});
+
+describe('the player camera (LIV-06, specs/04-live-sync.md §9, Q-038, D-119)', () => {
+  const mapWorld = { width: 2000, height: 1500 };
+  const maplessWorld = worldSize(GRID, undefined);
+  const tv = { width: 1920, height: 1080 };
+
+  it('draws the fitted camera exactly as fit-to-map, for a scene with a map and for a map-less scene', () => {
+    for (const world of [mapWorld, maplessWorld]) {
+      for (const viewport of [tv, { width: 1024, height: 768 }, { width: 600, height: 1000 }]) {
+        const view = viewOf(FIT_CAMERA, world, viewport);
+        const fit = fitCamera(world, viewport);
+        expect(view.scale).toBeCloseTo(fit.scale, 9);
+        expect(view.x).toBeCloseTo(fit.x, 6);
+        expect(view.y).toBeCloseTo(fit.y, 6);
+      }
+    }
+  });
+
+  it('shows the whole rectangle on any screen, centred, as large as it fits', () => {
+    const rect = { centre_x: 0.25, centre_y: 0.5, width: 0.4, height: 0.3 };
+    for (const viewport of [tv, { width: 800, height: 800 }]) {
+      const view = viewOf(rect, mapWorld, viewport);
+      // The rectangle's centre is the screen's centre.
+      expect(view.x + 0.25 * 2000 * view.scale).toBeCloseTo(viewport.width / 2, 6);
+      expect(view.y + 0.5 * 1500 * view.scale).toBeCloseTo(viewport.height / 2, 6);
+      // It fits on both axes and fills one.
+      const [w, h] = [800 * view.scale, 450 * view.scale];
+      expect(w).toBeLessThanOrEqual(viewport.width + 1e-6);
+      expect(h).toBeLessThanOrEqual(viewport.height + 1e-6);
+      expect(Math.max(w / viewport.width, h / viewport.height)).toBeCloseTo(1, 9);
+    }
+    // A rectangle past the zoom limits is shown at the limit.
+    expect(viewOf({ ...rect, width: 1e-3, height: 1e-3 }, mapWorld, tv).scale).toBe(MAX_SCALE);
+  });
+
+  it('widens the camera to the TV’s shape for the frame, and a frame of that shape is its own camera', () => {
+    const frame = frameOf(FIT_CAMERA, mapWorld, 16 / 9);
+    expect(frame.height).toBe(1500);
+    expect(frame.width).toBeCloseTo(1500 * (16 / 9), 9);
+    expect(frame.x + frame.width / 2).toBeCloseTo(1000, 9);
+    const tall = frameOf(FIT_CAMERA, mapWorld, 1);
+    expect(tall).toEqual({ x: 0, y: -250, width: 2000, height: 2000 });
+    const back = rectOf(frame, mapWorld);
+    expect(frameOf(back, mapWorld, 16 / 9).width).toBeCloseTo(frame.width, 3);
+    expect(back.centre_x).toBe(0.5);
+  });
+
+  it('keeps the camera within the contract’s bounds: the centre on the world, the size within reason', () => {
+    const off = rectOf({ x: 5000, y: -9000, width: 1, height: 10 }, mapWorld);
+    expect(off.centre_x).toBe(1);
+    expect(off.centre_y).toBe(0);
+    expect(off.width).toBe(CAMERA_BOUNDS.minSize);
+    expect(rectOf({ x: 0, y: 0, width: 10, height: 1e9 }, mapWorld).height).toBe(CAMERA_BOUNDS.maxSize);
+    expect(rectOf({ x: 0, y: 0, width: 10, height: 10 }, { width: 0, height: 0 })).toEqual(FIT_CAMERA);
+  });
+
+  it('resizes from a corner keeping the TV’s shape and the opposite corner, within the frame’s limits', () => {
+    const limits = frameLimits(mapWorld, 16 / 9, tv);
+    const anchor = { x: 100, y: 100 };
+    const box = resizeBox(anchor, { x: 900, y: 300 }, 16 / 9, limits);
+    expect(box).toMatchObject({ x: 100, y: 100, width: 800 });
+    expect(box.height).toBeCloseTo(450, 9);
+    const up = resizeBox(anchor, { x: 0, y: -500 }, 16 / 9, limits);
+    expect(up.x + up.width).toBeCloseTo(100, 9);
+    expect(up.y + up.height).toBeCloseTo(100, 9);
+    expect(up.width).toBeCloseTo(600 * (16 / 9), 9);
+    // Never narrower than the TV can zoom to: 1920 ÷ 8 = 240 world pixels.
+    expect(resizeBox(anchor, anchor, 16 / 9, limits).width).toBe(240);
+  });
+
+  it('keeps the frame between what the TV can zoom to and what the contract allows, in the TV’s shape (review C-M1, C-M2)', () => {
+    const limits = frameLimits(mapWorld, 16 / 9, tv);
+    expect(limits.min).toBe(1920 / MAX_SCALE);
+    expect(limits.max).toBe(1920 / MIN_SCALE);
+    // A frame the TV could not show that small is widened about its centre, keeping its shape.
+    const tiny = boundFrame({ x: 1000, y: 700, width: 16, height: 9 }, 16 / 9, limits);
+    expect(tiny.width).toBe(240);
+    expect(tiny.width / tiny.height).toBeCloseTo(16 / 9, 9);
+    expect(tiny.x + tiny.width / 2).toBeCloseTo(1008, 9);
+    // Zooming out stops at one factor for both sides: the camera keeps the TV's shape to the end.
+    let box = frameOf(FIT_CAMERA, { width: 1000, height: 1000 }, 16 / 9);
+    const square = frameLimits({ width: 1000, height: 1000 }, 16 / 9, tv);
+    for (let n = 0; n < 60; n++) box = boundFrame(scaleBox(box, 1.25), 16 / 9, square);
+    const camera = rectOf(box, { width: 1000, height: 1000 });
+    expect(camera.width / camera.height).toBeCloseTo(16 / 9, 4);
+    expect(Math.max(camera.width, camera.height)).toBeLessThanOrEqual(CAMERA_BOUNDS.maxSize);
+    // Without a reported screen the limits assume a 1920-pixel TV.
+    expect(frameLimits(mapWorld, 16 / 9, null).min).toBe(240);
+    expect(frameLimits(mapWorld, 16 / 9, { width: 3840, height: 2160 }).min).toBe(480);
+  });
+
+  it('fits the DM’s view in live mode to the map and the TV’s fitted frame, with room around them (review U-H1)', () => {
+    const box = liveFitBox(mapWorld, 16 / 9);
+    const frame = frameOf(FIT_CAMERA, mapWorld, 16 / 9);
+    for (const [x, y] of [
+      [frame.x, frame.y],
+      [frame.x + frame.width, frame.y + frame.height],
+      [0, 0],
+      [mapWorld.width, mapWorld.height],
+    ] as const) {
+      expect(x).toBeGreaterThan(box.x);
+      expect(x).toBeLessThan(box.x + box.width);
+      expect(y).toBeGreaterThan(box.y);
+      expect(y).toBeLessThan(box.y + box.height);
+    }
+    const view = fitBox(box, { width: 800, height: 600 });
+    expect(view.x + frame.x * view.scale).toBeGreaterThan(0);
+    expect(view.x + (frame.x + frame.width) * view.scale).toBeLessThan(800);
+    expect(fitBox({ x: 0, y: 0, ...mapWorld }, { width: 800, height: 600 })).toEqual(
+      fitCamera(mapWorld, { width: 800, height: 600 }),
+    );
+  });
+
+  it('moves and zooms the frame by key, and 0 fits the TV to the map', () => {
+    const box = { x: 0, y: 0, width: 800, height: 400 };
+    expect(frameForKey(box, 'ArrowRight', false)).toEqual({ ...box, x: 50 });
+    expect(frameForKey(box, 'ArrowUp', true)).toEqual({ ...box, y: -200 });
+    expect(frameForKey(box, '+', false)).toEqual(scaleBox(box, 1 / 1.25));
+    expect(frameForKey(box, '-', false)).toEqual(scaleBox(box, 1.25));
+    expect(frameForKey(box, '0', false)).toBe('fit');
+    expect(frameForKey(box, 'x', false)).toBeUndefined();
+    expect(scaleBox(box, 2)).toEqual({ x: -400, y: -200, width: 1600, height: 800 });
+  });
+
+  it('takes the TV’s shape from the screen reported, 16:9 without one, within reason', () => {
+    expect(screenAspect(null)).toBe(DEFAULT_ASPECT);
+    expect(DEFAULT_ASPECT).toBe(16 / 9);
+    expect(screenAspect({ width: 1024, height: 768 })).toBeCloseTo(4 / 3, 9);
+    expect(screenAspect({ width: 10_000, height: 10 })).toBe(4);
+    expect(screenAspect({ width: 10, height: 10_000 })).toBe(0.25);
   });
 });

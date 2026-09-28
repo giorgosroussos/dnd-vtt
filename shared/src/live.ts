@@ -24,6 +24,9 @@ export const SOCKET_CHANNELS = {
   command: 'command',
   event: 'event',
   snapshot: 'snapshot',
+  // The player view's viewport size (LIV-06): not a command of §2, so a players socket may send it,
+  // and it changes nothing players receive. The DM's TV frame takes its shape from it.
+  viewport: 'viewport',
 } as const;
 
 // Where the Socket.io server listens, on the server's own port (specs/02-architecture.md §2).
@@ -147,12 +150,37 @@ export const PlayerMapSchema = Type.Object(
   strict,
 );
 
+// The player camera (LIV-06; specs/04-live-sync.md §9, Q-038, D-018): the rectangle of the live
+// scene's world that every screen must show, its centre and size in fractions of the world's width
+// and height, so it means the same whatever the display version's pixels or a map-less scene's
+// square size. A screen shows it as large as it fits, centred, so a screen of another shape shows a
+// little more along one axis. Held in the server's memory only, and reset to FIT_CAMERA, the whole
+// map or the whole map-less extent, on every activation.
+export const CAMERA_BOUNDS = { minSize: 0.001, maxSize: 100 } as const;
+const CameraSize = Type.Number({ minimum: CAMERA_BOUNDS.minSize, maximum: CAMERA_BOUNDS.maxSize });
+const CameraCentre = Type.Number({ minimum: 0, maximum: 1 });
+export const PlayerCameraSchema = Type.Object(
+  { centre_x: CameraCentre, centre_y: CameraCentre, width: CameraSize, height: CameraSize },
+  strict,
+);
+export type PlayerCamera = Static<typeof PlayerCameraSchema>;
+/** The whole world: fit-to-map, or to the grid extent of a map-less scene. */
+export const FIT_CAMERA: PlayerCamera = Object.freeze({ centre_x: 0.5, centre_y: 0.5, width: 1, height: 1 });
+
+// A player view's viewport in CSS pixels, reported on SOCKET_CHANNELS.viewport. The DM room learns
+// the shape of the screen connected longest, which the TV frame follows; players never receive it.
+const ScreenSide = Type.Integer({ minimum: 1, maximum: 32_768 });
+export const ScreenSchema = Type.Object({ width: ScreenSide, height: ScreenSide }, strict);
+export type Screen = Static<typeof ScreenSchema>;
+export type ViewportAck = { ok: true } | ErrorEnvelope;
+
 export const PlayerLiveSceneSchema = Type.Object(
   {
     map: Type.Union([PlayerMapSchema, Type.Null()]),
     // Needed even when players do not see the grid: tokens are placed in grid units.
     grid: GridSchema,
     tokens: Type.Array(PlayerTokenSchema),
+    camera: PlayerCameraSchema,
   },
   strict,
 );
@@ -162,6 +190,9 @@ export const DmLiveSceneSchema = Type.Object(
     scene: SceneSchema,
     map: Type.Union([ImageSchema, Type.Null()]),
     tokens: Type.Array(SceneTokenSchema),
+    camera: PlayerCameraSchema,
+    // The screen the TV frame follows, or null while no player view has reported one.
+    screen: Type.Union([ScreenSchema, Type.Null()]),
   },
   strict,
 );
@@ -200,8 +231,10 @@ export type SnapshotAck = { ok: true };
 // for the scene that was live a moment ago never lands on the one another DM browser just made
 // live. A new token's label and visibility come from the server (specs/05-assets-and-images.md §3,
 // §4, Q-092), as in preparation. `undo` (LIV-05) carries nothing: the server applies the most recent
-// inverse from its own history (specs/04-live-sync.md §8, D-040). `camera.setPlayer` and the ruler
-// are LIV-06 and LIV-07's.
+// inverse from its own history (specs/04-live-sync.md §8, D-040). `camera.setPlayer` (LIV-06) names
+// the scene it frames, as `token.add` does, and is refused when that scene is no longer live, so a
+// frame dragged for the scene live a moment ago never moves the TV of the next one. The ruler is
+// LIV-07's.
 
 const Coordinate = TokenCreateBodySchema.properties.x;
 
@@ -215,6 +248,7 @@ export const TokenDeletePayloadSchema = Type.Object({ token_id: UuidSchema }, st
 export const SceneActivatePayloadSchema = Type.Object({ scene_id: UuidSchema }, strict);
 export const SceneDeactivatePayloadSchema = Type.Object({}, strict);
 export const UndoPayloadSchema = Type.Object({}, strict);
+export const CameraSetPlayerPayloadSchema = Type.Object({ scene_id: UuidSchema, camera: PlayerCameraSchema }, strict);
 
 /** The payload schema of every live command implemented so far; the server registers exactly these. */
 export const LIVE_COMMAND_PAYLOAD_SCHEMAS = {
@@ -224,6 +258,7 @@ export const LIVE_COMMAND_PAYLOAD_SCHEMAS = {
   'token.delete': TokenDeletePayloadSchema,
   'scene.activate': SceneActivatePayloadSchema,
   'scene.deactivate': SceneDeactivatePayloadSchema,
+  'camera.setPlayer': CameraSetPlayerPayloadSchema,
   undo: UndoPayloadSchema,
 } as const satisfies Partial<Record<CommandType, object>>;
 
@@ -234,6 +269,7 @@ export type TokenDeletePayload = Static<typeof TokenDeletePayloadSchema>;
 export type SceneActivatePayload = Static<typeof SceneActivatePayloadSchema>;
 export type SceneDeactivatePayload = Static<typeof SceneDeactivatePayloadSchema>;
 export type UndoPayload = Static<typeof UndoPayloadSchema>;
+export type CameraSetPlayerPayload = Static<typeof CameraSetPlayerPayloadSchema>;
 
 // What each room's events carry (specs/04-live-sync.md §3, §4; D-049, Q-083, G-023, G-025). One
 // event per room per command, as the table of §3 has it. The DM's token events carry the token in
@@ -256,19 +292,29 @@ export const PlayerTokenAddedPayloadSchema = Type.Object(
 );
 export const PlayerTokenUpdatedPayloadSchema = Type.Object({ token: PlayerTokenSchema }, strict);
 export const SceneClearedPayloadSchema = Type.Object({}, strict);
+// `camera.player` (LIV-06): players receive the camera alone; the DM room also the screen shape the
+// frame follows, and receives it again, with the same camera, when that shape changes.
+export const PlayerCameraPayloadSchema = Type.Object({ camera: PlayerCameraSchema }, strict);
+export const DmCameraPayloadSchema = Type.Object(
+  { camera: PlayerCameraSchema, screen: Type.Union([ScreenSchema, Type.Null()]) },
+  strict,
+);
 
 export type DmTokenEventPayload = Static<typeof DmTokenEventPayloadSchema>;
 export type TokenRemovedPayload = Static<typeof TokenRemovedPayloadSchema>;
 export type PlayerTokenAddedPayload = Static<typeof PlayerTokenAddedPayloadSchema>;
 export type PlayerTokenUpdatedPayload = Static<typeof PlayerTokenUpdatedPayloadSchema>;
 export type SceneClearedPayload = Static<typeof SceneClearedPayloadSchema>;
+export type PlayerCameraPayload = Static<typeof PlayerCameraPayloadSchema>;
+export type DmCameraPayload = Static<typeof DmCameraPayloadSchema>;
 
 /** Every event of the dm room with its payload. */
 export type DmEvent =
   | EventEnvelope<'scene.snapshot', DmSnapshot>
   | EventEnvelope<'token.added' | 'token.updated', DmTokenEventPayload>
   | EventEnvelope<'token.removed', TokenRemovedPayload>
-  | EventEnvelope<'scene.cleared', SceneClearedPayload>;
+  | EventEnvelope<'scene.cleared', SceneClearedPayload>
+  | EventEnvelope<'camera.player', DmCameraPayload>;
 
 /** Every event of the players room with its payload: nothing here names a hidden token. */
 export type PlayerEvent =
@@ -276,4 +322,5 @@ export type PlayerEvent =
   | EventEnvelope<'token.added', PlayerTokenAddedPayload>
   | EventEnvelope<'token.updated', PlayerTokenUpdatedPayload>
   | EventEnvelope<'token.removed', TokenRemovedPayload>
-  | EventEnvelope<'scene.cleared', SceneClearedPayload>;
+  | EventEnvelope<'scene.cleared', SceneClearedPayload>
+  | EventEnvelope<'camera.player', PlayerCameraPayload>;

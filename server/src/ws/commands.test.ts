@@ -4,6 +4,7 @@ import {
   DmSnapshotSchema,
   DmTokenEventPayloadSchema,
   ErrorEnvelopeSchema,
+  FIT_CAMERA,
   PlayerSnapshotSchema,
   PlayerTokenAddedPayloadSchema,
   PlayerTokenSchema,
@@ -611,7 +612,7 @@ describe('player commands (specs/10-testing-acceptance.md §3, specs/07-security
       'token.setVisibility': { token_id: w.hidden.id, hidden: false },
       'scene.activate': { scene_id: w.sceneB.id },
       'scene.deactivate': {},
-      'camera.setPlayer': {},
+      'camera.setPlayer': { scene_id: w.sceneA.id, camera: { centre_x: 0.1, centre_y: 0.1, width: 0.2, height: 0.2 } },
       'ruler.update': {},
       'ruler.clear': {},
       undo: {},
@@ -629,6 +630,8 @@ describe('player commands (specs/10-testing-acceptance.md §3, specs/07-security
     expect(dump()).toEqual(before);
     expect([h.versions.dm.current(), h.versions.players.current()]).toEqual(versions);
     for (const client of [dm, tv, laptopTv]) expect(await client.settle()).toEqual([]);
+    // The player camera, held in memory rather than the database, is still fitted to the map (LIV-06).
+    expect((tv.events.at(-1)!.payload as PlayerSnapshot).scene?.camera).toEqual(FIT_CAMERA);
     // The same commands from the DM socket do run: the refusal is the room's, not the content's.
     await acknowledged(dm, 'token.move', valid['token.move']);
     expect(tokenRow(w.goblins[0]!.id)).toMatchObject({ x: 9, y: 9 });

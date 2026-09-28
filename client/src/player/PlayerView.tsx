@@ -8,8 +8,9 @@ export { CURSOR_IDLE_MS };
 
 // Player view at / (FND-04, LIV-01, LIV-03): the dark idle screen with the product name while
 // nothing is live (specs/08-ux-journeys.md §4, Q-025), and the live scene once one is, drawn by
-// the map canvas in its player mode (D-090): the map's display version, fitted to it
-// (specs/04-live-sync.md §9, Q-038), the grid only when players see it (§4), and the visible
+// the map canvas in its player mode (D-090): the map's display version, framed by the player camera
+// the DM steers, fitted to the map on every activation (specs/04-live-sync.md §9, Q-038, LIV-06), the
+// grid only when players see it (§4), and the visible
 // tokens with their labels (Q-032). It has no controls and nothing that takes focus, and hides
 // the pointer after two seconds still (Q-054). It keeps the live connection, reconnecting by
 // itself and resynchronising from a fresh snapshot (§5, §6); meanwhile it keeps its last picture
@@ -28,7 +29,11 @@ export function PlayerView() {
       data-scene={scene ? 'live' : 'idle'}
       data-cursor={cursorHidden ? 'hidden' : 'shown'}
     >
-      {scene ? <MapCanvas mode="player" map={scene.map} grid={scene.grid} tokens={tokens} /> : <IdleScreen />}
+      {scene ? (
+        <MapCanvas mode="player" map={scene.map} grid={scene.grid} tokens={tokens} camera={scene.camera} />
+      ) : (
+        <IdleScreen />
+      )}
     </main>
   );
 }

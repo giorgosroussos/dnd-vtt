@@ -1,11 +1,13 @@
-import type {
-  EventEnvelope,
-  PlayerLiveScene,
-  PlayerSnapshot,
-  PlayerToken,
-  PlayerTokenAddedPayload,
-  PlayerTokenUpdatedPayload,
-  TokenRemovedPayload,
+import {
+  FIT_CAMERA,
+  type EventEnvelope,
+  type PlayerCameraPayload,
+  type PlayerLiveScene,
+  type PlayerSnapshot,
+  type PlayerToken,
+  type PlayerTokenAddedPayload,
+  type PlayerTokenUpdatedPayload,
+  type TokenRemovedPayload,
 } from '@emberglass/shared';
 
 // What the player view draws, kept in step from the players' events (LIV-03; specs/04-live-sync.md
@@ -14,7 +16,9 @@ import type {
 // token (a reveal included) is inserted at the rank its event gives and a removed one closes its
 // gap, so the ranks held always equal those of a fresh snapshot (G-025). A moved token is
 // replaced; a relabelled one keeps its place and takes its new label. `scene.cleared` returns to
-// the idle screen. Only the player fields are kept, whatever an event carried.
+// the idle screen. `camera.player` replaces the camera the TV shows (LIV-06, specs/04-live-sync.md
+// §9); a snapshot brings the current one, fitted to the map after an activation. Only the player
+// fields are kept, whatever an event carried.
 
 /** The live scene the player view draws, or null for the idle screen. */
 export type PlayerScene = PlayerLiveScene | null;
@@ -41,8 +45,13 @@ function placed(tokens: readonly PlayerToken[], token: PlayerToken): PlayerToken
 
 export function fromSnapshot(snapshot: PlayerSnapshot): PlayerScene {
   if (snapshot.scene === null) return null;
-  const { map, grid, tokens } = snapshot.scene;
-  return { map, grid, tokens: ranked([...tokens].sort((a, b) => a.z_order - b.z_order).map(playerToken)) };
+  const { map, grid, tokens, camera } = snapshot.scene;
+  return {
+    map,
+    grid,
+    tokens: ranked([...tokens].sort((a, b) => a.z_order - b.z_order).map(playerToken)),
+    camera: camera ? { ...camera } : FIT_CAMERA,
+  };
 }
 
 /** The scene after one players' event that is exactly the next version (the connection checks that). */
@@ -69,8 +78,14 @@ export function applyPlayerEvent(scene: PlayerScene, event: EventEnvelope): Play
       const { id } = event.payload as unknown as TokenRemovedPayload;
       return { ...scene, tokens: ranked(scene.tokens.filter((each) => each.id !== id)) };
     }
+    case 'camera.player': {
+      const { camera } = event.payload as unknown as Partial<PlayerCameraPayload>;
+      if (!camera) return scene;
+      const { centre_x, centre_y, width, height } = camera;
+      return { ...scene, camera: { centre_x, centre_y, width, height } };
+    }
     default:
-      // The camera and the ruler are LIV-06 and LIV-07's.
+      // The ruler is LIV-07's.
       return scene;
   }
 }

@@ -1,6 +1,7 @@
 import { act } from 'react';
 import { Value } from 'typebox/value';
 import {
+  FIT_CAMERA,
   LIVE_COMMAND_PAYLOAD_SCHEMAS,
   TokenCreateBodySchema,
   TokenUpdateBodySchema,
@@ -20,6 +21,8 @@ import {
   type LibraryAsset,
   type Scene,
   type SceneToken,
+  type PlayerCamera,
+  type Screen,
   type Session,
 } from '@emberglass/shared';
 import { installFakeSockets, type FakeSocket } from './fakeSocket.js';
@@ -114,6 +117,12 @@ export class FakeServer {
   calls: Call[] = [];
   /** Answers a live command before the fake applies it, to refuse it or hold it; undefined applies it. */
   beforeCommand: ((command: CommandEnvelope) => CommandAck | Promise<CommandAck | undefined> | undefined) | undefined;
+  /**
+   * The player camera of the live scene and the screen the TV frame follows (LIV-06, D-119): reset on
+   * every activation and deactivation, and when a REST change gives the live scene another map.
+   */
+  playerCamera: PlayerCamera = FIT_CAMERA;
+  screen: Screen | null = null;
   /** The `dm` room's version counter (D-108). */
   private dmVersion = 1;
   /**
@@ -317,6 +326,7 @@ export class FakeServer {
     if (call.method === 'GET') return this.handle(call);
     const before = this.dmSnapshot();
     const reply = this.handle(call);
+    if (before.scene !== null && before.scene.scene.map_image_id !== this.liveMap()) this.playerCamera = FIT_CAMERA;
     const after = this.dmSnapshot();
     if (before.scene !== null && after.scene === null) this.deliver('scene.cleared', {});
     else if (JSON.stringify(before) !== JSON.stringify(after)) this.deliver('scene.snapshot', after);
@@ -324,6 +334,17 @@ export class FakeServer {
   }
 
   // --- the live side (LIV-04) ---
+
+  private liveMap(): string | null | undefined {
+    return this.scenes.find((each) => each.id === this.liveSceneId)?.map_image_id;
+  }
+
+  /** The TV camera or the screen changed elsewhere: another DM browser steered, or a TV reported. */
+  steerElsewhere(camera: PlayerCamera = this.playerCamera, screen: Screen | null = this.screen): void {
+    this.playerCamera = { ...camera };
+    this.screen = screen && { ...screen };
+    this.deliver('camera.player', { camera: { ...this.playerCamera }, screen: this.screen });
+  }
 
   /** The DM room's snapshot of the live scene, tokens drawn from their asset's current fields. */
   dmSnapshot(): DmSnapshot {
@@ -335,6 +356,8 @@ export class FakeServer {
         scene: structuredClone(scene),
         map: structuredClone(this.images.find((each) => each.id === scene.map_image_id) ?? null),
         tokens: this.tokensOf(scene.id).map((token) => this.withAsset(token)),
+        camera: { ...this.playerCamera },
+        screen: this.screen && { ...this.screen },
       },
     };
   }
@@ -444,12 +467,14 @@ export class FakeServer {
       case 'scene.activate': {
         if (!this.scenes.some((each) => each.id === p.scene_id)) return refuse('not_found');
         this.liveSceneId = String(p.scene_id);
+        this.playerCamera = FIT_CAMERA;
         this.deliver('scene.snapshot', this.dmSnapshot());
         return { ok: true };
       }
       case 'scene.deactivate': {
         if (this.liveSceneId === null) return { ok: true };
         this.liveSceneId = null;
+        this.playerCamera = FIT_CAMERA;
         this.deliver('scene.cleared', {});
         return { ok: true };
       }
@@ -494,6 +519,14 @@ export class FakeServer {
         if (token === 'not_live') return refuse('scene_not_live');
         this.sceneTokens = this.sceneTokens.filter((each) => each !== token);
         this.deliver('token.removed', { id: token.id });
+        return { ok: true };
+      }
+      case 'camera.setPlayer': {
+        if (this.liveSceneId === null || p.scene_id !== this.liveSceneId) return refuse('scene_not_live');
+        const camera = p.camera as PlayerCamera;
+        if (JSON.stringify(camera) === JSON.stringify(this.playerCamera)) return { ok: true };
+        this.playerCamera = { ...camera };
+        this.deliver('camera.player', { camera: { ...camera }, screen: this.screen });
         return { ok: true };
       }
       case 'undo':

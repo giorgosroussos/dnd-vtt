@@ -527,7 +527,7 @@ describe('commands from the players room (specs/04-live-sync.md §2, specs/07-se
 
   it('validates a DM command in the envelope: a command of a later package is unsupported', async () => {
     const dm = await connect({ cookie });
-    expect(((await command(dm.socket, { type: 'camera.setPlayer', payload: {} })) as ErrorEnvelope).error.code).toBe(
+    expect(((await command(dm.socket, { type: 'ruler.update', payload: {} })) as ErrorEnvelope).error.code).toBe(
       'command_unsupported',
     );
     expect(((await command(dm.socket, { type: 'nope', payload: {} })) as ErrorEnvelope).error.code).toBe(

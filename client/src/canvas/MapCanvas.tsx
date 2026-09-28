@@ -1,19 +1,40 @@
 import { useEffect, useEffectEvent, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type Konva from 'konva';
 import { Circle, Group, Image as KonvaImage, Label, Layer, Line, Rect, Stage, Tag, Text } from 'react-konva';
-import { imageFileUrl, type Grid, type Image, type TokenSize } from '@emberglass/shared';
+import {
+  FIT_CAMERA,
+  imageFileUrl,
+  type Grid,
+  type Image,
+  type PlayerCamera,
+  type Screen,
+  type TokenSize,
+} from '@emberglass/shared';
 import { Button } from '../ui/Button.js';
 import { formatDecimal, normalise, type Rect as Box } from './calibration.js';
 import { t } from '../ui/messages.js';
 import {
+  boundFrame,
   cameraForKey,
+  fitBox,
   fitCamera,
+  frameLimits,
+  liveFitBox,
+  sameRect,
+  screenAspect,
+  frameForKey,
+  frameOf,
   gridLines,
   mapInfo,
+  rectOf,
+  resizeBox,
+  scaleBox,
+  viewOf,
   WHEEL_ZOOM_STEP,
   worldSize,
   ZOOM_STEP,
   zoomAt,
+  type Box as WorldBox,
   type Camera,
   type Size,
 } from './geometry.js';
@@ -40,6 +61,13 @@ import './canvas.css';
 // has no control and nothing that takes focus, always fits the map (specs/04-live-sync.md §9),
 // and draws no overlay when the grid is hidden for players. The player view uses it (LIV-03).
 //
+// The player camera (LIV-06, specs/04-live-sync.md §9, specs/08-ux-journeys.md §2, Q-080, D-046, D-119):
+// the player mode draws the part of the world the DM framed for the TV, fitted when the scene went
+// live. In live mode the DM mode draws that frame, widened to the TV's shape, over the map: its border
+// drags to pan the TV and its corners resize it to zoom, keeping the TV's shape, and the camera is sent
+// on the drop. The DM's own camera never moves with it. While steering is on (the toolbar's Steer the
+// TV), the view's keys and buttons move and zoom the frame instead of the DM's view.
+//
 // While the DM calibrates by rectangle (PRP-03, specs/06-grid-and-measurement.md §1, D-094), a
 // drag on the map draws a rectangle instead of panning, reported in the original's pixels.
 //
@@ -58,7 +86,12 @@ export const CANVAS_COLOURS = {
   halo: '#14110f',
   // The accent of tokens.css, for the rectangle measured during calibration.
   measure: '#f0a04b',
+  // The TV frame: live mode's colour (--color-danger of tokens.css, as the live outline), over a dark halo.
+  tvFrame: '#ff8f80',
 } as const;
+// The TV frame's corner handles and the width of its border's grip, in screen pixels.
+const HANDLE_PX = 12;
+const FRAME_GRIP_PX = 14;
 // A press-and-release shorter than this, in screen pixels either way, is a click, not a rectangle.
 const MIN_RECT_PX = 4;
 export const GRID_OPACITY = { shown: 0.7, faint: 0.25 } as const;
@@ -117,6 +150,28 @@ export interface CanvasTokenControls extends TokenControls {
   onDelete: (id: string) => void;
 }
 
+/** The frame of what the TV sees, in live mode (LIV-06). */
+export interface TvFrame {
+  camera: PlayerCamera;
+  /** The screen the frame follows, whose shape it keeps; null while none has reported (16:9). */
+  screen: Screen | null;
+  /** The live connection is down: the frame is shown but cannot be moved (D-116). */
+  offline: boolean;
+  /** While on, the view's keys and buttons steer the TV instead of the DM's own view. */
+  steering: boolean;
+  onSteer: (on: boolean) => void;
+  /** A new player camera: on a drop, a key press or a button. */
+  onChange: (camera: PlayerCamera) => void;
+}
+
+type Corner = 'nw' | 'ne' | 'sw' | 'se';
+const CORNERS: Corner[] = ['nw', 'ne', 'sw', 'se'];
+const cornerOf = (box: WorldBox, corner: Corner) => ({
+  x: corner.endsWith('w') ? box.x : box.x + box.width,
+  y: corner.startsWith('n') ? box.y : box.y + box.height,
+});
+const OPPOSITE: Record<Corner, Corner> = { nw: 'se', ne: 'sw', sw: 'ne', se: 'nw' };
+
 /** A rectangle measured on the map during calibration, in the original image's pixels. */
 export interface Measure {
   rect: Box | undefined;
@@ -162,6 +217,8 @@ export function MapCanvas({
   tokenControls,
   placing,
   toolbar,
+  camera: playerCamera,
+  tvFrame,
 }: {
   grid: Grid;
   /** The scene's map image, or null for a scene without a map. */
@@ -180,6 +237,10 @@ export function MapCanvas({
   placing?: Placing | undefined;
   /** DM view only: the scene's own controls, on the toolbar's row before the view's (D-100). */
   toolbar?: ReactNode;
+  /** Player view only: the player camera; fitted to the map when absent. */
+  camera?: PlayerCamera | undefined;
+  /** DM view in live mode only: the frame of what the TV sees, which steers it. */
+  tvFrame?: TvFrame | undefined;
 }) {
   const helpId = useId();
   const [viewportRef, viewport] = useViewport();
@@ -193,8 +254,19 @@ export function MapCanvas({
   // The DM's own camera, kept only for the world it was set on: another scene or map fits again.
   const worldKey = `${map?.id ?? 'none'}:${world.width}x${world.height}`;
   const [manual, setManual] = useState<{ key: string; camera: Camera }>();
-  const fitted = fitCamera(world, viewport);
-  const camera = mode === 'dm' && manual?.key === worldKey ? manual.camera : fitted;
+  // In live mode the DM's view fits the map and the TV's fitted frame, with room around them, so the
+  // frame's edges and corners can be grabbed (LIV-06 review U-H1); it never follows the TV's camera.
+  const liveAspect = mode === 'dm' && ready && tvFrame ? screenAspect(tvFrame.screen) : undefined;
+  const fitted =
+    liveAspect === undefined ? fitCamera(world, viewport) : fitBox(liveFitBox(world, liveAspect), viewport);
+  const camera =
+    mode === 'dm'
+      ? manual?.key === worldKey
+        ? manual.camera
+        : fitted
+      : playerCamera
+        ? viewOf(playerCamera, world, viewport)
+        : fitted;
   // From the latest camera, not this render's: wheel and drag events arrive outside React's
   // synchronous updates, and several can land before the next render (D-093).
   const changeCamera = (change: (current: Camera) => Camera) =>
@@ -217,6 +289,25 @@ export function MapCanvas({
   // Tokens are selected and dragged only when nothing else uses the pointer.
   const controls = dm && !measuring && !placingNow ? tokenControls : undefined;
   const selected = controls && tokens.find((token) => token.id === controls.selectedId);
+  // The TV frame, in world pixels: the one being dragged, or the player camera widened to the TV's shape.
+  const [frameDraft, setFrameDraft] = useState<WorldBox>();
+  const frameAnchor = useRef<{ x: number; y: number }>(undefined);
+  const tv = dm && ready && tvFrame ? tvFrame : undefined;
+  const aspect = liveAspect ?? 1;
+  // The frame is never narrower than the TV can zoom to, nor wider than it can show (review C-M1, C-M2).
+  const limits = tv ? frameLimits(world, aspect, tv.screen) : undefined;
+  const frameBox = tv && limits ? boundFrame(frameOf(tv.camera, world, aspect), aspect, limits) : undefined;
+  const shownFrame = tv ? (frameDraft ?? frameBox) : undefined;
+  const steering = tv?.steering === true && !measuring && !placingNow;
+  const frameMovable = tv !== undefined && !tv.offline && !measuring && !placingNow;
+  // The camera that shows `box`; nothing is sent when that is the camera already (review C-M2, U-M1).
+  const cameraFor = (box: WorldBox | 'fit'): PlayerCamera =>
+    box === 'fit' || !limits ? FIT_CAMERA : rectOf(boundFrame(box, aspect, limits), world);
+  const steerTo = (box: WorldBox | 'fit') => {
+    if (!tv) return;
+    const next = cameraFor(box);
+    if (!sameRect(next, tv.camera)) tv.onChange(next);
+  };
   // The drag being measured: the ref is what the handlers read, the state what is drawn, so a
   // release seen twice (by the stage and by the window) reports once.
   const dragRef = useRef<Drag>(undefined);
@@ -256,6 +347,32 @@ export function MapCanvas({
         place.onCancel();
         return;
       }
+    }
+    // T turns steering the TV on and off from the canvas itself (review U-M5).
+    if (tv && !measuring && !placingNow && (event.key === 't' || event.key === 'T')) {
+      event.preventDefault();
+      if (!event.repeat) tv.onSteer(!steering);
+      return;
+    }
+    if (steering && frameBox) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        tv?.onSteer(false);
+        return;
+      }
+      const next = frameForKey(frameBox, event.key, event.shiftKey);
+      if (next) {
+        event.preventDefault();
+        // A held key sends once, not a command per repeat (review U-M1).
+        if (!event.repeat) steerTo(next);
+      }
+      return;
+    }
+    // Fit, in live mode, fits the map and the TV's frame (review U-H1).
+    if (event.key === '0' && !event.shiftKey) {
+      event.preventDefault();
+      setManual(undefined);
+      return;
     }
     if (controls && selected) {
       const arrow = ARROWS[event.key];
@@ -372,6 +489,17 @@ export function MapCanvas({
         })
       : undefined;
 
+  // The frame dropped where it was dragged, or resized from a corner: the camera it shows is sent, and
+  // the frame is put where that camera draws it, kept on the world, even when the camera is unchanged.
+  function frameDropped(node: Konva.Node, box: WorldBox, at: (placed: WorldBox) => { x: number; y: number }) {
+    setFrameDraft(undefined);
+    frameAnchor.current = undefined;
+    if (!tv || !limits) return;
+    const next = cameraFor(box);
+    node.position(at(boundFrame(frameOf(next, world, aspect), aspect, limits)));
+    if (!sameRect(next, tv.camera)) tv.onChange(next);
+  }
+
   // A click that did not drag the view: places the token being placed, or lets the selection go.
   function onStageClick(event: Konva.KonvaEventObject<MouseEvent>) {
     if (event.target !== event.target.getStage()) return;
@@ -474,6 +602,91 @@ export function MapCanvas({
         ) : null}
       </Layer>
       {frame ? <TokenLayer tokens={tokens} frame={frame} scale={camera.scale} mode={mode} controls={controls} /> : null}
+      {tv && shownFrame ? (
+        <Layer name="tv-frame-layer" listening={frameMovable} opacity={tv.offline ? 0.5 : 1}>
+          <Rect
+            name="tv-frame-halo"
+            {...shownFrame}
+            stroke={CANVAS_COLOURS.halo}
+            strokeWidth={6}
+            strokeScaleEnabled={false}
+            listening={false}
+          />
+          <Rect
+            name="tv-frame"
+            {...shownFrame}
+            stroke={CANVAS_COLOURS.tvFrame}
+            strokeWidth={3}
+            {...(steering ? {} : { dash: [10, 5] })}
+            strokeScaleEnabled={false}
+            hitStrokeWidth={FRAME_GRIP_PX}
+            fillEnabled={false}
+            draggable={frameMovable}
+            onPointerDown={(event) => {
+              event.cancelBubble = true;
+            }}
+            onDragMove={(event) => {
+              const base = frameDraft ?? frameBox!;
+              setFrameDraft({ ...base, x: event.target.x(), y: event.target.y() });
+            }}
+            onDragEnd={(event) =>
+              frameDropped(
+                event.target,
+                { ...(frameDraft ?? frameBox!), x: event.target.x(), y: event.target.y() },
+                (placed) => ({ x: placed.x, y: placed.y }),
+              )
+            }
+          />
+          <Label
+            name="tv-frame-label"
+            x={shownFrame.x}
+            y={shownFrame.y}
+            scaleX={1 / camera.scale}
+            scaleY={1 / camera.scale}
+            listening={false}
+          >
+            <Tag fill={CANVAS_COLOURS.tvFrame} />
+            <Text text={t('canvas.tvFrame')} fill={CANVAS_COLOURS.halo} fontSize={12} padding={3} />
+          </Label>
+          {CORNERS.map((corner) => {
+            const at = cornerOf(shownFrame, corner);
+            const side = HANDLE_PX / camera.scale;
+            return (
+              <Rect
+                key={corner}
+                name={`tv-frame-handle tv-frame-handle-${corner}`}
+                x={at.x}
+                y={at.y}
+                offsetX={side / 2}
+                offsetY={side / 2}
+                width={side}
+                height={side}
+                fill={CANVAS_COLOURS.tvFrame}
+                stroke={CANVAS_COLOURS.halo}
+                strokeWidth={1}
+                strokeScaleEnabled={false}
+                draggable={frameMovable}
+                onPointerDown={(event) => {
+                  event.cancelBubble = true;
+                }}
+                onDragStart={() => {
+                  frameAnchor.current = cornerOf(frameBox!, OPPOSITE[corner]);
+                }}
+                onDragMove={(event) => {
+                  const anchor = frameAnchor.current ?? cornerOf(frameBox!, OPPOSITE[corner]);
+                  setFrameDraft(resizeBox(anchor, event.target.position(), aspect, limits!));
+                }}
+                onDragEnd={(event) => {
+                  const anchor = frameAnchor.current ?? cornerOf(frameBox!, OPPOSITE[corner]);
+                  frameDropped(event.target, resizeBox(anchor, event.target.position(), aspect, limits!), (placed) =>
+                    cornerOf(placed, corner),
+                  );
+                }}
+              />
+            );
+          })}
+        </Layer>
+      ) : null}
       {place ? (
         // Where Enter places the token: the centre of the view, marked while placing (review).
         <Layer listening={false}>
@@ -496,6 +709,18 @@ export function MapCanvas({
     'data-camera-scale': camera.scale,
     'data-grid': opacity === 0 ? 'none' : grid.visible ? 'shown' : 'faint',
   };
+  // The TV frame on screen, in pixels from the viewport's corner, for the end-to-end tests (LIV-06).
+  const frameState = shownFrame
+    ? {
+        'data-tv-frame': JSON.stringify({
+          left: camera.x + shownFrame.x * camera.scale,
+          top: camera.y + shownFrame.y * camera.scale,
+          width: shownFrame.width * camera.scale,
+          height: shownFrame.height * camera.scale,
+        }),
+        'data-tv-steering': steering ? 'on' : 'off',
+      }
+    : {};
   // Where each token is drawn, in screen pixels from the viewport's corner, for the end-to-end tests.
   // The player mode lists the tokens it draws, visible ones only, with nothing a player's snapshot
   // does not already carry (LIV-03).
@@ -529,14 +754,34 @@ export function MapCanvas({
       <div className="eg-canvas__toolbar">
         {toolbar}
         <div className="eg-canvas__view" role="group" aria-label={t('canvas.controls')}>
-          <Button size="small" onClick={() => changeCamera((current) => zoomAt(current, ZOOM_STEP, centre))}>
-            {t('canvas.zoomIn')}
+          {tv ? (
+            // Pressed only while steering is in effect: never while placing or measuring (review U-M3).
+            <Button size="small" aria-pressed={steering} onClick={() => tv.onSteer(!steering)}>
+              {t('canvas.steerTv')}
+            </Button>
+          ) : null}
+          <Button
+            size="small"
+            onClick={() =>
+              steering && frameBox
+                ? steerTo(scaleBox(frameBox, 1 / ZOOM_STEP))
+                : changeCamera((current) => zoomAt(current, ZOOM_STEP, centre))
+            }
+          >
+            {t(steering ? 'canvas.tvZoomIn' : 'canvas.zoomIn')}
           </Button>
-          <Button size="small" onClick={() => changeCamera((current) => zoomAt(current, 1 / ZOOM_STEP, centre))}>
-            {t('canvas.zoomOut')}
+          <Button
+            size="small"
+            onClick={() =>
+              steering && frameBox
+                ? steerTo(scaleBox(frameBox, ZOOM_STEP))
+                : changeCamera((current) => zoomAt(current, 1 / ZOOM_STEP, centre))
+            }
+          >
+            {t(steering ? 'canvas.tvZoomOut' : 'canvas.zoomOut')}
           </Button>
-          <Button size="small" onClick={() => setManual(undefined)}>
-            {t('canvas.fit')}
+          <Button size="small" onClick={() => (steering ? steerTo('fit') : setManual(undefined))}>
+            {t(steering ? 'canvas.tvFit' : 'canvas.fit')}
           </Button>
         </div>
         <p id={helpId} className="eg-canvas__help">
@@ -544,9 +789,13 @@ export function MapCanvas({
             ? t('canvas.helpMeasure')
             : placingNow
               ? t('canvas.helpPlace')
-              : selected
-                ? t('canvas.helpToken', { label: selected.label })
-                : t('canvas.help')}
+              : steering
+                ? t('canvas.helpSteer')
+                : selected
+                  ? t('canvas.helpToken', { label: selected.label })
+                  : tv
+                    ? t('canvas.helpLive')
+                    : t('canvas.help')}
         </p>
       </div>
       <div
@@ -558,6 +807,7 @@ export function MapCanvas({
         tabIndex={0}
         onKeyDown={onKeyDown}
         {...state}
+        {...frameState}
         data-tokens={tokenBoxes}
       >
         {stage}

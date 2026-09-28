@@ -18,6 +18,12 @@ import {
   SceneClearedPayloadSchema,
   SOCKET_CHANNELS,
   TokenRemovedPayloadSchema,
+  CAMERA_BOUNDS,
+  DmCameraPayloadSchema,
+  FIT_CAMERA,
+  PlayerCameraPayloadSchema,
+  PlayerCameraSchema,
+  ScreenSchema,
 } from './index.js';
 
 // The first column of the table in one section of specs/04-live-sync.md, split
@@ -42,10 +48,12 @@ describe('WebSocket envelope names', () => {
     expect([...EVENT_TYPES].sort()).toEqual(tableNames('3').sort());
   });
 
-  it('uses one Socket.io channel for commands, one for events and one for snapshot requests', () => {
-    expect(SOCKET_CHANNELS).toEqual({ command: 'command', event: 'event', snapshot: 'snapshot' });
-    // A snapshot request is not one of the commands of §2, so the players room may send it.
+  it('uses one Socket.io channel for commands, one for events, one for snapshot requests and one for viewport reports', () => {
+    expect(SOCKET_CHANNELS).toEqual({ command: 'command', event: 'event', snapshot: 'snapshot', viewport: 'viewport' });
+    // Neither a snapshot request nor a viewport report is one of the commands of §2, so the players
+    // room may send them (D-104, D-119).
     expect(COMMAND_TYPES).not.toContain(SOCKET_CHANNELS.snapshot);
+    expect(COMMAND_TYPES).not.toContain(SOCKET_CHANNELS.viewport);
   });
 
   it('names the two rooms of specs/04-live-sync.md §1', () => {
@@ -105,7 +113,9 @@ describe('snapshot payloads (specs/04-live-sync.md §4, LIV-01)', () => {
   });
 
   it('gives players no scene id or name and only the display version of the map', () => {
-    expect(Object.keys(PlayerLiveSceneSchema.properties).sort()).toEqual(['grid', 'map', 'tokens']);
+    expect(Object.keys(PlayerLiveSceneSchema.properties).sort()).toEqual(['camera', 'grid', 'map', 'tokens']);
+    // The players' camera is the rectangle alone: no screen of another viewer (D-119).
+    expect(Object.keys(PlayerCameraSchema.properties).sort()).toEqual(['centre_x', 'centre_y', 'height', 'width']);
     expect(Object.keys(PlayerMapSchema.properties).sort()).toEqual(['height', 'id', 'variants', 'width']);
     expect(Object.keys(PlayerMapSchema.properties.variants.properties)).toEqual(['display']);
   });
@@ -134,9 +144,10 @@ describe('live command and event payloads (specs/04-live-sync.md §2, §3, §4, 
   };
   const id = '00000000-0000-4000-8000-000000000001';
 
-  it('defines a payload for the commands LIV-02 and LIV-05 implement and no other', () => {
+  it('defines a payload for the commands LIV-02, LIV-05 and LIV-06 implement and no other', () => {
     expect(Object.keys(LIVE_COMMAND_PAYLOAD_SCHEMAS).sort()).toEqual(
       [
+        'camera.setPlayer',
         'scene.activate',
         'scene.deactivate',
         'token.add',
@@ -156,6 +167,9 @@ describe('live command and event payloads (specs/04-live-sync.md §2, §3, §4, 
       PlayerTokenUpdatedPayloadSchema,
       TokenRemovedPayloadSchema,
       SceneClearedPayloadSchema,
+      PlayerCameraPayloadSchema,
+      DmCameraPayloadSchema,
+      ScreenSchema,
     ] as object[]) {
       for (const object of objects(schema)) expect(object).toHaveProperty('additionalProperties', false);
     }
@@ -172,6 +186,43 @@ describe('live command and event payloads (specs/04-live-sync.md §2, §3, §4, 
     expect(Value.Check(LIVE_COMMAND_PAYLOAD_SCHEMAS['token.move'], { token_id: id, x: 1, y: 1, label: 'x' })).toBe(
       false,
     );
+  });
+
+  it('lets camera.setPlayer name the live scene and a camera within sane bounds, and nothing else (LIV-06)', () => {
+    const set = LIVE_COMMAND_PAYLOAD_SCHEMAS['camera.setPlayer'];
+    const camera = { centre_x: 0.25, centre_y: 0.75, width: 0.5, height: 0.4 };
+    expect(Value.Check(set, { scene_id: id, camera })).toBe(true);
+    expect(Value.Check(set, { scene_id: id, camera: FIT_CAMERA })).toBe(true);
+    expect(Value.Check(set, { camera })).toBe(false);
+    expect(Value.Check(set, { scene_id: 'x', camera })).toBe(false);
+    expect(Value.Check(set, { scene_id: id, camera, screen: { width: 1, height: 1 } })).toBe(false);
+    for (const wrong of [
+      { centre_x: -0.1 },
+      { centre_x: 1.1 },
+      { centre_y: 2 },
+      { width: 0 },
+      { width: CAMERA_BOUNDS.minSize / 2 },
+      { height: CAMERA_BOUNDS.maxSize * 2 },
+      { width: '0.5' },
+      { zoom: 2 },
+    ]) {
+      expect(Value.Check(set, { scene_id: id, camera: { ...camera, ...wrong } }), JSON.stringify(wrong)).toBe(false);
+    }
+    const partial = { centre_x: camera.centre_x, centre_y: camera.centre_y, height: camera.height };
+    expect(Value.Check(set, { scene_id: id, camera: partial })).toBe(false);
+  });
+
+  it('bounds a reported viewport to whole pixels within reason (LIV-06)', () => {
+    expect(Value.Check(ScreenSchema, { width: 1920, height: 1080 })).toBe(true);
+    for (const wrong of [
+      { width: 0, height: 1080 },
+      { width: 1920.5, height: 1080 },
+      { width: 40_000, height: 1080 },
+      { width: 1920 },
+      { width: 1920, height: 1080, dpr: 2 },
+    ]) {
+      expect(Value.Check(ScreenSchema, wrong), JSON.stringify(wrong)).toBe(false);
+    }
   });
 
   it("lets undo name nothing: the inverse is the server's, never the client's (D-040)", () => {

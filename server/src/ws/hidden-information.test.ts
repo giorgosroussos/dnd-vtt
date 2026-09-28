@@ -12,8 +12,9 @@ import { applyPlayerEvent, startLive, type LiveHarness, type PlayerState } from 
 // The recorded-traffic test of specs/10-testing-acceptance.md §3 (Q-067, D-042), and the gate of the
 // same name: everything a player socket receives, every message and every image response, across a
 // scripted session of adding hidden tokens, revealing, hiding, moving, deleting, undoing each of those,
-// a hidden token's included (LIV-05), activating another scene, reconnecting, and, since LIV-04, editing
-// the live scene's setup and assets over REST and deleting the live scene. It asserts that no hidden
+// a hidden token's included (LIV-05), activating another scene, reconnecting, since LIV-04 editing the
+// live scene's setup and assets over REST and deleting the live scene, and since LIV-06 steering the
+// TV camera and screens reporting their viewports. It asserts that no hidden
 // token's id, asset, image or name appears, and that the count of hidden tokens cannot be learnt
 // either: the whole recording is identical, byte for byte once identifiers are numbered by first
 // appearance, to the recording of the same session without any of the hidden-only steps
@@ -132,6 +133,17 @@ async function record(hidden: boolean): Promise<Recording> {
   const tokenOf = (events: EventEnvelope[]) => (events[0]!.payload as TokenChange).token;
 
   await step('activate A', () => send('scene.activate', { scene_id: sceneA.id }));
+  // The TV camera (LIV-06): the TV reports its viewport, which only the DM room hears of, and the DM
+  // steers it; players receive the camera alone, the same with or without hidden tokens.
+  const report = async (client: typeof tv, width: number, height: number) =>
+    expect(await client.socket.timeout(5_000).emitWithAck('viewport', { width, height })).toEqual({ ok: true });
+  await step('the TV reports its viewport and the DM steers it', async () => {
+    await report(tv, 1920, 1080);
+    await send('camera.setPlayer', {
+      scene_id: sceneA.id,
+      camera: { centre_x: 0.4, centre_y: 0.5, width: 0.5, height: 0.375 },
+    });
+  });
   await step(
     'add a hidden lurker',
     async () =>
@@ -172,6 +184,15 @@ async function record(hidden: boolean): Promise<Recording> {
   await step('undo the add of a hidden lurker', undo, true);
   await step('undo with nothing left to undo', undo);
   await step('activate B', () => send('scene.activate', { scene_id: sceneB.id }));
+  await step('a second screen reports its viewport and the DM steers the TV on B', async () => {
+    const second = await live.connect();
+    await report(second, 1280, 800);
+    second.socket.disconnect();
+    await send('camera.setPlayer', {
+      scene_id: sceneB.id,
+      camera: { centre_x: 0.6, centre_y: 0.3, width: 0.25, height: 0.25 },
+    });
+  });
   await step('rename the kobold asset, now visible by default', async () => {
     const response = await live.inject({
       method: 'PATCH',

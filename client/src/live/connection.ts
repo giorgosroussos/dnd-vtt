@@ -9,6 +9,7 @@ import {
   type EventEnvelope,
   type Room,
   type SceneSnapshot,
+  type Screen,
 } from '@emberglass/shared';
 import { createVersionTracker } from './versions.js';
 
@@ -24,6 +25,10 @@ import { createVersionTracker } from './versions.js';
 // only while connected: Socket.io would otherwise buffer it and send it after a reconnection, when
 // a move or a reveal may no longer be what the DM means. One left unanswered is reported as a lost
 // connection after COMMAND_TIMEOUT_MS; if it did apply, its events still bring the view in step.
+//
+// Viewport (LIV-06, D-119): the player view reports the size it draws at on `viewport`, and again on
+// every connection, since the server forgets a socket's report when it goes; the DM's TV frame takes
+// its shape from it. It is not a command, and the DM view never sends one.
 
 export type LiveStatus = 'connecting' | 'connected' | 'reconnecting';
 
@@ -85,6 +90,8 @@ export interface LiveConnection {
   command: (type: CommandType, payload: object) => Promise<CommandOutcome>;
   /** Drops the connection and opens it again, with the cookie the browser holds now (G-027). */
   reconnect: () => void;
+  /** The player view's size, sent now if connected and again on every connection. */
+  reportViewport: (screen: Screen) => void;
 }
 
 // The room each view's snapshots must be for. The player view never uses a DM snapshot, even if
@@ -99,6 +106,12 @@ export function connectLive(view: LiveView, handlers: LiveHandlers): LiveConnect
   // Until the first connection succeeds nothing was lost: a failed attempt is still connecting.
   let everConnected = false;
   let retry: ReturnType<typeof setTimeout> | undefined;
+  let viewport: Screen | undefined;
+  const sendViewport = (): void => {
+    if (view === 'player' && viewport !== undefined && socket.connected && !closed) {
+      socket.emit(SOCKET_CHANNELS.viewport, viewport, () => {});
+    }
+  };
 
   const requestSnapshot = (): void => {
     clearTimeout(retry);
@@ -113,6 +126,7 @@ export function connectLive(view: LiveView, handlers: LiveHandlers): LiveConnect
   socket.on('connect', () => {
     everConnected = true;
     handlers.onStatus('connected');
+    sendViewport();
   });
   socket.on('connect_error', () => handlers.onStatus(everConnected ? 'reconnecting' : 'connecting'));
   socket.on('disconnect', (reason: string) => {
@@ -162,6 +176,13 @@ export function connectLive(view: LiveView, handlers: LiveHandlers): LiveConnect
       if (closed) return;
       socket.disconnect();
       socket.connect();
+    },
+    reportViewport: (screen) => {
+      const size = { width: Math.round(screen.width), height: Math.round(screen.height) };
+      if (!(size.width >= 1 && size.height >= 1)) return;
+      if (viewport?.width === size.width && viewport.height === size.height) return;
+      viewport = size;
+      sendViewport();
     },
   };
 }

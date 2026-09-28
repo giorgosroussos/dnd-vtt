@@ -3,7 +3,9 @@ import { act } from 'react';
 import Konva from 'konva';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  FIT_CAMERA,
   imageFileUrl,
+  SOCKET_CHANNELS,
   type DmSnapshot,
   type EventEnvelope,
   type Grid,
@@ -16,6 +18,7 @@ import { settle } from '../ui/testing/fakeServer.js';
 import { installFakeSockets } from '../ui/testing/fakeSocket.js';
 import { FOCUSABLE, render, type Rendered } from '../ui/testing/render.js';
 import { CURSOR_IDLE_MS, PlayerView } from './PlayerView.js';
+import { VIEWPORT_SETTLE_MS } from './usePlayerLive.js';
 
 // The player view (LIV-01, LIV-03; specs/08-ux-journeys.md §4, §9, specs/04-live-sync.md §4, §5,
 // §6, §9, Q-025, Q-032, Q-038, Q-054, D-090, D-105, D-109), with a scripted socket and the real
@@ -47,7 +50,7 @@ const token = (n: number, label: string, z_order: number, x = n): PlayerToken =>
 
 const snapshot = (tokens: PlayerToken[], grid: Grid = GRID): PlayerSnapshot => ({
   role: 'players',
-  scene: { map: MAP, grid, tokens },
+  scene: { map: MAP, grid, tokens, camera: FIT_CAMERA },
 });
 
 let fake: ReturnType<typeof installFakeSockets>;
@@ -207,6 +210,8 @@ describe('what the player view draws (specs/08-ux-journeys.md §4)', () => {
         scene: {} as never,
         map: null,
         tokens: [],
+        camera: FIT_CAMERA,
+        screen: null,
       },
     };
     act(() => fake.sockets[0]!.deliver({ type: 'scene.snapshot', version: 2, payload: dm }));
@@ -313,7 +318,10 @@ describe('ordering and replacement', () => {
     };
     images.requested = [];
     act(() =>
-      fake.sockets[0]!.open({ role: 'players', scene: { map: other, grid: GRID, tokens: [token(7, 'Dragon', 0)] } }, 5),
+      fake.sockets[0]!.open(
+        { role: 'players', scene: { map: other, grid: GRID, tokens: [token(7, 'Dragon', 0)], camera: FIT_CAMERA } },
+        5,
+      ),
     );
     await settle();
     expect(images.requested).toContain(imageFileUrl(other.id, 'display'));
@@ -321,5 +329,52 @@ describe('ordering and replacement', () => {
     expect(drawnBoxes().map((box) => box.label)).toEqual(['Dragon']);
     const fitted = fitCamera(other.variants.display, VIEWPORT);
     expect([stage().x(), stage().y(), stage().scaleX()]).toEqual([fitted.x, fitted.y, fitted.scale]);
+  });
+});
+
+describe('the player camera (LIV-06; specs/04-live-sync.md §5, §9, Q-038, D-119)', () => {
+  const canvas = () => main().querySelector<HTMLElement>('.eg-canvas--player')!;
+  const drawnCamera = () => {
+    const { cameraX, cameraY, cameraScale } = canvas().dataset;
+    return { x: Number(cameraX), y: Number(cameraY), scale: Number(cameraScale) };
+  };
+  const steered = { centre_x: 0.25, centre_y: 0.5, width: 0.5, height: 0.5 };
+  const reports = () =>
+    fake.sockets[0]!.emitted.filter(({ event }) => event === SOCKET_CHANNELS.viewport).map(({ args }) => args[0]);
+
+  it('draws the camera its snapshot carries, then each camera.player, and fits again on the next activation', async () => {
+    await open({ role: 'players', scene: { ...snapshot([token(1, 'Goblin', 0)]).scene!, camera: steered } });
+    // 1000 × 750 world pixels in 1280 × 720: scaled to fit the height, centred on (500, 750).
+    expect(drawnCamera().scale).toBeCloseTo(720 / 750, 9);
+    expect(drawnCamera().x).toBeCloseTo(640 - 500 * (720 / 750), 6);
+    await deliver('camera.player', 2, { camera: { centre_x: 0.5, centre_y: 0.5, width: 0.25, height: 0.25 } });
+    expect(drawnCamera().scale).toBeCloseTo(720 / 375, 9);
+    expect(drawnCamera().x).toBeCloseTo(640 - 1000 * (720 / 375), 6);
+    // An activation's snapshot is fitted to the map (Q-038).
+    await deliver('scene.snapshot', 3, snapshot([]));
+    expect(drawnCamera()).toEqual(fitCamera(MAP.variants.display, VIEWPORT));
+  });
+
+  it('reports its window’s size once connected, and again once a resize has settled', async () => {
+    await open({ role: 'players', scene: null });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    expect(reports()).toEqual([{ width: window.innerWidth, height: window.innerHeight }]);
+    const [width, height] = [window.innerWidth, window.innerHeight];
+    act(() => {
+      Object.assign(window, { innerWidth: 1920, innerHeight: 1080 });
+      window.dispatchEvent(new Event('resize'));
+      window.dispatchEvent(new Event('resize'));
+    });
+    expect(reports()).toHaveLength(1);
+    act(() => {
+      vi.advanceTimersByTime(VIEWPORT_SETTLE_MS);
+    });
+    expect(reports()).toEqual([
+      { width, height },
+      { width: 1920, height: 1080 },
+    ]);
+    Object.assign(window, { innerWidth: width, innerHeight: height });
+    // Nothing the TV shows came from its own report: it has no controls and draws what it is sent.
+    expect(rendered.container.querySelectorAll(FOCUSABLE)).toHaveLength(0);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { DmSnapshot, EventEnvelope, Scene, SceneToken } from '@emberglass/shared';
+import { FIT_CAMERA, type DmSnapshot, type EventEnvelope, type Scene, type SceneToken } from '@emberglass/shared';
 import { applyDmEvent, fromDmSnapshot, type DmScene } from './dmScene.js';
 
 // The DM view's copy of the live scene (LIV-04, specs/04-live-sync.md §3, §5, D-109, G-018).
@@ -18,7 +18,10 @@ const token = (id: string, z_order: number, fields: Partial<SceneToken> = {}): S
   asset: { name: 'Goblin', image_id: 'f'.repeat(64), size: 'medium' },
   ...fields,
 });
-const snapshot = (tokens: SceneToken[]): DmSnapshot => ({ role: 'dm', scene: { scene, map: null, tokens } });
+const snapshot = (tokens: SceneToken[]): DmSnapshot => ({
+  role: 'dm',
+  scene: { scene, map: null, tokens, camera: FIT_CAMERA, screen: null },
+});
 let version = 1;
 const event = (type: EventEnvelope['type'], payload: object): EventEnvelope =>
   ({ type, version: ++version, payload }) as EventEnvelope;
@@ -55,6 +58,13 @@ describe('the DM live scene', () => {
     expect(applyDmEvent(null, event('token.added', { token: token('b', 1), relabelled: [] }))).toBeNull();
     expect(applyDmEvent(live, event('token.added', {}))).toBe(live);
     expect(applyDmEvent(live, event('camera.player', {}))).toBe(live);
+    // LIV-06: camera.player replaces the camera and the screen the TV frame follows.
+    const camera = { centre_x: 0.2, centre_y: 0.3, width: 0.4, height: 0.5 };
+    const steered = applyDmEvent(live, event('camera.player', { camera, screen: { width: 1024, height: 768 } }));
+    expect(steered?.camera).toEqual(camera);
+    expect(steered?.screen).toEqual({ width: 1024, height: 768 });
+    expect(steered?.tokens).toBe(live?.tokens);
+    expect(applyDmEvent(steered, event('camera.player', { camera: FIT_CAMERA }))?.screen).toBeNull();
     // A rename of a token this scene does not hold adds nothing.
     expect(
       ids(applyDmEvent(live, event('token.updated', { token: token('a', 0), relabelled: [token('z', 9)] }))),

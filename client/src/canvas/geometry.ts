@@ -1,4 +1,12 @@
-import { MAX_GRID_LINES_PER_AXIS, type Grid, type Image } from '@emberglass/shared';
+import {
+  CAMERA_BOUNDS,
+  FIT_CAMERA,
+  MAX_GRID_LINES_PER_AXIS,
+  type Grid,
+  type Image,
+  type PlayerCamera,
+  type Screen,
+} from '@emberglass/shared';
 
 // The geometry of the map canvas (specs/08-ux-journeys.md §3, specs/06-grid-and-measurement.md §2,
 // specs/03-domain-model.md §6, D-090), free of React and Konva so that it is tested on its own.
@@ -88,13 +96,18 @@ const clampScale = (scale: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, sc
 
 /** The whole world centred in the viewport, as large as it fits. */
 export function fitCamera(world: Size, viewport: Size): Camera {
-  if (world.width <= 0 || world.height <= 0 || viewport.width <= 0 || viewport.height <= 0) {
+  return fitBox({ x: 0, y: 0, width: world.width, height: world.height }, viewport);
+}
+
+/** A rectangle of the world, in world pixels, centred in the viewport as large as it fits. */
+export function fitBox(box: { x: number; y: number; width: number; height: number }, viewport: Size): Camera {
+  if (box.width <= 0 || box.height <= 0 || viewport.width <= 0 || viewport.height <= 0) {
     return { x: 0, y: 0, scale: 1 };
   }
-  const scale = clampScale(Math.min(viewport.width / world.width, viewport.height / world.height));
+  const scale = clampScale(Math.min(viewport.width / box.width, viewport.height / box.height));
   return {
-    x: (viewport.width - world.width * scale) / 2,
-    y: (viewport.height - world.height * scale) / 2,
+    x: (viewport.width - box.width * scale) / 2 - box.x * scale,
+    y: (viewport.height - box.height * scale) / 2 - box.y * scale,
     scale,
   };
 }
@@ -142,6 +155,199 @@ export function cameraForKey(
       return panBy(camera, 0, step);
     case 'ArrowDown':
       return panBy(camera, 0, -step);
+    default:
+      return undefined;
+  }
+}
+
+// --- the player camera (LIV-06; specs/04-live-sync.md §9, Q-038, Q-080, D-018, D-046, D-119) ---
+//
+// The player camera is a rectangle of the world in fractions of its width and height (`PlayerCamera`),
+// so the same camera means the same part of the map on every screen whatever its pixels. A screen
+// shows the rectangle as large as it fits, centred, so a screen of another shape shows a little more
+// along one axis. The DM view draws the frame of what the TV sees: the rectangle widened to the TV's
+// shape. Moving or resizing that frame gives the next camera, which is that frame itself.
+
+/** A rectangle of the world in world pixels, from its top-left corner. */
+export interface Box {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** A TV's shape when no screen has reported one: the common 16:9 of TVs and projectors. */
+export const DEFAULT_ASPECT = 16 / 9;
+const MIN_ASPECT = 1 / 4;
+const MAX_ASPECT = 4;
+
+/** Width ÷ height of the screen the frame follows, kept within reason. */
+export function screenAspect(screen: Screen | null | undefined): number {
+  if (!screen || screen.width <= 0 || screen.height <= 0) return DEFAULT_ASPECT;
+  return Math.min(MAX_ASPECT, Math.max(MIN_ASPECT, screen.width / screen.height));
+}
+
+/** The camera a screen of `viewport` pixels draws for the player camera `rect`. */
+export function viewOf(rect: PlayerCamera, world: Size, viewport: Size): Camera {
+  const width = rect.width * world.width;
+  const height = rect.height * world.height;
+  if (!(width > 0) || !(height > 0) || viewport.width <= 0 || viewport.height <= 0) return fitCamera(world, viewport);
+  const scale = clampScale(Math.min(viewport.width / width, viewport.height / height));
+  return {
+    scale,
+    x: viewport.width / 2 - rect.centre_x * world.width * scale,
+    y: viewport.height / 2 - rect.centre_y * world.height * scale,
+  };
+}
+
+/** What a screen of `aspect` shows of the camera `rect`, in world pixels: the rectangle widened to its shape. */
+export function frameOf(rect: PlayerCamera, world: Size, aspect: number): Box {
+  let width = rect.width * world.width;
+  let height = rect.height * world.height;
+  if (width / height > aspect) height = width / aspect;
+  else width = height * aspect;
+  return {
+    x: rect.centre_x * world.width - width / 2,
+    y: rect.centre_y * world.height - height / 2,
+    width,
+    height,
+  };
+}
+
+const round = (value: number): number => Math.round(value * 1e6) / 1e6;
+const within = (value: number, low: number, high: number): number => Math.min(high, Math.max(low, value));
+
+/** The player camera that shows `box`, kept within the contract's bounds: its centre on the world. */
+export function rectOf(box: Box, world: Size): PlayerCamera {
+  if (world.width <= 0 || world.height <= 0) return FIT_CAMERA;
+  const size = (value: number) => round(within(value, CAMERA_BOUNDS.minSize, CAMERA_BOUNDS.maxSize));
+  return {
+    centre_x: round(within((box.x + box.width / 2) / world.width, 0, 1)),
+    centre_y: round(within((box.y + box.height / 2) / world.height, 0, 1)),
+    width: size(box.width / world.width),
+    height: size(box.height / world.height),
+  };
+}
+
+/** The share of room left around the map and the fitted frame when the DM's view fits them. */
+export const LIVE_FIT_MARGIN = 1.1;
+
+/**
+ * What the DM's own view fits in live mode (LIV-06 review U-H1): the map and the frame of the TV fitted
+ * to it, with a margin, so the frame's edges and corners are on screen to grab. It depends only on the
+ * world and the TV's shape, so steering the TV never moves the DM's view.
+ */
+export function liveFitBox(world: Size, aspect: number): Box {
+  const frame = frameOf(FIT_CAMERA, world, aspect);
+  const x = Math.min(0, frame.x);
+  const y = Math.min(0, frame.y);
+  const union = {
+    x,
+    y,
+    width: Math.max(world.width, frame.x + frame.width) - x,
+    height: Math.max(world.height, frame.y + frame.height) - y,
+  };
+  return scaleBox(union, LIVE_FIT_MARGIN);
+}
+
+/** Whether two player cameras are the same rectangle. */
+export const sameRect = (a: PlayerCamera, b: PlayerCamera): boolean =>
+  a.centre_x === b.centre_x && a.centre_y === b.centre_y && a.width === b.width && a.height === b.height;
+
+/** `box` moved by (dx, dy) world pixels. */
+export const moveBox = (box: Box, dx: number, dy: number): Box => ({ ...box, x: box.x + dx, y: box.y + dy });
+
+/** `box` scaled by `factor` about its centre. */
+export function scaleBox(box: Box, factor: number): Box {
+  const width = box.width * factor;
+  const height = box.height * factor;
+  return { x: box.x + (box.width - width) / 2, y: box.y + (box.height - height) / 2, width, height };
+}
+
+/** The smallest frame, as a share of the world's larger side: about two squares of a 30-square map. */
+export const MIN_FRAME_SHARE = 0.05;
+/** A TV's width in CSS pixels while no screen has reported one, for the frame's limits. */
+export const DEFAULT_SCREEN_WIDTH = 1920;
+
+/** The widths, in world pixels, a frame may take: what the TV can really show, and the contract's bounds. */
+export interface FrameLimits {
+  min: number;
+  max: number;
+}
+
+/**
+ * How narrow and how wide the frame may be (LIV-06 review C-M1, C-M2). A screen draws the camera at
+ * most MAX_SCALE and at least MIN_SCALE, so a frame narrower than the TV's width ÷ MAX_SCALE would show
+ * the DM less than the TV shows; the camera's sides stay within CAMERA_BOUNDS, both by one factor, so
+ * the frame keeps the TV's shape at either end.
+ */
+export function frameLimits(world: Size, aspect: number, screen: Screen | null | undefined): FrameLimits {
+  const tvWidth = screen && screen.width > 0 ? screen.width : DEFAULT_SCREEN_WIDTH;
+  const min = Math.max(
+    tvWidth / MAX_SCALE,
+    Math.max(world.width, world.height) * MIN_FRAME_SHARE,
+    world.width * CAMERA_BOUNDS.minSize,
+    world.height * CAMERA_BOUNDS.minSize * aspect,
+  );
+  const max = Math.min(
+    tvWidth / MIN_SCALE,
+    world.width * CAMERA_BOUNDS.maxSize,
+    world.height * CAMERA_BOUNDS.maxSize * aspect,
+  );
+  return { min, max: Math.max(min, max) };
+}
+
+/** `box` in the TV's shape, its width within `limits`, about its centre. */
+export function boundFrame(box: Box, aspect: number, limits: FrameLimits): Box {
+  const width = within(box.width, limits.min, limits.max);
+  const height = width / aspect;
+  return { x: box.x + (box.width - width) / 2, y: box.y + (box.height - height) / 2, width, height };
+}
+
+/**
+ * The frame resized by dragging one corner to `to`, the opposite corner `anchor` staying where it is
+ * and the frame keeping the TV's shape (D-046), within `limits`.
+ */
+export function resizeBox(
+  anchor: { x: number; y: number },
+  to: { x: number; y: number },
+  aspect: number,
+  limits: FrameLimits,
+): Box {
+  const width = within(Math.max(Math.abs(to.x - anchor.x), Math.abs(to.y - anchor.y) * aspect), limits.min, limits.max);
+  const height = width / aspect;
+  return {
+    x: to.x < anchor.x ? anchor.x - width : anchor.x,
+    y: to.y < anchor.y ? anchor.y - height : anchor.y,
+    width,
+    height,
+  };
+}
+
+/**
+ * The frame after a key press while the DM steers the TV (Q-080, keyboard): an arrow moves it an
+ * eighth of its size (Shift, half), + and − zoom the TV in and out, and 0 fits the TV to the map.
+ * Undefined when the key does nothing there.
+ */
+export function frameForKey(box: Box, key: string, shift: boolean): Box | 'fit' | undefined {
+  const step = (shift ? 0.5 : 0.125) * Math.min(box.width, box.height);
+  switch (key) {
+    case '+':
+    case '=':
+      return scaleBox(box, 1 / ZOOM_STEP);
+    case '-':
+    case '_':
+      return scaleBox(box, ZOOM_STEP);
+    case '0':
+      return 'fit';
+    case 'ArrowLeft':
+      return moveBox(box, -step, 0);
+    case 'ArrowRight':
+      return moveBox(box, step, 0);
+    case 'ArrowUp':
+      return moveBox(box, 0, -step);
+    case 'ArrowDown':
+      return moveBox(box, 0, step);
     default:
       return undefined;
   }
