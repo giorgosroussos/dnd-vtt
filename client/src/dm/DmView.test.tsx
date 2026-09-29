@@ -120,8 +120,17 @@ describe('PIN entry and sign-out (specs/07-security-and-access.md §2, §6)', ()
     const view = await open();
     await type(inputs(view)[0], '4826');
     await submit(view.querySelector('form'));
-    expect(view.querySelector('[role="alert"]')!.textContent).toBe(t('signIn.lockedOut', { seconds: 480 }));
+    // In minutes once that reads better (REL-01 review U-L6).
+    expect(view.querySelector('[role="alert"]')!.textContent).toBe(t('signIn.lockedOutMinutes', { minutes: 8 }));
     expect(view.querySelector('nav')).toBeNull();
+  });
+
+  it('names a short wait in seconds', async () => {
+    server.lockedFor = 45;
+    const view = await open();
+    await type(inputs(view)[0], '4826');
+    await submit(view.querySelector('form'));
+    expect(view.querySelector('[role="alert"]')!.textContent).toBe(t('signIn.lockedOut', { seconds: 45 }));
   });
 
   it('signs out to the PIN form', async () => {

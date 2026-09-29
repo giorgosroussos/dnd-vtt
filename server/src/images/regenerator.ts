@@ -27,6 +27,8 @@ export interface DisplayRegeneratorOptions {
   logger: Logger;
   /** Stores each new display version; the live socket's refresh, so the TV hears of a new size. */
   commit?: Commit | undefined;
+  /** One image's regeneration; tests wrap it to hold a pass part-way. */
+  regenerate?: typeof regenerateDisplayVersion | undefined;
 }
 
 export function createDisplayRegenerator({
@@ -34,6 +36,7 @@ export function createDisplayRegenerator({
   imagesDir,
   logger,
   commit,
+  regenerate = regenerateDisplayVersion,
 }: DisplayRegeneratorOptions): DisplayRegenerator {
   let asked = false;
   let stopped = false;
@@ -50,7 +53,7 @@ export function createDisplayRegenerator({
         asked = true;
         break;
       }
-      const outcome = await regenerateDisplayVersion(db, imagesDir, id, size, commit);
+      const outcome = await regenerate(db, imagesDir, id, size, commit);
       if (outcome === 'regenerated') regenerated++;
       else if (outcome === 'failed') failed.push(id);
     }

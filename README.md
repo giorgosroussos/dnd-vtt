@@ -6,6 +6,8 @@ A free, self-hosted virtual tabletop for in-person play, compatible with 5th edi
 
 You need Node.js 24 or newer (<https://nodejs.org>) and Git. Emberglass is installed from source; nothing is published to a package registry.
 
+Type the commands below in a terminal: on Windows, Command Prompt or PowerShell; on Linux or macOS, Terminal. `npm install` can take a few minutes the first time. Keep the terminal window open while you play: closing it stops the server.
+
 ```bash
 git clone https://github.com/giorgosroussos/dnd-vtt.git emberglass
 cd emberglass
@@ -19,10 +21,10 @@ npm start
 
 On start the console prints the player view's address and a QR code for it, for example `http://192.168.1.20:3000/`, followed by the PC's other addresses.
 
-- **First run.** While no PIN is set, the console says so. Open `http://localhost:3000/dm` in a browser **on this PC** and choose the DM PIN (4 to 8 digits; 6 to 8 are much harder to guess). Setup is refused from any other device.
+- **First run.** While no PIN is set, the console says so and prints the address to open. Open `http://localhost:3000/dm` (or your port, if you set `EMBERGLASS_PORT`) in a browser **on this PC** and choose the DM PIN (4 to 8 digits; 6 to 8 are much harder to guess). Setup is refused from any other device, and from this PC through its network address: use `localhost`.
 - **The TV.** Open the printed address in the TV's browser, or use Connect a screen in the DM view, which shows the same address and code. The player view needs no PIN.
 - **The DM view.** On any browser on the Wi-Fi, open the same address followed by `/dm`, then enter the PIN. A browser stays signed in until the server restarts, the PIN changes or it signs out.
-- **Forgotten PIN.** Run `npm run reset-pin` in the Emberglass folder on this PC, then set a new one from `http://localhost:3000/dm`.
+- **Forgotten PIN.** Run `npm run reset-pin` in the Emberglass folder on this PC, then set a new one from `http://localhost:3000/dm` (or your port).
 
 ## Settings
 
@@ -38,7 +40,7 @@ Two environment variables set what the Settings cannot, and are read when the se
 - `EMBERGLASS_PORT`: the port, 3000 by default;
 - `EMBERGLASS_DATA_DIR`: the data directory.
 
-For example, `EMBERGLASS_PORT=8080 npm start` on Linux or macOS, or `set EMBERGLASS_PORT=8080` and then `npm start` in a Windows command prompt.
+For example, `EMBERGLASS_PORT=8080 npm start` on Linux or macOS; in Windows PowerShell `$env:EMBERGLASS_PORT=8080; npm start`; in Command Prompt `set EMBERGLASS_PORT=8080` and then `npm start`.
 
 ## Your data and backups
 
@@ -61,7 +63,7 @@ Nothing about the game is stored anywhere else.
 - **Backup.** Stop the server, then copy the whole data directory somewhere safe. There is no database server to set up or dump. To restore, or to move your campaigns to another PC, put the copy in place (or point `EMBERGLASS_DATA_DIR` at it) and start Emberglass.
 - **Automatic backups.** Before it applies a database change after an update, Emberglass copies the database to `emberglass-backup-<date and time>-v<version>.db` in the data directory. Delete old ones when you no longer need them.
 - **Backups hold the PIN hash.** The database, every `emberglass-backup-*.db` file and every copy of the folder hold the PIN as a salted hash, never the PIN itself. A 4-to-8-digit PIN can still be guessed offline from a stolen copy. After changing the PIN or running `npm run reset-pin`, delete the old `emberglass-backup-*.db` files and old copies you do not need, and keep the others where only you can read them.
-- **One server per data directory.** Run only one Emberglass server on a data directory at a time. A second one refuses to start on a port that is already taken, but before it does, it clears the uploads the first is receiving.
+- **One server per data directory.** Run only one Emberglass server on a data folder at a time. A second server started on the same folder breaks any upload the first is receiving and deletes images uploaded but not yet used by an asset or a scene, even if it then fails to start because the port is taken.
 - **The images folder grows with your uploads.** An image is removed only when nothing uses it any more: no asset and no scene. The same file uploaded twice is stored once.
 
 ## Network and security
@@ -73,8 +75,9 @@ Emberglass is meant for a trusted home network.
 - **The player view is open to any browser on the Wi-Fi.** It shows only what is visible on the live scene; hidden tokens never leave the server.
 - **Guessing the PIN:**
   - After 5 wrong PINs from one device, PIN entry from it is refused for 1 minute. The wait doubles on each further 5.
-  - After 20 wrong PINs from any devices within 10 minutes, PIN entry is paused for 10 minutes on every device except the server PC itself. The pause doubles on each further 20. Every pause is logged with the addresses that caused it.
-  - Browsers already signed in keep working during a pause, and you can always sign in on the server PC.
+  - After 20 wrong PINs from any devices within 10 minutes, PIN entry is paused for 10 minutes on every device except the server PC itself. The pause doubles on each further 20, and only a restart of the server brings it back to 10 minutes. Every pause is logged with the addresses that caused it.
+  - Browsers already signed in keep working during a pause. To sign in, or to change the PIN, during a pause, use a browser on the server PC opened at `http://localhost:3000/dm` (not the network address the console prints); its own limit of 5 wrong PINs still applies.
+  - A device that keeps just under 20 wrong PINs every 10 minutes, changing its address, is never paused: about 2,700 guesses a day. A 4-digit PIN could be found that way within days, a 6-digit one in months, an 8-digit one practically never.
   - Choose a PIN of 6 to 8 digits: a 4-digit PIN is the easiest to guess.
 
 ### Firewall
@@ -87,7 +90,9 @@ Emberglass is meant for a trusted home network.
 # ufw (Ubuntu, Debian, Mint)
 sudo ufw allow from 192.168.1.0/24 to any port 3000 proto tcp
 
-# firewalld (Fedora, RHEL, openSUSE): the home zone for your Wi-Fi connection
+# firewalld (Fedora, RHEL, openSUSE): first find the zone your Wi-Fi connection is in
+sudo firewall-cmd --get-active-zones
+# then open the port in that zone (here `home`; use the name the command above printed)
 sudo firewall-cmd --zone=home --add-port=3000/tcp --permanent
 sudo firewall-cmd --reload
 ```

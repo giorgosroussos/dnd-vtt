@@ -1003,16 +1003,28 @@ export function button(container: ParentNode, name: string): HTMLButtonElement |
 
 /**
  * jsdom has no modal dialog: `showModal` and `close` only open and close it here,
- * with the `close` event. The browser's focus trap and Escape are the e2e tests'.
+ * with the `close` event. As in a browser, while a modal dialog is open and in the
+ * document the page behind it is inert: focusing anything outside it does nothing
+ * (REL-01 review U-H1). The browser's focus trap and Escape are the e2e tests'.
  */
 export function installDialog(): void {
   const proto = HTMLDialogElement.prototype as HTMLDialogElement & { showModal?: () => void };
   if (typeof proto.showModal === 'function') return;
   proto.showModal = function showModal(this: HTMLDialogElement) {
     this.setAttribute('open', '');
+    this.dataset.fakeModal = '';
   };
   proto.close = function close(this: HTMLDialogElement) {
     this.removeAttribute('open');
+    delete this.dataset.fakeModal;
     this.dispatchEvent(new Event('close'));
+  };
+  // Called with `this` bound below.
+  // eslint-disable-next-line @typescript-eslint/unbound-method
+  const focus = HTMLElement.prototype.focus;
+  HTMLElement.prototype.focus = function inertFocus(this: HTMLElement, options?: FocusOptions) {
+    const modal = document.querySelector('dialog[data-fake-modal]');
+    if (modal && !modal.contains(this)) return;
+    focus.call(this, options);
   };
 }

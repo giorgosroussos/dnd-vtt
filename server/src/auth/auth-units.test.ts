@@ -129,6 +129,59 @@ describe('lockout (specs/07-security-and-access.md §6)', () => {
     expect(lockout.begin('10.2.0.200')).toMatchObject({ allowed: true, paused: null });
   });
 
+  it('forgives only the correct attempt: the other failures stay counted and the doubling is kept', () => {
+    let time = 0;
+    const lockout = createLockout(() => time);
+    for (let n = 0; n < GLOBAL_FAILURES_PER_PAUSE - 2; n++) lockout.begin(`10.3.0.${n % 5}`);
+    lockout.begin('10.3.0.50');
+    lockout.succeeded('10.3.0.50');
+    // Eighteen failures still counted: the nineteenth pauses nothing, the twentieth does.
+    expect(lockout.begin('10.3.0.60')).toMatchObject({ allowed: true, paused: null });
+    const next = lockout.begin('10.3.0.61');
+    expect(next.allowed && next.paused?.ms).toBe(600_000);
+    // A correct PIN after the pause resets nothing of the doubling.
+    time = 600_000;
+    lockout.begin('10.3.0.70');
+    lockout.succeeded('10.3.0.70');
+    let last: ReturnType<typeof lockout.begin> | undefined;
+    for (let n = 0; n < GLOBAL_FAILURES_PER_PAUSE; n++) last = lockout.begin(`10.4.0.${n}`);
+    expect(last!.allowed && last!.paused?.ms).toBe(1_200_000);
+  });
+
+  it('answers the longer wait when an address is locked for longer than the pause lasts', () => {
+    let time = 0;
+    const lockout = createLockout(() => time);
+    const fiveFrom = (address: string) => {
+      for (let n = 0; n < FAILURES_PER_LOCKOUT; n++) lockout.begin(address);
+    };
+    // Five lockouts of one address, 60 s to 960 s, spread so that the budget never fills.
+    for (const [at, locked] of [
+      [0, 60],
+      [61, 120],
+      [700, 240],
+      [950, 480],
+      [1_440, 960],
+    ] as const) {
+      time = at * 1000;
+      fiveFrom('10.5.0.1');
+      expect(lockout.begin('10.5.0.1')).toEqual({ allowed: false, retryAfterMs: locked * 1000 });
+    }
+    // Ten failures in the window from it; ten more from others open a 600 s pause.
+    for (let n = 0; n < 10; n++) lockout.begin(`10.5.1.${n}`);
+    expect(lockout.begin('10.5.2.1')).toEqual({ allowed: false, retryAfterMs: 600_000 });
+    expect(lockout.begin('10.5.0.1')).toEqual({ allowed: false, retryAfterMs: 960_000 });
+  });
+
+  it('forgives a whole IPv6 /64 when a correct PIN comes from any address of it', () => {
+    const lockout = createLockout(() => 0);
+    for (let n = 1; n < FAILURES_PER_LOCKOUT; n++) lockout.begin(`2001:db8:9:9::${n}`);
+    lockout.begin('2001:db8:9:9::aa');
+    lockout.succeeded('2001:db8:9:9::aa');
+    for (let n = 1; n < FAILURES_PER_LOCKOUT; n++) {
+      expect(lockout.begin(`2001:db8:9:9::b${n}`)).toMatchObject({ allowed: true, lockedMs: null });
+    }
+  });
+
   it.each([
     ['2001:db8:1:2:3:4:5:6', '2001:db8:1:2::/64'],
     ['2001:0DB8:0001:0002:ffff::1', '2001:db8:1:2::/64'],

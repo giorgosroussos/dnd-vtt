@@ -481,6 +481,37 @@ describe('guessing protection (specs/07-security-and-access.md §6)', () => {
     expect(lines.filter((line) => line.event === 'pin.paused')).toEqual([
       expect.objectContaining({ level: 'warn', seconds: 600, addresses }),
     ]);
+    // Refused during the pause, the fresh address was never counted as a failure.
+    expect(lines.filter((line) => line.event === 'pin.failed' && line.address === '192.168.1.99')).toEqual([]);
+  });
+
+  it('logs a pause that a correct PIN opened, since the pause stays (review C-M1)', async () => {
+    for (let n = 0; n < 19; n++) expectFailure(await enter(WRONG, `192.168.9.${n % 5}`), 401, 'pin_incorrect');
+    expect((await enter(PIN, '192.168.9.50')).statusCode).toBe(200);
+    await expectLocked(600, '192.168.9.60');
+    const paused = readFileSync(logFilePath(data.dataDir), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((line) => line.event === 'pin.paused');
+    expect(paused).toEqual([expect.objectContaining({ seconds: 600 })]);
+  });
+
+  it('counts at most 20 PINs across addresses when guesses arrive all at once, and logs one pause', async () => {
+    // At the production cost, so that the guesses really overlap the hashing.
+    await app.close();
+    data.remove();
+    data = createTestData('emberglass-auth-');
+    app = await start({ pinHashParams: SCRYPT_PARAMS });
+    await setUpPin(app, PIN);
+    const answers = await Promise.all(Array.from({ length: 40 }, (_, n) => enter(WRONG, `10.9.0.${n}`)));
+    const statuses = answers.map((response) => response.statusCode);
+    expect(statuses.filter((status) => status === 401)).toHaveLength(20);
+    expect(statuses.filter((status) => status === 429)).toHaveLength(20);
+    const paused = readFileSync(logFilePath(data.dataDir), 'utf8')
+      .split('\n')
+      .filter((line) => line.includes('"event":"pin.paused"'));
+    expect(paused).toHaveLength(1);
   });
 
   it('doubles the pause on each further run', async () => {

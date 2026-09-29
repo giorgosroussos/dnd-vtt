@@ -181,6 +181,16 @@ export function registerAuth(
     const address = clientAddress(request);
     const attempt = lockout.begin(address);
     if (!attempt.allowed) throw lockedOut(attempt.retryAfterMs);
+    // A pause stays whether or not this PIN is right (19 wrong ones came first), so it is logged now:
+    // an address's own lockout is lifted by a right PIN and is logged only with a wrong one (review C-M1).
+    if (attempt.paused !== null) {
+      const seconds = attempt.paused.ms / 1000;
+      logger.warn(
+        'pin.paused',
+        `PIN entry is paused for ${seconds} s from every address but this PC, after many failed attempts.`,
+        { seconds, addresses: attempt.paused.addresses },
+      );
+    }
     if (await verifyPin(pin, stored)) {
       lockout.succeeded(address);
       return;
@@ -189,14 +199,6 @@ export function registerAuth(
     if (attempt.lockedMs !== null) {
       const seconds = attempt.lockedMs / 1000;
       logger.warn('pin.locked', `PIN entry from ${address} is locked for ${seconds} s.`, { address, seconds });
-    }
-    if (attempt.paused !== null) {
-      const seconds = attempt.paused.ms / 1000;
-      logger.warn(
-        'pin.paused',
-        `PIN entry is paused for ${seconds} s from every address but this PC, after many failed attempts.`,
-        { seconds, addresses: attempt.paused.addresses },
-      );
     }
     throw pinIncorrect();
   };

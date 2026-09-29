@@ -17,15 +17,20 @@ const liveBar = (page: Page) => page.getByRole('region', { name: 'Live scene' })
 const feetOn = async (page: Page): Promise<number | undefined> =>
   (JSON.parse((await tvCanvas(page).getAttribute('data-ruler')) ?? 'null') as { feet: number } | null)?.feet;
 
+/** Opens Settings from the keyboard, runs `change` there, saves with Enter and closes with Escape. */
 async function saveSettings(dm: Page, change: (dialog: ReturnType<Page['getByRole']>) => Promise<void>) {
-  await liveBar(dm).getByRole('button', { name: 'Settings' }).click();
+  const open = liveBar(dm).getByRole('button', { name: 'Settings' });
+  await open.focus();
+  await dm.keyboard.press('Enter');
   const dialog = dm.getByRole('dialog', { name: 'Settings' });
-  await expect(dialog.getByLabel('Upload limit, in MB')).not.toHaveValue('');
+  // Focus lands in the first setting once they have been read.
+  await expect(dialog.getByLabel('Upload limit, in MB')).toBeFocused();
   await change(dialog);
-  await dialog.getByRole('button', { name: 'Save settings' }).click();
   await expect(dialog.getByRole('status').first()).toHaveText(/^Settings saved\./);
-  await dialog.getByRole('button', { name: 'Close' }).click();
+  await dm.keyboard.press('Escape');
   await expect(dialog).toBeHidden();
+  // Focus returns to the button that opened it (review U-H1).
+  await expect(open).toBeFocused();
 }
 
 test('settings saved in the DM view take effect with no restart: the upload limit and the TV’s distance', async ({
@@ -37,7 +42,14 @@ test('settings saved in the DM view take effect with no restart: the upload limi
   const tv = await playerContext.newPage();
   await openWorkspace(dm);
 
-  const names = { campaign: `Settings REL-01 ${Date.now()}`, session: 'Tuning night', scene: 'Wide hall' };
+  // A long live scene name: at 1,024 px the live bar still keeps one line (review U-M4).
+  await dm.setViewportSize({ width: 1024, height: 700 });
+  const names = {
+    campaign: `Settings REL-01 ${Date.now()}`,
+    session: 'Tuning night',
+    scene: 'The wide hall under the old keep, where the river runs',
+  };
+  const before = (await (await dm.request.get('/api/settings')).json()) as Record<string, unknown>;
   const campaignId = await seedCampaign(dm, names.campaign, [names.session]);
   const [session] = (await (await dm.request.get(`/api/campaigns/${campaignId}/sessions`)).json()) as { id: string }[];
   const hall = (await (
@@ -54,7 +66,12 @@ test('settings saved in the DM view take effect with no restart: the upload limi
 
   try {
     // The upload limit: 1 MB, saved from the dialog.
-    await saveSettings(dm, (dialog) => dialog.getByLabel('Upload limit, in MB').fill('1'));
+    await saveSettings(dm, async () => {
+      // Typed, then saved with Enter in the field.
+      await dm.keyboard.press('ControlOrMeta+a');
+      await dm.keyboard.type('1');
+      await dm.keyboard.press('Enter');
+    });
     await selectScene(dm, names);
     await dm.getByLabel('Map image: PNG, JPEG or WebP').setInputFiles({
       name: 'big.png',
@@ -85,14 +102,27 @@ test('settings saved in the DM view take effect with no restart: the upload limi
     for (const key of ['Enter', 'ArrowRight', 'ArrowDown', 'ArrowRight', 'ArrowDown']) await dm.keyboard.press(key);
     // Two diagonals: 10 ft by the PHB rule.
     await expect.poll(() => feetOn(tv)).toBe(10);
-    await saveSettings(dm, (dialog) => dialog.getByLabel('Diagonals alternate 5 ft and 10 ft (DMG)').check());
+    // The live bar keeps one line with the long name and all its buttons.
+    expect((await liveBar(dm).boundingBox())!.height).toBeLessThanOrEqual(42);
+    await saveSettings(dm, async (dialog) => {
+      // Tab to the rule, arrow to DMG, back to a text field and Enter.
+      await dm.keyboard.press('Tab');
+      await dm.keyboard.press('Tab');
+      await expect(dialog.getByLabel('Every diagonal square counts 5 ft (PHB)')).toBeFocused();
+      await dm.keyboard.press('ArrowDown');
+      await expect(dialog.getByLabel('Diagonals alternate 5 ft and 10 ft (DMG)')).toBeChecked();
+      await dm.keyboard.press('Shift+Tab');
+      await dm.keyboard.press('Enter');
+    });
     // The same measurement, counted again on the server: 15 ft.
     await expect.poll(() => feetOn(tv)).toBe(15);
   } finally {
     // Put the settings back for the other tests, and leave no campaign behind.
-    await dm.request.patch('/api/settings', {
-      data: { upload_limit_bytes: 50 * MB, display_variant_size: 4096, ruler_rule: 'phb' },
+    const { upload_limit_bytes, display_variant_size, ruler_rule } = before;
+    const restored = await dm.request.patch('/api/settings', {
+      data: { upload_limit_bytes, display_variant_size, ruler_rule },
     });
+    expect(restored.ok(), await restored.text()).toBe(true);
     const summary = await dm.request.get(`/api/campaigns/${campaignId}/deletion`);
     if (summary.ok()) {
       await dm.request.delete(`/api/campaigns/${campaignId}`, { data: { confirm: (await summary.json()) as object } });

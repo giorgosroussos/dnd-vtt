@@ -13,6 +13,13 @@ import { ApiError, errorCode, request } from './api.js';
 
 const PIN = new RegExp(PIN_PATTERN);
 
+/** How long PIN entry is refused, in minutes once that reads better than seconds (REL-01 review U-L6). */
+export function lockedOutText(seconds: number): string {
+  return seconds >= 120
+    ? t('signIn.lockedOutMinutes', { minutes: Math.ceil(seconds / 60) })
+    : t('signIn.lockedOut', { seconds });
+}
+
 // Browsers may fill the field from a password manager; numeric keypad on laptops with one.
 const pinInput = { type: 'password', inputMode: 'numeric', required: true } as const;
 
@@ -102,9 +109,7 @@ export function PinEntry({ onDone, notice }: { onDone: () => void; notice?: stri
       const code = errorCode(error);
       if (code === 'pin_incorrect') return setFieldError(errorMessage(code));
       const wait = error instanceof ApiError ? error.retryAfter : undefined;
-      setFailure(
-        code === 'locked_out' && wait !== undefined ? t('signIn.lockedOut', { seconds: wait }) : errorMessage(code),
-      );
+      setFailure(code === 'locked_out' && wait !== undefined ? lockedOutText(wait) : errorMessage(code));
     }
   }
 

@@ -20,7 +20,7 @@ import { readPinHash, readSettings } from '../db/settings.js';
 import { createLogger, logFilePath } from '../log/logger.js';
 import { imageFilePath, imagesDirOf } from '../images/store.js';
 import { compileSchema } from '../validation.js';
-import { buildTestApp, createTestData, setUpPin, type TestData } from './testing/app.js';
+import { buildTestApp, createTestData, dmCookie, setUpPin, type TestData } from './testing/app.js';
 
 // REL-01: the settings a DM changes without restarting, against a real SQLite file and a real images
 // folder (specs/09-operations.md §7, specs/05-assets-and-images.md §6, §7, specs/07-security-and-access.md
@@ -201,11 +201,15 @@ describe('the display size (specs/05-assets-and-images.md §7, G-015)', () => {
     const body = new PassThrough();
     const pending = upload(body);
     body.write(bytes.subarray(0, 64));
-    // The route has read the settings and is receiving into its staged folder.
-    await vi.waitFor(() => expect(readdirSync(path.join(imagesDir, '.incoming')).length).toBe(1));
-
-    ok(await patch({ display_variant_size: 1000 }));
-    body.end(bytes.subarray(64));
+    try {
+      // The route has read the settings and is receiving into its staged folder.
+      await vi.waitFor(() => expect(readdirSync(path.join(imagesDir, '.incoming')).length).toBe(1), {
+        timeout: 10_000,
+      });
+      ok(await patch({ display_variant_size: 1000 }));
+    } finally {
+      body.end(bytes.subarray(64));
+    }
     const late = (await pending).json<Image>();
     // Made at the size it read when it started…
     expect(late.variants.display).toEqual({ width: 2000, height: 1000 });
@@ -213,6 +217,39 @@ describe('the display size (specs/05-assets-and-images.md §7, G-015)', () => {
     // …and brought to the new one.
     expect(displayOf(late.id)).toEqual({ width: 1000, height: 500 });
     expect(displayOf(early.id)).toEqual({ width: 1000, height: 750 });
+  });
+});
+
+describe('the display size, saved again unchanged (D-124)', () => {
+  it('finishes a regeneration a restart cut short', async () => {
+    const image = (await upload(await picture(1600, 1200))).json<Image>();
+    // The setting was saved and the server stopped before this image was regenerated.
+    data.db.prepare('UPDATE settings SET display_variant_size = 800').run();
+    expect(displayOf(image.id)).toEqual({ width: 1600, height: 1200 });
+    ok(await patch({ display_variant_size: 800 }));
+    await app.regenerator.idle();
+    expect(displayOf(image.id)).toEqual({ width: 800, height: 600 });
+  });
+});
+
+describe('closing the server while display versions are regenerated (review C-M2)', () => {
+  it('stops the worker before the database closes, with no error and nothing left staged', async () => {
+    const events: string[] = [];
+    const record = (event: string) => void events.push(event);
+    await app.close();
+    app = await buildTestApp(data, { logger: { info: record, warn: record, error: record } });
+    // As server.ts does: the database closes in an onClose hook registered after the app's own.
+    const db = data.db;
+    app.addHook('onClose', () => db.close());
+    cookie = dmCookie(await app.inject({ method: 'POST', url: '/api/auth', payload: { pin: '4826' } }));
+    for (let n = 0; n < 3; n++) expect((await upload(await picture(3000, 2000))).statusCode).toBe(201);
+    ok(await patch({ display_variant_size: 1024 }));
+    await app.close();
+    expect(events.filter((event) => event.startsWith('images.regenerate'))).toEqual([]);
+    expect(readdirSync(path.join(imagesDir, '.incoming'))).toEqual([]);
+    // afterEach closes the app again; give it a database to find.
+    data.db = data.reopen();
+    app = await buildTestApp(data);
   });
 });
 

@@ -12,22 +12,26 @@ describe('the settings update (specs/09-operations.md §7, REL-01)', () => {
     expect(valid({ ...DEFAULT_SETTINGS })).toBe(true);
   });
 
-  it('refuses an empty body, an unknown field, a wrong type and every value out of bounds', () => {
-    expect(
-      [
-        {},
-        { pin_hash: 'x' },
-        { live_scene_id: null },
-        { upload_limit_bytes: UPLOAD_LIMIT_BOUNDS.min - 1 },
-        { upload_limit_bytes: UPLOAD_LIMIT_BOUNDS.max + 1 },
-        { upload_limit_bytes: 2_000_000.5 },
-        { upload_limit_bytes: '52428800' },
-        { display_variant_size: DISPLAY_SIZE_BOUNDS.min - 1 },
-        { display_variant_size: DISPLAY_SIZE_BOUNDS.max + 1 },
-        { ruler_rule: 'euclid' },
-        { ruler_rule: null },
-      ].some(valid),
-    ).toBe(false);
+  it.each([
+    ['an empty body', {}],
+    ['the PIN hash', { pin_hash: 'x' }],
+    ['the live scene', { live_scene_id: null }],
+    ['an upload limit under 1 MB', { upload_limit_bytes: UPLOAD_LIMIT_BOUNDS.min - 1 }],
+    ['an upload limit over 1 GB', { upload_limit_bytes: UPLOAD_LIMIT_BOUNDS.max + 1 }],
+    ['a fractional upload limit', { upload_limit_bytes: 2_000_000.5 }],
+    ['an upload limit as text', { upload_limit_bytes: '52428800' }],
+    ['a display size under the bound', { display_variant_size: DISPLAY_SIZE_BOUNDS.min - 1 }],
+    ['a display size over the bound', { display_variant_size: DISPLAY_SIZE_BOUNDS.max + 1 }],
+    ['an unknown rule', { ruler_rule: 'euclid' }],
+    ['no rule', { ruler_rule: null }],
+  ])('refuses %s', (_name, body) => {
+    expect(valid(body)).toBe(false);
+  });
+
+  it('accepts each bound itself', () => {
+    expect(valid({ upload_limit_bytes: UPLOAD_LIMIT_BOUNDS.max, display_variant_size: DISPLAY_SIZE_BOUNDS.min })).toBe(
+      true,
+    );
   });
 
   it('keeps the defaults within the bounds', () => {

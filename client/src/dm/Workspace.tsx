@@ -5,6 +5,7 @@ import { errorMessage } from '../ui/errorMessage.js';
 import { t } from '../ui/messages.js';
 import { errorCode, request } from './api.js';
 import { Button } from '../ui/Button.js';
+import { useFocusLater } from '../ui/useFocusLater.js';
 import { ConnectDialog } from './ConnectDialog.js';
 import { LiveBar } from './LiveBar.js';
 import { ScenePanel } from './ScenePanel.js';
@@ -38,32 +39,42 @@ export function Workspace({ mainId, onSignedOut }: { mainId: string; onSignedOut
   const [connecting, setConnecting] = useState(false);
   // Focus returns to the button that opened the panel when it closes, as for the other dialogs.
   const connectButton = useRef<HTMLButtonElement>(null);
+  const focusLater = useFocusLater();
   const closeConnect = () => {
     setConnecting(false);
-    connectButton.current?.focus();
+    focusLater(() => connectButton.current);
   };
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsButton = useRef<HTMLButtonElement>(null);
   const closeSettings = () => {
     setSettingsOpen(false);
-    settingsButton.current?.focus();
+    focusLater(() => settingsButton.current);
   };
 
+  // Each read and each save takes the next number, and a read's answer is applied only if nothing
+  // newer began since it was sent: a slow read must not undo a save (review C-L1).
+  const settingsTurn = useRef(0);
   const readSettings = useCallback((quiet: boolean) => {
+    const turn = ++settingsTurn.current;
     request<Settings>('GET', API_PATHS.settings).then(
       (value) => {
+        if (turn !== settingsTurn.current) return;
         setSettings(value);
         setFailure(undefined);
       },
       // A read again when measuring starts that fails keeps the rule it had, and says nothing.
       (error: unknown) => {
-        if (!quiet) setFailure(errorMessage(errorCode(error)));
+        if (!quiet && turn === settingsTurn.current) setFailure(errorMessage(errorCode(error)));
       },
     );
   }, []);
   useEffect(() => readSettings(false), [readSettings]);
   const rereadSettings = useCallback(() => readSettings(true), [readSettings]);
+  const settingsSaved = useCallback((saved: Settings) => {
+    settingsTurn.current++;
+    setSettings(saved);
+  }, []);
 
   // G-027: count the players snapshots already answered, so each is checked once and a session that
   // really ended after a reconnection does sign out.
@@ -197,7 +208,7 @@ export function Workspace({ mainId, onSignedOut }: { mainId: string; onSignedOut
         }
       />
       {connecting ? <ConnectDialog onClose={closeConnect} /> : null}
-      {settingsOpen ? <SettingsDialog onClose={closeSettings} onSaved={setSettings} /> : null}
+      {settingsOpen ? <SettingsDialog onClose={closeSettings} onSaved={settingsSaved} /> : null}
       {failure ? <Notice>{failure}</Notice> : null}
       {barMessage ? <Notice>{barMessage}</Notice> : null}
       <div className="eg-workspace__columns">

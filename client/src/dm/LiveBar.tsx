@@ -56,6 +56,7 @@ export function LiveBar({
               : 'eg-livebar__text'
         }
         role="status"
+        title={text}
       >
         {text ?? t('dm.loading')}
       </p>

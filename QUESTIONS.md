@@ -120,6 +120,7 @@ Every card opens `Blocking` and is answered before the specification proceeds. `
 - Q-095 — Where a token revealed live sits in the stacking order — security — Resolved
 - Q-096 — A lone token hidden and revealed again comes back numbered — ux — Blocking
 - Q-097 — PIN guessing from many LAN addresses — security — Resolved
+- Q-098 — PIN guessing kept just under the server-wide budget — security — Blocking
 
 ## Blocking
 
@@ -132,6 +133,17 @@ Every card opens `Blocking` and is answered before the specification proceeds. `
   - B) Store per token whether it has been shown to players (an additive migration) and number only at the first showing → effect on ux: the token comes back as "Goblin", exactly as `05` §3 reads; a new column, set in placement, reveal and numbering, with its tests.
   - C) Without a migration, keep the bare name on reveal when the scene has issued exactly one number for the asset and no other token of it is shown → effect on ux: the common case comes back as "Goblin", but a hidden Goblin placed after the first one was deleted is revealed as "Goblin" instead of "Goblin 2", against Q-091's example.
 - Recommendation: B, because it is the only option that makes the code do what `05` §3 already says, and the rename happens in front of players on the token they were watching, unlike the gap Q-094 B would have closed.
+- Blocks: specification
+
+### Q-098 — PIN guessing kept just under the server-wide budget
+- Surface: security
+- Source: REL-01 review (security pass, S-M1), 2026-09-29: `07` §6 [Q-097] pauses PIN entry after 20 failures across addresses within 10 minutes (`server/src/auth/lockout.ts`, a sliding window), and nothing counts over a longer period. A device on the Wi-Fi that makes 19 wrong guesses every 10 minutes, changing its IPv4 address after 4 so that no address is locked either, is never paused: 2,736 guesses a day, reproduced in a simulation of one day (no refusal, no pause, 684 addresses used). A 4-digit PIN falls in about 1.8 days on average, a 6-digit one in about 6 months; nothing is logged but the failed attempts themselves. The README (REL-01) now states this rate. A guessed PIN defeats the isolation of `04` §4.
+- Question: Should the server also bound PIN failures over a longer period than 10 minutes?
+- Options:
+  - A) Add a second, long-horizon budget: after 100 failed attempts across all addresses (loopback excluded) within 24 hours, PIN entry is paused as Q-097's pause is, from every address but loopback, doubling with it → effect on security: an address-hopping device gets at most about 100 guesses a day, so a 4-digit PIN takes months and a 6-digit one decades; a table where a guest's phone fails a few times a night never reaches it. `07` §6 gains the rule (a spec amendment with this card's tag), `lockout.ts` a second window with its tests, the README the new limit.
+  - B) Replace the window by a decaying score: each failure adds 1, the score halves every hour, and a pause starts at 20 → effect on security: a steady trickle is bounded at about 14 failures an hour, about 330 a day; the rule is harder to state in the README and to test, and the Q-097 wording (20 in 10 minutes) no longer describes the behaviour exactly.
+  - C) Accept the residual: keep Q-097's rule, with the README stating the sustained rate and advising 6 to 8 digits (as it does since the REL-01 review) → effect on security: no code change; a 4-digit PIN stays guessable within days by a patient device on the Wi-Fi, a 6-digit one within months.
+- Recommendation: A, because it closes the steady trickle with the same mechanism, loopback exemption and logging as Q-097's pause, is one sentence in the README, and costs a DM at a home table nothing.
 - Blocks: specification
 
 ## Open

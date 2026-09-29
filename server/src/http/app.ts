@@ -126,7 +126,8 @@ export async function buildApp({
   registerTokens(app, db);
   registerConnect(app, networkInterfaces);
   const regenerator = createDisplayRegenerator({ db, imagesDir, logger, commit: live.refresh });
-  app.addHook('onClose', () => regenerator.stop());
+  // Before any onClose hook: the server closes the database in one registered after this (review C-M2).
+  app.addHook('preClose', () => regenerator.stop());
   registerSettings(app, { db, logger, live, regenerator });
   await registerImages(app, { db, imagesDir, auth, regenerator });
   const sendIndex = client.kind === 'static' ? await serveBuild(app, client.dist) : await serveVite(app, client.root);
