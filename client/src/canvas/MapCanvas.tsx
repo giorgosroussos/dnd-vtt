@@ -219,9 +219,15 @@ const scaled = (box: Box, ratio: number): Box => ({
 
 /**
  * The display version of the map, once loaded; only that version is ever requested, and only
- * again when the map itself changes, not when its record is rebuilt.
+ * again when the map itself changes, or its display version was regenerated at another size
+ * (`size`, REL-01), not when its record is rebuilt. Until the new one arrives the old one is
+ * drawn, at the new size.
  */
-function useDisplayImage(id: string | undefined, onError: (() => void) | undefined): HTMLImageElement | undefined {
+function useDisplayImage(
+  id: string | undefined,
+  size: string,
+  onError: (() => void) | undefined,
+): HTMLImageElement | undefined {
   const [loaded, setLoaded] = useState<{ id: string; element: HTMLImageElement }>();
   const failed = useEffectEvent(() => onError?.());
   useEffect(() => {
@@ -234,7 +240,7 @@ function useDisplayImage(id: string | undefined, onError: (() => void) | undefin
       element.onload = null;
       element.onerror = null;
     };
-  }, [id]);
+  }, [id, size]);
   return id !== undefined && loaded?.id === id ? loaded.element : undefined;
 }
 
@@ -279,7 +285,8 @@ export function MapCanvas({
 }) {
   const helpId = useId();
   const [viewportRef, viewport] = useViewport();
-  const displayImage = useDisplayImage(map?.id, onMapError);
+  const shownSize = map?.variants.display ? `${map.variants.display.width}x${map.variants.display.height}` : '';
+  const displayImage = useDisplayImage(map?.id, shownSize, onMapError);
   const info = map
     ? mapInfo(map, displayImage && { width: displayImage.naturalWidth, height: displayImage.naturalHeight })
     : undefined;

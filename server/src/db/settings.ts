@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import type { Settings } from '@emberglass/shared';
+import type { Settings, SettingsUpdate } from '@emberglass/shared';
 
 // The one settings row (specs/03-domain-model.md §1), read and written through
 // explicit column lists only. The PIN hash shares the row with the settings a DM
@@ -10,6 +10,20 @@ const SETTINGS_COLUMNS = 'id, live_scene_id, ruler_rule, upload_limit_bytes, dis
 
 export function readSettings(db: Database.Database): Settings {
   return db.prepare(`SELECT ${SETTINGS_COLUMNS} FROM settings`).get() as Settings;
+}
+
+// The columns an update may write, named here so that no request can name another (REL-01).
+const UPDATABLE = ['upload_limit_bytes', 'display_variant_size', 'ruler_rule'] as const;
+
+/** Writes the settings `update` names, in one statement, and answers them all. */
+export function updateSettings(db: Database.Database, update: SettingsUpdate): Settings {
+  const columns = UPDATABLE.filter((column) => update[column] !== undefined);
+  if (columns.length > 0) {
+    db.prepare(`UPDATE settings SET ${columns.map((column) => `${column} = ?`).join(', ')}`).run(
+      ...columns.map((column) => update[column]),
+    );
+  }
+  return readSettings(db);
 }
 
 export function readPinHash(db: Database.Database): string | null {

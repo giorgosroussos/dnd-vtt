@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { imageFileUrl, type LibraryAsset } from '@emberglass/shared';
+import { useFocusLater } from '../../ui/useFocusLater.js';
 import { Button } from '../../ui/Button.js';
 import { t } from '../../ui/messages.js';
 import { AssetDeleteDialog } from './AssetDeleteDialog.js';
@@ -29,9 +30,10 @@ export function Library({ uploadLimit }: { uploadLimit: number }) {
 
   // A deleted asset takes the button that opened its dialog with it; the keyboard
   // goes to New asset instead of the page body (as D-087 does in the tree).
+  const focusLater = useFocusLater();
   const deleted = () => {
     changed();
-    newButton.current?.querySelector('button')?.focus();
+    focusLater(() => newButton.current?.querySelector('button'));
   };
 
   return (

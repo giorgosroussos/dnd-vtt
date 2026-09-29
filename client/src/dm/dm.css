@@ -615,3 +615,47 @@ textarea.eg-field__input {
   margin: 0;
   overflow-wrap: anywhere;
 }
+
+/* The Settings dialog (REL-01): two sections, the PIN change set apart below the table's settings,
+ * the rule's radio buttons without the browser's group border, and an empty status taking no room. */
+.eg-settings__heading {
+  font-size: var(--font-size-md);
+}
+
+.eg-settings__pin {
+  border-top: 1px solid var(--color-border);
+  margin-top: var(--space-6);
+  padding-top: var(--space-4);
+}
+
+.eg-settings__rule {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.eg-settings__rule legend {
+  padding: 0;
+  margin-bottom: var(--space-1);
+}
+
+.eg-settings__status:empty {
+  position: absolute;
+}
+
+/* The live bar keeps one line: a long scene name is cut with an ellipsis, its whole text still read
+ * out and shown on hover (REL-01 review U-M4, G-022). */
+.eg-livebar__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.eg-livebar__actions {
+  flex: 0 0 auto;
+}

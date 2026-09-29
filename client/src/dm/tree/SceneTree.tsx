@@ -3,6 +3,7 @@ import { API_STRUCTURE_PATHS as PATHS, type Campaign, type Scene, type Session }
 import { Button } from '../../ui/Button.js';
 import { Notice } from '../../ui/Notice.js';
 import { TextField } from '../../ui/TextField.js';
+import { useFocusLater } from '../../ui/useFocusLater.js';
 import { errorMessage } from '../../ui/errorMessage.js';
 import { t, type MessageKey } from '../../ui/messages.js';
 import { errorCode, request } from '../api.js';
@@ -60,6 +61,7 @@ export function SceneTree({ selectedSceneId, onSelectScene, onScenesRemoved, onS
   // second press moves from the new order, not the old one (G-018).
   const [reordering, setReordering] = useState<string>();
   const [focusNext, setFocusNext] = useState<{ id: string; action: Action }>();
+  const focusLater = useFocusLater();
 
   // Runs a request; its failure is shown above the tree, by its catalogue message.
   const attempt = useCallback(async (work: () => Promise<void>): Promise<boolean> => {
@@ -207,7 +209,7 @@ export function SceneTree({ selectedSceneId, onSelectScene, onScenesRemoved, onS
       const removed = (sessions[target.id] ?? []).flatMap((session) => (scenes[session.id] ?? []).map((s) => s.id));
       onScenesRemoved(removed);
       void loadCampaigns().then(() =>
-        root.current?.querySelector<HTMLButtonElement>('[data-action="new-campaign"]')?.focus(),
+        focusLater(() => root.current?.querySelector<HTMLButtonElement>('[data-action="new-campaign"]')),
       );
     } else if (target.kind === 'session') {
       onScenesRemoved((scenes[target.id] ?? []).map((scene) => scene.id));

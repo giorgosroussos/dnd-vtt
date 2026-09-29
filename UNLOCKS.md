@@ -20,3 +20,4 @@ Never edit or remove a line here. The point of the file is that it cannot be tid
 - unlock 2026-09-25T11:03:57Z path="specs/13-implementation-plan.md" by="Giorgos Roussos" reason="PRP-04 Surfaces gains data, derived by check-docs from 05 §3 now tagged Q-091 (D-098)"
 - unlock 2026-09-25T11:27:46Z path="specs/05-assets-and-images.md" by="Giorgos Roussos" reason="Q-092 answered B by the owner: a hidden token is numbered only when first shown to players (PRP-04)"
 - unlock 2026-09-25T14:51:33Z path="specs/04-live-sync.md" by="Giorgos Roussos" reason="Q-093 answered A by the owner: one event version counter per room, so players never see a version they did not receive (04 §5)"
+- unlock 2026-09-28T19:12:51Z path="specs/07-security-and-access.md" by="Giorgos Roussos" reason="Q-097 answered C by the owner: a server-wide PIN failure budget beside the per-address one, IPv6 keyed by /64 (REL-01, closes G-010)"

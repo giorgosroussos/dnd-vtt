@@ -1,13 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { API_PATHS, DEFAULT_SETTINGS, type AuthState, type Scene, type Settings } from '@emberglass/shared';
 import { Notice } from '../ui/Notice.js';
 import { errorMessage } from '../ui/errorMessage.js';
 import { t } from '../ui/messages.js';
 import { errorCode, request } from './api.js';
 import { Button } from '../ui/Button.js';
+import { useFocusLater } from '../ui/useFocusLater.js';
 import { ConnectDialog } from './ConnectDialog.js';
 import { LiveBar } from './LiveBar.js';
 import { ScenePanel } from './ScenePanel.js';
+import { SettingsDialog } from './SettingsDialog.js';
 import { Library } from './library/Library.js';
 import { useDmLive } from './live/useDmLive.js';
 import { SceneTree } from './tree/SceneTree.js';
@@ -16,7 +18,10 @@ import { SceneTree } from './tree/SceneTree.js';
 // Campaign → Session → Scene tree on the left, the selected scene in the centre and
 // the asset library on the right. The centre is the selected scene's setup and canvas
 // (ScenePanel, PRP-02), in live mode when it is the live scene and in prep mode otherwise
-// (LIV-04, specs/08-ux-journeys.md §2, Q-024). Settings give the upload limit.
+// (LIV-04, specs/08-ux-journeys.md §2, Q-024). Settings give the upload limit and the ruler's rule, and the
+// Settings dialog in the live bar changes them without a restart (REL-01, specs/09-operations.md §7); the
+// rule is read again whenever the ruler is turned on, since another browser may have changed it and the
+// WebSocket carries only the live scene (specs/04-live-sync.md §1, G-036).
 //
 // The workspace keeps the live connection open (LIV-01, LIV-04, specs/04-live-sync.md §6): the live
 // scene comes from the `dm` room's snapshots and events, so the live bar and the live canvas follow
@@ -34,19 +39,41 @@ export function Workspace({ mainId, onSignedOut }: { mainId: string; onSignedOut
   const [connecting, setConnecting] = useState(false);
   // Focus returns to the button that opened the panel when it closes, as for the other dialogs.
   const connectButton = useRef<HTMLButtonElement>(null);
+  const focusLater = useFocusLater();
   const closeConnect = () => {
     setConnecting(false);
-    connectButton.current?.focus();
+    focusLater(() => connectButton.current);
   };
 
-  useEffect(() => {
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsButton = useRef<HTMLButtonElement>(null);
+  const closeSettings = () => {
+    setSettingsOpen(false);
+    focusLater(() => settingsButton.current);
+  };
+
+  // Each read and each save takes the next number, and a read's answer is applied only if nothing
+  // newer began since it was sent: a slow read must not undo a save (review C-L1).
+  const settingsTurn = useRef(0);
+  const readSettings = useCallback((quiet: boolean) => {
+    const turn = ++settingsTurn.current;
     request<Settings>('GET', API_PATHS.settings).then(
       (value) => {
+        if (turn !== settingsTurn.current) return;
         setSettings(value);
         setFailure(undefined);
       },
-      (error: unknown) => setFailure(errorMessage(errorCode(error))),
+      // A read again when measuring starts that fails keeps the rule it had, and says nothing.
+      (error: unknown) => {
+        if (!quiet && turn === settingsTurn.current) setFailure(errorMessage(errorCode(error)));
+      },
     );
+  }, []);
+  useEffect(() => readSettings(false), [readSettings]);
+  const rereadSettings = useCallback(() => readSettings(true), [readSettings]);
+  const settingsSaved = useCallback((saved: Settings) => {
+    settingsTurn.current++;
+    setSettings(saved);
   }, []);
 
   // G-027: count the players snapshots already answered, so each is checked once and a session that
@@ -174,10 +201,14 @@ export function Workspace({ mainId, onSignedOut }: { mainId: string; onSignedOut
             <Button ref={connectButton} size="small" onClick={() => setConnecting(true)}>
               {t('connect.open')}
             </Button>
+            <Button ref={settingsButton} size="small" onClick={() => setSettingsOpen(true)}>
+              {t('settings.open')}
+            </Button>
           </>
         }
       />
       {connecting ? <ConnectDialog onClose={closeConnect} /> : null}
+      {settingsOpen ? <SettingsDialog onClose={closeSettings} onSaved={settingsSaved} /> : null}
       {failure ? <Notice>{failure}</Notice> : null}
       {barMessage ? <Notice>{barMessage}</Notice> : null}
       <div className="eg-workspace__columns">
@@ -201,6 +232,7 @@ export function Workspace({ mainId, onSignedOut }: { mainId: string; onSignedOut
               name={selected.name}
               uploadLimit={settings?.upload_limit_bytes ?? DEFAULT_SETTINGS.upload_limit_bytes}
               rulerRule={settings?.ruler_rule ?? DEFAULT_SETTINGS.ruler_rule}
+              onRulerOn={rereadSettings}
               live={live}
             />
           ) : (

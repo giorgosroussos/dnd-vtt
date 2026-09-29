@@ -11,7 +11,7 @@ import { BootScreen } from './BootScreen.js';
 import { DmErrorScreen } from './ErrorScreen.js';
 import { IdleScreen } from './IdleScreen.js';
 import { catalogue, t } from './messages.js';
-import { button, click, FakeServer, installDialog, settle } from './testing/fakeServer.js';
+import { button, click, FakeServer, installDialog, settle, submit, type } from './testing/fakeServer.js';
 import { installCanvas2d, installImageLoading, installResizeObserver } from './testing/canvas2d.js';
 import { render } from './testing/render.js';
 import { TEXT_ATTRIBUTES, scanIndexHtml, scanSource } from './testing/uiTextScan.js';
@@ -122,10 +122,8 @@ describe('the catalogue', () => {
   });
 
   it('fills placeholders and leaves unknown ones visible', () => {
-    expect(t('signIn.lockedOut', { seconds: 30 })).toBe(
-      'Too many wrong PINs from this device. Try again in 30 seconds.',
-    );
-    expect(t('signIn.lockedOut')).toBe('Too many wrong PINs from this device. Try again in {seconds} seconds.');
+    expect(t('signIn.lockedOut', { seconds: 30 })).toBe('Too many wrong PINs. Try again in 30 seconds.');
+    expect(t('signIn.lockedOut')).toBe('Too many wrong PINs. Try again in {seconds} seconds.');
     expect(t('app.name')).toBe('Emberglass');
   });
 });
@@ -262,6 +260,50 @@ it('show only catalogue text: the Connect a screen panel, with addresses and wit
     await click(button(container, t('connect.open')));
     await settle();
     expectCatalogueOnly(container.querySelector('dialog')!);
+    unmount();
+  } finally {
+    server.uninstall();
+  }
+});
+
+// The Settings dialog (REL-01): loaded, saved with a new display size, with field errors, a PIN refused,
+// and when the settings cannot be read.
+it('show only catalogue text: the Settings dialog in each of its states', async () => {
+  installDialog();
+  const server = new FakeServer();
+  server.install();
+  try {
+    const { container, unmount } = render(DmView);
+    await settle();
+    await click(button(container, t('settings.open')));
+    const dialog = () => container.querySelector('dialog')!;
+    expectCatalogueOnly(dialog());
+    const inputs = () => [...dialog().querySelectorAll<HTMLInputElement>('input')];
+    await type(inputs()[1], '2048');
+    await submit(dialog().querySelectorAll('form')[0]);
+    expect(dialog().textContent).toContain(t('settings.savedRegenerating'));
+    expectCatalogueOnly(dialog());
+    await type(inputs()[0], '0');
+    await submit(dialog().querySelectorAll('form')[0]);
+    await submit(dialog().querySelectorAll('form')[1]);
+    expect(dialog().querySelectorAll('[aria-invalid="true"]').length).toBeGreaterThan(1);
+    expectCatalogueOnly(dialog());
+    server.lockedFor = 30;
+    const pins = () => [...dialog().querySelectorAll<HTMLInputElement>('form:last-of-type input')];
+    await type(pins()[0], '4826');
+    await type(pins()[1], '591837');
+    await type(pins()[2], '591837');
+    await submit(dialog().querySelectorAll('form')[1]);
+    expect(dialog().querySelector('[role="alert"]')).not.toBeNull();
+    expectCatalogueOnly(dialog());
+    await click(button(dialog(), t('settings.close')));
+    server.before = (call) =>
+      call.path === '/api/settings'
+        ? { status: 500, body: { error: { code: 'internal_error', message: 'x' } } }
+        : undefined;
+    await click(button(container, t('settings.open')));
+    expect(dialog().textContent).toContain(t('settings.retry'));
+    expectCatalogueOnly(dialog());
     unmount();
   } finally {
     server.uninstall();

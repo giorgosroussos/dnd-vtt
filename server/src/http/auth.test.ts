@@ -409,7 +409,7 @@ describe('guessing protection (specs/07-security-and-access.md §6)', () => {
 
   it('doubles the lockout on each further run of 5 failures', async () => {
     let expected = 60;
-    for (let run = 0; run < 4; run++) {
+    for (let run = 0; run < 3; run++) {
       await failFiveTimes();
       await expectLocked(expected);
       clock += expected * 1000 - 1;
@@ -417,7 +417,11 @@ describe('guessing protection (specs/07-security-and-access.md §6)', () => {
       clock += 1;
       expected *= 2;
     }
-    expect(expected).toBe(960);
+    expect(expected).toBe(480);
+    // The fourth run is the 20th failure within 10 minutes: the server-wide pause (600 s) outlasts
+    // the address's own 480 s, and the answer names the longer wait (Q-097).
+    await failFiveTimes();
+    await expectLocked(600);
   });
 
   it('forgives earlier failures once the right PIN is entered', async () => {
@@ -450,6 +454,86 @@ describe('guessing protection (specs/07-security-and-access.md §6)', () => {
     expect(await verifyPin(PIN, readPinHash(data.db)!)).toBe(true);
   });
 
+  // 20 failures from 5 addresses, 4 each: no address is locked on its own (Q-097).
+  const failAcrossAddresses = async (prefix = '192.168.7.'): Promise<string[]> => {
+    const addresses = [0, 1, 2, 3, 4].map((n) => `${prefix}${n + 10}`);
+    for (let round = 0; round < 4; round++) {
+      for (const address of addresses) expectFailure(await enter(WRONG, address), 401, 'pin_incorrect');
+    }
+    return addresses;
+  };
+
+  it('pauses PIN entry from every address but the server PC after 20 failures across addresses, and logs the pause', async () => {
+    const addresses = await failAcrossAddresses();
+    // A fresh address, the right PIN: refused for 10 minutes, with nothing counted or hashed.
+    await expectLocked(600, '192.168.1.99');
+    const fromServerPc = await enter(PIN, '127.0.0.1');
+    expect(fromServerPc.statusCode, fromServerPc.body).toBe(200);
+    clock += 600_000 - 1_000;
+    await expectLocked(1, '192.168.1.99');
+    clock += 1_000;
+    expect((await enter(PIN, '192.168.1.99')).statusCode).toBe(200);
+
+    const lines = readFileSync(logFilePath(data.dataDir), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(lines.filter((line) => line.event === 'pin.paused')).toEqual([
+      expect.objectContaining({ level: 'warn', seconds: 600, addresses }),
+    ]);
+    // Refused during the pause, the fresh address was never counted as a failure.
+    expect(lines.filter((line) => line.event === 'pin.failed' && line.address === '192.168.1.99')).toEqual([]);
+  });
+
+  it('logs a pause that a correct PIN opened, since the pause stays (review C-M1)', async () => {
+    for (let n = 0; n < 19; n++) expectFailure(await enter(WRONG, `192.168.9.${n % 5}`), 401, 'pin_incorrect');
+    expect((await enter(PIN, '192.168.9.50')).statusCode).toBe(200);
+    await expectLocked(600, '192.168.9.60');
+    const paused = readFileSync(logFilePath(data.dataDir), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((line) => line.event === 'pin.paused');
+    expect(paused).toEqual([expect.objectContaining({ seconds: 600 })]);
+  });
+
+  it('counts at most 20 PINs across addresses when guesses arrive all at once, and logs one pause', async () => {
+    // At the production cost, so that the guesses really overlap the hashing.
+    await app.close();
+    data.remove();
+    data = createTestData('emberglass-auth-');
+    app = await start({ pinHashParams: SCRYPT_PARAMS });
+    await setUpPin(app, PIN);
+    const answers = await Promise.all(Array.from({ length: 40 }, (_, n) => enter(WRONG, `10.9.0.${n}`)));
+    const statuses = answers.map((response) => response.statusCode);
+    expect(statuses.filter((status) => status === 401)).toHaveLength(20);
+    expect(statuses.filter((status) => status === 429)).toHaveLength(20);
+    const paused = readFileSync(logFilePath(data.dataDir), 'utf8')
+      .split('\n')
+      .filter((line) => line.includes('"event":"pin.paused"'));
+    expect(paused).toHaveLength(1);
+  });
+
+  it('doubles the pause on each further run', async () => {
+    await failAcrossAddresses();
+    clock += 600_000;
+    await failAcrossAddresses('192.168.8.');
+    await expectLocked(1_200, '192.168.1.99');
+  });
+
+  it('keeps a DM session already open working during a pause', async () => {
+    const cookie = await signInFrom(OTHER_LAN);
+    await failAcrossAddresses();
+    await expectLocked(600, OTHER_LAN);
+    expect((await settings(cookie, OTHER_LAN)).statusCode).toBe(200);
+  });
+
+  it('counts an IPv6 client by its /64 for the per-address lockout (Q-097)', async () => {
+    for (let n = 1; n <= 5; n++) expectFailure(await enter(WRONG, `2001:db8:5:6::${n}`), 401, 'pin_incorrect');
+    await expectLocked(60, '2001:db8:5:6:abcd::1');
+    expect((await enter(PIN, '2001:db8:5:7::1')).statusCode).toBe(200);
+  });
+
   it('logs each failed attempt and each lockout with the client address', async () => {
     await failFiveTimes();
     const lines = readFileSync(logFilePath(data.dataDir), 'utf8')
@@ -472,7 +556,8 @@ describe('PIN change (specs/07-security-and-access.md §1, §2)', () => {
   it('lets no session made with the old PIN outlive a change, even one whose PIN check was still running', async () => {
     // At the production cost, so that sign-ins with the old PIN are still being
     // hashed when the change lands. One every 10 ms from its own address (so the
-    // lockout never refuses them) covers the whole change.
+    // lockout never refuses them) covers the whole change. Loopback addresses, which
+    // the server-wide budget leaves out: the old PIN's failures would pause the rest (Q-097).
     await app.close();
     data.remove();
     data = createTestData('emberglass-auth-');
@@ -482,7 +567,7 @@ describe('PIN change (specs/07-security-and-access.md §1, §2)', () => {
     let done = false;
     const change = changePin(changer, PIN, NEW_PIN).finally(() => (done = true));
     for (let n = 0; !done && n < 200; n++) {
-      signIns.push(enter(PIN, `10.1.${n >> 8}.${n & 255}`));
+      signIns.push(enter(PIN, `127.1.${n >> 8}.${n & 255}`));
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     expect((await change).statusCode).toBe(204);
@@ -636,7 +721,12 @@ describe('the DM session guards every /api route but PIN entry and setup (specs/
   it('declares the SRV-02 routes, so the checks below cover them', () => {
     const routes = protectedRoutes().map(({ method, url }) => `${method} ${url}`);
     expect(routes).toEqual(
-      expect.arrayContaining(['GET /api/settings', 'HEAD /api/settings', 'PUT /api/settings/pin']),
+      expect.arrayContaining([
+        'GET /api/settings',
+        'HEAD /api/settings',
+        'PATCH /api/settings',
+        'PUT /api/settings/pin',
+      ]),
     );
   });
 

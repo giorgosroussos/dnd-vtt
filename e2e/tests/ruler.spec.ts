@@ -112,7 +112,9 @@ test('a measurement on the live scene shows its line and distance on the TV and 
     await panel(dm).getByLabel('Feet per square').fill('10');
     await panel(dm).getByLabel('Feet per square').press('Enter');
     await expect.poll(async () => (await rulerOf(tvCanvas(tv)))?.feet).toBe(squares * 10);
-    expect((await rulerOf(viewport(dm)))?.feet).toBe(squares * 10);
+    // The DM view hears it from its own room's snapshot, sent in the same step but on another socket:
+    // on a slow runner it can render after the TV's (CI run on febd59d, 2026-09-29).
+    await expect.poll(async () => (await rulerOf(viewport(dm)))?.feet).toBe(squares * 10);
 
     // Escape on the canvas clears the measurement: gone from the TV.
     await viewport(dm).focus();

@@ -4,6 +4,8 @@ import {
   FEET_PER_SQUARE_BOUNDS,
   FIT_CAMERA,
   LIVE_COMMAND_PAYLOAD_SCHEMAS,
+  PinChangeBodySchema,
+  SettingsUpdateSchema,
   rulerFeet,
   TokenCreateBodySchema,
   TokenUpdateBodySchema,
@@ -95,6 +97,7 @@ export class FakeServer {
   tokens: Record<string, number> = {};
   liveSceneId: string | null = null;
   uploadLimit = 50 * 1024 * 1024;
+  displaySize = 4096;
   assets: LibraryAsset[] = [];
   images: Image[] = [];
   /** Scenes whose tokens use an asset, which refuse its deletion (D-083). */
@@ -795,13 +798,28 @@ export class FakeServer {
     if (!this.signedIn) return failure(401, 'unauthorized');
     if (path === '/api/connect' && method === 'GET') return json(200, this.connect);
     if (path === '/api/settings') {
+      // PATCH, as the server checks it (REL-01): strict and bounded, all or nothing.
+      if (method === 'PATCH') {
+        if (!Value.Check(SettingsUpdateSchema, b)) return failure(400, 'validation_failed');
+        const update = b;
+        this.uploadLimit = update.upload_limit_bytes ?? this.uploadLimit;
+        this.displaySize = update.display_variant_size ?? this.displaySize;
+        this.rulerRule = update.ruler_rule ?? this.rulerRule;
+      }
       return json(200, {
         id: '00000000-0000-4000-8000-00000000ffff',
         live_scene_id: this.liveSceneId,
         ruler_rule: this.rulerRule,
         upload_limit_bytes: this.uploadLimit,
-        display_variant_size: 4096,
+        display_variant_size: this.displaySize,
       });
+    }
+    if (path === '/api/settings/pin' && method === 'PUT') {
+      if (!Value.Check(PinChangeBodySchema, b)) return failure(400, 'validation_failed');
+      if (this.lockedFor !== undefined) return failure(429, 'locked_out', { 'retry-after': String(this.lockedFor) });
+      if (b.current_pin !== this.pin) return failure(401, 'pin_incorrect');
+      this.pin = String(b.new_pin);
+      return json(204);
     }
     if (path === '/api/images' && method === 'POST') {
       this.uploads.push(body);
@@ -985,16 +1003,28 @@ export function button(container: ParentNode, name: string): HTMLButtonElement |
 
 /**
  * jsdom has no modal dialog: `showModal` and `close` only open and close it here,
- * with the `close` event. The browser's focus trap and Escape are the e2e tests'.
+ * with the `close` event. As in a browser, while a modal dialog is open and in the
+ * document the page behind it is inert: focusing anything outside it does nothing
+ * (REL-01 review U-H1). The browser's focus trap and Escape are the e2e tests'.
  */
 export function installDialog(): void {
   const proto = HTMLDialogElement.prototype as HTMLDialogElement & { showModal?: () => void };
   if (typeof proto.showModal === 'function') return;
   proto.showModal = function showModal(this: HTMLDialogElement) {
     this.setAttribute('open', '');
+    this.dataset.fakeModal = '';
   };
   proto.close = function close(this: HTMLDialogElement) {
     this.removeAttribute('open');
+    delete this.dataset.fakeModal;
     this.dispatchEvent(new Event('close'));
+  };
+  // Called with `this` bound below.
+  // eslint-disable-next-line @typescript-eslint/unbound-method
+  const focus = HTMLElement.prototype.focus;
+  HTMLElement.prototype.focus = function inertFocus(this: HTMLElement, options?: FocusOptions) {
+    const modal = document.querySelector('dialog[data-fake-modal]');
+    if (modal && !modal.contains(this)) return;
+    focus.call(this, options);
   };
 }

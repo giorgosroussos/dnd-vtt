@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { CommandAck, LibraryAsset, Scene, SceneToken } from '@emberglass/shared';
 import { t } from '../ui/messages.js';
 import { installCanvas2d, installImageLoading, installResizeObserver } from '../ui/testing/canvas2d.js';
-import { button, click, FakeServer, installDialog, settle, submit } from '../ui/testing/fakeServer.js';
+import { button, click, FakeServer, installDialog, settle, submit, type Reply } from '../ui/testing/fakeServer.js';
 import { render, type Rendered } from '../ui/testing/render.js';
 import { Workspace } from './Workspace.js';
 
@@ -1059,6 +1059,74 @@ describe('the ruler (LIV-07, specs/06-grid-and-measurement.md §5, specs/04-live
     await measureByKeys(view, 'ArrowRight', 'ArrowDown', 'ArrowRight', 'ArrowDown');
     expect(shown(view)?.feet).toBe(15);
     expect(status(view)).toBe(distance(15));
+  });
+
+  it('measures by a rule another browser saved while this view was open, read again when the ruler is turned on (G-036)', async () => {
+    const view = await open();
+    await selectScene(view, cave);
+    // Saved from another DM browser: this view learns it when measuring starts.
+    server.rulerRule = 'dmg';
+    const reads = server.calls.filter((call) => call.path === '/api/settings').length;
+    await measureByKeys(view, 'ArrowRight', 'ArrowDown', 'ArrowRight', 'ArrowDown');
+    expect(server.calls.filter((call) => call.path === '/api/settings')).toHaveLength(reads + 1);
+    expect(shown(view)?.feet).toBe(15);
+    expect(status(view)).toBe(distance(15));
+  });
+
+  it('keeps the rule it had, saying nothing, when reading it again fails', async () => {
+    const view = await open();
+    await selectScene(view, cave);
+    server.before = (call) =>
+      call.path === '/api/settings'
+        ? { status: 500, body: { error: { code: 'internal_error', message: 'x' } } }
+        : undefined;
+    await measureByKeys(view, 'ArrowRight', 'ArrowDown', 'ArrowRight', 'ArrowDown');
+    expect(shown(view)?.feet).toBe(10);
+    expect(view.querySelector('.eg-notice')).toBeNull();
+  });
+
+  it('never lets a slow read of the settings undo a rule saved after it was sent (review C-L1)', async () => {
+    const view = await open();
+    await selectScene(view, cave);
+    let answer: (reply: Reply) => void = () => {};
+    const stale = {
+      id: '00000000-0000-4000-8000-00000000ffff',
+      live_scene_id: null,
+      ruler_rule: 'phb',
+      upload_limit_bytes: 50 * 1024 * 1024,
+      display_variant_size: 4096,
+    };
+    server.before = (call) =>
+      call.path === '/api/settings' && call.method === 'GET'
+        ? new Promise<Reply>((resolve) => (answer = resolve))
+        : undefined;
+    // Turning the ruler on reads the settings again; that read is held.
+    await measureByKeys(view, 'ArrowRight', 'ArrowDown', 'ArrowRight', 'ArrowDown');
+    server.before = undefined;
+    const held = answer;
+    await click(button(view, t('settings.open')));
+    const dialog = view.querySelector('dialog')!;
+    await click(dialog.querySelector<HTMLInputElement>('input[value="dmg"]'));
+    await submit(dialog.querySelector('form'));
+    await click(button(dialog, t('settings.close')));
+    expect(shown(view)?.feet).toBe(15);
+    held({ status: 200, body: stale });
+    await settle();
+    expect(shown(view)?.feet).toBe(15);
+  });
+
+  it('counts the measurement shown again by a rule saved in this view’s Settings, without a reload', async () => {
+    const view = await open();
+    await selectScene(view, cave);
+    await measureByKeys(view, 'ArrowRight', 'ArrowDown', 'ArrowRight', 'ArrowDown');
+    expect(shown(view)?.feet).toBe(10);
+    await click(button(view, t('settings.open')));
+    const dialog = view.querySelector('dialog')!;
+    await click(dialog.querySelector<HTMLInputElement>('input[value="dmg"]'));
+    await submit(dialog.querySelector('form'));
+    expect(server.rulerRule).toBe('dmg');
+    await click(button(dialog, t('settings.close')));
+    expect(shown(view)?.feet).toBe(15);
   });
 
   it('in live mode sends ruler.update for each measurement and ruler.clear to end it; the canvas shows what the TV shows', async () => {
