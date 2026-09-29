@@ -2,7 +2,6 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
 
 // The offline acceptance of specs/10-testing-acceptance.md §6 (specs/02-architecture.md §6, Q-020,
@@ -37,7 +36,8 @@ const browserService = (each: Attempt) =>
   each.from === 'browser' && EDGE_AGENT.test(each.agent ?? '') && MICROSOFT_SERVICES.test(hostOf(each.target));
 
 const log = process.env.EMBERGLASS_E2E_OUTBOUND_LOG!;
-const guard = fileURLToPath(new URL('../offline/guard.mjs', import.meta.url));
+// A URL, not a path: `--import` reads an absolute Windows path's drive letter as a URL scheme.
+const guard = new URL('../offline/guard.mjs', import.meta.url).href;
 const attempts = (file: string): Attempt[] =>
   existsSync(file)
     ? readFileSync(file, 'utf8')
