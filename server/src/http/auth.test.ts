@@ -545,6 +545,25 @@ describe('guessing protection (specs/07-security-and-access.md §6)', () => {
     expect(paused[0]!.addresses).toHaveLength(100);
   });
 
+  it('checks exactly one of five guesses arriving at once as the 100th of the day, and logs one pause (review T-L1)', async () => {
+    let failures = 0;
+    for (let burst = 0; failures < 99; burst++) {
+      for (let n = 0; n < 19 && failures < 99; n++, failures++) {
+        expectFailure(await enter(WRONG, `10.22.${burst}.${n}`), 401, 'pin_incorrect');
+      }
+      if (failures < 99) clock += 600_000;
+    }
+    const answers = await Promise.all([0, 1, 2, 3, 4].map((n) => enter(WRONG, `10.22.99.${n}`)));
+    const statuses = answers.map((response) => response.statusCode).sort();
+    expect(statuses).toEqual([401, 429, 429, 429, 429]);
+    const paused = readFileSync(logFilePath(data.dataDir), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((line) => line.event === 'pin.paused');
+    expect(paused).toEqual([expect.objectContaining({ budget: '24h', seconds: 600 })]);
+  });
+
   it('doubles a day-budget pause after a 10-minute one, one run count for both (Q-098)', async () => {
     await failAcrossAddresses();
     clock += 600_000;

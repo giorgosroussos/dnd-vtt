@@ -47,16 +47,37 @@ describe('lockout (specs/07-security-and-access.md §6)', () => {
     expect(lockoutDuration(10_000)).toBeGreaterThan(lockoutDuration(30));
   });
 
+  // The failure an attempt counted is opaque to its caller: any object.
+  const aFailure: unknown = expect.any(Object);
+
   it('locks on the fifth failure and refuses without counting while locked', () => {
     let time = 0;
     const lockout = createLockout(() => time);
     for (let n = 1; n < FAILURES_PER_LOCKOUT; n++)
-      expect(lockout.begin('a')).toEqual({ allowed: true, failures: n, lockedMs: null, paused: null });
-    expect(lockout.begin('a')).toEqual({ allowed: true, failures: 5, lockedMs: 60_000, paused: null });
+      expect(lockout.begin('a')).toEqual({
+        allowed: true,
+        failures: n,
+        lockedMs: null,
+        paused: null,
+        counted: aFailure,
+      });
+    expect(lockout.begin('a')).toEqual({
+      allowed: true,
+      failures: 5,
+      lockedMs: 60_000,
+      paused: null,
+      counted: aFailure,
+    });
     time = 30_000;
     expect(lockout.begin('a')).toEqual({ allowed: false, retryAfterMs: 30_000 });
     time = 60_000;
-    expect(lockout.begin('a')).toEqual({ allowed: true, failures: 6, lockedMs: null, paused: null });
+    expect(lockout.begin('a')).toEqual({
+      allowed: true,
+      failures: 6,
+      lockedMs: null,
+      paused: null,
+      counted: aFailure,
+    });
   });
 
   it('bounds how many addresses it remembers', () => {
@@ -178,6 +199,21 @@ describe('lockout (specs/07-security-and-access.md §6)', () => {
     clock.time += 1_200_000;
     const third = Array.from({ length: GLOBAL_FAILURES_PER_PAUSE }, (_, n) => lockout.begin(`10.6.0.${n}`)).at(-1)!;
     expect(third.allowed && third.paused).toMatchObject({ ms: 2_400_000, budget: '10m' });
+  });
+
+  it('forgives exactly the correct attempt’s own failure, never a later one of the same address (review C-L1)', () => {
+    let time = 0;
+    const lockout = createLockout(() => time);
+    // A slow correct PIN from 10.8.0.1 starts; nineteen others open a pause, which empties the window.
+    const slow = lockout.begin('10.8.0.1');
+    for (let n = 0; n < GLOBAL_FAILURES_PER_PAUSE - 1; n++) lockout.begin(`10.8.1.${n}`);
+    // The pause over, the same address fails once more; then the slow attempt turns out right.
+    time = pauseDuration(1);
+    expect(lockout.begin('10.8.0.1')).toMatchObject({ allowed: true, paused: null });
+    lockout.succeeded('10.8.0.1', slow.allowed ? slow.counted : undefined);
+    // The later failure still counts: the 19th more opens the next pause, not the 20th.
+    const more = Array.from({ length: GLOBAL_FAILURES_PER_PAUSE - 1 }, (_, n) => lockout.begin(`10.8.2.${n}`));
+    expect(more.at(-1)).toMatchObject({ allowed: true, paused: { budget: '10m' } });
   });
 
   it('never counts loopback towards the day budget, and forgives a correct PIN from it', () => {

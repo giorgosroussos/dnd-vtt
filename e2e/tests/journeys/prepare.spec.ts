@@ -29,10 +29,11 @@ import { deleteAssets, deleteCampaign, framesOf, player } from './support.js';
 test('Prepare (Phase 2 exit): a campaign prepared in the browser, calibrated by each method, with numbered tokens some hidden, reloads unchanged and reaches no TV', async ({
   page,
   browser,
-}) => {
-  // The longest journey: some forty steps, which WebKit on the Windows runner takes past the default
-  // 30 s (CI run 36563039931), each step passing (D-130).
-  test.setTimeout(90_000);
+}, info) => {
+  // The longest journey: some forty steps, which WebKit on the Windows runner (CI run 36563039931) and
+  // Firefox on a loaded machine take past the default 30 s, each step passing (D-131). Only those
+  // engines get longer; Chromium and Edge keep the default, so a slowdown there still fails (review T-L2).
+  if (['webkit', 'firefox'].includes(info.project.name)) test.setTimeout(90_000);
   // Unique across the browsers of the matrix too; kept short, since the layout check below reads long labels.
   const id = unique();
   // A TV connected all along: preparing reaches no client but the DM view (specs/02-architecture.md §4).
@@ -218,8 +219,11 @@ test('Prepare (Phase 2 exit): a campaign prepared in the browser, calibrated by 
   expect(loaded).toBe(200);
   expect(roadTokens[0]).toMatchObject({ asset_id: hero.id, label: heroName, hidden: false });
 
-  // The TV stayed on the idle screen and heard nothing of it: no scene, asset, token or name.
+  // The TV stayed on the idle screen and heard nothing of it: no scene, asset, token or name. It was
+  // connected all along: its idle snapshot arrived, so the silence is not a TV that never listened
+  // (review M4).
   await expect(player(tv)).toHaveAttribute('data-scene', 'idle');
+  expect(tvFrames.some((frame) => frame.startsWith('42') && frame.includes('"scene.snapshot"'))).toBe(true);
   const heard = tvFrames.join('\n');
   for (const secret of [campaign, throne, road, goblin.id, hero.id, goblin.image_id, goblinName, heroName, 'token.']) {
     expect(heard, secret).not.toContain(secret);

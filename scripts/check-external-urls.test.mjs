@@ -31,6 +31,8 @@ const CLEAN_HTML = `<!doctype html><html><head>
 <link rel="stylesheet" crossorigin href="/assets/index-a.css">
 </head><body><div id="root"></div><a href="https://example.org/licence">licence</a></body></html>`;
 const CLEAN_JS = [
+  'const url={pattern:`^http://[0-9.]+(:[0-9]+)?/$`};',
+  'console.warn("https://github.com/konvajs/react-konva/issues/256");',
   'import{a as b}from"./messages-x.js";',
   'const ns="http://www.w3.org/2000/svg",x=`http://www.w3.org/1999/xlink`;',
   'throw Error("https://react.dev/errors/"+e);',
@@ -141,6 +143,54 @@ describe('the build fails on an external URL in the built client (@gate:external
       'an SVG image reference',
       'icon.svg',
       '<svg xmlns="http://www.w3.org/2000/svg"><image href="https://img.example.com/a.png"/></svg>',
+      'https://img.example.com/a.png',
+    ],
+    // Review M1: what code can reach without naming a file.
+    ['a fetch', 'index.js', 'fetch("https://api.example.com/collect");', 'https://api.example.com/collect'],
+    ['a WebSocket', 'index.js', 'new WebSocket("wss://live.example.com");', 'wss://live.example.com'],
+    ['a beacon', 'index.js', 'navigator.sendBeacon("https://x.example.com/b");', 'https://x.example.com/b'],
+    [
+      'a pixel without an extension',
+      'index.js',
+      'i.src="https://x.example.com/p?id=1";',
+      'https://x.example.com/p?id=1',
+    ],
+    [
+      'a URL joined from pieces',
+      'index.js',
+      'const u="https://cdn.example.com/lib/"+n+".js";',
+      'https://cdn.example.com/lib/',
+    ],
+    [
+      'a web font stylesheet set from code',
+      'index.js',
+      'l.href="https://fonts.googleapis.com/css2?family=Inter";',
+      'https://fonts.googleapis.com/css2?family=Inter',
+    ],
+    [
+      'CSS inside a JavaScript string',
+      'index.js',
+      's.textContent=`@font-face{src:url(https://fonts.gstatic.com/s/x.woff2)}`;',
+      'https://fonts.gstatic.com/s/x.woff2',
+    ],
+    [
+      'a file on a documentation host',
+      'index.js',
+      'e="https://github.com/x/y/raw/main/a.js";',
+      'https://github.com/x/y/raw/main/a.js',
+    ],
+    ['an IPv6 literal', 'index.js', 'f="http://[2001:db8::1]/x";', 'http://[2001:db8::1]/x'],
+    [
+      'a > inside a quoted attribute',
+      'index.html',
+      '<img alt="a>b" src="https://img.example.com/a.png">',
+      'https://img.example.com/a.png',
+    ],
+    ['a base element', 'index.html', '<base href="https://cdn.example.com/">', 'https://cdn.example.com/'],
+    [
+      'an image-set',
+      'index.css',
+      '.a{background:image-set("https://img.example.com/a.png" 1x)}',
       'https://img.example.com/a.png',
     ],
   ])('fails on %s', (_label, name, text, url) => {

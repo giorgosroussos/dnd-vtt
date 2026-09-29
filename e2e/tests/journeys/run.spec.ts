@@ -205,6 +205,7 @@ test('Run: go live, move, reveal, hide, delete, undo, measure, steer the TV, pre
     // Prepare the next scene in prep mode: a token placed through the picker and its grid hidden
     // from players. Nothing of it reaches the TV, which keeps the live scene.
     const heard = tvFrames.length;
+    const gridBefore = await tvCanvas(tv).getAttribute('data-grid');
     await nameButton(dm, next).click();
     await expect(dm.getByRole('heading', { level: 1 })).toHaveText(next);
     await expect(panel(dm)).toHaveAttribute('data-mode', 'prep');
@@ -225,6 +226,8 @@ test('Run: go live, move, reveal, hide, delete, undo, measure, steer the TV, pre
     await expect(player(tv)).toHaveAttribute('data-scene', 'live');
     expect((await tvTokens(tv)).map((each) => each.id)).toEqual([shadeToken.id]);
     expect(requested.some((path) => path.includes(ghoul.image_id))).toBe(false);
+    // Hiding the grid of the scene being prepared left the live scene's grid on the TV as it was.
+    expect(await tvCanvas(tv).getAttribute('data-grid')).toBe(gridBefore);
 
     // Go live on it: the TV switches to the next scene and draws its token, fitted afresh.
     await liveBar(dm)
@@ -234,12 +237,14 @@ test('Run: go live, move, reveal, hide, delete, undo, measure, steer the TV, pre
     await expect(panel(dm)).toHaveAttribute('data-mode', 'live');
     await expect.poll(async () => (await tvTokens(tv)).map((each) => each.id)).toEqual([ghoulToken!.id]);
     await expect(tvCanvas(tv)).toHaveAttribute('data-grid', 'none');
-    // What the TV heard since the prep edits began: nothing of the next scene until its activation's
-    // snapshot, the frame that first names it.
+    // What the TV heard since the prep edits began: nothing at all before the activation's snapshot.
+    // Its socket delivers in the order the server sent, so any frame the edits had caused would come
+    // first; the order proves it without waiting on a clock (review M4).
     const since = tvFrames.slice(heard);
-    const first = since.findIndex((frame) => frame.includes(crypt.id) || frame.includes(ghoulToken!.id));
-    expect(first).toBeGreaterThanOrEqual(0);
-    expect(since[first]).toContain('"scene.snapshot"');
+    expect(since.length).toBeGreaterThan(0);
+    expect(since[0]).toContain('"scene.snapshot"');
+    // The next scene's, by its token: a players' snapshot names no scene.
+    expect(since[0]).toContain(ghoulToken!.id);
 
     // Blank TV: the idle screen, and the canvas back in prep mode.
     await liveBar(dm).getByRole('button', { name: 'Blank TV' }).click();

@@ -26,6 +26,7 @@ export {
   SOCKET_CHANNELS,
   SOCKET_PATH,
   HEARTBEAT_INTERVAL_MS,
+  SOCKET_REFUSALS,
   HEARTBEAT_TIMEOUT_MS,
   type CommandAck,
   type CommandEnvelope,

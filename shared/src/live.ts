@@ -39,6 +39,13 @@ export const SOCKET_PATH = '/socket.io';
 export const HEARTBEAT_INTERVAL_MS = 10_000;
 export const HEARTBEAT_TIMEOUT_MS = 5_000;
 
+// Why the server refused a socket in its handshake: the message of the client's connect_error. A
+// refused socket is not retried by Socket.io itself; the client waits before trying again.
+export const SOCKET_REFUSALS = {
+  // More player views from one address than the server holds at once (G-029).
+  tooManyViews: 'too_many_views',
+} as const;
+
 // The rooms of specs/04-live-sync.md §1; the server decides which a socket joins,
 // from its DM session only (Q-046).
 export const ROOMS = ['dm', 'players'] as const;

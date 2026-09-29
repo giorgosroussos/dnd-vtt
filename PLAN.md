@@ -19,7 +19,7 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
   - Residuals: each gap listed above closed with its test, or kept with a recorded decision and its row updated. `make verify` exit 0 on both CI runners. `TRACEABILITY.md` REL-02 row and the five journey rows with test names; Phase 3's exit recorded.
 - **Non-goals:** the owner's LG TV run and the display-size default (REL-03, G-002); packaging (`02` §8); any feature beyond the MVP (`01` §4 to §7).
 - **Review:** `Touches red line: yes` (the offline run, `02` §6), so prompt 2 (review) runs after implementation.
-- **Status (2026-09-29):** implemented and passing locally on Linux (D-127, D-128, D-129; `TRACEABILITY.md` REL-02 row). Remaining before done: the CI run on both runners, which is the first run of WebKit (it cannot start on the development machine) and of Edge; the owner removing the two `tripwire · … (absent)` jobs from the ruleset's required checks; then the review (prompt 2).
+- **Status (2026-09-29):** implemented (D-127 to D-133), green on all 18 CI jobs in run 36574280148, the matrix's first WebKit and Edge runs included; the ruleset's tripwire checks removed by the owner; reviewed (prompt 2), with the approved fixes in D-134 and D-135 and G-041, G-042 opened. Remaining before done: a green CI run with the review fixes.
 
 ## Next
 

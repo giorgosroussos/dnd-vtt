@@ -36,7 +36,14 @@ export interface Pause {
 }
 
 export type AttemptStart =
-  | { allowed: true; failures: number; lockedMs: number | null; paused: Pause | null }
+  | {
+      allowed: true;
+      failures: number;
+      lockedMs: number | null;
+      paused: Pause | null;
+      /** The failure this attempt counted, to hand back to `succeeded` if the PIN is right. */
+      counted: CountedFailure;
+    }
   | { allowed: false; retryAfterMs: number };
 
 export interface Lockout {
@@ -46,8 +53,11 @@ export interface Lockout {
    */
   begin(address: string): AttemptStart;
   /** The attempt's PIN was right: the address starts afresh, and its failure leaves the server's budget. */
-  succeeded(address: string): void;
+  succeeded(address: string, counted?: CountedFailure): void;
 }
+
+/** A failure counted by `begin`, opaque to its caller. */
+export type CountedFailure = object;
 
 interface Failure {
   key: string;
@@ -105,8 +115,8 @@ export function createLockout(now: () => number = Date.now): Lockout {
         entry.lockedUntil = time + lockedMs;
       }
       let paused: Pause | null = null;
+      const failure: Failure = { key, address, time };
       if (counted) {
-        const failure = { key, address, time };
         window = window.filter((earlier) => time - earlier.time < GLOBAL_WINDOW_MS);
         window.push(failure);
         day = day.filter((earlier) => time - earlier.time < DAILY_WINDOW_MS);
@@ -126,15 +136,17 @@ export function createLockout(now: () => number = Date.now): Lockout {
           if (opener === day) day = [];
         }
       }
-      return { allowed: true, failures: entry.failures, lockedMs, paused };
+      return { allowed: true, failures: entry.failures, lockedMs, paused, counted: failure };
     },
-    succeeded(address) {
+    succeeded(address, counted) {
       const key = lockoutKey(address);
       entries.delete(key);
-      // Its own failure, counted when it started. A pause it completed stays: the wrong PINs came first.
+      // Its own failure, counted when it started: that very entry when the caller hands it back, so a
+      // pause that already emptied it takes no earlier failure of the address out instead (review C-L1).
+      // A pause it completed stays: the wrong PINs came first.
       for (const budget of [window, day]) {
-        const last = budget.findLastIndex((failure) => failure.key === key);
-        if (last >= 0) budget.splice(last, 1);
+        const at = counted ? budget.indexOf(counted as Failure) : budget.findLastIndex((each) => each.key === key);
+        if (at >= 0) budget.splice(at, 1);
       }
     },
   };

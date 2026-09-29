@@ -9,6 +9,7 @@ import {
   ROOMS,
   SOCKET_CHANNELS,
   SOCKET_PATH,
+  SOCKET_REFUSALS,
   HEARTBEAT_INTERVAL_MS,
   HEARTBEAT_TIMEOUT_MS,
   ScreenSchema,
@@ -88,8 +89,8 @@ import { readSnapshot, type LiveMemory } from './snapshot.js';
 // connection lines are limited per address like rejected requests (G-006). One LAN address holds
 // at most MAX_PLAYER_SOCKETS_PER_ADDRESS player sockets at once, an IPv6 one by its /64 as the PIN
 // limits count it, so a device opening hundreds cannot make every broadcast cost that many
-// encodings (G-029); a socket past the cap is dropped before it joins a room or hears anything. The
-// server PC itself is not capped.
+// encodings (G-029); a socket past the cap is refused in the handshake, before it joins a room or
+// hears anything. The server PC itself is not capped, nor is a DM view.
 
 export interface LiveSocketOptions {
   db: Database.Database;
@@ -327,27 +328,45 @@ export function attachLiveSocket(
 
   // Player sockets held per address key, loopback left out (G-029).
   const playersByAddress = new Map<string, number>();
+  // The role, from the DM session alone (Q-046); a player view's socket holds no session at all, so it
+  // can neither command nor stay a DM.
+  const sessionOfSocket = (socket: Socket): string | undefined =>
+    (socket.handshake.auth as { view?: unknown }).view === PLAYER_VIEW_AUTH.view
+      ? undefined
+      : auth.sessionOfCookie(socket.request.headers.cookie);
+
+  // The cap on player sockets per address (G-029) is applied in the handshake, so a socket past it is
+  // refused before it connects: the client hears a refusal, not a connection that ends, and retries
+  // after a pause instead of at once (review H1). The count is released when the socket goes, with
+  // the listener registered here, so no later step can leave it counted (review C-L3).
+  io.use((socket, next) => {
+    if (sessionOfSocket(socket) !== undefined) return next();
+    const address = normalizeAddress(clientAddress(socket.request));
+    if (isLoopback(address)) return next();
+    const key = lockoutKey(address);
+    const held = playersByAddress.get(key) ?? 0;
+    if (held >= maxPlayerSocketsPerAddress) {
+      if (lines.admit(address)) {
+        logger.warn('ws.too_many', `Too many player views from ${address}; one more was refused.`, {
+          address,
+          limit: maxPlayerSocketsPerAddress,
+        });
+      }
+      return next(new Error(SOCKET_REFUSALS.tooManyViews));
+    }
+    playersByAddress.set(key, held + 1);
+    socket.on('disconnect', () => {
+      const left = (playersByAddress.get(key) ?? 1) - 1;
+      if (left > 0) playersByAddress.set(key, left);
+      else playersByAddress.delete(key);
+    });
+    next();
+  });
+
   io.on('connection', (socket) => {
-    const playerView = (socket.handshake.auth as { view?: unknown }).view === PLAYER_VIEW_AUTH.view;
-    // A player view's socket holds no session at all: it can neither command nor stay a DM.
-    const session = playerView ? undefined : auth.sessionOfCookie(socket.request.headers.cookie);
+    const session = sessionOfSocket(socket);
     const role: Room = session === undefined ? 'players' : 'dm';
     const address = normalizeAddress(clientAddress(socket.request));
-    const key = role === 'players' && !isLoopback(address) ? lockoutKey(address) : undefined;
-    if (key !== undefined) {
-      const held = playersByAddress.get(key) ?? 0;
-      if (held >= maxPlayerSocketsPerAddress) {
-        if (lines.admit(address)) {
-          logger.warn('ws.too_many', `Too many player views from ${address}; one more was refused.`, {
-            address,
-            limit: maxPlayerSocketsPerAddress,
-          });
-        }
-        socket.disconnect(true);
-        return;
-      }
-      playersByAddress.set(key, held + 1);
-    }
     void socket.join(role);
     if (session !== undefined) {
       const sockets = bySession.get(session) ?? new Set<Socket>();
@@ -461,11 +480,6 @@ export function attachLiveSocket(
     socket.on('disconnect', () => {
       clearTimeout(scheduled);
       clearTimeout(reportTimer);
-      if (key !== undefined) {
-        const left = (playersByAddress.get(key) ?? 1) - 1;
-        if (left > 0) playersByAddress.set(key, left);
-        else playersByAddress.delete(key);
-      }
       if (role === 'players') {
         screens.disconnected(socket.id);
         screenChanged();

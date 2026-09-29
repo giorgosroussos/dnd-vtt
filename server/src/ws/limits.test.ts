@@ -2,7 +2,7 @@ import type { AddressInfo } from 'node:net';
 import type { FastifyInstance } from 'fastify';
 import { io as connectClient, type Socket as ClientSocket } from 'socket.io-client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SOCKET_CHANNELS, SOCKET_PATH } from '@emberglass/shared';
+import { SOCKET_CHANNELS, SOCKET_PATH, SOCKET_REFUSALS } from '@emberglass/shared';
 import { buildTestApp, createTestData, setUpPin, type TestData } from '../http/testing/app.js';
 import { MAX_PLAYER_SOCKETS_PER_ADDRESS } from './live.js';
 
@@ -39,7 +39,10 @@ afterEach(async () => {
   data.remove();
 });
 
-/** A socket from `address`: 'snapshot' once it heard its first snapshot, 'dropped' if the server cut it. */
+/**
+ * A socket from `address`: 'snapshot' once it heard its first snapshot, 'refused: <why>' if the
+ * handshake was refused, 'dropped' if the server cut a connection it had accepted.
+ */
 function open(
   address: string,
   headers: Record<string, string> = {},
@@ -57,17 +60,19 @@ function open(
       if (event.type === 'scene.snapshot') resolve({ socket, outcome: 'snapshot' });
     });
     socket.on('disconnect', () => resolve({ socket, outcome: 'dropped' }));
-    socket.on('connect_error', () => resolve({ socket, outcome: 'refused' }));
+    socket.on('connect_error', (error) => resolve({ socket, outcome: `refused: ${error.message}` }));
   });
 }
 
 describe('player sockets per address (G-029)', () => {
-  it('drops a player socket past the cap before it hears anything, and admits one again once another goes', async () => {
+  it('refuses a player socket past the cap in the handshake, and admits one again once another goes', async () => {
     expect(MAX_PLAYER_SOCKETS_PER_ADDRESS).toBeGreaterThanOrEqual(8);
     const held = await Promise.all(Array.from({ length: LIMIT }, () => open('192.168.1.40')));
     expect(held.map((each) => each.outcome)).toEqual(['snapshot', 'snapshot', 'snapshot']);
+    // Refused before it connects, so a client hears a refusal and waits, not a connection that ends (review H1).
     const extra = await open('192.168.1.40');
-    expect(extra.outcome).toBe('dropped');
+    expect(extra.outcome).toBe(`refused: ${SOCKET_REFUSALS.tooManyViews}`);
+    expect(extra.socket.active).toBe(false);
     // Another address is its own count.
     expect((await open('192.168.1.41')).outcome).toBe('snapshot');
     // One goes: its place is free again.
@@ -77,9 +82,19 @@ describe('player sockets per address (G-029)', () => {
 
   it('counts an IPv6 client by its /64, never caps the server PC, and never caps a DM view', async () => {
     for (let n = 1; n <= LIMIT; n++) expect((await open(`2001:db8:1:2::${n}`)).outcome).toBe('snapshot');
-    expect((await open('2001:db8:1:2:ffff::9')).outcome).toBe('dropped');
+    expect((await open('2001:db8:1:2:ffff::9')).outcome).toBe(`refused: ${SOCKET_REFUSALS.tooManyViews}`);
     for (let n = 0; n < LIMIT + 2; n++) expect((await open('127.0.0.1')).outcome).toBe('snapshot');
     for (let n = 0; n < LIMIT; n++) expect((await open('192.168.1.50')).outcome).toBe('snapshot');
     expect((await open('192.168.1.50', { cookie })).outcome).toBe('snapshot');
+  });
+
+  it('never lets refused sockets change the count: each extra is refused, and one freed slot admits exactly one (review M5)', async () => {
+    const held = await Promise.all(Array.from({ length: LIMIT }, () => open('192.168.1.60')));
+    const refused = `refused: ${SOCKET_REFUSALS.tooManyViews}`;
+    for (let n = 0; n < 3; n++) expect((await open('192.168.1.60')).outcome).toBe(refused);
+    held[0]!.socket.disconnect();
+    await vi.waitFor(async () => expect((await open('192.168.1.60')).outcome).toBe('snapshot'));
+    expect((await open('192.168.1.60')).outcome).toBe(refused);
+    expect((await open('192.168.1.60')).outcome).toBe(refused);
   });
 });

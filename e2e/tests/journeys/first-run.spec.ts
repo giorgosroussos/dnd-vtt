@@ -1,5 +1,13 @@
 import { expect, test } from '@playwright/test';
-import { LAN_LOAD_MS, lanAddress, player, startOwnServer, type OwnServer } from './support.js';
+import {
+  lanAddress,
+  lanWait,
+  player,
+  SLOW_LAN_LOAD_MS,
+  startOwnServer,
+  timedLanLoad,
+  type OwnServer,
+} from './support.js';
 
 // Journey 1, First run (specs/10-testing-acceptance.md §5, specs/08-ux-journeys.md §10,
 // specs/07-security-and-access.md §1, specs/09-operations.md §2, Q-007): start the server on an
@@ -19,9 +27,10 @@ test.afterEach(async () => {
 
 test('First run: the server starts, a LAN browser cannot set the PIN, the server PC sets it and opens the DM view', async ({
   browser,
-}) => {
-  // Four loads from the LAN address, each allowed LAN_LOAD_MS (G-040).
-  test.setTimeout(4 * LAN_LOAD_MS + 30_000);
+}, info) => {
+  // Four loads from the LAN address, allowed longer where they are known to be slow (G-040).
+  const wait = lanWait(info);
+  if ('timeout' in wait) test.setTimeout(4 * SLOW_LAN_LOAD_MS + 30_000);
   const local = `http://localhost:${server.port}`;
   const lan = `http://${lanAddress()}:${server.port}`;
   // The console names the player view's address and how to set the PIN (specs/09-operations.md §2).
@@ -34,9 +43,9 @@ test('First run: the server starts, a LAN browser cannot set the PIN, the server
   try {
     // A browser on the LAN: told to set up on the server PC, offered nothing else, and refused.
     const guest = await lanContext.newPage();
-    await guest.goto(`${lan}/dm`, { timeout: LAN_LOAD_MS });
-    await expect(guest.getByRole('heading', { level: 1 })).toHaveText('Set up on the server PC', {
-      timeout: LAN_LOAD_MS,
+    await timedLanLoad(info, 'the DM view from the LAN address', async () => {
+      await guest.goto(`${lan}/dm`, wait);
+      await expect(guest.getByRole('heading', { level: 1 })).toHaveText('Set up on the server PC', wait);
     });
     await expect(guest.locator('main input, main button')).toHaveCount(0);
     const refused = await guest.evaluate(() =>
@@ -48,8 +57,8 @@ test('First run: the server starts, a LAN browser cannot set the PIN, the server
     );
     expect(refused).toBe(403);
     // The player view is open to it all along (specs/07-security-and-access.md §3).
-    await guest.goto(`${lan}/`, { timeout: LAN_LOAD_MS });
-    await expect(player(guest)).toHaveAttribute('data-scene', 'idle', { timeout: LAN_LOAD_MS });
+    await guest.goto(`${lan}/`, wait);
+    await expect(player(guest)).toHaveAttribute('data-scene', 'idle', wait);
 
     // On the server PC: the setup form, the PIN twice, then the DM workspace.
     const dm = await pcContext.newPage();
@@ -62,14 +71,12 @@ test('First run: the server starts, a LAN browser cannot set the PIN, the server
     await expect(dm.getByRole('heading', { level: 1 })).toHaveText('No scene selected');
 
     // The LAN browser now gets the PIN form, never setup; the right PIN opens the DM view there too.
-    await guest.goto(`${lan}/dm`, { timeout: LAN_LOAD_MS });
-    await expect(guest.getByRole('heading', { level: 1 })).toHaveText('Enter the DM PIN', { timeout: LAN_LOAD_MS });
+    await guest.goto(`${lan}/dm`, wait);
+    await expect(guest.getByRole('heading', { level: 1 })).toHaveText('Enter the DM PIN', wait);
     await guest.getByLabel('PIN', { exact: true }).fill('24681357');
     await guest.getByRole('button', { name: 'Enter' }).click();
     // The workspace's code is its own chunk, loaded from the LAN address too.
-    await expect(guest.getByRole('navigation', { name: 'Campaigns, sessions and scenes' })).toBeVisible({
-      timeout: LAN_LOAD_MS,
-    });
+    await expect(guest.getByRole('navigation', { name: 'Campaigns, sessions and scenes' })).toBeVisible(wait);
     // And a second setup is refused even from the server PC.
     const again = await dm.evaluate(() =>
       fetch('/api/setup', {

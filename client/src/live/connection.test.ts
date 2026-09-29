@@ -6,7 +6,10 @@ import {
   COMMAND_TIMEOUT_MS,
   connectLive,
   HIDDEN_RECONNECT_MS,
+  REFUSED_RETRY_MS,
   SNAPSHOT_RETRY_MS,
+  SOCKET_OPTIONS,
+  CONNECT_TIMEOUT_MS,
   type LiveStatus,
 } from './connection.js';
 
@@ -205,6 +208,23 @@ describe('commands from the DM view (LIV-04, specs/04-live-sync.md §2)', () => 
     connection.close();
   });
 
+  it('settles a command in flight as lost the moment its socket goes, not after the timeout (review M2)', async () => {
+    vi.useFakeTimers();
+    const { connection, dm } = dmConnection();
+    dm.open({ role: 'dm', scene: null });
+    const settled: unknown[] = [];
+    void connection.command('scene.deactivate', {}).then((outcome) => settled.push(outcome));
+    // A reconnect on waking drops the socket; Socket.io forgets the acknowledgement.
+    connection.reconnect();
+    await Promise.resolve();
+    expect(settled).toEqual([{ ok: false, code: 'network' }]);
+    // Nothing is settled twice when the timeout would have come.
+    vi.advanceTimersByTime(COMMAND_TIMEOUT_MS);
+    await Promise.resolve();
+    expect(settled).toHaveLength(1);
+    connection.close();
+  });
+
   it('reconnects on request, and not once closed', () => {
     const { connection, dm } = dmConnection();
     dm.open({ role: 'dm', scene: null });
@@ -213,6 +233,45 @@ describe('commands from the DM view (LIV-04, specs/04-live-sync.md §2)', () => 
     connection.close();
     connection.reconnect();
     expect(dm.connects).toBe(1);
+  });
+});
+
+describe('the real socket (review M3)', () => {
+  it('gives up a connection attempt after 5 s, over WebSocket only, retrying within 5 s', () => {
+    expect(CONNECT_TIMEOUT_MS).toBe(5_000);
+    expect(SOCKET_OPTIONS).toMatchObject({
+      timeout: CONNECT_TIMEOUT_MS,
+      transports: ['websocket'],
+      reconnection: true,
+      reconnectionDelayMax: 5_000,
+    });
+  });
+});
+
+describe('a refused handshake (review H1)', () => {
+  it('tries again after a pause, once per pause while refused, and not once closed', () => {
+    vi.useFakeTimers();
+    socket.refuse('too_many_views');
+    expect(statuses).toEqual(['connecting', 'connecting']);
+    vi.advanceTimersByTime(REFUSED_RETRY_MS - 1);
+    expect(socket.connects).toBe(0);
+    vi.advanceTimersByTime(1);
+    expect(socket.connects).toBe(1);
+    socket.refuse('too_many_views');
+    vi.advanceTimersByTime(REFUSED_RETRY_MS);
+    expect(socket.connects).toBe(2);
+    socket.refuse('too_many_views');
+    close();
+    vi.advanceTimersByTime(REFUSED_RETRY_MS * 3);
+    expect(socket.connects).toBe(2);
+  });
+
+  it('leaves a lost connection to Socket.io, which retries by itself', () => {
+    vi.useFakeTimers();
+    socket.open(idle, 1);
+    socket.drop('transport close');
+    vi.advanceTimersByTime(REFUSED_RETRY_MS * 2);
+    expect(socket.connects).toBe(0);
   });
 });
 
@@ -251,6 +310,18 @@ describe('waking up (G-026)', () => {
     vi.advanceTimersByTime(HIDDEN_RECONNECT_MS);
     show('visible');
     expect(socket.connects).toBe(1);
+  });
+
+  it('counts a page opened hidden as hidden from the start (review C-L2)', () => {
+    vi.useFakeTimers();
+    visibility = 'hidden';
+    const connection = connectLive('player', { onStatus: () => {}, onSnapshot: () => {}, onEvent: () => {} });
+    const own = fake.sockets.at(-1)!;
+    own.open(idle, 1);
+    vi.advanceTimersByTime(HIDDEN_RECONNECT_MS);
+    show('visible');
+    expect(own.connects).toBe(1);
+    connection.close();
   });
 
   it('listens no more once closed', () => {

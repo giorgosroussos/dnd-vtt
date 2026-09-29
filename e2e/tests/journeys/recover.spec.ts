@@ -100,6 +100,8 @@ test('Recover: the TV and the DM laptop lose the network and get it back, and bo
     await expect(liveBar(dm).getByText('The connection to the server was lost. Reconnecting…')).toBeVisible({
       timeout: BOUND_MS + 5_000,
     });
+    // And so does the TV's, whose network died too (review M6).
+    await expect(player(tv)).toHaveAttribute('data-live', 'reconnecting', { timeout: BOUND_MS + 5_000 });
     expect(Date.now() - cutAt).toBeLessThan(BOUND_MS + 5_000);
 
     // Meanwhile the game goes on: the keeper moves and the drowned one is revealed.
@@ -124,6 +126,7 @@ test('Recover: the TV and the DM laptop lose the network and get it back, and bo
         { id: keeperToken.id, x: 7, y: 3 },
       ]);
     await expect(player(tv)).toHaveAttribute('data-scene', 'live');
+    await expect(player(tv)).toHaveAttribute('data-live', 'connected');
     await expect(liveBar(dm).getByRole('status')).toHaveText(`Live: ${names.scene}`, { timeout: 20_000 });
     await expect(panel(dm)).toHaveAttribute('data-mode', 'live');
     await expect

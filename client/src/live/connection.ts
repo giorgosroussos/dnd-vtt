@@ -42,6 +42,8 @@ export type LiveStatus = 'connecting' | 'connected' | 'reconnecting';
 /** What the connection needs of a Socket.io client socket; the component tests pass a fake. */
 export interface LiveSocketLike {
   readonly connected: boolean;
+  /** False once the server refused the socket in its handshake: Socket.io then does not retry by itself. */
+  readonly active: boolean;
   on(event: string, listener: (...args: never[]) => void): unknown;
   emit(event: string, ...args: unknown[]): unknown;
   connect(): unknown;
@@ -56,19 +58,21 @@ export type SocketFactory = (view: LiveView) => LiveSocketLike;
 // A handshake on the LAN takes milliseconds.
 export const CONNECT_TIMEOUT_MS = 5_000;
 
+/** The options of the real socket, beside the view's handshake hint; exported for their test (review M3). */
+export const SOCKET_OPTIONS = {
+  path: SOCKET_PATH,
+  // WebSocket only: no long-polling requests (D-104).
+  transports: ['websocket'],
+  reconnection: true,
+  reconnectionDelay: 500,
+  reconnectionDelayMax: 5_000,
+  // An attempt made while the network is down can hang unanswered; given up after this, the next
+  // attempt follows at once instead of after Socket.io's 20 s (G-026, D-130).
+  timeout: CONNECT_TIMEOUT_MS,
+};
+
 const realSocket: SocketFactory = (view) =>
-  io({
-    path: SOCKET_PATH,
-    auth: view === 'player' ? { ...PLAYER_VIEW_AUTH } : {},
-    // WebSocket only: no long-polling requests (D-104).
-    transports: ['websocket'],
-    reconnection: true,
-    reconnectionDelay: 500,
-    reconnectionDelayMax: 5_000,
-    // An attempt made while the network is down can hang unanswered; given up after this, the next
-    // attempt follows at once instead of after Socket.io's 20 s (G-026, D-130).
-    timeout: CONNECT_TIMEOUT_MS,
-  });
+  io({ ...SOCKET_OPTIONS, auth: view === 'player' ? { ...PLAYER_VIEW_AUTH } : {} });
 
 let socketFactory: SocketFactory = realSocket;
 
@@ -92,6 +96,10 @@ export interface LiveHandlers {
 export const SNAPSHOT_RETRY_MS = 5_000;
 // How long a command may go unanswered before the view says the connection was lost.
 export const COMMAND_TIMEOUT_MS = 10_000;
+// How long a socket the server refused in its handshake (too many views from one address) waits before
+// it tries again (review H1): a slot freed is taken within this, and a refused screen costs the server
+// one handshake per interval, not hundreds a second.
+export const REFUSED_RETRY_MS = 5_000;
 // A page hidden this long may have slept: shown again, it reconnects rather than trust its socket.
 export const HIDDEN_RECONNECT_MS = HEARTBEAT_INTERVAL_MS + HEARTBEAT_TIMEOUT_MS;
 
@@ -143,10 +151,25 @@ export function connectLive(view: LiveView, handlers: LiveHandlers): LiveConnect
     handlers.onStatus('connected');
     sendViewport();
   });
-  socket.on('connect_error', () => handlers.onStatus(everConnected ? 'reconnecting' : 'connecting'));
+  let refusedRetry: ReturnType<typeof setTimeout> | undefined;
+  socket.on('connect_error', () => {
+    handlers.onStatus(everConnected ? 'reconnecting' : 'connecting');
+    // Refused by the server, not lost: Socket.io gives up, so the view tries again after a pause.
+    if (!socket.active && !closed) {
+      clearTimeout(refusedRetry);
+      refusedRetry = setTimeout(() => {
+        if (!closed && !socket.connected) socket.connect();
+      }, REFUSED_RETRY_MS);
+    }
+  });
+  // Commands waiting on their acknowledgement. Socket.io drops an acknowledgement when its socket goes,
+  // so each is settled at once as lost, not after COMMAND_TIMEOUT_MS; if it did apply, its events or
+  // the next snapshot bring the view in step (review M2).
+  const pending = new Set<() => void>();
   socket.on('disconnect', (reason: string) => {
     clearTimeout(retry);
     tracker.reset();
+    for (const lost of [...pending]) lost();
     if (closed) return;
     handlers.onStatus('reconnecting');
     // Socket.io does not reconnect by itself when the server ended the socket: the session ended.
@@ -171,7 +194,10 @@ export function connectLive(view: LiveView, handlers: LiveHandlers): LiveConnect
     socket.disconnect();
     socket.connect();
   };
-  let hiddenSince: number | undefined;
+  const browser = typeof window !== 'undefined' && typeof document !== 'undefined';
+  // A page opened hidden (a background tab, a TV that loaded with its screen off) counts as hidden
+  // from the start (review C-L2).
+  let hiddenSince: number | undefined = browser && document.visibilityState === 'hidden' ? Date.now() : undefined;
   const onVisibility = (): void => {
     if (document.visibilityState === 'hidden') {
       hiddenSince ??= Date.now();
@@ -181,7 +207,6 @@ export function connectLive(view: LiveView, handlers: LiveHandlers): LiveConnect
     hiddenSince = undefined;
     if (since !== undefined && Date.now() - since >= HIDDEN_RECONNECT_MS) reconnect();
   };
-  const browser = typeof window !== 'undefined' && typeof document !== 'undefined';
   if (browser) {
     window.addEventListener('online', reconnect);
     document.addEventListener('visibilitychange', onVisibility);
@@ -190,9 +215,16 @@ export function connectLive(view: LiveView, handlers: LiveHandlers): LiveConnect
   const command = (type: CommandType, payload: object): Promise<CommandOutcome> =>
     new Promise((resolve) => {
       if (closed || !socket.connected) return resolve({ ok: false, code: 'network' });
-      const timer = setTimeout(() => resolve({ ok: false, code: 'network' }), COMMAND_TIMEOUT_MS);
+      const lost = () => {
+        clearTimeout(timer);
+        pending.delete(lost);
+        resolve({ ok: false, code: 'network' });
+      };
+      const timer = setTimeout(lost, COMMAND_TIMEOUT_MS);
+      pending.add(lost);
       socket.emit(SOCKET_CHANNELS.command, { type, payload }, (ack: CommandAck) => {
         clearTimeout(timer);
+        pending.delete(lost);
         resolve(
           'ok' in ack && ack.ok
             ? { ok: true }
@@ -205,6 +237,7 @@ export function connectLive(view: LiveView, handlers: LiveHandlers): LiveConnect
     close: () => {
       closed = true;
       clearTimeout(retry);
+      clearTimeout(refusedRetry);
       if (browser) {
         window.removeEventListener('online', reconnect);
         document.removeEventListener('visibilitychange', onVisibility);

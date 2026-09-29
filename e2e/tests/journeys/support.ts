@@ -43,12 +43,23 @@ export function unique(info: TestInfo, name: string): string {
 }
 
 /**
- * How long a view opened from this PC's LAN address may take to show its first screen. Firefox on
- * the Windows runner took 9 s and then 26 s to load from 10.1.0.x where every other browser took
- * about a second (CI runs 36558406339, 36564824322); the cause is not known (G-040, D-132). A slow
- * load still has to finish: every assertion stands, only the wait is longer.
+ * The wait allowed for a view opened from this PC's LAN address to load and show its first screen.
+ * Firefox on the Windows runner took 9 s and then 26 s to load from 10.1.0.x where every other
+ * browser took about a second (CI runs 36558406339, 36564824322); the cause is not known (G-040,
+ * D-132). Only there is the wait longer, 45 s; everywhere else the defaults apply, so a slowdown
+ * elsewhere still fails (review T-L2). Every assertion stands; only the wait changes.
  */
-export const LAN_LOAD_MS = 45_000;
+export const SLOW_LAN_LOAD_MS = 45_000;
+export function lanWait(info: TestInfo): { timeout: number } | Record<string, never> {
+  return process.platform === 'win32' && info.project.name === 'firefox' ? { timeout: SLOW_LAN_LOAD_MS } : {};
+}
+
+/** Records how long a load from the LAN address took, so a drift shows in the report (review T-L2). */
+export async function timedLanLoad(info: TestInfo, what: string, load: () => Promise<unknown>): Promise<void> {
+  const started = Date.now();
+  await load();
+  info.annotations.push({ type: 'LAN load', description: `${what}: ${Date.now() - started} ms` });
+}
 
 /** This PC's first non-internal IPv4 address: how a LAN device reaches the server. */
 export function lanAddress(): string {

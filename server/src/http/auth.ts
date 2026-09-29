@@ -181,7 +181,7 @@ export function registerAuth(
     const address = clientAddress(request);
     const attempt = lockout.begin(address);
     if (!attempt.allowed) throw lockedOut(attempt.retryAfterMs);
-    // A pause stays whether or not this PIN is right (19 wrong ones came first), so it is logged now:
+    // A pause stays whether or not this PIN is right (the wrong ones that spent the budget came first), so it is logged now:
     // an address's own lockout is lifted by a right PIN and is logged only with a wrong one (review C-M1).
     if (attempt.paused !== null) {
       const seconds = attempt.paused.ms / 1000;
@@ -192,7 +192,7 @@ export function registerAuth(
       );
     }
     if (await verifyPin(pin, stored)) {
-      lockout.succeeded(address);
+      lockout.succeeded(address, attempt.counted);
       return;
     }
     logger.warn('pin.failed', `Wrong PIN from ${address}.`, { address, failures: attempt.failures });

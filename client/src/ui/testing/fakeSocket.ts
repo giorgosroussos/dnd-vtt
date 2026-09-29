@@ -17,6 +17,8 @@ type Listener = (...args: never[]) => void;
 export class FakeSocket implements LiveSocketLike {
   constructor(readonly view: LiveView = 'dm') {}
   connected = false;
+  /** False once the server refused the socket in its handshake, as Socket.io's `active`. */
+  active = true;
   connects = 0;
   readonly emitted: { event: string; args: unknown[] }[] = [];
   /** Answers each command as the server would; without it a command stays unanswered (LIV-04). */
@@ -40,6 +42,7 @@ export class FakeSocket implements LiveSocketLike {
 
   connect(): this {
     this.connects++;
+    this.active = true;
     return this;
   }
 
@@ -60,6 +63,13 @@ export class FakeSocket implements LiveSocketLike {
     this.connected = true;
     this.fire('connect');
     if (snapshot) this.deliver({ type: 'scene.snapshot', version, payload: snapshot });
+  }
+
+  /** The server refused the handshake (review H1): Socket.io reports it and stops trying. */
+  refuse(message: string): void {
+    this.connected = false;
+    this.active = false;
+    this.fire('connect_error', new Error(message));
   }
 
   deliver(event: EventEnvelope): void {

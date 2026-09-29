@@ -3,8 +3,14 @@ import type { AddressInfo } from 'node:net';
 import { Server, type Socket } from 'socket.io';
 import { io } from 'socket.io-client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SOCKET_CHANNELS, SOCKET_PATH, type EventEnvelope, type SceneSnapshot } from '@emberglass/shared';
-import { connectLive, setSocketFactory, type LiveStatus } from './connection.js';
+import {
+  SOCKET_CHANNELS,
+  SOCKET_PATH,
+  SOCKET_REFUSALS,
+  type EventEnvelope,
+  type SceneSnapshot,
+} from '@emberglass/shared';
+import { connectLive, REFUSED_RETRY_MS, setSocketFactory, type LiveStatus } from './connection.js';
 
 // The live connection over a real Socket.io client and server (LIV-01 review, D-106): the gap
 // loop and the reconnection after the server ends a socket, which the component tests only
@@ -20,12 +26,21 @@ let restore: () => void;
 let close: (() => void) | undefined;
 const sockets: Socket[] = [];
 let snapshotRequests: number;
+// Refuse every handshake in the middleware while set, as the server does past its cap (review H1).
+let refusing = false;
+let handshakes = 0;
 
 beforeEach(async () => {
   version = 1;
   snapshotRequests = 0;
   http = createServer();
   server = new Server(http, { path: SOCKET_PATH, transports: ['websocket'] });
+  refusing = false;
+  handshakes = 0;
+  server.use((_socket, next) => {
+    handshakes++;
+    next(refusing ? new Error(SOCKET_REFUSALS.tooManyViews) : undefined);
+  });
   server.on('connection', (socket) => {
     sockets.push(socket);
     socket.emit(SOCKET_CHANNELS.event, { type: 'scene.snapshot', version, payload: idle });
@@ -93,4 +108,18 @@ describe('live connection over a real Socket.io transport', () => {
     expect(sockets).toHaveLength(2);
     expect(seen.statuses).toEqual(['connecting', 'connected', 'reconnecting', 'connected']);
   });
+
+  it('waits after a refused handshake instead of retrying at once, and connects once a slot frees (review H1)', async () => {
+    refusing = true;
+    const seen = open();
+    await vi.waitFor(() => expect(handshakes).toBe(1));
+    // Socket.io stops after a refusal; without the view's own pause it never comes back, and with an
+    // immediate retry it would hammer the server. In the next second: no second attempt.
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    expect(handshakes).toBe(1);
+    expect(seen.statuses).toEqual(['connecting', 'connecting']);
+    refusing = false;
+    await vi.waitFor(() => expect(seen.snapshots).toEqual([1]), { timeout: REFUSED_RETRY_MS + 2_000 });
+    expect(handshakes).toBe(2);
+  }, 15_000);
 });
