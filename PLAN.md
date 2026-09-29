@@ -23,4 +23,4 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
 
 ## Next
 
-1. **REL-03 — Acceptance on the owner's TV.** The player view on the owner's LG TV with the large-scene fixture (`node e2e/fixtures/large-scene.ts <folder>`), and the display-size default confirmed or changed (G-002); the connect panel's prominent address checked on the owner's PC and TV (G-031), and the TV's ruler distance label read across the room (D-129) (`13` §7, `10` §4, `05` §7, `08` §5).
+1. **REL-03 — Acceptance on the owner's TV.** The player view on the owner's LG TV with the large-scene fixture (`node e2e/fixtures/large-scene.ts <folder>`), and the display-size default confirmed or changed (G-002); the connect panel's prominent address checked on the owner's PC and TV (G-031), a first load in Firefox on Windows from the LAN address timed (G-040), and the TV's ruler distance label read across the room (D-129) (`13` §7, `10` §4, `05` §7, `08` §5).

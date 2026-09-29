@@ -42,6 +42,14 @@ export function unique(info: TestInfo, name: string): string {
   return `${name} ${info.project.name} ${Date.now()}`;
 }
 
+/**
+ * How long a view opened from this PC's LAN address may take to show its first screen. Firefox on
+ * the Windows runner took 9 s and then 26 s to load from 10.1.0.x where every other browser took
+ * about a second (CI runs 36558406339, 36564824322); the cause is not known (G-040, D-132). A slow
+ * load still has to finish: every assertion stands, only the wait is longer.
+ */
+export const LAN_LOAD_MS = 45_000;
+
 /** This PC's first non-internal IPv4 address: how a LAN device reaches the server. */
 export function lanAddress(): string {
   const found = Object.values(os.networkInterfaces())

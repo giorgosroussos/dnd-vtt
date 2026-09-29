@@ -148,6 +148,7 @@ Affected specs: …
 - D-129 — REL-02 residuals: what the MVP ships with, accepted by record; the narrowest supported DM window; how Windows runs the developer targets; the connect address kept for the owner's hardware — implementation
 - D-130 — REL-02 CI fixes: pointer steps kept on screen, a 5-second connect timeout, project patterns for Windows paths, and traces of failed tests — implementation
 - D-131 — The Prepare journey's test budget is 90 s — implementation
+- D-132 — First loads from the LAN address get 45 s in the journeys; the Firefox-on-Windows slowness is a gap — implementation
 
 ## D-001 (2026-09-23) — Repository documentation regime
 Type: implementation
@@ -1076,3 +1077,10 @@ Decision: Refines D-130. `e2e/tests/journeys/prepare.spec.ts` sets `test.setTime
 Why: Prepare is some forty steps; WebKit on the Windows runner takes it at more than twice Chromium's time on the same runner, so the whole exceeds a budget meant for short tests while no step fails or waits on a race.
 Alternatives: Splitting Prepare into several tests (not taken: `10` §5 names one journey, and the tests share one server in order, D-086); a longer default for every test (rejected: would let a short test hang for 90 s); leaving WebKit on Windows out of the matrix (rejected: `10` §4 asks for the matrix where CI can run it, and it runs).
 Affected specs: `10` §4, `10` §5
+
+## D-132 (2026-09-29) — First loads from the LAN address get 45 s in the journeys; the Firefox-on-Windows slowness is a gap
+Type: implementation
+Decision: Refines D-130 and D-131. `LAN_LOAD_MS` (45 s, `e2e/tests/journeys/support.ts`) bounds each navigation to this PC's LAN address in the First run and Connect TV journeys and the first screen it shows, and their test budgets are raised to hold them; every assertion stays as it was. CI run 36564824322 (`7fc69bc`) passed 17 of 18 jobs, `e2e · linux` whole, and 59 of 61 tests on Windows: those two journeys in Firefox, whose first loads from 10.1.0.x took over 26 s there, having taken 9 s and 5.6 s in run 36558406339, against about a second in every other browser and in Firefox on Linux. The slowness is recorded as G-040 against REL-03, with its cause not identified.
+Why: The journeys test that a LAN browser reaches the views and what it sees; the time Firefox on the Windows runner takes to load from that address varies from run to run and is not the product's behaviour under test. A bound, not an unlimited wait, keeps a load that never finishes a failure, and the gap keeps the slowness visible instead of absorbed.
+Alternatives: Leaving Firefox on Windows out of the two journeys (rejected: hides the case, and `10` §4 asks for the matrix where CI runs it); turning off Firefox's HTTPS-First in the test profile (not taken: the cause is unconfirmed, and a DM's Firefox would have it on); retries (rejected by D-060); investigating from the trace before merging (not taken now: the artifact needs a signed-in download; G-040 names it as the evidence).
+Affected specs: `10` §4, `10` §5, `08` §10

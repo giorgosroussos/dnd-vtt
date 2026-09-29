@@ -1,13 +1,15 @@
 import { expect, test } from '@playwright/test';
 import { openWorkspace } from '../dm.js';
 import { commandFromPage } from '../socket.js';
-import { player } from './support.js';
+import { LAN_LOAD_MS, player } from './support.js';
 
 // Journey 3, Connect TV (specs/10-testing-acceptance.md §5, specs/08-ux-journeys.md §4, §5, §10, Q-025,
 // Q-026, Q-053): the DM opens "Connect a screen", the TV opens the URL shown there, typed as it reads,
 // and shows the dark idle screen with the product name only. The owner's LG TV is REL-03 (G-002).
 
 test('Connect TV: the URL in Connect a screen, typed on the TV, opens the idle screen', async ({ browser }) => {
+  // The TV's first load from the LAN address is allowed LAN_LOAD_MS (G-040).
+  test.setTimeout(LAN_LOAD_MS + 30_000);
   const dmContext = await browser.newContext();
   const tvContext = await browser.newContext();
   try {
@@ -29,9 +31,9 @@ test('Connect TV: the URL in Connect a screen, typed on the TV, opens the idle s
 
     // The TV types it: a browser with no DM session, on this PC's LAN address.
     const tv = await tvContext.newPage();
-    const response = await tv.goto(typed);
+    const response = await tv.goto(typed, { timeout: LAN_LOAD_MS });
     expect(response?.status()).toBe(200);
-    await expect(player(tv)).toHaveAttribute('data-scene', 'idle');
+    await expect(player(tv)).toHaveAttribute('data-scene', 'idle', { timeout: LAN_LOAD_MS });
     await expect(player(tv)).toHaveText('Emberglass');
     await expect(tv.locator('button, a[href], input, select, textarea, [tabindex]')).toHaveCount(0);
     await expect(tv.locator('.eg-idle')).toHaveCSS('background-color', 'rgb(20, 17, 15)');
