@@ -41,8 +41,9 @@ Who can do what, how the DM proves it, and what the server never reveals or trus
 - The PIN MUST be numeric, 4 to 8 digits. [Q-009, recommendation accepted]
 - After 5 failed attempts from one client address, PIN entry from that address MUST be refused for 1 minute, the lockout doubling on each further run of 5 failures. [Q-009, recommendation accepted]
 - Beside the per-address limit, after 20 failed attempts across all client addresses within 10 minutes, PIN entry from every address except the server machine's own (loopback) MUST be refused for 10 minutes, the pause doubling on each further run; each pause is logged with the addresses that caused it, and DM sessions already open keep working. [Q-097]
-- An IPv6 client address MUST be counted by its /64 prefix for both limits. [Q-097]
-- The README MUST state both limits and advise a PIN of 6 to 8 digits (`09` §8). [Q-097]
+- Beside it, after 100 failed attempts across all client addresses except loopback within 24 hours, PIN entry MUST be paused in the same way, from every address except loopback, the pause doubling with the 10-minute one and logged like it. [Q-098]
+- An IPv6 client address MUST be counted by its /64 prefix for every limit. [Q-097]
+- The README MUST state the limits and advise a PIN of 6 to 8 digits (`09` §8). [Q-097, Q-098]
 
 ## 7. What the server trusts
 
