@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { nameButton, selectScene, viewport } from '../canvas-view.js';
+import { nameButton, onScreen, selectScene, viewport } from '../canvas-view.js';
 import { openWorkspace, seedCampaign } from '../dm.js';
 import { pick } from '../prep.js';
 import { solidPng } from '../png.js';
@@ -173,12 +173,14 @@ test('Run: go live, move, reveal, hide, delete, undo, measure, steer the TV, pre
     await expect(viewport(dm)).toHaveAttribute('data-ruler-tool', 'on');
     await viewport(dm).scrollIntoViewIfNeeded();
     const box = (await viewport(dm).boundingBox())!;
-    const from = { x: box.x + box.width * 0.35, y: box.y + box.height * 0.5 };
-    const to = { x: box.x + box.width * 0.65, y: box.y + box.height * 0.6 };
-    await dm.mouse.move(from.x, from.y);
+    const [from, to] = (await onScreen(dm, [
+      [box.x + box.width * 0.35, box.y + box.height * 0.5],
+      [box.x + box.width * 0.65, box.y + box.height * 0.6],
+    ])) as [[number, number], [number, number]];
+    await dm.mouse.move(...from);
     await dm.mouse.down();
-    await dm.mouse.move((from.x + to.x) / 2, (from.y + to.y) / 2, { steps: 5 });
-    await dm.mouse.move(to.x, to.y, { steps: 5 });
+    await dm.mouse.move((from[0] + to[0]) / 2, (from[1] + to[1]) / 2, { steps: 5 });
+    await dm.mouse.move(...to, { steps: 5 });
     await dm.mouse.up();
     await expect.poll(async () => (await rulerOf(viewport(dm)))?.feet ?? 0).toBeGreaterThan(0);
     const feet = (await rulerOf(viewport(dm)))!.feet;

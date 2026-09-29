@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { cameraOf, nameButton, tree, viewport } from './canvas-view.js';
+import { cameraOf, nameButton, onScreen, tree, viewport } from './canvas-view.js';
 import { solidPng } from './png.js';
 
 // Preparing in the DM view against the real server (PRP-04, D-100): the helpers the token specs and
@@ -69,7 +69,10 @@ export async function screenOf(page: Page, wx: number, wy: number): Promise<[num
   const camera = await cameraOf(page);
   const box = (await viewport(page).boundingBox())!;
   // The viewport's 1 px border.
-  return [box.x + 1 + camera.x + wx * camera.scale, box.y + 1 + camera.y + wy * camera.scale];
+  const [point] = await onScreen(page, [
+    [box.x + 1 + camera.x + wx * camera.scale, box.y + 1 + camera.y + wy * camera.scale],
+  ]);
+  return point!;
 }
 
 /** Screen coordinates of the middle of grid square (gx, gy), for a grid of `square` world px from 0. */
@@ -97,12 +100,16 @@ export async function dragBy(page: Page, label: string, dx: number, dy: number, 
   await viewport(page).scrollIntoViewIfNeeded();
   const token = (await drawn(page)).find((each) => each.label === label)!;
   const box = (await viewport(page).boundingBox())!;
-  const from = [box.x + 1 + token.left + token.side / 2, box.y + 1 + token.top + token.side / 2] as const;
+  const start: [number, number] = [box.x + 1 + token.left + token.side / 2, box.y + 1 + token.top + token.side / 2];
   const perSquare = token.side;
+  const [from, to] = (await onScreen(page, [start, [start[0] + dx * perSquare, start[1] + dy * perSquare]])) as [
+    [number, number],
+    [number, number],
+  ];
   await page.mouse.move(...from);
   await page.mouse.down();
-  await page.mouse.move(from[0] + (dx * perSquare) / 2, from[1] + (dy * perSquare) / 2, { steps: 4 });
-  await page.mouse.move(from[0] + dx * perSquare, from[1] + dy * perSquare, { steps: 4 });
+  await page.mouse.move((from[0] + to[0]) / 2, (from[1] + to[1]) / 2, { steps: 4 });
+  await page.mouse.move(...to, { steps: 4 });
   if (alt) await page.keyboard.down('Alt');
   await page.mouse.up();
   if (alt) await page.keyboard.up('Alt');

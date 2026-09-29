@@ -53,6 +53,9 @@ export type LiveView = 'dm' | 'player';
 
 export type SocketFactory = (view: LiveView) => LiveSocketLike;
 
+// A handshake on the LAN takes milliseconds.
+export const CONNECT_TIMEOUT_MS = 5_000;
+
 const realSocket: SocketFactory = (view) =>
   io({
     path: SOCKET_PATH,
@@ -62,6 +65,9 @@ const realSocket: SocketFactory = (view) =>
     reconnection: true,
     reconnectionDelay: 500,
     reconnectionDelayMax: 5_000,
+    // An attempt made while the network is down can hang unanswered; given up after this, the next
+    // attempt follows at once instead of after Socket.io's 20 s (G-026, D-130).
+    timeout: CONNECT_TIMEOUT_MS,
   });
 
 let socketFactory: SocketFactory = realSocket;
