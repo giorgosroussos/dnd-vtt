@@ -51,6 +51,9 @@ for (const name of others) {
   if (!(name in BROWSERS)) throw new Error(`EMBERGLASS_E2E_BROWSERS: unknown browser "${name}"`);
 }
 const chromium = devices['Desktop Chrome'];
+// Paths are matched as the system spells them: backslashes on Windows.
+const setUp = /(?:^|[\\/])tests[\\/]first-run\.spec\.ts$/;
+const journey = /[\\/]journeys[\\/].+\.spec\.ts$/;
 
 export default defineConfig({
   testDir: 'tests',
@@ -62,21 +65,23 @@ export default defineConfig({
   // a time, in a known order (D-086).
   workers: 1,
   fullyParallel: false,
-  reporter: [['list']],
-  use: { baseURL: `http://127.0.0.1:${port}`, proxy },
+  // On CI a failure also becomes an annotation on the run, which can be read without the log.
+  reporter: process.env.CI ? [['list'], ['github']] : [['list']],
+  // A failed test keeps its trace and a screenshot in test-results/, which CI uploads.
+  use: { baseURL: `http://127.0.0.1:${port}`, proxy, trace: 'retain-on-failure', screenshot: 'only-on-failure' },
   // The First run journey needs the fresh data directory, before any other test
   // sets the PIN; the rest depend on it (D-086). The offline check runs after all.
   projects: [
-    { name: 'first-run', testMatch: /(?<!journeys\/)first-run\.spec\.ts$/, use: chromium },
+    { name: 'first-run', testMatch: setUp, use: chromium },
     {
       name: 'chromium',
-      testIgnore: [/(?<!journeys\/)first-run\.spec\.ts$/, /offline\.spec\.ts$/],
+      testIgnore: [setUp, /offline\.spec\.ts$/],
       dependencies: ['first-run'],
       use: chromium,
     },
     ...others.map((name) => ({
       name,
-      testMatch: /journeys\/.+\.spec\.ts$/,
+      testMatch: journey,
       dependencies: ['first-run'],
       use: BROWSERS[name]!,
     })),
