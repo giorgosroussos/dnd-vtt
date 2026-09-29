@@ -1,5 +1,7 @@
 import { io } from 'socket.io-client';
 import {
+  HEARTBEAT_INTERVAL_MS,
+  HEARTBEAT_TIMEOUT_MS,
   PLAYER_VIEW_AUTH,
   SOCKET_CHANNELS,
   SOCKET_PATH,
@@ -25,6 +27,11 @@ import { createVersionTracker } from './versions.js';
 // only while connected: Socket.io would otherwise buffer it and send it after a reconnection, when
 // a move or a reveal may no longer be what the DM means. One left unanswered is reported as a lost
 // connection after COMMAND_TIMEOUT_MS; if it did apply, its events still bring the view in step.
+//
+// Waking up (G-026): a device that slept, or whose Wi-Fi came back, may hold a socket that died
+// without a word, which the heartbeat would notice only after HEARTBEAT_INTERVAL_MS plus
+// HEARTBEAT_TIMEOUT_MS. So the connection is opened afresh at once when the browser says it is
+// online again, and when the page is shown after being hidden for longer than the heartbeat takes.
 //
 // Viewport (LIV-06, D-119): the player view reports the size it draws at on `viewport`, and again on
 // every connection, since the server forgets a socket's report when it goes; the DM's TV frame takes
@@ -79,6 +86,8 @@ export interface LiveHandlers {
 export const SNAPSHOT_RETRY_MS = 5_000;
 // How long a command may go unanswered before the view says the connection was lost.
 export const COMMAND_TIMEOUT_MS = 10_000;
+// A page hidden this long may have slept: shown again, it reconnects rather than trust its socket.
+export const HIDDEN_RECONNECT_MS = HEARTBEAT_INTERVAL_MS + HEARTBEAT_TIMEOUT_MS;
 
 /** A command's outcome: `network` when it could not be sent or was not answered in time. */
 export type CommandOutcome = { ok: true } | { ok: false; code: ErrorCode | 'network' };
@@ -151,6 +160,27 @@ export function connectLive(view: LiveView, handlers: LiveHandlers): LiveConnect
     else if (verdict === 'gap') requestSnapshot();
   });
 
+  const reconnect = (): void => {
+    if (closed) return;
+    socket.disconnect();
+    socket.connect();
+  };
+  let hiddenSince: number | undefined;
+  const onVisibility = (): void => {
+    if (document.visibilityState === 'hidden') {
+      hiddenSince ??= Date.now();
+      return;
+    }
+    const since = hiddenSince;
+    hiddenSince = undefined;
+    if (since !== undefined && Date.now() - since >= HIDDEN_RECONNECT_MS) reconnect();
+  };
+  const browser = typeof window !== 'undefined' && typeof document !== 'undefined';
+  if (browser) {
+    window.addEventListener('online', reconnect);
+    document.addEventListener('visibilitychange', onVisibility);
+  }
+
   const command = (type: CommandType, payload: object): Promise<CommandOutcome> =>
     new Promise((resolve) => {
       if (closed || !socket.connected) return resolve({ ok: false, code: 'network' });
@@ -169,14 +199,14 @@ export function connectLive(view: LiveView, handlers: LiveHandlers): LiveConnect
     close: () => {
       closed = true;
       clearTimeout(retry);
+      if (browser) {
+        window.removeEventListener('online', reconnect);
+        document.removeEventListener('visibilitychange', onVisibility);
+      }
       socket.disconnect();
     },
     command,
-    reconnect: () => {
-      if (closed) return;
-      socket.disconnect();
-      socket.connect();
-    },
+    reconnect,
     reportViewport: (screen) => {
       const size = { width: Math.round(screen.width), height: Math.round(screen.height) };
       if (!(size.width >= 1 && size.height >= 1)) return;

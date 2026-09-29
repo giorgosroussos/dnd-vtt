@@ -5,7 +5,8 @@
 # The steps before it only provision the machine: checkout, Node from .nvmrc,
 # `make setup`, and on Windows the MSYS2 shell that provides make and bash.
 # Nothing retries: a flaky gate is a red gate. README.md "Continuous integration"
-# maps every job to its command.
+# maps every job to its command. The failing-forward tripwires of D-061 are gone:
+# REL-02 promoted the last two gates into `make e2e` and `make build` (D-127).
 
 name: CI
 
@@ -36,8 +37,10 @@ jobs:
       matrix:
         target: [lint, format-check, typecheck, test, e2e, build, check-docs, audit, scan-secrets]
     env:
-      # Only the e2e job runs a browser; on Linux it also needs the system libraries.
-      SETUP_BROWSERS: ${{ matrix.target == 'e2e' && '--with-deps chromium' || '' }}
+      # Only the e2e job runs a browser; on Linux it also needs the system libraries. Chromium
+      # runs every spec, Firefox and WebKit the acceptance journeys (specs/10 §4, D-127).
+      SETUP_BROWSERS: ${{ matrix.target == 'e2e' && '--with-deps chromium firefox webkit' || '' }}
+      EMBERGLASS_E2E_BROWSERS: chromium,firefox,webkit
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -54,7 +57,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          key: playwright-${{ runner.os }}-chromium-firefox-webkit-${{ hashFiles('package-lock.json') }}
       - name: make setup
         if: matrix.target != 'check-docs'
         run: make setup
@@ -78,7 +81,9 @@ jobs:
       matrix:
         target: [lint, format-check, typecheck, test, e2e, build, check-docs, audit, scan-secrets]
     env:
-      SETUP_BROWSERS: ${{ matrix.target == 'e2e' && 'chromium' || '' }}
+      # Edge is on the image already; Playwright drives it through its channel (D-127).
+      SETUP_BROWSERS: ${{ matrix.target == 'e2e' && 'chromium firefox webkit' || '' }}
+      EMBERGLASS_E2E_BROWSERS: chromium,firefox,webkit,msedge
     defaults:
       run:
         # The image has no make. MSYS2 (preinstalled, off PATH) supplies make,
@@ -108,7 +113,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~\AppData\Local\ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          key: playwright-${{ runner.os }}-chromium-firefox-webkit-${{ hashFiles('package-lock.json') }}
       - name: make setup
         if: matrix.target != 'check-docs'
         run: make setup
@@ -122,28 +127,3 @@ jobs:
           path: e2e/test-results/
           if-no-files-found: ignore
           retention-days: 7
-
-  # Failing-forward tripwires (specs/13-implementation-plan.md §3 FND-02): one job
-  # per gate that specs/10-testing-acceptance.md §3 and §6 require and nothing
-  # implements yet. Each passes only while its gate is provably absent (no code
-  # file carries `@gate:<id>`) and fails with promotion instructions once one does.
-  # Promotion: the gate runs inside a real gate target above, and its entry here
-  # and in scripts/tripwire.mjs is removed. They scan text, so Linux suffices.
-  tripwire:
-    name: tripwire · ${{ matrix.gate }} (absent)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    strategy:
-      fail-fast: false
-      matrix:
-        gate: [offline-e2e, external-url-build]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # Nothing after checkout needs the token; npm install scripts should not see it.
-          persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .nvmrc
-      - name: make tripwire GATE=${{ matrix.gate }}
-        run: make tripwire GATE=${{ matrix.gate }}

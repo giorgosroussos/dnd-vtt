@@ -32,6 +32,13 @@ export const SOCKET_CHANNELS = {
 // Where the Socket.io server listens, on the server's own port (specs/02-architecture.md §2).
 export const SOCKET_PATH = '/socket.io';
 
+// The heartbeat both ends keep (G-026, specs/04-live-sync.md §6): the server pings every
+// HEARTBEAT_INTERVAL_MS and either end drops a connection whose ping or answer is
+// HEARTBEAT_TIMEOUT_MS late, so a view whose network died without a word is reconnecting within
+// their sum, not Socket.io's default 45 s. A ping is a few bytes on the LAN.
+export const HEARTBEAT_INTERVAL_MS = 10_000;
+export const HEARTBEAT_TIMEOUT_MS = 5_000;
+
 // The rooms of specs/04-live-sync.md §1; the server decides which a socket joins,
 // from its DM session only (Q-046).
 export const ROOMS = ['dm', 'players'] as const;

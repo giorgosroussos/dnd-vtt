@@ -18,20 +18,11 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const GATES = [
-  {
-    id: 'offline-e2e',
-    spec: 'specs/10-testing-acceptance.md §6',
-    gate: 'the end-to-end run with outbound traffic beyond the local host blocked',
-    lands: 'REL-02',
-  },
-  {
-    id: 'external-url-build',
-    spec: 'specs/10-testing-acceptance.md §6',
-    gate: 'a build that fails when the client references an external URL for scripts, styles, fonts or images',
-    lands: 'REL-02',
-  },
-];
+// Empty since REL-02 promoted the last two, `offline-e2e` and `external-url-build` (D-127): every
+// gate of specs/10-testing-acceptance.md §3 and §6 now runs inside a real gate target. The
+// mechanism stays for a gate a later specification adds; an entry reads
+//   { id: 'offline-e2e', spec: 'specs/10-testing-acceptance.md §6', gate: '<what it checks>', lands: '<package>' }
+export const GATES = [];
 
 // Documentation and the decision record describe gates; they never are one.
 const NOT_A_GATE = /(?:\.md$|^\.log\/|^specs\/|^docs\/)/;
@@ -49,10 +40,13 @@ export function markerFor(id) {
 }
 
 /** Judge one gate over a list of repository paths; `read(path)` returns file text, or null for a binary file. */
-export function evaluate(id, paths, read) {
-  const gate = GATES.find((g) => g.id === id);
+export function evaluate(id, paths, read, gates = GATES) {
+  const gate = gates.find((g) => g.id === id);
   if (!gate) {
-    return { status: 'error', lines: [`unknown gate "${id}"; known: ${GATES.map((g) => g.id).join(', ')}`] };
+    return {
+      status: 'error',
+      lines: [`unknown gate "${id}"; known: ${gates.map((g) => g.id).join(', ') || 'none, every gate is promoted'}`],
+    };
   }
   const candidates = paths.filter((p) => !NOT_A_GATE.test(p) && !SELF.has(p));
   const texts = new Map();
@@ -97,26 +91,35 @@ export function evaluate(id, paths, read) {
   };
 }
 
-function repositoryPaths() {
+/** Every file Git tracks or would track under `cwd`, as repository paths. */
+export function repositoryPaths(cwd = process.cwd()) {
   const listed = spawnSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
+    cwd,
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
   });
   if (listed.status !== 0) throw new Error(`git ls-files failed: ${listed.stderr}`);
-  return [...new Set(listed.stdout.split('\0').filter(Boolean))].filter((p) => existsSync(p));
+  return [...new Set(listed.stdout.split('\0').filter(Boolean))].filter((p) => existsSync(path.join(cwd, p)));
 }
 
-function readText(p) {
-  const bytes = readFileSync(p);
+/** A file's text, or null for a binary one. */
+export function readText(p, cwd = process.cwd()) {
+  const bytes = readFileSync(path.join(cwd, p));
   return bytes.includes(0) ? null : bytes.toString('utf8');
 }
 
 function main(args) {
+  if (!args[0] && GATES.length === 0) {
+    console.log(
+      'tripwire: no gate is registered; every gate of specs/10-testing-acceptance.md §3 and §6 is implemented.',
+    );
+    return 0;
+  }
   const ids = args[0] ? [args[0]] : GATES.map((g) => g.id);
   const paths = repositoryPaths();
   let exitCode = 0;
   for (const id of ids) {
-    const result = evaluate(id, paths, readText);
+    const result = evaluate(id, paths, (p) => readText(p));
     const out = result.status === 'absent' ? console.log : console.error;
     for (const line of result.lines) out(line);
     if (result.status !== 'absent') exitCode = 1;

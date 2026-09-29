@@ -19,7 +19,8 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
   - Residuals: each gap listed above closed with its test, or kept with a recorded decision and its row updated. `make verify` exit 0 on both CI runners. `TRACEABILITY.md` REL-02 row and the five journey rows with test names; Phase 3's exit recorded.
 - **Non-goals:** the owner's LG TV run and the display-size default (REL-03, G-002); packaging (`02` §8); any feature beyond the MVP (`01` §4 to §7).
 - **Review:** `Touches red line: yes` (the offline run, `02` §6), so prompt 2 (review) runs after implementation.
+- **Status (2026-09-29):** implemented and passing locally on Linux (D-127, D-128, D-129; `TRACEABILITY.md` REL-02 row). Remaining before done: the CI run on both runners, which is the first run of WebKit (it cannot start on the development machine) and of Edge; the owner removing the two `tripwire · … (absent)` jobs from the ruleset's required checks; then the review (prompt 2).
 
 ## Next
 
-1. **REL-03 — Acceptance on the owner's TV.** The player view on the owner's LG TV with the large-scene fixture, and the display-size default confirmed or changed (G-002; `13` §7, `10` §4, `05` §7).
+1. **REL-03 — Acceptance on the owner's TV.** The player view on the owner's LG TV with the large-scene fixture (`node e2e/fixtures/large-scene.ts <folder>`), and the display-size default confirmed or changed (G-002); the connect panel's prominent address checked on the owner's PC and TV (G-031), and the TV's ruler distance label read across the room (D-129) (`13` §7, `10` §4, `05` §7, `08` §5).

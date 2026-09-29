@@ -22,7 +22,8 @@ const readme = read('README.md');
 
 const verifyGates = list(/^verify:([^#\n]*)##/m.exec(makefile)[1].replace(/\s+/g, ','));
 const targetMatrices = [...workflow.matchAll(/^\s+target: \[(.*)\]$/gm)].map((m) => list(m[1]));
-const tripwireMatrix = list(/^\s+gate: \[(.*)\]$/m.exec(workflow)[1]);
+// No tripwire job at all once every gate is promoted (D-127).
+const tripwireMatrix = list(/^\s+gate: \[(.*)\]$/m.exec(workflow)?.[1] ?? '');
 
 // Every gate `specs/10-testing-acceptance.md` §3 and §6 require that is a test or
 // a build check. Each is either still a tripwire or, once promoted, carries its

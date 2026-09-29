@@ -1,7 +1,14 @@
+// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SOCKET_CHANNELS, type EventEnvelope, type SceneSnapshot } from '@emberglass/shared';
 import { installFakeSockets, type FakeSocket } from '../ui/testing/fakeSocket.js';
-import { COMMAND_TIMEOUT_MS, connectLive, SNAPSHOT_RETRY_MS, type LiveStatus } from './connection.js';
+import {
+  COMMAND_TIMEOUT_MS,
+  connectLive,
+  HIDDEN_RECONNECT_MS,
+  SNAPSHOT_RETRY_MS,
+  type LiveStatus,
+} from './connection.js';
 
 // The live connection (LIV-01, specs/04-live-sync.md §5, §6), against a scripted socket.
 
@@ -206,6 +213,51 @@ describe('commands from the DM view (LIV-04, specs/04-live-sync.md §2)', () => 
     connection.close();
     connection.reconnect();
     expect(dm.connects).toBe(1);
+  });
+});
+
+describe('waking up (G-026)', () => {
+  let visibility: DocumentVisibilityState = 'visible';
+  beforeEach(() => {
+    visibility = 'visible';
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => visibility });
+  });
+  afterEach(() => {
+    delete (document as { visibilityState?: unknown }).visibilityState;
+  });
+  const show = (state: DocumentVisibilityState): void => {
+    visibility = state;
+    document.dispatchEvent(new Event('visibilitychange'));
+  };
+
+  it('opens the connection afresh when the browser is online again, whatever the socket believes', () => {
+    socket.open(idle, 1);
+    window.dispatchEvent(new Event('online'));
+    // Dropped and opened again: a fresh snapshot follows, so the view is in step at once.
+    expect(socket.connects).toBe(1);
+    expect(statuses.at(-1)).toBe('reconnecting');
+    socket.open(idle, 7);
+    expect(snapshots.at(-1)).toEqual({ snapshot: idle, version: 7 });
+  });
+
+  it('reconnects when shown after being hidden longer than the heartbeat takes, and not after a short hide', () => {
+    vi.useFakeTimers();
+    socket.open(idle, 1);
+    show('hidden');
+    vi.advanceTimersByTime(HIDDEN_RECONNECT_MS - 1);
+    show('visible');
+    expect(socket.connects).toBe(0);
+    show('hidden');
+    vi.advanceTimersByTime(HIDDEN_RECONNECT_MS);
+    show('visible');
+    expect(socket.connects).toBe(1);
+  });
+
+  it('listens no more once closed', () => {
+    socket.open(idle, 1);
+    close();
+    window.dispatchEvent(new Event('online'));
+    expect(socket.connects).toBe(0);
   });
 });
 

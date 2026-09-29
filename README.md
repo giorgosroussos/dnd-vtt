@@ -75,9 +75,9 @@ Emberglass is meant for a trusted home network.
 - **The player view is open to any browser on the Wi-Fi.** It shows only what is visible on the live scene; hidden tokens never leave the server.
 - **Guessing the PIN:**
   - After 5 wrong PINs from one device, PIN entry from it is refused for 1 minute. The wait doubles on each further 5.
-  - After 20 wrong PINs from any devices within 10 minutes, PIN entry is paused for 10 minutes on every device except the server PC itself. The pause doubles on each further 20, and only a restart of the server brings it back to 10 minutes. Every pause is logged with the addresses that caused it.
+  - After 20 wrong PINs from any devices within 10 minutes, or 100 within 24 hours, PIN entry is paused for 10 minutes on every device except the server PC itself. Wrong PINs typed on the server PC count towards neither. The pause doubles on each further run of either kind, and only a restart of the server brings it back to 10 minutes. Every pause is logged with the addresses that caused it.
   - Browsers already signed in keep working during a pause. To sign in, or to change the PIN, during a pause, use a browser on the server PC opened at `http://localhost:3000/dm` (not the network address the console prints); its own limit of 5 wrong PINs still applies.
-  - A device that keeps just under 20 wrong PINs every 10 minutes, changing its address, is never paused: about 2,700 guesses a day. A 4-digit PIN could be found that way within days, a 6-digit one in months, an 8-digit one practically never.
+  - A device that keeps just under both limits, changing its address, is never paused: at most 99 guesses a day. A 4-digit PIN could be found that way within about 100 days, a 6-digit one only in decades, an 8-digit one practically never.
   - Choose a PIN of 6 to 8 digits: a 4-digit PIN is the easiest to guess.
 
 ### Firewall
@@ -127,7 +127,9 @@ make smoke        # checks a running server
 make help         # the full command contract
 ```
 
-`make setup` points development at `.dev-data/` in the clone, so `make dev` never opens your real campaigns.
+`make setup` points development at `.dev-data/` in the clone, so `make dev` never opens your real campaigns. On Windows, `npm start` and `npm run dev` run natively and the `make` targets run from MSYS2, Git Bash or WSL, as CI runs them; `make clean-start` needs Linux or WSL (D-129).
+
+The acceptance journeys of `specs/10-testing-acceptance.md` §5 are `e2e/tests/journeys/`. `node e2e/fixtures/large-scene.ts <folder>` writes the large-scene fixture's generated images (a 10,000 × 7,000 px map and five token images) for loading by hand, as on a TV acceptance run.
 
 - Agents and contributors start at `AGENTS.md`. Ready-made session prompts: `SESSION_BOOTSTRAP_PROMPT_SAMPLE.md`.
 - Specifications: `specs/README.md` (map, requirement language, conflict resolution).
@@ -151,10 +153,9 @@ GitHub Actions, `.github/workflows/ci.yml` (FND-02, `specs/13-implementation-pla
 | `check-docs · linux`, `check-docs · windows` | both | `make check-docs` |
 | `audit · linux`, `audit · windows` | both | `make audit` |
 | `scan-secrets · linux`, `scan-secrets · windows` | both | `make scan-secrets` |
-| `tripwire · offline-e2e (absent)` | `ubuntu-latest` | `make tripwire GATE=offline-e2e` |
-| `tripwire · external-url-build (absent)` | `ubuntu-latest` | `make tripwire GATE=external-url-build` |
+The `e2e` jobs run the acceptance suite (`specs/10-testing-acceptance.md` §4–§6, D-127): Chromium runs every spec, and the five journeys of `e2e/tests/journeys/` also run in Firefox and WebKit on both runners and in Edge on Windows, as named by `EMBERGLASS_E2E_BROWSERS` (locally the default is Chromium alone; `npx playwright install firefox webkit` adds the others). Every browser runs behind a proxy that refuses and records anything beyond the local host, and the server under a guard that does the same, so `make e2e` is also the offline run; its last test, `e2e/tests/offline.spec.ts`, fails if anything was attempted. `make build` fails when the built client references a script, style, font or image on another host (`scripts/check-external-urls.mjs`).
 
-A tripwire job stands in for a gate that `specs/10-testing-acceptance.md` §3 or §6 requires and nothing implements yet. It passes only while the gate is provably absent, meaning no code file carries the marker `@gate:<id>`, and says so in its name and output; it is never the gate. The first test or build check that carries the marker turns the job red, with the promotion steps: run the gate inside a real gate target, then remove its job here and its entry in `scripts/tripwire.mjs`.
+Gates that the testing specification requires and nothing implements yet would run as failing-forward tripwires (`make tripwire`, D-061), one job each; there are none left, since REL-02 promoted the last two, and `make tripwire` says so.
 
-`make verify` runs the first seven gate commands; `make audit`, `make scan-secrets` and `make tripwire` run beside it. Caches (npm, Playwright browsers) are keyed on `package-lock.json`, and a failed `e2e` job keeps `e2e/test-results/` as an artifact for seven days. A ruleset on `main` requires every job above by name, so a red pipeline blocks a merge; it lives on GitHub, not in this repository. Promoting a tripwire removes its job, so the same change must remove that job from the ruleset's required checks, or GitHub waits for a check that never runs.
+`make verify` runs the first seven gate commands; `make audit` and `make scan-secrets` run beside it. Caches (npm, Playwright browsers) are keyed on `package-lock.json`, and a failed `e2e` job keeps `e2e/test-results/` as an artifact for seven days. A ruleset on `main` requires every job above by name, so a red pipeline blocks a merge; it lives on GitHub, not in this repository.
 

@@ -25,6 +25,8 @@ export {
   SceneSnapshotSchema,
   SOCKET_CHANNELS,
   SOCKET_PATH,
+  HEARTBEAT_INTERVAL_MS,
+  HEARTBEAT_TIMEOUT_MS,
   type CommandAck,
   type CommandEnvelope,
   type CommandType,

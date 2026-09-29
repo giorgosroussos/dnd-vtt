@@ -5,7 +5,7 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
-    "build": "vite build"
+    "build": "vite build && node ../scripts/check-external-urls.mjs dist"
   },
   "dependencies": {
     "@emberglass/shared": "0.0.0",

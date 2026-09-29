@@ -46,7 +46,12 @@ export interface AppOptions {
   /** Command validation and application; tests only replace them (LIV-01). */
   commands?: LiveSocketOptions['commands'];
   /** The live socket's abuse limits; tests only lower them (D-106). */
-  liveLimits?: Pick<LiveSocketOptions, 'snapshotIntervalMs' | 'maxPendingPackets' | 'connectionLines'> | undefined;
+  liveLimits?:
+    | Pick<
+        LiveSocketOptions,
+        'snapshotIntervalMs' | 'maxPendingPackets' | 'connectionLines' | 'maxPlayerSocketsPerAddress' | 'clientAddress'
+      >
+    | undefined;
   /** The PC's network interfaces, for the connect panel; the system's unless a test passes them (LIV-03). */
   networkInterfaces?: NetworkInterfaces | undefined;
 }
@@ -129,7 +134,7 @@ export async function buildApp({
   // Before any onClose hook: the server closes the database in one registered after this (review C-M2).
   app.addHook('preClose', () => regenerator.stop());
   registerSettings(app, { db, logger, live, regenerator });
-  await registerImages(app, { db, imagesDir, auth, regenerator });
+  await registerImages(app, { db, imagesDir, auth, regenerator, refresh: live.refresh });
   const sendIndex = client.kind === 'static' ? await serveBuild(app, client.dist) : await serveVite(app, client.root);
 
   // Both views come from one client build: the player view at /, the DM view at /dm.

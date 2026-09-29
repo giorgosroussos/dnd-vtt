@@ -188,7 +188,7 @@ export function registerAuth(
       logger.warn(
         'pin.paused',
         `PIN entry is paused for ${seconds} s from every address but this PC, after many failed attempts.`,
-        { seconds, addresses: attempt.paused.addresses },
+        { seconds, budget: attempt.paused.budget, addresses: attempt.paused.addresses },
       );
     }
     if (await verifyPin(pin, stored)) {
