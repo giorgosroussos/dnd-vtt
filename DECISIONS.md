@@ -149,6 +149,7 @@ Affected specs: …
 - D-130 — REL-02 CI fixes: pointer steps kept on screen, a 5-second connect timeout, project patterns for Windows paths, and traces of failed tests — implementation
 - D-131 — The Prepare journey's test budget is 90 s — implementation
 - D-132 — First loads from the LAN address get 45 s in the journeys; the Firefox-on-Windows slowness is a gap — implementation
+- D-133 — The offline gate sets aside Edge's own calls to Microsoft's services, and lists them — implementation
 
 ## D-001 (2026-09-23) — Repository documentation regime
 Type: implementation
@@ -1084,3 +1085,10 @@ Decision: Refines D-130 and D-131. `LAN_LOAD_MS` (45 s, `e2e/tests/journeys/supp
 Why: The journeys test that a LAN browser reaches the views and what it sees; the time Firefox on the Windows runner takes to load from that address varies from run to run and is not the product's behaviour under test. A bound, not an unlimited wait, keeps a load that never finishes a failure, and the gap keeps the slowness visible instead of absorbed.
 Alternatives: Leaving Firefox on Windows out of the two journeys (rejected: hides the case, and `10` §4 asks for the matrix where CI runs it); turning off Firefox's HTTPS-First in the test profile (not taken: the cause is unconfirmed, and a DM's Firefox would have it on); retries (rejected by D-060); investigating from the trace before merging (not taken now: the artifact needs a signed-in download; G-040 names it as the evidence).
 Affected specs: `10` §4, `10` §5, `08` §10
+
+## D-133 (2026-09-29) — The offline gate sets aside Edge's own calls to Microsoft's services, and lists them
+Type: implementation
+Decision: Refines D-127. The blackhole proxy records the user agent of each attempt. `e2e/tests/offline.spec.ts` sets aside an attempt only when Edge's user agent (`Edg/`) sent it to a host in bing.com, microsoft.com, msn.com, live.com, skype.com, msedge.net or windows.com, reports those in the test's annotations with their hosts, and fails on every other attempt, Edge's to any other host and any attempt without a user agent included. CI run 36569636626 (`75a9287`) passed 61 of 62 tests on Windows and failed only the gate, on about 115 CONNECT attempts to www.bing.com and edge.microsoft.com, all blocked, made while Edge ran the journeys; the gate passes on Linux after Chromium, Firefox and WebKit with nothing recorded.
+Why: `02` §6 and `10` §6 bound the running application: that it sends nothing outside the LAN. Edge calls Bing and Microsoft by itself whatever page it shows; those calls were blocked by the proxy, as the gate requires, and name no host the application knows, since the build check (`scripts/check-external-urls.mjs`) proves the built client references no other host and the server's guard recorded nothing. Setting aside only that browser's own vendor domains, by its user agent, keeps any request from a view, to any other host, a failure.
+Alternatives: Failing on every attempt whatever its source (rejected: the gate would test Edge's services, and Edge could never be in the matrix); Edge started with its services turned off by flags (not taken: no documented flag set stops them all, and the gate would still fail on the next one Edge adds); running Edge outside the proxy (rejected: its views' traffic would go unwatched); dropping Edge from the matrix (rejected: `10` §4 names it); attributing attempts to pages through Playwright's request events (not taken: needs every spec to register its contexts, and misses traffic the page did not start, which is what the proxy is for).
+Affected specs: `02` §6, `10` §4, `10` §6

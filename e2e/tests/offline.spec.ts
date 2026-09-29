@@ -16,7 +16,25 @@ interface Attempt {
   from: 'browser' | 'server';
   kind: string;
   target: string;
+  agent?: string | null;
 }
+
+// Edge's own services: it calls Bing and Microsoft's hosts by itself, whatever page it shows
+// (CI run 36569636626: www.bing.com and edge.microsoft.com, Edge on Windows). Such an attempt is
+// the browser's, not the running application's (specs/02-architecture.md §6): it is set aside only
+// when Edge's user agent sent it to one of these domains, and listed in the report; any other
+// attempt, Edge's to any other host included, fails the gate (D-133).
+const EDGE_AGENT = /\bEdg\//;
+const MICROSOFT_SERVICES =
+  /(?:^|\.)(?:bing\.com|microsoft\.com|msn\.com|live\.com|skype\.com|msedge\.net|windows\.com)$/;
+const hostOf = (target: string) =>
+  target
+    .replace(/^[A-Z]+ /, '')
+    .replace(/^[a-z]+:\/\//, '')
+    .replace(/[/:].*$/, '')
+    .toLowerCase();
+const browserService = (each: Attempt) =>
+  each.from === 'browser' && EDGE_AGENT.test(each.agent ?? '') && MICROSOFT_SERVICES.test(hostOf(each.target));
 
 const log = process.env.EMBERGLASS_E2E_OUTBOUND_LOG!;
 const guard = fileURLToPath(new URL('../offline/guard.mjs', import.meta.url));
@@ -34,8 +52,19 @@ const OUTSIDE = '198.51.100.7';
 test('@gate:offline-e2e the end-to-end run sent nothing beyond the local host, and the block it ran under holds', async ({
   page,
 }) => {
-  // 1. Nothing was attempted by any view or by the server during the whole run.
-  expect(attempts(log)).toEqual([]);
+  // 1. Nothing was attempted by any view or by the server during the whole run; Edge's calls to its
+  // own services are reported, not counted.
+  const all = attempts(log);
+  const services = all.filter(browserService);
+  if (services.length > 0) {
+    test.info().annotations.push({
+      type: 'browser services',
+      description: `${services.length} attempts by Edge to its own services, blocked: ${[
+        ...new Set(services.map((each) => hostOf(each.target))),
+      ].join(', ')}`,
+    });
+  }
+  expect(all.filter((each) => !browserService(each))).toEqual([]);
 
   // 2. A view's request beyond the local host fails and reaches the log.
   await page.goto('/');
@@ -52,7 +81,11 @@ test('@gate:offline-e2e the end-to-end run sent nothing beyond the local host, a
   );
   expect(outcome).toBe('failed');
   await expect
-    .poll(() => attempts(log).map((each) => `${each.from} ${each.target}`))
+    .poll(() =>
+      attempts(log)
+        .filter((each) => !browserService(each))
+        .map((each) => `${each.from} ${each.target}`),
+    )
     .toEqual([`browser GET http://${OUTSIDE}/map.png`]);
 
   // 3. So does a Node process's, under the guard the server runs with: a connection and a lookup.

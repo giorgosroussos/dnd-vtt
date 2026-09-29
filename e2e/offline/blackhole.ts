@@ -14,10 +14,15 @@ export interface Blackhole {
 }
 
 export function startBlackhole(port: number, log: string): Promise<Blackhole> {
-  const record = (kind: string, target: string) =>
-    appendFileSync(log, `${JSON.stringify({ from: 'browser', kind, target, at: new Date().toISOString() })}\n`);
+  // The user agent says which browser asked, so the gate can tell a browser's own service traffic
+  // from a view's request (D-133).
+  const record = (kind: string, target: string, agent: string | undefined) =>
+    appendFileSync(
+      log,
+      `${JSON.stringify({ from: 'browser', kind, target, agent: agent ?? null, at: new Date().toISOString() })}\n`,
+    );
   const server = http.createServer((request, response) => {
-    record('request', `${request.method} ${request.url}`);
+    record('request', `${request.method} ${request.url}`, request.headers['user-agent']);
     response.writeHead(502, { 'content-type': 'text/plain', connection: 'close' });
     response.end('Blocked: the offline end-to-end run allows no traffic beyond the local host.');
   });
@@ -25,7 +30,7 @@ export function startBlackhole(port: number, log: string): Promise<Blackhole> {
     // A browser may reset a tunnel it asked for; unhandled, that error would end the whole run
     // (CI run 36566598624, Edge on Windows).
     socket.on('error', () => socket.destroy());
-    record('connect', String(request.url));
+    record('connect', String(request.url), request.headers['user-agent']);
     socket.end('HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
   });
   server.on('connection', (socket) => socket.on('error', () => socket.destroy()));
