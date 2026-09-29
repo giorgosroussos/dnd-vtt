@@ -118,22 +118,13 @@ Every card opens `Blocking` and is answered before the specification proceeds. `
 - Q-093 — Version numbers that would reveal a hidden token — security — Resolved
 - Q-094 — Labels that would hint at a hidden token — security — Resolved
 - Q-095 — Where a token revealed live sits in the stacking order — security — Resolved
-- Q-096 — A lone token hidden and revealed again comes back numbered — ux — Blocking
+- Q-096 — A lone token hidden and revealed again comes back numbered — ux — Resolved
 - Q-097 — PIN guessing from many LAN addresses — security — Resolved
 - Q-098 — PIN guessing kept just under the server-wide budget — security — Resolved
 
 ## Blocking
 
-### Q-096 — A lone token hidden and revealed again comes back numbered
-- Surface: ux
-- Source: Found while testing LIV-05's undo, 2026-09-27, reproduced in `server/src/domain/undo.test.ts`: `updateToken` (`server/src/db/tokens.ts`, PRP-04, LIV-02) numbers every token that carries its asset's bare name when it is revealed, so the lone visible "Goblin" hidden and revealed again becomes "Goblin 2", in preparation and on the TV. `05` §3 [Q-092] says a token is numbered "only when it is first shown to players" and "a single token keeps the bare name"; the server cannot tell a bare-named token that was shown from one placed hidden, and Q-094 B (storing whether players saw a token) was not chosen. Undo already restores the bare name (D-117); the ordinary hide and reveal do not.
-- Question: When a lone token that players saw with its asset's bare name is hidden and revealed again, what label should it come back with?
-- Options:
-  - A) Keep today's rule and amend `05` §3: a reveal numbers any bare-named token, so it comes back as the next number ("Goblin 2") → effect on ux: players see the only goblin renamed after a hide; no migration; the spec states the exception.
-  - B) Store per token whether it has been shown to players (an additive migration) and number only at the first showing → effect on ux: the token comes back as "Goblin", exactly as `05` §3 reads; a new column, set in placement, reveal and numbering, with its tests.
-  - C) Without a migration, keep the bare name on reveal when the scene has issued exactly one number for the asset and no other token of it is shown → effect on ux: the common case comes back as "Goblin", but a hidden Goblin placed after the first one was deleted is revealed as "Goblin" instead of "Goblin 2", against Q-091's example.
-- Recommendation: B, because it is the only option that makes the code do what `05` §3 already says, and the rename happens in front of players on the token they were watching, unlike the gap Q-094 B would have closed.
-- Blocks: specification
+None. Phase 0 can proceed.
 
 ## Open
 
@@ -1215,6 +1206,18 @@ None.
 - Recommendation: A, because the residual tells players only what the table sees anyway when a token appears, and keeping the DM's layering is what `04` §4 describes.
 - Blocks: specification
 - Answer: A (2026-09-26; recommendation accepted)
+
+### Q-096 — A lone token hidden and revealed again comes back numbered
+- Surface: ux
+- Source: Found while testing LIV-05's undo, 2026-09-27, reproduced in `server/src/domain/undo.test.ts`: `updateToken` (`server/src/db/tokens.ts`, PRP-04, LIV-02) numbers every token that carries its asset's bare name when it is revealed, so the lone visible "Goblin" hidden and revealed again becomes "Goblin 2", in preparation and on the TV. `05` §3 [Q-092] says a token is numbered "only when it is first shown to players" and "a single token keeps the bare name"; the server cannot tell a bare-named token that was shown from one placed hidden, and Q-094 B (storing whether players saw a token) was not chosen. Undo already restores the bare name (D-117); the ordinary hide and reveal do not.
+- Question: When a lone token that players saw with its asset's bare name is hidden and revealed again, what label should it come back with?
+- Options:
+  - A) Keep today's rule and amend `05` §3: a reveal numbers any bare-named token, so it comes back as the next number ("Goblin 2") → effect on ux: players see the only goblin renamed after a hide; no migration; the spec states the exception.
+  - B) Store per token whether it has been shown to players (an additive migration) and number only at the first showing → effect on ux: the token comes back as "Goblin", exactly as `05` §3 reads; a new column, set in placement, reveal and numbering, with its tests.
+  - C) Without a migration, keep the bare name on reveal when the scene has issued exactly one number for the asset and no other token of it is shown → effect on ux: the common case comes back as "Goblin", but a hidden Goblin placed after the first one was deleted is revealed as "Goblin" instead of "Goblin 2", against Q-091's example.
+- Recommendation: B, because it is the only option that makes the code do what `05` §3 already says, and the rename happens in front of players on the token they were watching, unlike the gap Q-094 B would have closed.
+- Blocks: specification
+- Answer: B (2026-09-29; recommendation accepted)
 
 ### Q-097 — PIN guessing from many LAN addresses
 - Surface: security

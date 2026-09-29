@@ -14,7 +14,7 @@ The MVP MUST store exactly these eight entities in SQLite: [input, Q-006, Q-037,
 | Campaign | `name`, `description`, `rules_version` | `rules_version = 5e-2014` |
 | Session | `campaign_id`, `title`, `order`, `date` | |
 | Scene | `session_id`, `name`, `order`, `map_image_id`, `grid`, `token_numbers` | grid: `type`, `size`, `offset_x`, `offset_y`, `visible`, `feet_per_square`, `columns`, `rows` (`06` §2); token numbers: the highest number issued per asset on the scene, never sent to a client (`05` §3) |
-| Token | `scene_id`, `asset_id`, `label`, `x`, `y`, `hidden`, `z_order`, `character_id` | `character_id` empty in the MVP |
+| Token | `scene_id`, `asset_id`, `label`, `x`, `y`, `hidden`, `z_order`, `shown`, `character_id` | `character_id` empty in the MVP; `shown`: whether players have seen the token, set when it is first shown and never cleared, never sent to a client (`05` §3) |
 | Settings | `live_scene_id`, ruler rule, upload limit, display variant size, PIN hash | one game per server |
 
 ## 2. Relationships

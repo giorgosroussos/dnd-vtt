@@ -153,6 +153,7 @@ Affected specs: …
 - D-134 — REL-02 review fixes: over-cap sockets refused in the handshake, the offline gate proves it watched, a stricter URL check, commands settled on disconnect, and the tests the review found missing — implementation
 - D-135 — D-129 and D-133 corrected after the REL-02 review: the DM window's height is a gap, and the offline gate's exception does not rest on the build check alone — implementation
 - D-136 — The Prepare journey's 90 s budget is by engine, not by system — implementation
+- D-137 — A token stores whether players have seen it; numbering only at the first showing (Q-096) — spec-amendment
 
 ## D-001 (2026-09-23) — Repository documentation regime
 Type: implementation
@@ -1116,3 +1117,10 @@ Decision: Refines D-134 (T-L2): the Prepare journey's 90 s budget applies to the
 Why: Firefox took Prepare past 30 s on the loaded Linux development machine with every step passing, as WebKit did on the Windows runner; the point of T-L2, that a slowdown in the main engine still fails, holds with the budget scoped by engine.
 Alternatives: Keeping the Windows-only scope (rejected: local runs of the matrix fail on load alone); 90 s for every project (rejected by T-L2).
 Affected specs: `10` §4, `10` §5
+
+## D-137 (2026-09-29) — A token stores whether players have seen it; numbering only at the first showing (Q-096)
+Type: spec-amendment
+Decision: `05` §3 gains one statement, tagged [Q-096]: whether a token has been shown to players MUST be stored with it, set when it is first shown (placed visible or revealed) and never cleared, and the numbering of Q-092 applies only at that first showing, so a token players saw with the bare name that is hidden and revealed again comes back with the label they saw. `03` §1's Token row gains the field `shown`, never sent to a client, referring to `05` §3, as Scene's `token_numbers` refers to it. The register (`12`) is unchanged. Both files changed through `make unlock`, recorded in `UNLOCKS.md`. The code does not implement it yet: G-043 records it, and REL-03 carries it (an additive migration, the flag set in placement, reveal and numbering, with tests).
+Why: The owner answered Q-096 with B on 2026-09-29, the recommendation: it is the only option that makes the code do what `05` §3 already says, and the rename happened in front of players on the token they were watching (found testing LIV-05's undo, `server/src/domain/undo.test.ts`).
+Alternatives: A, keeping the rule and amending `05` §3 so a reveal numbers any bare-named token; C, a heuristic without a migration that breaks Q-091's example (both not chosen by the owner, see Q-096).
+Affected specs: `05` §3, `03` §1
