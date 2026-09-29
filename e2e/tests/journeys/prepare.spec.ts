@@ -30,6 +30,9 @@ test('Prepare (Phase 2 exit): a campaign prepared in the browser, calibrated by 
   page,
   browser,
 }) => {
+  // The longest journey: some forty steps, which WebKit on the Windows runner takes past the default
+  // 30 s (CI run 36563039931), each step passing (D-130).
+  test.setTimeout(90_000);
   // Unique across the browsers of the matrix too; kept short, since the layout check below reads long labels.
   const id = unique();
   // A TV connected all along: preparing reaches no client but the DM view (specs/02-architecture.md §4).

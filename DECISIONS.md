@@ -147,6 +147,7 @@ Affected specs: …
 - D-128 — The 24-hour PIN budget as built, a 15-second heartbeat with reconnection on waking, a cap on player sockets per address, and three routes that tell the DM room (REL-02: G-039, G-026, G-029, G-033) — implementation
 - D-129 — REL-02 residuals: what the MVP ships with, accepted by record; the narrowest supported DM window; how Windows runs the developer targets; the connect address kept for the owner's hardware — implementation
 - D-130 — REL-02 CI fixes: pointer steps kept on screen, a 5-second connect timeout, project patterns for Windows paths, and traces of failed tests — implementation
+- D-131 — The Prepare journey's test budget is 90 s — implementation
 
 ## D-001 (2026-09-23) — Repository documentation regime
 Type: implementation
@@ -1068,3 +1069,10 @@ Decision: Refines D-127 and D-128, which stay in force except as stated. The fir
 Why: The pointer steps are what the journeys measure, not the layout; the layout at 1,280 × 720 is D-129's accepted residual, and a test aiming off screen tested the harness. A connect timeout of 5 s is far above a LAN handshake and completes G-026's bound for the case where the device's own attempt hangs. Annotations and traces make a CI failure diagnosable without the job log, which needs a signed-in user.
 Alternatives: A taller viewport for the journeys (not taken: moves them off the 1,280 × 720 laptop window the other specs use); scrollIntoViewIfNeeded alone (rejected: it leaves a partly visible canvas where it is, which is the failure); retries (rejected by D-060); leaving the connect timeout at Socket.io's default (rejected: a TV back on the Wi-Fi could wait 20 s more); traces for every test (not taken: large artifacts for passing runs).
 Affected specs: `10` §4, `10` §5, `04` §6, `08` §10
+
+## D-131 (2026-09-29) — The Prepare journey's test budget is 90 s
+Type: implementation
+Decision: Refines D-130. `e2e/tests/journeys/prepare.spec.ts` sets `test.setTimeout(90_000)`, as the keyboard walk (90 s) and the Recover journey (120 s) do. CI run 36563039931 (`a225a75`) passed every job but `e2e · windows`, where 60 of 61 tests passed and the Prepare journey in WebKit ran past Playwright's default 30 s at its drag step, every earlier step having passed; the offline gate, which depends on it, did not run there. The same run passed `e2e · linux` whole: all specs in Chromium, the journeys in Firefox and WebKit, and the offline gate after them with nothing recorded.
+Why: Prepare is some forty steps; WebKit on the Windows runner takes it at more than twice Chromium's time on the same runner, so the whole exceeds a budget meant for short tests while no step fails or waits on a race.
+Alternatives: Splitting Prepare into several tests (not taken: `10` §5 names one journey, and the tests share one server in order, D-086); a longer default for every test (rejected: would let a short test hang for 90 s); leaving WebKit on Windows out of the matrix (rejected: `10` §4 asks for the matrix where CI can run it, and it runs).
+Affected specs: `10` §4, `10` §5
