@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { act, createElement } from 'react';
 import Konva from 'konva';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandAck, LibraryAsset, Scene, SceneToken } from '@emberglass/shared';
 import { t } from '../ui/messages.js';
+import { CONNECTION_NOTICE_DELAY_MS } from './LiveBar.js';
 import { installCanvas2d, installImageLoading, installResizeObserver } from '../ui/testing/canvas2d.js';
 import { button, click, FakeServer, installDialog, settle, submit, type Reply } from '../ui/testing/fakeServer.js';
 import { render, type Rendered } from '../ui/testing/render.js';
@@ -406,9 +407,27 @@ describe('while the connection is down (review M3, M4)', () => {
     expect(indicator(view)?.classList.contains('eg-scene__canvas--offline')).toBe(false);
     act(() => server.sockets[0]!.drop());
     await settle();
-    expect(panel(view).querySelector('.eg-scene__mode')?.textContent).toBe(t('scene.liveOffline'));
+    // Shown once the loss has lasted as long as the live bar waits (review U-L1).
+    expect(panel(view).querySelector('.eg-scene__mode')?.textContent).toBe(t('scene.live'));
+    await vi.waitFor(
+      () => expect(panel(view).querySelector('.eg-scene__mode')?.textContent).toBe(t('scene.liveOffline')),
+      { timeout: CONNECTION_NOTICE_DELAY_MS + 1_000 },
+    );
     expect(indicator(view)?.classList.contains('eg-scene__canvas--offline')).toBe(true);
     expect(viewport(view).getAttribute('aria-label')).toBe(t('canvas.labelOffline', { name: 'Cave' }));
+  });
+
+  it('shows nothing of a connection back within a second, as a reconnection on waking is (review U-L1)', async () => {
+    server.liveSceneId = cave.id;
+    const view = await open();
+    await selectScene(view, cave);
+    act(() => server.sockets[0]!.drop());
+    await settle();
+    await server.openSockets();
+    await settle();
+    await new Promise((resolve) => setTimeout(resolve, CONNECTION_NOTICE_DELAY_MS + 200));
+    expect(panel(view).querySelector('.eg-scene__mode')?.textContent).toBe(t('scene.live'));
+    expect(indicator(view)?.classList.contains('eg-scene__canvas--offline')).toBe(false);
   });
 
   it('keeps Go live and Blank TV in place but refusing, sends nothing, and clears a stale refusal once back', async () => {

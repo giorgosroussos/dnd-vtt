@@ -1,4 +1,5 @@
 import { rmSync } from 'node:fs';
+import path from 'node:path';
 
 // Remove the temporary data directory the server under test was started with.
 // Playwright stops that server only after this runs, and on Windows a file the
@@ -6,6 +7,9 @@ import { rmSync } from 'node:fs';
 // retried as this process exits, once the server has been stopped, and a folder
 // that still cannot go is left to the runner's temporary directory, with a warning.
 export default function globalTeardown(): void {
+  // The offline run's outbound log, read by offline.spec.ts; nothing holds it open.
+  const log = process.env.EMBERGLASS_E2E_OUTBOUND_LOG;
+  if (log) rmSync(path.dirname(log), { recursive: true, force: true });
   const dir = process.env.EMBERGLASS_E2E_DATA_DIR;
   if (!dir) return;
   try {

@@ -174,6 +174,77 @@ describe('a REST change to the live scene (04 §10, G-019)', () => {
   });
 });
 
+describe('a REST change to the DM room’s copy of the live scene that players never see (G-033)', () => {
+  it('tells only the DM room of a new scene order, and nobody when the order is refused', async () => {
+    const w = await world();
+    ok(
+      await h.inject({
+        method: 'PUT',
+        url: `/api/sessions/${w.live.session_id}/scenes/order`,
+        payload: { ids: [w.other.id, w.live.id] },
+      }),
+    );
+    expect(onlySnapshot(await w.dm.settle(), 'dm').scene?.scene.order).toBe(1);
+    expect(await w.player.settle()).toEqual([]);
+    const refused = await h.inject({
+      method: 'PUT',
+      url: `/api/sessions/${w.live.session_id}/scenes/order`,
+      payload: { ids: [w.live.id] },
+    });
+    expect(refused.statusCode).toBe(409);
+    expect(await w.dm.settle()).toEqual([]);
+    expect(await w.player.settle()).toEqual([]);
+  });
+
+  it('tells only the DM room when a duplicate moves the live scene down, and nobody when it does not', async () => {
+    const w = await world();
+    // The live scene is first: a copy of it goes second and moves the other scene, not the live one.
+    ok(
+      await h.inject({ method: 'POST', url: `/api/scenes/${w.live.id}/duplicate`, payload: { name: 'Lair again' } }),
+      201,
+    );
+    expect(await w.dm.settle()).toEqual([]);
+    const scenes = ok<Scene[]>(await h.inject({ method: 'GET', url: `/api/sessions/${w.live.session_id}/scenes` }));
+    const copy = scenes.find((each) => each.name === 'Lair again')!;
+    ok(
+      await h.inject({
+        method: 'PUT',
+        url: `/api/sessions/${w.live.session_id}/scenes/order`,
+        payload: { ids: [w.other.id, w.live.id, copy.id] },
+      }),
+    );
+    expect(onlySnapshot(await w.dm.settle(), 'dm').scene?.scene.order).toBe(1);
+    // Now the other scene is first: its copy goes second and moves the live scene down.
+    ok(
+      await h.inject({ method: 'POST', url: `/api/scenes/${w.other.id}/duplicate`, payload: { name: 'Road again' } }),
+      201,
+    );
+    expect(onlySnapshot(await w.dm.settle(), 'dm').scene?.scene.order).toBe(2);
+    expect(await w.player.settle()).toEqual([]);
+  });
+
+  it('tells only the DM room of a new preset of the live map', async () => {
+    const w = await world();
+    const preset = {
+      type: 'square',
+      size: 12,
+      offset_x: 1,
+      offset_y: 2,
+      visible: true,
+      feet_per_square: 5,
+      columns: 8,
+      rows: 8,
+    };
+    ok(await h.inject({ method: 'PUT', url: `/api/images/${w.live.map_image_id}/preset`, payload: preset }));
+    expect(onlySnapshot(await w.dm.settle(), 'dm').scene?.map?.grid_preset).toEqual(preset);
+    expect(await w.player.settle()).toEqual([]);
+    // Another image's preset is nobody's business.
+    ok(await h.inject({ method: 'PUT', url: `/api/images/${w.other.map_image_id}/preset`, payload: preset }));
+    expect(await w.dm.settle()).toEqual([]);
+    expect(await w.player.settle()).toEqual([]);
+  });
+});
+
 describe('a REST change to an asset with a token on the live scene (05 §5, G-019)', () => {
   it('sends both rooms a snapshot with the new image of a visible token, and none of the hidden one', async () => {
     const w = await world();

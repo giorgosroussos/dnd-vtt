@@ -31,7 +31,9 @@ import { Notice } from '../ui/Notice.js';
 import { TextField } from '../ui/TextField.js';
 import { errorMessage } from '../ui/errorMessage.js';
 import { t, type MessageKey } from '../ui/messages.js';
+import { useHeldFor } from '../ui/useHeldFor.js';
 import { errorCode, request, upload } from './api.js';
+import { CONNECTION_NOTICE_DELAY_MS } from './LiveBar.js';
 import { CalibrationPanel } from './calibration/CalibrationPanel.js';
 import { CornerMagnifier } from './calibration/CornerMagnifier.js';
 import { startDraft, withRect, type Draft } from './calibration/draft.js';
@@ -176,11 +178,14 @@ export function ScenePanel({
   const isLive = liveScene !== undefined;
   // Live mode while the connection is down: nothing done here reaches the TV until it is back (review M3).
   const offline = isLive && live?.status !== 'connected';
+  // What the DM is shown of it waits as the live bar's notice does, so a reconnection on waking,
+  // back within a second, does not flash "not connected" (review U-L1); commands are refused at once.
+  const shownOffline = useHeldFor(offline, CONNECTION_NOTICE_DELAY_MS);
   // Live mode names itself in the head, not by colour alone (specs/08-ux-journeys.md §2, review M4).
-  const modeLabel = offline ? 'scene.liveOffline' : 'scene.live';
+  const modeLabel = shownOffline ? 'scene.liveOffline' : 'scene.live';
   const frameClass = !isLive
     ? 'eg-scene__canvas'
-    : `eg-scene__canvas eg-scene__canvas--live${offline ? ' eg-scene__canvas--offline' : ''}`;
+    : `eg-scene__canvas eg-scene__canvas--live${shownOffline ? ' eg-scene__canvas--offline' : ''}`;
   // The scene as read over REST in prep mode; live mode shows the live scene's record instead.
   const [prepScene, setScene] = useState<Scene>();
   const scene = liveScene?.scene ?? prepScene;
@@ -566,6 +571,7 @@ export function ScenePanel({
       ? {
           camera: pendingCamera?.camera ?? liveScene.camera,
           screen: liveScene.screen,
+          // The frame locks at once: a drag while down would reach no TV.
           offline,
           steering,
           onSteer: (on) => {
@@ -950,7 +956,9 @@ export function ScenePanel({
                   grid={draft ? { ...scene.grid, ...draft.calibration } : scene.grid}
                   map={map}
                   mode="dm"
-                  label={t(!isLive ? 'canvas.label' : offline ? 'canvas.labelOffline' : 'canvas.labelLive', { name })}
+                  label={t(!isLive ? 'canvas.label' : shownOffline ? 'canvas.labelOffline' : 'canvas.labelLive', {
+                    name,
+                  })}
                   onMapError={() => setMapFailedFor(mapId ?? undefined)}
                   measure={measure}
                   toolbar={tokenBar}

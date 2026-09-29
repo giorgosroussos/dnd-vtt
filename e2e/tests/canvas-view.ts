@@ -7,6 +7,29 @@ export const tree = (page: Page) => page.getByRole('navigation', { name: 'Campai
 export const nameButton = (page: Page, name: string) => tree(page).getByRole('button', { name, exact: true });
 export const viewport = (page: Page) => page.locator('main [role="application"]');
 
+/**
+ * Scrolls the page, when needed, so that every point given (in viewport pixels) is on screen, and
+ * answers where each point is after the scroll. At 1,280 × 720 the canvas runs below the fold
+ * (G-022); Chromium delivers a pointer event at a point off screen, WebKit does not, so a pointer
+ * aimed there does nothing (REL-02, CI run 36561044420).
+ */
+export async function onScreen(page: Page, points: [number, number][]): Promise<[number, number][]> {
+  const height = page.viewportSize()!.height;
+  const ys = points.map(([, y]) => y);
+  const [top, bottom] = [Math.min(...ys), Math.max(...ys)];
+  const margin = 8;
+  if (top >= margin && bottom <= height - margin) return points;
+  const moved = await page.evaluate(
+    (by) => {
+      const before = window.scrollY;
+      window.scrollBy(0, by);
+      return window.scrollY - before;
+    },
+    (top + bottom) / 2 - height / 2,
+  );
+  return points.map(([x, y]) => [x, y - moved]);
+}
+
 export async function selectScene(page: Page, names: { campaign: string; session: string; scene: string }) {
   await nameButton(page, names.campaign).click();
   await nameButton(page, names.session).click();

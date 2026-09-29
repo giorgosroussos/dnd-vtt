@@ -6,5 +6,5 @@
     "types": ["node"],
     "tsBuildInfoFile": "../node_modules/.tmp/e2e.tsbuildinfo"
   },
-  "include": ["tests", "playwright.config.ts", "global-teardown.ts"]
+  "include": ["tests", "offline", "fixtures", "playwright.config.ts", "global-setup.ts", "global-teardown.ts"]
 }

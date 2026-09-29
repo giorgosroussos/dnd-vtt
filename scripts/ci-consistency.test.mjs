@@ -22,7 +22,8 @@ const readme = read('README.md');
 
 const verifyGates = list(/^verify:([^#\n]*)##/m.exec(makefile)[1].replace(/\s+/g, ','));
 const targetMatrices = [...workflow.matchAll(/^\s+target: \[(.*)\]$/gm)].map((m) => list(m[1]));
-const tripwireMatrix = list(/^\s+gate: \[(.*)\]$/m.exec(workflow)[1]);
+// No tripwire job at all once every gate is promoted (D-127).
+const tripwireMatrix = list(/^\s+gate: \[(.*)\]$/m.exec(workflow)?.[1] ?? '');
 
 // Every gate `specs/10-testing-acceptance.md` §3 and §6 require that is a test or
 // a build check. Each is either still a tripwire or, once promoted, carries its
@@ -70,11 +71,19 @@ describe('CI and the command contract agree', () => {
       }
     };
     const notAGate = /(?:\.md$|^\.log\/|^specs\/|^docs\/|^scripts\/(?:tripwire|ci-consistency)\.)/;
+    const isTest = /\.(?:spec|test)\.(?:ts|tsx|mjs|js)$/;
     for (const id of REQUIRED_GATES) {
       const registered = GATES.some((g) => g.id === id);
-      const present = paths.some((p) => !notAGate.test(p) && readFile(p)?.includes(`@gate:${id}`));
+      // In a test that runs, not only in a comment beside the code it checks (review C-L4).
+      const present = paths.some((p) => isTest.test(p) && !notAGate.test(p) && readFile(p)?.includes(`@gate:${id}`));
       expect(registered || present, `${id}: neither a tripwire nor present in the repository`).toBe(true);
     }
+  });
+
+  it('runs the external-URL check in the client build, which make build runs (review C-L4)', () => {
+    const client = JSON.parse(read('client/package.json'));
+    expect(client.scripts.build).toContain('node ../scripts/check-external-urls.mjs dist');
+    expect(/^build:[^#\n]*##/m.test(makefile)).toBe(true);
   });
 
   it('maps every job to its command in README.md', () => {

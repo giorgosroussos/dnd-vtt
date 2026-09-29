@@ -1,10 +1,12 @@
-// Guessing protection for PIN entry (specs/07-security-and-access.md §6, Q-009, Q-097):
+// Guessing protection for PIN entry (specs/07-security-and-access.md §6, Q-009, Q-097, Q-098):
 // after 5 failed attempts from one client address, PIN entry from that address is
 // refused for 1 minute, and the lockout doubles on each further run of 5 failures.
 // Beside it, a budget for the whole server: after 20 failed attempts from any addresses
 // but the server machine's own within 10 minutes, PIN entry is paused for every address
 // but loopback for 10 minutes, doubling on each further run, so that a device changing its
-// address gets no fresh guesses (G-010). An IPv6 address counts by its /64, since one
+// address gets no fresh guesses (G-010). A second budget of 100 such failures within 24 hours
+// pauses PIN entry in the same way, with one run count for both, so that a device keeping just
+// under 20 per 10 minutes is paused too (Q-098). An IPv6 address counts by its /64, since one
 // device can take any address of its prefix.
 //
 // An attempt is counted as a failure when it starts, before the PIN is hashed,
@@ -21,16 +23,27 @@ const MAX_DOUBLINGS = 30;
 export const GLOBAL_FAILURES_PER_PAUSE = 20;
 export const GLOBAL_WINDOW_MS = 10 * 60_000;
 export const FIRST_PAUSE_MS = 10 * 60_000;
+export const DAILY_FAILURES_PER_PAUSE = 100;
+export const DAILY_WINDOW_MS = 24 * 60 * 60_000;
 
 /** A pause of PIN entry for every address but loopback, started by the attempt that returned it. */
 export interface Pause {
   ms: number;
+  /** Which budget it was: 20 failures within 10 minutes, or 100 within 24 hours. */
+  budget: '10m' | '24h';
   /** The client addresses of the failures that made it, each once. */
   addresses: string[];
 }
 
 export type AttemptStart =
-  | { allowed: true; failures: number; lockedMs: number | null; paused: Pause | null }
+  | {
+      allowed: true;
+      failures: number;
+      lockedMs: number | null;
+      paused: Pause | null;
+      /** The failure this attempt counted, to hand back to `succeeded` if the PIN is right. */
+      counted: CountedFailure;
+    }
   | { allowed: false; retryAfterMs: number };
 
 export interface Lockout {
@@ -40,8 +53,11 @@ export interface Lockout {
    */
   begin(address: string): AttemptStart;
   /** The attempt's PIN was right: the address starts afresh, and its failure leaves the server's budget. */
-  succeeded(address: string): void;
+  succeeded(address: string, counted?: CountedFailure): void;
 }
+
+/** A failure counted by `begin`, opaque to its caller. */
+export type CountedFailure = object;
 
 interface Failure {
   key: string;
@@ -69,9 +85,11 @@ export function pauseDuration(pauses: number): number {
  */
 export function createLockout(now: () => number = Date.now): Lockout {
   const entries = new Map<string, Entry>();
-  // The budget's failures within the window, oldest first; emptied when a pause starts, so at
-  // most GLOBAL_FAILURES_PER_PAUSE long.
+  // Each budget's failures within its window, oldest first. A pause empties the 10-minute
+  // window; the day's window only when the day's budget opened it, since the failures before a
+  // 10-minute pause are still guesses made that day. So they are at most 20 and 100 long.
   let window: Failure[] = [];
+  let day: Failure[] = [];
   let pauses = 0;
   let pausedUntil = 0;
   return {
@@ -97,24 +115,39 @@ export function createLockout(now: () => number = Date.now): Lockout {
         entry.lockedUntil = time + lockedMs;
       }
       let paused: Pause | null = null;
+      const failure: Failure = { key, address, time };
       if (counted) {
-        window = window.filter((failure) => time - failure.time < GLOBAL_WINDOW_MS);
-        window.push({ key, address, time });
-        if (window.length >= GLOBAL_FAILURES_PER_PAUSE) {
+        window = window.filter((earlier) => time - earlier.time < GLOBAL_WINDOW_MS);
+        window.push(failure);
+        day = day.filter((earlier) => time - earlier.time < DAILY_WINDOW_MS);
+        day.push(failure);
+        // Both budgets may be spent by one attempt; it opens one pause, named after the day's.
+        const opener =
+          day.length >= DAILY_FAILURES_PER_PAUSE ? day : window.length >= GLOBAL_FAILURES_PER_PAUSE ? window : null;
+        if (opener) {
           pauses++;
-          paused = { ms: pauseDuration(pauses), addresses: [...new Set(window.map((failure) => failure.address))] };
+          paused = {
+            ms: pauseDuration(pauses),
+            budget: opener === day ? '24h' : '10m',
+            addresses: [...new Set(opener.map((earlier) => earlier.address))],
+          };
           pausedUntil = time + paused.ms;
           window = [];
+          if (opener === day) day = [];
         }
       }
-      return { allowed: true, failures: entry.failures, lockedMs, paused };
+      return { allowed: true, failures: entry.failures, lockedMs, paused, counted: failure };
     },
-    succeeded(address) {
+    succeeded(address, counted) {
       const key = lockoutKey(address);
       entries.delete(key);
-      // Its own failure, counted when it started. A pause it completed stays: 19 wrong PINs came first.
-      const last = window.findLastIndex((failure) => failure.key === key);
-      if (last >= 0) window.splice(last, 1);
+      // Its own failure, counted when it started: that very entry when the caller hands it back, so a
+      // pause that already emptied it takes no earlier failure of the address out instead (review C-L1).
+      // A pause it completed stays: the wrong PINs came first.
+      for (const budget of [window, day]) {
+        const at = counted ? budget.indexOf(counted as Failure) : budget.findLastIndex((each) => each.key === key);
+        if (at >= 0) budget.splice(at, 1);
+      }
     },
   };
 }

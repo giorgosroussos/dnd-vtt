@@ -479,7 +479,7 @@ describe('guessing protection (specs/07-security-and-access.md §6)', () => {
       .split('\n')
       .map((line) => JSON.parse(line) as Record<string, unknown>);
     expect(lines.filter((line) => line.event === 'pin.paused')).toEqual([
-      expect.objectContaining({ level: 'warn', seconds: 600, addresses }),
+      expect.objectContaining({ level: 'warn', seconds: 600, budget: '10m', addresses }),
     ]);
     // Refused during the pause, the fresh address was never counted as a failure.
     expect(lines.filter((line) => line.event === 'pin.failed' && line.address === '192.168.1.99')).toEqual([]);
@@ -519,6 +519,60 @@ describe('guessing protection (specs/07-security-and-access.md §6)', () => {
     clock += 600_000;
     await failAcrossAddresses('192.168.8.');
     await expectLocked(1_200, '192.168.1.99');
+  });
+
+  it('pauses a trickle of 19 failures every 10 minutes from changing addresses at the 100th in a day, and logs it (Q-098)', async () => {
+    const started = clock;
+    let failures = 0;
+    for (let burst = 0; failures < 100; burst++) {
+      for (let n = 0; n < 19 && failures < 100; n++, failures++) {
+        expectFailure(await enter(WRONG, `10.20.${burst}.${n}`), 401, 'pin_incorrect');
+      }
+      if (failures < 100) clock += 600_000;
+    }
+    // The 100th came in the sixth burst, 50 minutes in: every address but the server PC waits 10 minutes.
+    expect(clock - started).toBe(3_000_000);
+    await expectLocked(600, '10.20.99.1');
+    expect((await enter(PIN, '127.0.0.1')).statusCode).toBe(200);
+    clock += 600_000;
+    expect((await enter(PIN, '10.20.99.1')).statusCode).toBe(200);
+    const paused = readFileSync(logFilePath(data.dataDir), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((line) => line.event === 'pin.paused');
+    expect(paused).toEqual([expect.objectContaining({ level: 'warn', seconds: 600, budget: '24h' })]);
+    expect(paused[0]!.addresses).toHaveLength(100);
+  });
+
+  it('checks exactly one of five guesses arriving at once as the 100th of the day, and logs one pause (review T-L1)', async () => {
+    let failures = 0;
+    for (let burst = 0; failures < 99; burst++) {
+      for (let n = 0; n < 19 && failures < 99; n++, failures++) {
+        expectFailure(await enter(WRONG, `10.22.${burst}.${n}`), 401, 'pin_incorrect');
+      }
+      if (failures < 99) clock += 600_000;
+    }
+    const answers = await Promise.all([0, 1, 2, 3, 4].map((n) => enter(WRONG, `10.22.99.${n}`)));
+    const statuses = answers.map((response) => response.statusCode).sort();
+    expect(statuses).toEqual([401, 429, 429, 429, 429]);
+    const paused = readFileSync(logFilePath(data.dataDir), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((line) => line.event === 'pin.paused');
+    expect(paused).toEqual([expect.objectContaining({ budget: '24h', seconds: 600 })]);
+  });
+
+  it('doubles a day-budget pause after a 10-minute one, one run count for both (Q-098)', async () => {
+    await failAcrossAddresses();
+    clock += 600_000;
+    // Eighty more, 19 per 10 minutes, bring the day to 100: the second pause.
+    for (let n = 0; n < 80; n++) {
+      if (n > 0 && n % 19 === 0) clock += 600_000;
+      expectFailure(await enter(WRONG, `10.21.${Math.floor(n / 19)}.${n % 19}`), 401, 'pin_incorrect');
+    }
+    await expectLocked(1_200, '10.21.99.1');
   });
 
   it('keeps a DM session already open working during a pause', async () => {

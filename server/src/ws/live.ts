@@ -9,6 +9,9 @@ import {
   ROOMS,
   SOCKET_CHANNELS,
   SOCKET_PATH,
+  SOCKET_REFUSALS,
+  HEARTBEAT_INTERVAL_MS,
+  HEARTBEAT_TIMEOUT_MS,
   ScreenSchema,
   type CommandAck,
   type CommandEnvelope,
@@ -18,7 +21,7 @@ import {
   type SnapshotEvent,
   type ViewportAck,
 } from '@emberglass/shared';
-import { normalizeAddress } from '../auth/lockout.js';
+import { isLoopback, lockoutKey, normalizeAddress } from '../auth/lockout.js';
 import { readScene } from '../db/campaigns.js';
 import { readSettings } from '../db/settings.js';
 import { PlayerCameraState, ScreenRegistry, sameScreen } from '../domain/camera.js';
@@ -83,7 +86,11 @@ import { readSnapshot, type LiveMemory } from './snapshot.js';
 // closed at once, as Fastify answered it before there was a WebSocket, except Vite's own in
 // development; a socket's snapshot requests are served at most one per interval, the rest
 // merged into the next; a socket whose outgoing packets pile up unread is dropped; and the
-// connection lines are limited per address like rejected requests (G-006).
+// connection lines are limited per address like rejected requests (G-006). One LAN address holds
+// at most MAX_PLAYER_SOCKETS_PER_ADDRESS player sockets at once, an IPv6 one by its /64 as the PIN
+// limits count it, so a device opening hundreds cannot make every broadcast cost that many
+// encodings (G-029); a socket past the cap is refused in the handshake, before it joins a room or
+// hears anything. The server PC itself is not capped, nor is a DM view.
 
 export interface LiveSocketOptions {
   db: Database.Database;
@@ -113,6 +120,10 @@ export interface LiveSocketOptions {
   maxPendingPackets?: number | undefined;
   /** Limits on connection log lines; the defaults suit production. */
   connectionLines?: Omit<LineLimiterOptions, 'onDropped'> | undefined;
+  /** Player sockets one address may hold at once (G-029); tests pass a small one. */
+  maxPlayerSocketsPerAddress?: number | undefined;
+  /** A handshake's client address; tests pass one that reads a header, since theirs is loopback. */
+  clientAddress?: ((request: IncomingMessage) => string | undefined) | undefined;
 }
 
 export interface LiveSocket {
@@ -131,6 +142,9 @@ export interface LiveSocket {
 const MAX_MESSAGE_BYTES = 64 * 1024;
 export const SNAPSHOT_INTERVAL_MS = 1_000;
 export const MAX_PENDING_PACKETS = 256;
+// A TV, a spare screen and a few tabs, with room for sockets a sleeping device left behind until the
+// heartbeat drops them.
+export const MAX_PLAYER_SOCKETS_PER_ADDRESS = 16;
 
 const NOT_FOUND = 'HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n';
 const isSocketPath = (url: string | undefined): boolean => (url ?? '').split('?', 1)[0]!.startsWith(`${SOCKET_PATH}/`);
@@ -157,6 +171,8 @@ export function attachLiveSocket(
     snapshotIntervalMs = SNAPSHOT_INTERVAL_MS,
     maxPendingPackets = MAX_PENDING_PACKETS,
     connectionLines = {},
+    maxPlayerSocketsPerAddress = MAX_PLAYER_SOCKETS_PER_ADDRESS,
+    clientAddress = (request) => request.socket.remoteAddress,
   }: LiveSocketOptions,
 ): LiveSocket {
   for (const counter of Object.values(versions)) if (counter.current() === 0) counter.next();
@@ -166,6 +182,8 @@ export function attachLiveSocket(
     path: SOCKET_PATH,
     serveClient: false,
     transports: ['websocket'],
+    pingInterval: HEARTBEAT_INTERVAL_MS,
+    pingTimeout: HEARTBEAT_TIMEOUT_MS,
     maxHttpBufferSize: MAX_MESSAGE_BYTES,
     // Other paths' upgrades are ended below, at once, not after the engine's delay.
     destroyUpgrade: false,
@@ -207,7 +225,7 @@ export function attachLiveSocket(
     const pending = (socket.conn as unknown as { writeBuffer: readonly unknown[] }).writeBuffer.length;
     if (pending <= maxPendingPackets) return false;
     logger.warn('ws.overloaded', 'A socket left too many messages unread and was disconnected.', {
-      address: normalizeAddress(socket.request.socket.remoteAddress),
+      address: normalizeAddress(clientAddress(socket.request)),
     });
     socket.disconnect(true);
     return true;
@@ -308,12 +326,47 @@ export function attachLiveSocket(
     else shapeTimer = setTimeout(tellShape, wait);
   };
 
+  // Player sockets held per address key, loopback left out (G-029).
+  const playersByAddress = new Map<string, number>();
+  // The role, from the DM session alone (Q-046); a player view's socket holds no session at all, so it
+  // can neither command nor stay a DM.
+  const sessionOfSocket = (socket: Socket): string | undefined =>
+    (socket.handshake.auth as { view?: unknown }).view === PLAYER_VIEW_AUTH.view
+      ? undefined
+      : auth.sessionOfCookie(socket.request.headers.cookie);
+
+  // The cap on player sockets per address (G-029) is applied in the handshake, so a socket past it is
+  // refused before it connects: the client hears a refusal, not a connection that ends, and retries
+  // after a pause instead of at once (review H1). The count is released when the socket goes, with
+  // the listener registered here, so no later step can leave it counted (review C-L3).
+  io.use((socket, next) => {
+    if (sessionOfSocket(socket) !== undefined) return next();
+    const address = normalizeAddress(clientAddress(socket.request));
+    if (isLoopback(address)) return next();
+    const key = lockoutKey(address);
+    const held = playersByAddress.get(key) ?? 0;
+    if (held >= maxPlayerSocketsPerAddress) {
+      if (lines.admit(address)) {
+        logger.warn('ws.too_many', `Too many player views from ${address}; one more was refused.`, {
+          address,
+          limit: maxPlayerSocketsPerAddress,
+        });
+      }
+      return next(new Error(SOCKET_REFUSALS.tooManyViews));
+    }
+    playersByAddress.set(key, held + 1);
+    socket.on('disconnect', () => {
+      const left = (playersByAddress.get(key) ?? 1) - 1;
+      if (left > 0) playersByAddress.set(key, left);
+      else playersByAddress.delete(key);
+    });
+    next();
+  });
+
   io.on('connection', (socket) => {
-    const playerView = (socket.handshake.auth as { view?: unknown }).view === PLAYER_VIEW_AUTH.view;
-    // A player view's socket holds no session at all: it can neither command nor stay a DM.
-    const session = playerView ? undefined : auth.sessionOfCookie(socket.request.headers.cookie);
+    const session = sessionOfSocket(socket);
     const role: Room = session === undefined ? 'players' : 'dm';
-    const address = normalizeAddress(socket.request.socket.remoteAddress);
+    const address = normalizeAddress(clientAddress(socket.request));
     void socket.join(role);
     if (session !== undefined) {
       const sockets = bySession.get(session) ?? new Set<Socket>();

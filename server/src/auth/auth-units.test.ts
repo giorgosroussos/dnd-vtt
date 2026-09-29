@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { dmCookieValues } from '../http/auth.js';
 import {
   createLockout,
+  DAILY_FAILURES_PER_PAUSE,
+  DAILY_WINDOW_MS,
   FAILURES_PER_LOCKOUT,
   GLOBAL_FAILURES_PER_PAUSE,
   GLOBAL_WINDOW_MS,
@@ -45,16 +47,37 @@ describe('lockout (specs/07-security-and-access.md §6)', () => {
     expect(lockoutDuration(10_000)).toBeGreaterThan(lockoutDuration(30));
   });
 
+  // The failure an attempt counted is opaque to its caller: any object.
+  const aFailure: unknown = expect.any(Object);
+
   it('locks on the fifth failure and refuses without counting while locked', () => {
     let time = 0;
     const lockout = createLockout(() => time);
     for (let n = 1; n < FAILURES_PER_LOCKOUT; n++)
-      expect(lockout.begin('a')).toEqual({ allowed: true, failures: n, lockedMs: null, paused: null });
-    expect(lockout.begin('a')).toEqual({ allowed: true, failures: 5, lockedMs: 60_000, paused: null });
+      expect(lockout.begin('a')).toEqual({
+        allowed: true,
+        failures: n,
+        lockedMs: null,
+        paused: null,
+        counted: aFailure,
+      });
+    expect(lockout.begin('a')).toEqual({
+      allowed: true,
+      failures: 5,
+      lockedMs: 60_000,
+      paused: null,
+      counted: aFailure,
+    });
     time = 30_000;
     expect(lockout.begin('a')).toEqual({ allowed: false, retryAfterMs: 30_000 });
     time = 60_000;
-    expect(lockout.begin('a')).toEqual({ allowed: true, failures: 6, lockedMs: null, paused: null });
+    expect(lockout.begin('a')).toEqual({
+      allowed: true,
+      failures: 6,
+      lockedMs: null,
+      paused: null,
+      counted: aFailure,
+    });
   });
 
   it('bounds how many addresses it remembers', () => {
@@ -87,6 +110,7 @@ describe('lockout (specs/07-security-and-access.md §6)', () => {
     expect(last).toMatchObject({ allowed: true, lockedMs: null });
     expect(last.allowed && last.paused).toEqual({
       ms: 600_000,
+      budget: '10m',
       addresses: ['10.0.0.0', '10.0.0.1', '10.0.0.2', '10.0.0.3', '10.0.0.4'],
     });
     time = 1_000;
@@ -112,6 +136,100 @@ describe('lockout (specs/07-security-and-access.md §6)', () => {
     time += 600_000;
     const second = fail(GLOBAL_FAILURES_PER_PAUSE).at(-1)!;
     expect(second.allowed && second.paused?.ms).toBe(1_200_000);
+  });
+
+  // A device keeping just under the 10-minute budget, a fresh address for every guess (Q-098).
+  const trickle = (lockout: ReturnType<typeof createLockout>, clock: { time: number }, bursts: number) => {
+    const starts: ReturnType<typeof lockout.begin>[] = [];
+    for (let burst = 0; burst < bursts; burst++) {
+      for (let n = 0; n < GLOBAL_FAILURES_PER_PAUSE - 1; n++)
+        starts.push(lockout.begin(`10.${clock.time % 250}.${burst}.${n}`));
+      clock.time += GLOBAL_WINDOW_MS;
+    }
+    return starts;
+  };
+
+  it('pauses a trickle of 19 failures every 10 minutes from changing addresses at the 100th within 24 hours (Q-098)', () => {
+    const clock = { time: 0 };
+    const lockout = createLockout(() => clock.time);
+    const starts = trickle(lockout, clock, 6);
+    // Never 20 within 10 minutes, so the first budget never spends; the 100th failure opens the pause.
+    const paused = starts.map((start, n) => (start.allowed && start.paused ? n + 1 : null)).filter((n) => n !== null);
+    expect(paused).toEqual([DAILY_FAILURES_PER_PAUSE]);
+    const pause = starts[DAILY_FAILURES_PER_PAUSE - 1]!;
+    expect(pause.allowed && pause.paused).toMatchObject({ ms: 600_000, budget: '24h' });
+    expect(pause.allowed && pause.paused?.addresses).toHaveLength(DAILY_FAILURES_PER_PAUSE);
+    // Every attempt after it was refused without counting, and a fresh address is refused too.
+    expect(starts.slice(DAILY_FAILURES_PER_PAUSE).every((start) => !start.allowed)).toBe(true);
+    // The 100th failure came in the sixth burst, at 50 minutes; the pause runs 10 minutes from there.
+    clock.time = 5 * GLOBAL_WINDOW_MS + 1_000;
+    expect(lockout.begin('10.200.0.1')).toEqual({ allowed: false, retryAfterMs: 600_000 - 1_000 });
+    expect(lockout.begin('127.0.0.1')).toMatchObject({ allowed: true, paused: null });
+    clock.time = 6 * GLOBAL_WINDOW_MS;
+    expect(lockout.begin('10.200.0.1')).toMatchObject({ allowed: true, paused: null });
+  });
+
+  it('counts only the failures of the last 24 hours towards the day budget', () => {
+    let time = 0;
+    const lockout = createLockout(() => time);
+    for (let n = 0; n < DAILY_FAILURES_PER_PAUSE - 1; n++) {
+      // One failure every 14 minutes and a half: never 20 in 10 minutes, all within one day.
+      expect(lockout.begin(`10.4.${n >> 8}.${n & 255}`)).toMatchObject({ allowed: true, paused: null });
+      time += 870_000;
+    }
+    // The first failure is now more than a day old: the 100th attempt finds 99 in the window.
+    time = DAILY_WINDOW_MS;
+    expect(lockout.begin('10.4.1.0')).toMatchObject({ allowed: true, paused: null });
+    expect(lockout.begin('10.4.1.1')).toMatchObject({ allowed: true, paused: { budget: '24h' } });
+  });
+
+  it('shares one run count between both budgets, so either pause doubles the other', () => {
+    const clock = { time: 0 };
+    const lockout = createLockout(() => clock.time);
+    // A burst of 20 opens the first, 10-minute, pause; its failures still count for the day.
+    const burst = Array.from({ length: GLOBAL_FAILURES_PER_PAUSE }, (_, n) => lockout.begin(`10.5.0.${n}`));
+    const first = burst.at(-1)!;
+    expect(first.allowed && first.paused).toMatchObject({ ms: 600_000, budget: '10m' });
+    clock.time = pauseDuration(1);
+    // Eighty more in a trickle bring the day to 100: the second pause, twice as long.
+    const starts = trickle(lockout, clock, 5);
+    const second = starts[DAILY_FAILURES_PER_PAUSE - GLOBAL_FAILURES_PER_PAUSE - 1]!;
+    expect(second.allowed && second.paused).toMatchObject({ ms: 1_200_000, budget: '24h' });
+    // The day's window was emptied by its pause; the next run of 20 in 10 minutes is the third.
+    clock.time += 1_200_000;
+    const third = Array.from({ length: GLOBAL_FAILURES_PER_PAUSE }, (_, n) => lockout.begin(`10.6.0.${n}`)).at(-1)!;
+    expect(third.allowed && third.paused).toMatchObject({ ms: 2_400_000, budget: '10m' });
+  });
+
+  it('forgives exactly the correct attempt’s own failure, never a later one of the same address (review C-L1)', () => {
+    let time = 0;
+    const lockout = createLockout(() => time);
+    // A slow correct PIN from 10.8.0.1 starts; nineteen others open a pause, which empties the window.
+    const slow = lockout.begin('10.8.0.1');
+    for (let n = 0; n < GLOBAL_FAILURES_PER_PAUSE - 1; n++) lockout.begin(`10.8.1.${n}`);
+    // The pause over, the same address fails once more; then the slow attempt turns out right.
+    time = pauseDuration(1);
+    expect(lockout.begin('10.8.0.1')).toMatchObject({ allowed: true, paused: null });
+    lockout.succeeded('10.8.0.1', slow.allowed ? slow.counted : undefined);
+    // The later failure still counts: the 19th more opens the next pause, not the 20th.
+    const more = Array.from({ length: GLOBAL_FAILURES_PER_PAUSE - 1 }, (_, n) => lockout.begin(`10.8.2.${n}`));
+    expect(more.at(-1)).toMatchObject({ allowed: true, paused: { budget: '10m' } });
+  });
+
+  it('never counts loopback towards the day budget, and forgives a correct PIN from it', () => {
+    let time = 0;
+    const lockout = createLockout(() => time);
+    for (let n = 0; n < 300; n++) lockout.begin(`127.1.${n >> 8}.${n & 255}`);
+    for (let n = 0; n < DAILY_FAILURES_PER_PAUSE - 2; n++) {
+      lockout.begin(`10.7.${n >> 8}.${n & 255}`);
+      if (n % 10 === 9) time += GLOBAL_WINDOW_MS;
+    }
+    // A correct PIN takes its own failure out of both budgets: 98 remain, then 99, then the pause.
+    time += GLOBAL_WINDOW_MS;
+    expect(lockout.begin('10.7.9.9')).toMatchObject({ allowed: true, paused: null });
+    lockout.succeeded('10.7.9.9');
+    expect(lockout.begin('10.7.9.10')).toMatchObject({ allowed: true, paused: null });
+    expect(lockout.begin('10.7.9.11')).toMatchObject({ allowed: true, paused: { budget: '24h' } });
   });
 
   it('never counts failures from loopback towards the pause', () => {

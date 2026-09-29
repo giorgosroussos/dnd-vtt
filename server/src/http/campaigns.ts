@@ -184,7 +184,8 @@ export function registerCampaigns(
     { schema: { ...params, body: OrderBodySchema, response: { 200: Type.Array(SceneSchema) } } },
     (request) => {
       requireSession(request.params.id);
-      if (!reorderScenes(db, request.params.id, request.body.ids)) throw orderMismatch();
+      // The live scene's order is in the DM room's copy of it: a new order reaches that room (G-033).
+      if (!refreshLive(() => reorderScenes(db, request.params.id, request.body.ids))) throw orderMismatch();
       return listScenes(db, request.params.id);
     },
   );
@@ -223,7 +224,8 @@ export function registerCampaigns(
     PATHS.sceneDuplicate,
     { schema: { ...params, body: SceneDuplicateBodySchema, response: { 201: SceneSchema } } },
     async (request, reply) => {
-      const copy = duplicateScene(db, request.params.id, request.body.name) ?? raise(notFound());
+      // A copy moves the scenes after its original down one, the live one among them (G-033).
+      const copy = refreshLive(() => duplicateScene(db, request.params.id, request.body.name)) ?? raise(notFound());
       return reply.code(201).send(copy);
     },
   );

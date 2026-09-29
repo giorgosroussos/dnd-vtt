@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { GATES, evaluate, markerFor } from './tripwire.mjs';
+import { GATES, evaluate, markerFor, readText, repositoryPaths } from './tripwire.mjs';
 
 // A repository with both test roots present and no gate in it.
 const BASE = {
@@ -13,20 +13,27 @@ const BASE = {
   'client/src/main.tsx': 'render();',
 };
 
+// Every gate is promoted (D-127), so the mechanism is tested on a registry of its own: the two
+// gates REL-02 promoted, as they were registered until then.
+const SAMPLE = [
+  { id: 'offline-e2e', spec: 'specs/10-testing-acceptance.md §6', gate: 'the offline run', lands: 'REL-02' },
+  { id: 'external-url-build', spec: 'specs/10-testing-acceptance.md §6', gate: 'the URL check', lands: 'REL-02' },
+];
+
 // A value of null stands for a binary file.
 function judge(id, files) {
-  return evaluate(id, Object.keys(files), (p) => files[p]);
+  return evaluate(id, Object.keys(files), (p) => files[p], SAMPLE);
 }
 
 describe('tripwire', () => {
-  it.each(GATES.map((g) => g.id))('passes while %s is absent and says it is not the gate', (id) => {
+  it.each(SAMPLE.map((g) => g.id))('passes while %s is absent and says it is not the gate', (id) => {
     const result = judge(id, BASE);
     expect(result.status).toBe('absent');
     expect(result.lines.join('\n')).toContain('This job is not the gate');
     expect(result.lines.join('\n')).toContain(`Promotion condition: the first file carrying ${markerFor(id)}`);
   });
 
-  it.each(GATES.map((g) => g.id))('turns red with promotion instructions once %s appears in a test', (id) => {
+  it.each(SAMPLE.map((g) => g.id))('turns red with promotion instructions once %s appears in a test', (id) => {
     const result = judge(id, {
       ...BASE,
       'e2e/tests/gate.spec.ts': `test('the gate ${markerFor(id)}', () => {});`,
@@ -98,43 +105,41 @@ describe('tripwire', () => {
     expect(judge('no-such-gate', BASE).status).toBe('error');
   });
 
-  it('from the command line, skips ignored files, scans untracked ones and exits 1 once a gate is present', () => {
+  it('scans tracked and untracked files but not ignored ones', () => {
     const repo = mkdtempSync(path.join(os.tmpdir(), 'emberglass-tripwire-'));
     const write = (file, text) => {
       mkdirSync(path.dirname(path.join(repo, file)), { recursive: true });
       writeFileSync(path.join(repo, file), text);
     };
-    const run = () =>
-      spawnSync(process.execPath, [fileURLToPath(new URL('./tripwire.mjs', import.meta.url)), 'offline-e2e'], {
-        cwd: repo,
-        encoding: 'utf8',
-      });
+    const judgeRepo = () => evaluate('offline-e2e', repositoryPaths(repo), (p) => readText(p, repo), SAMPLE);
     try {
       expect(spawnSync('git', ['init', '-q'], { cwd: repo }).status).toBe(0);
       write('.gitignore', 'dist/\n');
       write('e2e/tests/views.spec.ts', '');
       write('server/src/app.test.ts', '');
       write('dist/built.js', `// ${markerFor('offline-e2e')}`);
-      const ignored = run();
-      expect(ignored.status).toBe(0);
-      expect(ignored.stdout).toContain('gate ABSENT');
+      expect(judgeRepo().status).toBe('absent');
 
       write('e2e/tests/offline.spec.ts', `test('${markerFor('offline-e2e')}', () => {});`);
-      const present = run();
-      expect(present.status).toBe(1);
-      expect(present.stderr).toContain('gate PRESENT in e2e/tests/offline.spec.ts');
+      const present = judgeRepo();
+      expect(present.status).toBe('present');
+      expect(present.lines[0]).toContain('gate PRESENT in e2e/tests/offline.spec.ts');
     } finally {
       rmSync(repo, { recursive: true, force: true });
     }
   });
 
-  it('passes on this repository today, for every gate', () => {
-    const run = spawnSync(process.execPath, ['scripts/tripwire.mjs'], {
-      cwd: fileURLToPath(new URL('..', import.meta.url)),
-      encoding: 'utf8',
-    });
-    expect(run.stderr).toBe('');
-    expect(run.status).toBe(0);
-    for (const gate of GATES) expect(run.stdout).toContain(`tripwire ${gate.id}: gate ABSENT`);
+  it('registers no gate once every one is promoted, and says so from the command line', () => {
+    expect(GATES).toEqual([]);
+    const script = fileURLToPath(new URL('./tripwire.mjs', import.meta.url));
+    const cwd = fileURLToPath(new URL('..', import.meta.url));
+    const all = spawnSync(process.execPath, [script], { cwd, encoding: 'utf8' });
+    expect(all.stderr).toBe('');
+    expect(all.status).toBe(0);
+    expect(all.stdout).toContain('no gate is registered');
+    // A promoted gate's tripwire is gone: asking for it is an error, not a pass.
+    const promoted = spawnSync(process.execPath, [script, 'offline-e2e'], { cwd, encoding: 'utf8' });
+    expect(promoted.status).toBe(1);
+    expect(promoted.stderr).toContain('unknown gate "offline-e2e"; known: none, every gate is promoted');
   });
 });

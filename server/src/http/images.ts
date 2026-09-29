@@ -68,11 +68,13 @@ export interface ImageRoutesOptions {
   auth: Auth;
   /** Told when an upload's display version was made at a size that is no longer the setting (G-015). */
   regenerator: Pick<DisplayRegenerator, 'kick'>;
+  /** Runs a change and tells the live scene's rooms what it changed of it (LIV-04, G-033). */
+  refresh: <T>(work: () => T) => T;
 }
 
 export async function registerImages(
   app: FastifyInstance,
-  { db, imagesDir, auth, regenerator }: ImageRoutesOptions,
+  { db, imagesDir, auth, regenerator, refresh }: ImageRoutesOptions,
 ): Promise<void> {
   // The upload takes the file's bytes as its body, whatever Content-Type the browser gave it,
   // so its route has a scope of its own with one parser that hands over the unread stream.
@@ -115,11 +117,12 @@ export async function registerImages(
   );
 
   // Calibrating a scene updates its image's preset for later scenes; existing scenes keep their
-  // own grid (specs/03-domain-model.md §5, Q-001).
+  // own grid (specs/03-domain-model.md §5, Q-001). The live map's preset is in the DM room's copy of
+  // the live scene, so a change to it reaches that room; players never see a preset (G-033).
   app.put<{ Params: ImageIdParams; Body: GridPreset }>(
     PATHS.imagePreset,
     { schema: { params: ImageIdParamsSchema, body: GridPresetSchema, response: { 200: ImageSchema } } },
-    (request) => updateGridPreset(db, request.params.id, request.body) ?? raise(notFound()),
+    (request) => refresh(() => updateGridPreset(db, request.params.id, request.body)) ?? raise(notFound()),
   );
 
   // No params schema: a malformed id or variant is not found, like everything else here,
