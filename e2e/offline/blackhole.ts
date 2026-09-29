@@ -22,9 +22,13 @@ export function startBlackhole(port: number, log: string): Promise<Blackhole> {
     response.end('Blocked: the offline end-to-end run allows no traffic beyond the local host.');
   });
   server.on('connect', (request, socket) => {
+    // A browser may reset a tunnel it asked for; unhandled, that error would end the whole run
+    // (CI run 36566598624, Edge on Windows).
+    socket.on('error', () => socket.destroy());
     record('connect', String(request.url));
     socket.end('HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
   });
+  server.on('connection', (socket) => socket.on('error', () => socket.destroy()));
   server.on('clientError', (_error, socket) => socket.destroy());
   return new Promise((resolve, reject) => {
     server.once('error', reject);
