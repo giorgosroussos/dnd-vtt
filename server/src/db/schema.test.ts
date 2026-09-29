@@ -214,6 +214,8 @@ describe('migration 0001 on a fresh database', () => {
         'hidden INTEGER NOT NULL',
         'z_order INTEGER NOT NULL',
         'character_id TEXT NULL',
+        // Migration 0003 (Q-096, D-137).
+        'shown INTEGER NOT NULL DEFAULT 0',
       ],
       settings: [
         'id TEXT NOT NULL',
@@ -786,11 +788,14 @@ const CONTRACT: Record<Table, TSchema & { properties: Record<string, unknown> }>
 };
 
 describe('the contract types in shared', () => {
-  // The token numbers a scene has issued are the server's own too (Q-091, D-101).
-  it('name exactly the stored columns, except the PIN hash and the token numbers, which never leave the server', () => {
+  // The token numbers a scene has issued, and whether players have seen a token, are the server's own
+  // too (Q-091, D-101; Q-096, D-137).
+  it('name exactly the stored columns, except the PIN hash, the token numbers and whether a token was shown, which never leave the server', () => {
     migrated();
     const internal = (table: string, column: string) =>
-      (table === 'settings' && column === 'pin_hash') || (table === 'scene' && column === 'token_numbers');
+      (table === 'settings' && column === 'pin_hash') ||
+      (table === 'scene' && column === 'token_numbers') ||
+      (table === 'token' && column === 'shown');
     for (const table of TABLES) {
       const stored = columnNames(table).filter((c) => !internal(table, c));
       expect(contractColumns(CONTRACT[table]).sort(), table).toEqual(stored.sort());
@@ -798,6 +803,7 @@ describe('the contract types in shared', () => {
     expect(Object.keys(GridSchema.properties)).toEqual(GRID_FIELDS);
     expect(Object.keys(SettingsSchema.properties)).not.toContain('pin_hash');
     expect(Object.keys(SceneSchema.properties)).not.toContain('token_numbers');
+    expect(Object.keys(TokenSchema.properties)).not.toContain('shown');
   });
 
   it('describe every row of the generated fixture database', () => {
@@ -889,5 +895,15 @@ describe('migrations on the generated fixture database (specs/14-agent-playbook.
     // scene has issued, none recorded yet, which readEntities leaves out (Q-091).
     expect(readEntities(db)).toEqual(before);
     expect(db.prepare('SELECT DISTINCT token_numbers FROM scene').pluck().all()).toEqual(['{}']);
+    // Migration 0003 counts an existing token as shown when it is visible or its label is not its
+    // asset's bare name, and leaves a hidden bare-named one not shown (Q-096).
+    const shown = db
+      .prepare(
+        `SELECT token.hidden, token.label = asset.name AS bare, token.shown FROM token
+         JOIN asset ON asset.id = token.asset_id`,
+      )
+      .all() as { hidden: 0 | 1; bare: 0 | 1; shown: 0 | 1 }[];
+    expect(shown.length).toBeGreaterThan(0);
+    for (const row of shown) expect(row.shown, JSON.stringify(row)).toBe(row.hidden === 0 || row.bare === 0 ? 1 : 0);
   });
 });

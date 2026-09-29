@@ -387,6 +387,42 @@ describe('hidden tokens are numbered only when first shown (specs/05-assets-and-
     expect((await changed(c.token.id, { hidden: false })).label).toBe('Goblin 2');
   });
 
+  it('brings a lone token players saw as the bare name back with it after a hide, not as the next number (Q-096)', async () => {
+    const cave = await scene();
+    const goblin = await asset('Goblin', { category: 'npc' });
+    const lone = await place(cave.id, goblin.id);
+    expect(lone.token).toMatchObject({ label: 'Goblin', hidden: false });
+    expect((await changed(lone.token.id, { hidden: true })).label).toBe('Goblin');
+    const revealed = ok<TokenChange>(await patch(tokenUrl(lone.token.id), { hidden: false }));
+    expect(revealed).toMatchObject({ token: { label: 'Goblin', hidden: false }, relabelled: [] });
+    // A second goblin shown later still numbers them both, the first as 1 (Q-063, Q-091).
+    const second = await place(cave.id, goblin.id);
+    expect(second.token.label).toBe('Goblin 2');
+    expect(await labels(cave.id)).toEqual(['Goblin 1', 'Goblin 2']);
+  });
+
+  it('numbers a token placed hidden at its first showing only, and never again after a hide (Q-092, Q-096)', async () => {
+    const cave = await scene();
+    const goblin = await asset('Goblin', { category: 'monster' });
+    const [a, b] = [await place(cave.id, goblin.id), await place(cave.id, goblin.id)];
+    expect((await changed(a.token.id, { hidden: false })).label).toBe('Goblin');
+    expect((await changed(a.token.id, { hidden: true })).label).toBe('Goblin');
+    // Shown before: revealed with the label players saw, not numbered as a first showing.
+    expect((await changed(a.token.id, { hidden: false })).label).toBe('Goblin');
+    // b's first showing numbers it, and a with it.
+    expect((await changed(b.token.id, { hidden: false })).label).toBe('Goblin 2');
+    expect(await labels(cave.id)).toEqual(['Goblin 1', 'Goblin 2']);
+  });
+
+  it('never sends whether a token was shown to a client (Q-096)', async () => {
+    const cave = await scene();
+    const goblin = await asset('Goblin', { category: 'npc' });
+    const placed = await place(cave.id, goblin.id);
+    expect(Object.keys(placed.token)).not.toContain('shown');
+    const listed = ok<SceneToken[]>(await get(`/api/scenes/${cave.id}/tokens`));
+    for (const token of listed) expect(Object.keys(token)).not.toContain('shown');
+  });
+
   it('numbers a visible placement after the shown tokens only, never after a hidden one', async () => {
     const cave = await scene();
     const goblin = await asset('Goblin', { category: 'monster' });

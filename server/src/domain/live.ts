@@ -39,7 +39,8 @@ export type LiveEffect =
   | { type: 'cleared' }
   | { type: 'token.added'; token: SceneToken; relabelled: SceneToken[] }
   | { type: 'token.updated'; before: SceneToken; token: SceneToken; relabelled: SceneToken[] }
-  | { type: 'token.removed'; token: SceneToken }
+  // `shown` is for the undo that puts the token back; the projection sends only the id.
+  | { type: 'token.removed'; token: SceneToken; shown: boolean }
   /** The player camera was set (LIV-06): both rooms receive `camera.player`. */
   | { type: 'camera' }
   /** A measurement is shown on the live scene (LIV-07): both rooms receive `ruler.shown`. */
@@ -82,7 +83,7 @@ export function applyLiveCommand(db: Database.Database, command: CommandEnvelope
       const result = deleteToken(db, token_id, 'live');
       if (result.outcome === 'not_found') return tokenNotFound();
       if (result.outcome !== 'deleted') return notLive();
-      return [{ type: 'token.removed', token: result.token }];
+      return [{ type: 'token.removed', token: result.token, shown: result.shown }];
     }
     case 'scene.activate': {
       const { scene_id } = command.payload as SceneActivatePayload;
@@ -117,7 +118,7 @@ export function applyInverse(db: Database.Database, inverse: Inverse): LiveResul
     return changed(result);
   }
   if (inverse.type !== 'token.add') return applyLiveCommand(db, inverse);
-  const result = restoreToken(db, inverse.restore, 'live');
+  const result = restoreToken(db, inverse.restore, 'live', inverse.shown);
   switch (result.outcome) {
     case 'restored':
       return [{ type: 'token.added', token: result.token, relabelled: [] }];

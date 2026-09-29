@@ -44,6 +44,10 @@ const toToken = (row: Row): SceneToken => ({
   asset: { name: row.asset_name, image_id: row.asset_image_id, size: row.asset_size },
 });
 
+/** Whether players have seen the token (Q-096); kept out of SceneToken, which clients receive. */
+const shownOf = (db: Database.Database, id: string): boolean =>
+  db.prepare('SELECT shown FROM token WHERE id = ?').pluck().get(id) === 1;
+
 const isLive = (db: Database.Database, sceneId: string): boolean =>
   (db.prepare('SELECT live_scene_id FROM settings').pluck().get() as string | null) === sceneId;
 
@@ -136,8 +140,19 @@ export function createToken(
     if (asset === undefined) return { outcome: 'asset_not_found' };
     const top = db.prepare('SELECT max(z_order) FROM token WHERE scene_id = ?').pluck().get(sceneId) as number | null;
     db.prepare(
-      'INSERT INTO token (id, scene_id, asset_id, label, x, y, hidden, z_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    ).run(id, sceneId, fields.asset_id, asset.name, fields.x, fields.y, asset.default_hidden, (top ?? -1) + 1);
+      'INSERT INTO token (id, scene_id, asset_id, label, x, y, hidden, z_order, shown) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    ).run(
+      id,
+      sceneId,
+      fields.asset_id,
+      asset.name,
+      fields.x,
+      fields.y,
+      asset.default_hidden,
+      (top ?? -1) + 1,
+      // Placed visible is its first showing (Q-096).
+      asset.default_hidden === 1 ? 0 : 1,
+    );
     const renamed =
       asset.default_hidden === 1 ? undefined : numberAs(db, sceneId, { id: fields.asset_id, name: asset.name }, id);
     return {
@@ -170,7 +185,7 @@ export type TokenChangeOutcome =
  * live scene. `stack`
  * puts it above (`front`) or below (`back`) every other token of the scene, unless it already is.
  * Revealing a token that still carries its asset's bare name numbers it (Q-092), unless the same
- * change gives it a label; hiding one keeps its label.
+ * change gives it a label or players have seen it before (Q-096); hiding one keeps its label.
  */
 export function updateToken(
   db: Database.Database,
@@ -204,8 +219,12 @@ export function updateToken(
       id,
     );
     const revealed = before.hidden && fields.hidden === false;
+    // Numbered only at its first showing (Q-096): a token players saw is revealed with the label
+    // they saw, bare name included.
+    const firstShowing = revealed && !shownOf(db, id);
+    if (revealed) db.prepare('UPDATE token SET shown = 1 WHERE id = ?').run(id);
     const renamed =
-      revealed && fields.label === undefined && before.label === before.asset.name
+      firstShowing && fields.label === undefined && before.label === before.asset.name
         ? numberAs(db, before.scene_id, { id: before.asset_id, name: before.asset.name }, id)
         : undefined;
     return {
@@ -218,7 +237,10 @@ export function updateToken(
 }
 
 export type TokenDeleteOutcome =
-  { outcome: 'deleted'; token: SceneToken } | { outcome: 'not_found' } | { outcome: 'live' } | { outcome: 'not_live' };
+  | { outcome: 'deleted'; token: SceneToken; shown: boolean }
+  | { outcome: 'not_found' }
+  | { outcome: 'live' }
+  | { outcome: 'not_live' };
 
 /** Deletes a token, answering what it was; its number is not issued again (Q-063). */
 export function deleteToken(db: Database.Database, id: string, scope: TokenScope = 'prep'): TokenDeleteOutcome {
@@ -227,8 +249,10 @@ export function deleteToken(db: Database.Database, id: string, scope: TokenScope
     if (token === undefined) return { outcome: 'not_found' };
     const refused = refusal(db, token.scene_id, scope);
     if (refused) return { outcome: refused };
+    // Whether players had seen it, for an undo that puts it back (Q-096); never sent to a client.
+    const shown = shownOf(db, id);
     db.prepare('DELETE FROM token WHERE id = ?').run(id);
-    return { outcome: 'deleted', token };
+    return { outcome: 'deleted', token, shown };
   })();
 }
 
@@ -240,8 +264,8 @@ export type TokenRestoreOutcome =
   | { outcome: 'not_live' };
 
 /**
- * Puts a deleted token back exactly as it was: its id, label, position, visibility and stacking
- * order (LIV-05, undo of `token.delete`, specs/04-live-sync.md §8, D-117). No number is issued, and
+ * Puts a deleted token back exactly as it was: its id, label, position, visibility, stacking
+ * order and whether players had seen it (`shown`, Q-096; by default, whether it was visible) (LIV-05, undo of `token.delete`, specs/04-live-sync.md §8, D-117). No number is issued, and
  * none is taken back: its label is the one it had, or the asset's current name if it carried the
  * asset's bare name and the asset was renamed since. Refused when its scene is gone or not in `scope`,
  * or its asset was deleted meanwhile. Each deletion's inverse is taken once, so its id is free; were
@@ -251,6 +275,7 @@ export function restoreToken(
   db: Database.Database,
   token: SceneToken,
   scope: TokenScope = 'live',
+  shown = !token.hidden,
 ): TokenRestoreOutcome {
   return db.transaction((): TokenRestoreOutcome => {
     if (db.prepare('SELECT count(*) FROM scene WHERE id = ?').pluck().get(token.scene_id) === 0) {
@@ -265,8 +290,8 @@ export function restoreToken(
     // numbering would then take for a label the DM typed (Q-094, LIV-05 review C2).
     const label = token.label === token.asset.name ? name : token.label;
     db.prepare(
-      `INSERT INTO token (id, scene_id, asset_id, label, x, y, hidden, z_order, character_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO token (id, scene_id, asset_id, label, x, y, hidden, z_order, character_id, shown)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       token.id,
       token.scene_id,
@@ -277,6 +302,7 @@ export function restoreToken(
       token.hidden ? 1 : 0,
       token.z_order,
       token.character_id,
+      shown ? 1 : 0,
     );
     return { outcome: 'restored', token: readToken(db, token.id)! };
   })();

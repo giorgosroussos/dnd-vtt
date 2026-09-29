@@ -149,8 +149,22 @@ describe('undo over the wire (specs/04-live-sync.md §8, D-040)', () => {
     expect(undone.tv).toEqual([
       { type: 'token.removed', version: expect.any(Number) as number, payload: { id: hidden.id } },
     ]);
-    // The token is as it was; the number its first showing issued stays issued (Q-091, Q-092, D-117).
-    expect(row()).toEqual(before);
+    // The token is as it was, but players saw it: it stays shown, so a later reveal keeps its label
+    // (Q-096); the number its first showing issued stays issued (Q-091, Q-092, D-117).
+    expect(row()).toEqual({ ...(before as object), shown: 1 });
+  });
+
+  it('puts back whether players saw a deleted token, so its next reveal keeps the label they saw (Q-096)', async () => {
+    const w = await world();
+    const shown = () => h.data.db.prepare('SELECT shown FROM token WHERE id = ?').pluck().get(w.first.id);
+    expect(shown()).toBe(1);
+    await step(w, 'token.setVisibility', { token_id: w.first.id, hidden: true });
+    await step(w, 'token.delete', { token_id: w.first.id });
+    await undo(w);
+    expect(shown()).toBe(1);
+    const revealed = await step(w, 'token.setVisibility', { token_id: w.first.id, hidden: false });
+    expect((revealed.tv[0]!.payload as { token: { label: string } }).token.label).toBe('Goblin');
+    expect(JSON.stringify(revealed.tv)).not.toContain('shown');
   });
 
   it('undoes a hide: players hear token.added with the label they saw, and the database is as before', async () => {

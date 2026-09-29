@@ -25,7 +25,7 @@ export type Inverse =
   | { type: 'token.move'; payload: TokenMovePayload }
   | { type: 'token.setVisibility'; payload: TokenSetVisibilityPayload }
   | { type: 'token.delete'; payload: TokenDeletePayload }
-  | { type: 'token.add'; restore: SceneToken };
+  | { type: 'token.add'; restore: SceneToken; shown: boolean };
 
 export const UNDO_LIMIT = 100;
 
@@ -54,7 +54,9 @@ export function inverseOf(command: CommandEnvelope, effects: readonly LiveEffect
         ? { type: 'token.setVisibility', payload: { token_id: effect.token.id, hidden: effect.before.hidden } }
         : undefined;
     case 'token.delete':
-      return effect.type === 'token.removed' ? { type: 'token.add', restore: effect.token } : undefined;
+      return effect.type === 'token.removed'
+        ? { type: 'token.add', restore: effect.token, shown: effect.shown }
+        : undefined;
     default:
       return undefined;
   }

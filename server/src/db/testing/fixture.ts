@@ -186,7 +186,8 @@ export function readEntities(db: Database.Database): Entities {
       ...without(without(row, 'grid_'), 'token_numbers'),
       grid: grid(row, 'grid_'),
     })) as Scene[],
-    token: all('token').map((row) => ({ ...row, hidden: row.hidden === 1 })) as Token[],
+    // Whether players have seen a token is the server's own too (Q-096).
+    token: all('token').map((row) => ({ ...without(row, 'shown'), hidden: row.hidden === 1 })) as Token[],
     settings: all('settings').map((row) => without(row, 'pin_hash')) as Settings[],
   };
 }

@@ -71,11 +71,16 @@ describe('the inverse of each undoable command (specs/04-live-sync.md §8)', () 
   });
 
   it('undoes a delete by putting back the same token, all of it, a hidden one included', () => {
-    for (const hidden of [false, true]) {
+    for (const [hidden, shown] of [
+      [false, true],
+      [true, false],
+      [true, true],
+    ] as const) {
       const deleted = token({ hidden });
-      expect(inverseOf(command('token.delete'), [{ type: 'token.removed', token: deleted }])).toEqual({
+      expect(inverseOf(command('token.delete'), [{ type: 'token.removed', token: deleted, shown }])).toEqual({
         type: 'token.add',
         restore: deleted,
+        shown,
       });
     }
   });
@@ -88,7 +93,7 @@ describe('the inverse of each undoable command (specs/04-live-sync.md §8)', () 
     expect(inverseOf(command('token.setVisibility'), [])).toBeUndefined();
     expect(inverseOf(command('scene.activate'), [{ type: 'activated' }])).toBeUndefined();
     expect(inverseOf(command('scene.deactivate'), [{ type: 'cleared' }])).toBeUndefined();
-    expect(inverseOf(command('undo'), [{ type: 'token.removed', token: token() }])).toBeUndefined();
+    expect(inverseOf(command('undo'), [{ type: 'token.removed', token: token(), shown: true }])).toBeUndefined();
   });
 });
 

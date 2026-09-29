@@ -154,6 +154,7 @@ Affected specs: …
 - D-135 — D-129 and D-133 corrected after the REL-02 review: the DM window's height is a gap, and the offline gate's exception does not rest on the build check alone — implementation
 - D-136 — The Prepare journey's 90 s budget is by engine, not by system — implementation
 - D-137 — A token stores whether players have seen it; numbering only at the first showing (Q-096) — spec-amendment
+- D-138 — Q-096 as built: migration 0003 adds token.shown, set at the first showing and carried through undo, never sent to a client — implementation
 
 ## D-001 (2026-09-23) — Repository documentation regime
 Type: implementation
@@ -1124,3 +1125,10 @@ Decision: `05` §3 gains one statement, tagged [Q-096]: whether a token has been
 Why: The owner answered Q-096 with B on 2026-09-29, the recommendation: it is the only option that makes the code do what `05` §3 already says, and the rename happened in front of players on the token they were watching (found testing LIV-05's undo, `server/src/domain/undo.test.ts`).
 Alternatives: A, keeping the rule and amending `05` §3 so a reveal numbers any bare-named token; C, a heuristic without a migration that breaks Q-091's example (both not chosen by the owner, see Q-096).
 Affected specs: `05` §3, `03` §1
+
+## D-138 (2026-09-29) — Q-096 as built: migration 0003 adds token.shown, set at the first showing and carried through undo, never sent to a client
+Type: implementation
+Decision: Refines D-137, which planned the work for REL-03; it is done with the answer instead, since `server/src/db/schema.test.ts` checks the schema against `03` §1's field list and failed in CI (run 36610443613) once the spec named `shown`. Migration `0003_token_shown.sql` adds `token.shown INTEGER NOT NULL DEFAULT 0 CHECK (shown IN (0, 1))` and marks an existing token shown when it is visible or its label is not its asset's bare name (numbered at a showing, or typed by the DM, never renumbered either way); a hidden bare-named token is left not shown, as it was treated before. `server/src/db/tokens.ts`: a token placed visible is stored shown; a reveal sets `shown` and numbers a bare-named token only when it was not shown before (Q-092 applies at the first showing only); `deleteToken` answers whether the token was shown, the `token.removed` effect and the undo inverse (`token.add` in its restoring form) carry it, and `restoreToken` puts it back (by default, whether the token was visible). `shown` is read by its own query and is not in `SceneToken`, so no REST body, event or snapshot carries it; the projection of `token.removed` sends only the id. Test tooling: `readEntities` leaves `shown` out, as it does the token numbers, and the fixture migration test checks the migration's rule row by row.
+Why: The owner answered Q-096 with B (D-137). Keeping the flag out of the contract keeps it where the other server-only numbering state is (Q-091's token numbers), and carrying it through the undo inverse is what keeps a token players saw, hidden, deleted and put back, from being renumbered at its next reveal.
+Alternatives: Deferring the code to REL-03 (rejected: the schema conformance test fails until the column exists, and weakening it is not an option); adding `shown` to `SceneToken` (rejected: it would reach the DM's and, through a projection mistake, could reach players' payloads, against `03` §1 as amended); marking every existing hidden token shown (not taken: a token placed hidden and never revealed would then come back with the bare name when a second of its asset is already numbered, against Q-092).
+Affected specs: `05` §3, `03` §1, `04` §8
