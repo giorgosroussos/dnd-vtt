@@ -63,7 +63,9 @@ test('a ping on the live scene shows at the same point on the TV for about two s
     const box = (await viewport(dm).boundingBox())!;
     const at = { x: box.width * 0.55, y: box.height * 0.5 };
     await viewport(dm).click({ position: at });
+    // Each view draws it when its own event arrives, so both are waited for, not read once (CI review).
     await expect.poll(async () => (await pingsOf(tvCanvas(tv))).length).toBe(1);
+    await expect.poll(async () => (await pingsOf(viewport(dm))).length).toBe(1);
     const [onTv] = await pingsOf(tvCanvas(tv));
     const [onDm] = await pingsOf(viewport(dm));
     expect(onDm).toMatchObject({ x: onTv!.x, y: onTv!.y });

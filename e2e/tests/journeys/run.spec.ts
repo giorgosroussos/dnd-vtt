@@ -51,6 +51,9 @@ function eventFramesOf(page: Page): string[] {
 test('Run: go live, move, reveal, hide, delete, undo, measure, steer the TV, prepare the next scene unseen, go live on it, Blank TV', async ({
   browser,
 }, info) => {
+  // A long journey: WebKit and Firefox on the CI runners take more than the default 30 s for it, as they do
+  // for Prepare; on Windows WebKit it ran out during the final cleanup, every step passed (CI, PR #26).
+  if (['webkit', 'firefox'].includes(info.project.name)) test.setTimeout(90_000);
   const dmContext = await browser.newContext();
   const tvContext = await browser.newContext();
   const dm = await dmContext.newPage();

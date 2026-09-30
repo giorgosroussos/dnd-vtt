@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
 import type { TSchema } from 'typebox';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   AssetSchema,
   AssetTagSchema,
@@ -43,6 +43,19 @@ import {
 let root: string;
 let dataDir: string;
 let db: Database.Database;
+// A data directory migrated once for the whole file: each test that needs the latest schema starts from a
+// copy of its database, so the file's many small tests do not each run every migration (they timed out on
+// slow CI runners, three times). The server's own migration still runs on the copy, and finds nothing to do.
+let template: string;
+
+beforeAll(() => {
+  template = mkdtempSync(path.join(os.tmpdir(), 'emberglass-schema-template-'));
+  migrateDataDirectory(path.join(template, 'data'), MIGRATIONS_DIR);
+});
+
+afterAll(() => {
+  rmSync(template, { recursive: true, force: true });
+});
 
 beforeEach(() => {
   root = mkdtempSync(path.join(os.tmpdir(), 'emberglass-schema-'));
@@ -55,7 +68,9 @@ afterEach(() => {
 });
 
 function migrated(): Database.Database {
-  migrateDataDirectory(dataDir, MIGRATIONS_DIR);
+  mkdirSync(dataDir, { recursive: true });
+  copyFileSync(path.join(template, 'data', DATABASE_FILE), path.join(dataDir, DATABASE_FILE));
+  expect(migrateDataDirectory(dataDir, MIGRATIONS_DIR).applied).toEqual([]);
   db = openDatabase(dataDir);
   return db;
 }
