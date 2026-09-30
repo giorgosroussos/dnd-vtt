@@ -312,6 +312,72 @@ describe('undo and redo on the rail (specs/04-live-sync.md §8)', () => {
   });
 });
 
+describe('ping (TBL-01, specs/04-live-sync.md §12)', () => {
+  const canvas = (view: HTMLElement) => view.querySelector<HTMLElement>('[role="application"]')!;
+  const pings = (view: HTMLElement) => JSON.parse(canvas(view).dataset.pings ?? '[]') as { x: number; y: number }[];
+
+  it('pings the centre of the view with Enter on the live scene, drawn here once the server says so', async () => {
+    server.liveSceneId = tavern.id;
+    const view = await open();
+    const tool = button(view, t('canvas.toolPing'))!;
+    expect(tool.getAttribute('aria-disabled')).toBeNull();
+    expect(tool.getAttribute('aria-pressed')).toBe('false');
+    press(document.body, 'p');
+    await settle();
+    expect(canvas(view).dataset.pingTool).toBe('on');
+    expect(tool.getAttribute('aria-pressed')).toBe('true');
+    expect(button(view, t('canvas.toolSelect'))!.getAttribute('aria-pressed')).toBe('false');
+    press(canvas(view), 'Enter');
+    await settle();
+    const sent = commands().at(-1)!;
+    expect(sent).toMatchObject({ type: 'ping', payload: { scene_id: tavern.id } });
+    const { x, y } = sent.payload as { x: number; y: number };
+    expect([typeof x, typeof y]).toEqual(['number', 'number']);
+    expect(pings(view)).toEqual([expect.objectContaining({ x, y })]);
+    // Nothing of it is kept: no undo, no snapshot.
+    expect(button(view, t('canvas.undo'))!.getAttribute('aria-disabled')).toBe('true');
+  });
+
+  it('gives way to the ruler and to Select, and stops with P or Escape on the map', async () => {
+    server.liveSceneId = tavern.id;
+    const view = await open();
+    press(document.body, 'p');
+    await settle();
+    press(document.body, 'm');
+    await settle();
+    expect(canvas(view).dataset.rulerTool).toBe('on');
+    expect(canvas(view).dataset.pingTool).toBe('off');
+    await click(button(view, t('canvas.toolPing')));
+    expect(canvas(view).dataset.pingTool).toBe('on');
+    expect(canvas(view).dataset.rulerTool).toBe('off');
+    press(document.body, 'v');
+    await settle();
+    expect(canvas(view).dataset.pingTool).toBe('off');
+    press(canvas(view), 'p');
+    await settle();
+    expect(canvas(view).dataset.pingTool).toBe('on');
+    press(canvas(view), 'Escape');
+    await settle();
+    expect(canvas(view).dataset.pingTool).toBe('off');
+    expect(commands().filter((each) => each.type === 'ping')).toEqual([]);
+  });
+
+  it('is not offered on a scene that is not live, where P does nothing', async () => {
+    server.liveSceneId = cellar.id;
+    const view = await open();
+    await selectScene(view, 'Tavern');
+    const tool = button(view, t('canvas.toolPing'))!;
+    expect(tool.getAttribute('aria-disabled')).toBe('true');
+    expect(document.getElementById(tool.getAttribute('aria-describedby')!)!.textContent).toBe(t('canvas.pingLiveOnly'));
+    press(document.body, 'p');
+    await settle();
+    expect(canvas(view).dataset.pingTool).toBeUndefined();
+    press(canvas(view), 'Enter');
+    await settle();
+    expect(commands().filter((each) => each.type === 'ping')).toEqual([]);
+  });
+});
+
 describe('NEXT UP (UIX-01)', () => {
   const scenes = [{ id: 'a' }, { id: 'b' }, { id: 'c' }] as Scene[];
   it('is the scene after the live one in this session, else after the one shown, and none after the last', () => {

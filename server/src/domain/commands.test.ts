@@ -178,6 +178,7 @@ describe('the process command validator', () => {
     'camera.setPlayer',
     'ruler.update',
     'ruler.clear',
+    'ping',
     'undo',
     'redo',
   ];
@@ -219,5 +220,23 @@ describe('the process command validator', () => {
     expect(send({ type: 'ruler.update', payload: { scene_id, from, to: { column: 4, row: 5 } } })).toEqual({
       ok: true,
     });
+  });
+
+  it('refuses a ping off the coordinates a token may take, without its scene or with more than a point (TBL-01)', () => {
+    const { apply, send } = harness(validateCommand);
+    const scene_id = '00000000-0000-4000-8000-000000000001';
+    for (const payload of [
+      { scene_id, x: 1 },
+      { x: 1, y: 2 },
+      { scene_id, x: 1, y: 2e7 },
+      { scene_id, x: '1', y: 2 },
+      { scene_id, x: 1, y: 2, colour: 'red' },
+    ]) {
+      expect((send({ type: 'ping', payload }) as ErrorEnvelope).error.code, JSON.stringify(payload)).toBe(
+        'validation_failed',
+      );
+    }
+    expect(apply).not.toHaveBeenCalled();
+    expect(send({ type: 'ping', payload: { scene_id, x: 3.25, y: -0.5 } })).toEqual({ ok: true });
   });
 });

@@ -69,6 +69,7 @@ export const COMMAND_TYPES = [
   'camera.setPlayer',
   'ruler.update',
   'ruler.clear',
+  'ping',
   'undo',
   'redo',
 ] as const;
@@ -83,6 +84,7 @@ export const EVENT_TYPES = [
   'camera.player',
   'ruler.shown',
   'ruler.cleared',
+  'ping',
   'history.changed',
 ] as const;
 
@@ -301,6 +303,9 @@ export const RulerUpdatePayloadSchema = Type.Object(
   strict,
 );
 export const RulerClearPayloadSchema = Type.Object({ scene_id: UuidSchema }, strict);
+// `ping` (TBL-01, specs/04-live-sync.md §12): a point on the live scene in grid units, as token positions
+// are, which both rooms draw for a moment; it names the scene and is refused when that scene is not live.
+export const PingPayloadSchema = Type.Object({ scene_id: UuidSchema, x: Coordinate, y: Coordinate }, strict);
 
 /** The payload schema of every live command implemented so far; the server registers exactly these. */
 export const LIVE_COMMAND_PAYLOAD_SCHEMAS = {
@@ -313,6 +318,7 @@ export const LIVE_COMMAND_PAYLOAD_SCHEMAS = {
   'camera.setPlayer': CameraSetPlayerPayloadSchema,
   'ruler.update': RulerUpdatePayloadSchema,
   'ruler.clear': RulerClearPayloadSchema,
+  ping: PingPayloadSchema,
   undo: UndoPayloadSchema,
   redo: RedoPayloadSchema,
 } as const satisfies Partial<Record<CommandType, object>>;
@@ -328,6 +334,7 @@ export type RedoPayload = Static<typeof RedoPayloadSchema>;
 export type CameraSetPlayerPayload = Static<typeof CameraSetPlayerPayloadSchema>;
 export type RulerUpdatePayload = Static<typeof RulerUpdatePayloadSchema>;
 export type RulerClearPayload = Static<typeof RulerClearPayloadSchema>;
+export type PingPayload = Static<typeof PingPayloadSchema>;
 
 // What each room's events carry (specs/04-live-sync.md §3, §4; D-049, Q-083, G-023, G-025). One
 // event per room per command, as the table of §3 has it. The DM's token events carry the token in
@@ -363,6 +370,10 @@ export const DmCameraPayloadSchema = Type.Object(
 export const RulerShownPayloadSchema = Type.Object({ ruler: MeasurementSchema }, strict);
 export const RulerClearedPayloadSchema = Type.Object({}, strict);
 
+// `ping` (TBL-01): the point pinged, the same to both rooms; it names no token and no scene, and nothing
+// keeps it, so no snapshot carries it.
+export const PingShownPayloadSchema = Type.Object({ x: Coordinate, y: Coordinate }, strict);
+
 // `history.changed` (UIX-01): the DM room's only. Players never learn anything of the undo history.
 export const HistoryChangedPayloadSchema = UndoStateSchema;
 
@@ -375,6 +386,7 @@ export type PlayerCameraPayload = Static<typeof PlayerCameraPayloadSchema>;
 export type DmCameraPayload = Static<typeof DmCameraPayloadSchema>;
 export type RulerShownPayload = Static<typeof RulerShownPayloadSchema>;
 export type RulerClearedPayload = Static<typeof RulerClearedPayloadSchema>;
+export type PingShownPayload = Static<typeof PingShownPayloadSchema>;
 export type HistoryChangedPayload = Static<typeof HistoryChangedPayloadSchema>;
 
 /** Every event of the dm room with its payload. */
@@ -386,6 +398,7 @@ export type DmEvent =
   | EventEnvelope<'camera.player', DmCameraPayload>
   | EventEnvelope<'ruler.shown', RulerShownPayload>
   | EventEnvelope<'ruler.cleared', RulerClearedPayload>
+  | EventEnvelope<'ping', PingShownPayload>
   | EventEnvelope<'history.changed', HistoryChangedPayload>;
 
 /** Every event of the players room with its payload: nothing here names a hidden token. */
@@ -397,4 +410,5 @@ export type PlayerEvent =
   | EventEnvelope<'scene.cleared', SceneClearedPayload>
   | EventEnvelope<'camera.player', PlayerCameraPayload>
   | EventEnvelope<'ruler.shown', RulerShownPayload>
-  | EventEnvelope<'ruler.cleared', RulerClearedPayload>;
+  | EventEnvelope<'ruler.cleared', RulerClearedPayload>
+  | EventEnvelope<'ping', PingShownPayload>;

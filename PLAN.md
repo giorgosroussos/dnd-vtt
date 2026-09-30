@@ -18,7 +18,7 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
 
 ## Next
 
-- **TBL-01 — Ping** (`13` §10): the `ping` command and event, grid units, stored nowhere; the P tool.
+- **TBL-01 — Ping** (`13` §10): the `ping` command and event, grid units, stored nowhere; the P tool. Implemented and verified locally, committed on `uix-redesign` (D-142); closes when CI is green.
 - **TBL-02 — Condition markers** (`13` §10): migration 0004, `token.setMarkers` with undo and redo, the popover's chips and the markers drawn on both views.
 - **TBL-03 — Manual fog regions** (`13` §10): migration 0005, Region commands and REST, the player-visibility rule in snapshots, events, numbering and image files, the fog tool; the hidden-information suite extended; review prompt 2.
 - **REL-03 — Acceptance on the owner's TV**, after Phase 5, unchanged:

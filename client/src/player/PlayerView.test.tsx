@@ -458,3 +458,34 @@ describe('the redesign on the TV (UIX-01, specs/08-ux-journeys.md §11)', () => 
     expect(labelScaleFor(288)).toBe(1.6);
   });
 });
+
+describe('pings on the TV (TBL-01, specs/04-live-sync.md §12)', () => {
+  const drawnPings = () => {
+    const state = main().querySelector<HTMLElement>('.eg-canvas--player')!.dataset.pings;
+    return state === undefined ? [] : (JSON.parse(state) as { x: number; y: number }[]);
+  };
+
+  it('draws each ping at its point in grid units, over the tokens, and lets every ping go on a snapshot', async () => {
+    await open(snapshot([token(1, 'Goblin', 0)]));
+    expect(drawnPings()).toEqual([]);
+    await deliver('ping', 2, { x: 4.5, y: 2.5 });
+    await deliver('ping', 3, { x: 10, y: 8 });
+    expect(drawnPings()).toMatchObject([
+      { x: 4.5, y: 2.5 },
+      { x: 10, y: 8 },
+    ]);
+    const layers = stage().getLayers();
+    const pingLayer = stage().findOne<Konva.Layer>('.ping-layer')!;
+    expect(layers.indexOf(pingLayer)).toBeGreaterThan(layers.findIndex((layer) => layer.findOne('.token')));
+    expect(pingLayer.find('.ping')).toHaveLength(2);
+    // Drawn where the grid puts the point: the map's squares are 50 display pixels at this grid.
+    expect(pingLayer.find('.ping')[0]!.position()).toEqual({ x: 225, y: 125 });
+    // A malformed ping is skipped; the TV still has no control.
+    await deliver('ping', 4, { x: 'left', y: 1 });
+    expect(drawnPings()).toHaveLength(2);
+    expect(rendered.container.querySelectorAll(FOCUSABLE)).toHaveLength(0);
+    await deliver('scene.snapshot', 5, snapshot([]));
+    expect(drawnPings()).toEqual([]);
+    expect(stage().findOne('.ping-layer')).toBeUndefined();
+  });
+});

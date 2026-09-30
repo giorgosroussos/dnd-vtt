@@ -659,6 +659,11 @@ export class FakeServer {
         this.measureElsewhere(null);
         return { ok: true };
       }
+      case 'ping': {
+        if (this.liveSceneId === null || p.scene_id !== this.liveSceneId) return refuse('scene_not_live');
+        this.deliver('ping', { x: Number(p.x), y: Number(p.y) });
+        return { ok: true };
+      }
       case 'undo':
         return this.undo();
       case 'redo':

@@ -4,6 +4,7 @@ import {
   type CameraSetPlayerPayload,
   type CommandEnvelope,
   type ErrorEnvelope,
+  type PingPayload,
   type RulerClearPayload,
   type RulerUpdatePayload,
   type SceneActivatePayload,
@@ -46,7 +47,9 @@ export type LiveEffect =
   /** A measurement is shown on the live scene (LIV-07): both rooms receive `ruler.shown`. */
   | { type: 'ruler' }
   /** The measurement was taken off: both rooms receive `ruler.cleared`. */
-  | { type: 'ruler.cleared' };
+  | { type: 'ruler.cleared' }
+  /** A point of the live scene was pinged (TBL-01): both rooms receive `ping`; nothing keeps it. */
+  | { type: 'ping'; x: number; y: number };
 
 export type LiveResult = LiveEffect[] | ErrorEnvelope;
 
@@ -217,6 +220,13 @@ export function createLiveCommands(
         if (ruler.of(live) === null) return [];
         ruler.clear();
         return [{ type: 'ruler.cleared' }];
+      }
+      case 'ping': {
+        // Stored nowhere and never undone (specs/04-live-sync.md §12).
+        const { scene_id, x, y } = command.payload as PingPayload;
+        const live = liveSceneId();
+        if (live === null || live !== scene_id) return notLive();
+        return [{ type: 'ping', x, y }];
       }
       case 'camera.setPlayer': {
         const { scene_id, camera: next } = command.payload as CameraSetPlayerPayload;

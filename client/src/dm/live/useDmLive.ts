@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CommandType, Room, SceneToken } from '@emberglass/shared';
 import { connectLive, type CommandOutcome, type LiveConnection, type LiveStatus } from '../../live/connection.js';
+import { usePings, type Ping } from '../../live/pings.js';
 import { applyDmEvent, fromDmSnapshot, type DmScene } from './dmScene.js';
 
 export interface DmLive {
@@ -11,6 +12,8 @@ export interface DmLive {
   scene: DmScene | undefined;
   /** How many snapshots arrived. */
   snapshots: number;
+  /** The pings being drawn on the live scene (TBL-01). */
+  pings: Ping[];
   command: (type: CommandType, payload: object) => Promise<CommandOutcome>;
   reconnect: () => void;
   /** The live scene now, read when called: once a command is acknowledged, its events are in (D-111). */
@@ -22,7 +25,7 @@ export interface DmLive {
 // The DM workspace's live connection (LIV-01, LIV-04; specs/04-live-sync.md §2, §3, §5, §6, D-104):
 // the live scene from the `dm` room's snapshots and events, which the live bar and the live canvas
 // follow, so a second DM browser's changes show here as they happen (G-018); and the commands the
-// live canvas, Go live and Blank TV send.
+// live canvas, Go live and Blank TV send. A ping is drawn for a moment and let go by any snapshot (TBL-01).
 export function useDmLive(): DmLive {
   const [state, setState] = useState<Pick<DmLive, 'status' | 'role' | 'scene' | 'snapshots'>>({
     status: 'connecting',
@@ -30,6 +33,7 @@ export function useDmLive(): DmLive {
     scene: undefined,
     snapshots: 0,
   });
+  const { pings, onEvent: onPing, clear: clearPings } = usePings();
   const connection = useRef<LiveConnection>(undefined);
   // Written by the connection's handlers as each message arrives, before React renders it.
   const scene = useRef<DmScene | undefined>(undefined);
@@ -44,6 +48,7 @@ export function useDmLive(): DmLive {
       onSnapshot: (snapshot) => {
         const role = snapshot.role;
         room.current = role;
+        clearPings();
         if (role === 'dm') scene.current = fromDmSnapshot(snapshot);
         setState((current) => ({
           ...current,
@@ -54,6 +59,7 @@ export function useDmLive(): DmLive {
       },
       onEvent: (event) => {
         if (room.current !== 'dm' || scene.current === undefined) return;
+        onPing(event);
         if (event.type === 'token.added') added.current = (event.payload as { token?: SceneToken }).token;
         scene.current = applyDmEvent(scene.current, event);
         const next = scene.current;
@@ -65,7 +71,7 @@ export function useDmLive(): DmLive {
       connection.current = undefined;
       live.close();
     };
-  }, []);
+  }, [onPing, clearPings]);
 
   const command = useCallback(
     (type: CommandType, payload: object): Promise<CommandOutcome> =>
@@ -76,5 +82,5 @@ export function useDmLive(): DmLive {
   const current = useCallback(() => scene.current, []);
   const lastAdded = useCallback(() => added.current, []);
 
-  return { ...state, command, reconnect, current, lastAdded };
+  return { ...state, pings, command, reconnect, current, lastAdded };
 }

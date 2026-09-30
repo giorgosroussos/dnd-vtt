@@ -22,6 +22,7 @@ Commands flow from a DM socket to the server; the server MUST reject any command
 | `scene.deactivate` | clear the live scene; the player view goes idle | no |
 | `camera.setPlayer` | set the player camera | no |
 | `ruler.update`, `ruler.clear` | show or clear a measurement on the TV | no |
+| `ping` | mark a point of the live scene on both views for a moment (§12) | no |
 | `undo` | apply the most recent inverse command | — |
 | `redo` | apply again the most recently undone command | — |
 
@@ -43,6 +44,7 @@ Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-02
 | `scene.cleared` | on deactivate | on deactivate |
 | `camera.player` | on change | on change |
 | `ruler.shown`, `ruler.cleared` | on change | on change |
+| `ping` | on ping | on ping |
 | `history.changed` | when whether undo or redo would change anything changes | never |
 
 ## 4. Role-filtered projection
@@ -96,3 +98,8 @@ Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-02
 
 - While the DM measures on the live scene, the ruler line and distance MUST be shown on the player view through `ruler.shown` and `ruler.cleared`; measurements are never stored. [Q-027]
 - A measurement made on a scene that is not live MUST NOT be sent to players. [Q-086]
+
+## 12. Ping
+
+- A `ping` MUST name the live scene and a point on it in grid units, as token positions are (`03` §4); a ping naming a scene that is not live MUST be refused and sent to nobody. [Q-099]
+- Both rooms MUST receive the point as a `ping` event, drawn on each view for about two seconds; a ping names no token and MUST NOT be stored, undone or carried in a snapshot, so a view that connects later never sees it. [input, Q-099]

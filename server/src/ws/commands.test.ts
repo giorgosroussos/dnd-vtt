@@ -642,6 +642,7 @@ describe('player commands (specs/10-testing-acceptance.md §3, specs/07-security
       'camera.setPlayer': { scene_id: w.sceneA.id, camera: { centre_x: 0.1, centre_y: 0.1, width: 0.2, height: 0.2 } },
       'ruler.update': { scene_id: w.sceneA.id, from: { column: 1, row: 1 }, to: { column: 4, row: 3 } },
       'ruler.clear': { scene_id: w.sceneA.id },
+      ping: { scene_id: w.sceneA.id, x: 2.5, y: 1.5 },
       undo: {},
       redo: {},
     };

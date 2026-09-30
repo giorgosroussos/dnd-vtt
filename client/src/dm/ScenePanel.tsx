@@ -23,6 +23,7 @@ import {
   type CanvasTokenControls,
   type Measure,
   type Placing,
+  type PingTool,
   type RulerTool,
   type TvFrame,
 } from '../canvas/MapCanvas.js';
@@ -297,10 +298,13 @@ export function ScenePanel({
   // Whether the scene is live now, for a ruler command sent from an earlier render (review C-L1).
   const liveNow = useRef(isLive);
   liveNow.current = isLive;
+  // The ping tool (TBL-01): on the live scene only, so it stops when the scene stops being live.
+  const [pingOn, setPingOn] = useState(false);
   const [rulerMode, setRulerMode] = useState(isLive);
   if (rulerMode !== isLive) {
     setRulerMode(isLive);
     setRulerOn(false);
+    setPingOn(false);
     setPrepPath(null);
     setRulerDraft(undefined);
     rulerQueue.current.next = undefined;
@@ -311,7 +315,10 @@ export function ScenePanel({
   const selectToken = (id: string | undefined) => {
     setSelectedToken(id);
     // Ending measuring takes the measurement off, on the TV too (review C-M1).
-    if (id !== undefined) stopMeasuring();
+    if (id !== undefined) {
+      stopMeasuring();
+      setPingOn(false);
+    }
   };
   const [picking, setPicking] = useState(false);
   const [placingAsset, setPlacingAsset] = useState<LibraryAsset>();
@@ -730,6 +737,7 @@ export function ScenePanel({
         on: rulerOn,
         onToggle: (on) => {
           if (!on) return stopMeasuring();
+          setPingOn(false);
           setRulerOn(true);
           onRulerOn?.();
           setSelectedToken(undefined);
@@ -743,6 +751,27 @@ export function ScenePanel({
     : livePath !== undefined
       ? livePath && measured(livePath)
       : (liveScene?.ruler ?? null);
+
+  // Ping (TBL-01, specs/04-live-sync.md §12): a click on the live scene, or Enter at the view's centre,
+  // marks the point on the TV and here; nothing is kept. Not connected, nothing is sent.
+  const pingTool: PingTool | undefined =
+    draft || !isLive || !live
+      ? undefined
+      : {
+          on: pingOn,
+          onToggle: (on) => {
+            if (on) {
+              stopMeasuring();
+              setSelectedToken(undefined);
+              if (placingAsset) setPlacingAsset(undefined);
+            }
+            setPingOn(on);
+          },
+          onPing: (at) => {
+            if (offline) return announce(t('scene.pingOffline'));
+            void command('ping', { scene_id: sceneId, x: at.x, y: at.y }, 'scene.pingFailed');
+          },
+        };
 
   // One undo at a time: Ctrl+Z pressed again, or held down, before the server answers is ignored,
   // so a held key never unwinds the live scene one change after another (LIV-05 review U5).
@@ -817,6 +846,9 @@ export function ScenePanel({
     } else if (key === 'm' && rulerTool) {
       event.preventDefault();
       rulerTool.onToggle(!rulerOn);
+    } else if (key === 'p' && pingTool) {
+      event.preventDefault();
+      pingTool.onToggle(!pingOn);
     } else if (key === 't' && canAddToken) {
       event.preventDefault();
       openPicker();
@@ -866,12 +898,14 @@ export function ScenePanel({
 
   function openPicker() {
     setStatus(undefined);
+    setPingOn(false);
     setPicking(true);
   }
 
-  // Select (V): leaves the ruler and stops placing (UIX-01).
+  // Select (V): leaves the ruler and the ping tool and stops placing (UIX-01).
   function selectTool() {
     stopMeasuring();
+    setPingOn(false);
     if (placingAsset) setPlacingAsset(undefined);
   }
 
@@ -1213,6 +1247,7 @@ export function ScenePanel({
                     placing={placing}
                     tvFrame={tvFrame}
                     ruler={{ shown: shownRuler, tool: rulerTool }}
+                    ping={{ shown: isLive && live ? live.pings : [], tool: pingTool }}
                   />
                   {map && draft ? <CornerMagnifier map={map} calibration={draft.calibration} /> : null}
                 </div>

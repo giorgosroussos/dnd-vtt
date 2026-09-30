@@ -15,7 +15,7 @@ import { applyPlayerEvent, startLive, type LiveHarness, type PlayerState } from 
 // a hidden token's included (LIV-05), activating another scene, reconnecting, since LIV-04 editing the
 // live scene's setup and assets over REST and deleting the live scene, since LIV-06 steering the
 // TV camera and screens reporting their viewports, and since LIV-07 measuring with the ruler on the live
-// scene, and on a scene that is not live, which reaches players not at all. It asserts that no hidden
+// scene, and on a scene that is not live, which reaches players not at all, and since TBL-01 pinging both. It asserts that no hidden
 // token's id, asset, image or name appears, and that the count of hidden tokens cannot be learnt
 // either: the whole recording is identical, byte for byte once identifiers are numbered by first
 // appearance, to the recording of the same session without any of the hidden-only steps
@@ -162,6 +162,12 @@ async function record(hidden: boolean): Promise<Recording> {
     expect((ack as { error: { code: string } }).error.code).toBe('scene_not_live');
   });
   await step('the DM clears the measurement', () => send('ruler.clear', { scene_id: sceneA.id }));
+  // A ping (TBL-01, specs/04-live-sync.md §12): on the live scene both rooms see the point, on another nobody.
+  await step('the DM pings the live scene', () => send('ping', { scene_id: sceneA.id, x: 3.5, y: 2.5 }));
+  await step('the DM pings a scene that is not live', async () => {
+    const ack = await live.command(dm, 'ping', { scene_id: sceneB.id, x: 1, y: 1 });
+    expect((ack as { error: { code: string } }).error.code).toBe('scene_not_live');
+  });
   // A second DM browser measures and goes: its line leaves the TV with it (D-121, review T-M4).
   await step('a second DM browser measures and disconnects', async () => {
     const other = await live.connect({ cookie: live.cookie });
@@ -359,6 +365,8 @@ describe('what a player view receives across a live session (specs/10-testing-ac
     ]);
     expect(eventsOf('the DM measures on a scene that is not live')).toEqual(['scene.snapshot']);
     expect(eventsOf('the DM clears the measurement')).toEqual(['ruler.cleared', 'scene.snapshot']);
+    expect(eventsOf('the DM pings the live scene')).toEqual(['ping', 'scene.snapshot']);
+    expect(eventsOf('the DM pings a scene that is not live')).toEqual(['scene.snapshot']);
     expect(eventsOf('a second DM browser measures and disconnects')).toEqual([
       'ruler.shown',
       'ruler.cleared',

@@ -157,7 +157,7 @@ describe('live command and event payloads (specs/04-live-sync.md §2, §3, §4, 
   };
   const id = '00000000-0000-4000-8000-000000000001';
 
-  it('defines a payload for every command of specs/04-live-sync.md §2, redo (UIX-01) the last', () => {
+  it('defines a payload for every command of specs/04-live-sync.md §2, redo (UIX-01) and ping (TBL-01) the last', () => {
     expect(Object.keys(LIVE_COMMAND_PAYLOAD_SCHEMAS).sort()).toEqual([...COMMAND_TYPES].sort());
     expect(Object.keys(LIVE_COMMAND_PAYLOAD_SCHEMAS).sort()).toEqual(
       [
@@ -172,6 +172,7 @@ describe('live command and event payloads (specs/04-live-sync.md §2, §3, §4, 
         'token.setVisibility',
         'undo',
         'redo',
+        'ping',
       ].sort(),
     );
     for (const type of Object.keys(LIVE_COMMAND_PAYLOAD_SCHEMAS)) expect(COMMAND_TYPES).toContain(type);

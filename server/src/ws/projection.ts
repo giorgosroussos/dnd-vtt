@@ -14,7 +14,7 @@ import { liveMeasurement, readSnapshot, toPlayerToken, type LiveMemory } from '.
 // are built by `toPlayerToken`, as the snapshot's are, with their rank among the visible tokens read
 // from the database after the change. Called in the same synchronous step as the command, so the
 // database it reads is the state the command left. The player camera (LIV-06) and the ruler (LIV-07)
-// reach both rooms alike: they say nothing of any token.
+// reach both rooms alike, as a ping does (TBL-01): they say nothing of any token.
 
 /** An event before it takes its room's version. */
 export type Unversioned<E> = E extends { type: infer T; payload: infer P }
@@ -54,6 +54,12 @@ export function project(db: Database.Database, effect: LiveEffect, memory: LiveM
     }
     case 'ruler.cleared':
       return { dm: { type: 'ruler.cleared', payload: {} }, players: { type: 'ruler.cleared', payload: {} } };
+    case 'ping':
+      // The same point to both rooms (TBL-01, specs/04-live-sync.md §12): it names no token.
+      return {
+        dm: { type: 'ping', payload: { x: effect.x, y: effect.y } },
+        players: { type: 'ping', payload: { x: effect.x, y: effect.y } },
+      };
     case 'token.added': {
       const dm = { type: 'token.added', payload: { token: effect.token, relabelled: effect.relabelled } } as const;
       if (effect.token.hidden) return { dm };

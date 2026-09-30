@@ -158,6 +158,7 @@ Affected specs: …
 - D-139 — The 2026-09-30 brief and design bundle as inputs; Q-099 and Q-100 written into the pack as Phase 5, before REL-03 — spec-amendment
 - D-140 — UIX-01 as built: redo, the undo state and the screens count, the scene's name and category for players, and the redesigned workspace's behaviour — implementation
 - D-141 — Where UIX-01 departs from the 2026-09-30 design, and why — implementation
+- D-142 — TBL-01: how a ping is sent, drawn and let go — implementation
 
 ## D-001 (2026-09-23) — Repository documentation regime
 Type: implementation
@@ -1156,3 +1157,10 @@ Decision: Kept from the pack where the boards say otherwise: the live double out
 Why: The design is a non-authoritative input for look and layout (D-003, D-139): where it differs from a specified behaviour, the specification wins, and every MVP flow must keep a place.
 Alternatives: Dropping the live outline to match the boards (rejected: Q-024 requires a persistent indicator); dark grid lines as drawn (rejected: invisible on dark maps, against D-093); a separate Sign out button in the header (not taken: the boards' header is full, and Settings is where the DM already manages the PIN).
 Affected specs: `08` §1, `08` §2, `08` §11, `06` §5, `03` §7
+
+## D-142 (2026-09-30) — TBL-01: how a ping is sent, drawn and let go
+Type: implementation
+Decision: `ping {scene_id, x, y}` names the live scene and a point in grid units bounded like token coordinates; the server refuses it as scene_not_live otherwise, keeps nothing and records no undo, and both rooms receive the same `ping {x, y}`, one version each. Each view draws a ping for 2 s from its arrival (a glowing centre and two rings that grow and fade on 1.6 s cycles, 0.5 s apart, still under reduced motion), at most the latest 8 at once, over the tokens and sized in screen pixels, larger on the TV by the label scale; any snapshot lets every ping go. The DM's Ping tool (P, or the rail) is offered on the live scene only, with the reason given on the disabled button; a click pings the point clicked, a drag still pans, Enter pings the centre of the view, and P or Escape on the map, V, M, T or choosing a token leave it. No per-socket rate limit: only the DM's sockets can send, as for the ruler.
+Why: specs/04-live-sync.md §12 (Q-099) asks for a point in grid units, stored nowhere, shown for about two seconds; a ping is transient, so each view expires it itself and no snapshot or history needs to carry it. On a scene that is not live a ping would show on no TV (as with the ruler, Q-086).
+Alternatives: Holding pings in the server's memory and sending them in snapshots (rejected: §12 says a later view never sees one); a server-side expiry event (rejected: an extra event per ping for no gain); a throttle per socket (not taken: the DM is trusted and the ruler has none).
+Affected specs: `04` §2, `04` §3, `04` §12, `08` §11

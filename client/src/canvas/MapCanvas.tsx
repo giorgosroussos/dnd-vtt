@@ -53,6 +53,7 @@ import {
   type Size,
 } from './geometry.js';
 import { labelOffset, rulerForKey, sameSquare, squareAt, squareCentre, type RulerPath } from './ruler.js';
+import { PingLayer, type PingPoint } from './PingLayer.js';
 import { TokenLayer, type TokenControls } from './TokenLayer.js';
 import {
   clampToWorld,
@@ -60,6 +61,7 @@ import {
   gridFrame,
   nudge,
   placePosition,
+  toGrid,
   toWorld,
   type CanvasToken,
   type Point,
@@ -257,6 +259,19 @@ export interface RulerTool {
   onClear: () => void;
 }
 
+/** The pings drawn (TBL-01), and in the DM view on the live scene the tool that pings. */
+export interface PingView {
+  shown: readonly PingPoint[];
+  tool?: PingTool | undefined;
+}
+
+export interface PingTool {
+  on: boolean;
+  onToggle: (on: boolean) => void;
+  /** A point pinged, in grid units: a click on the map, or Enter at the centre of the view. */
+  onPing: (at: Point) => void;
+}
+
 /** A rectangle measured on the map during calibration, in the original image's pixels. */
 export interface Measure {
   rect: Box | undefined;
@@ -315,6 +330,7 @@ export function MapCanvas({
   camera: playerCamera,
   tvFrame,
   ruler,
+  ping,
 }: {
   grid: Grid;
   /** The scene's map image, or null for a scene without a map. */
@@ -347,6 +363,8 @@ export function MapCanvas({
   tvFrame?: TvFrame | undefined;
   /** The measurement drawn, and in the DM view the ruler tool (LIV-07). */
   ruler?: RulerView | undefined;
+  /** The pings drawn, and in the DM view the ping tool (TBL-01). */
+  ping?: PingView | undefined;
 }) {
   const helpId = useId();
   const [viewportRef, viewport] = useViewport();
@@ -401,11 +419,14 @@ export function MapCanvas({
   // The ruler measures only when neither calibration nor placing has the pointer, on a drawn grid.
   const rulerTool = dm && !measuring && !placingNow && frame ? ruler?.tool : undefined;
   const rulerOn = rulerTool?.on === true;
+  // The ping tool (TBL-01), under the same conditions; a click pings and a drag still pans.
+  const pingTool = dm && !measuring && !placingNow && frame ? ping?.tool : undefined;
+  const pingOn = pingTool?.on === true && !rulerOn;
   // Space held down: a drag pans the view, whatever the tool (UIX-01).
   const [spaceHeld, setSpaceHeld] = useState(false);
   const panning = dm && spaceHeld;
   // Tokens are selected and dragged only when nothing else uses the pointer.
-  const controls = dm && !measuring && !placingNow && !rulerOn && !panning ? tokenControls : undefined;
+  const controls = dm && !measuring && !placingNow && !rulerOn && !pingOn && !panning ? tokenControls : undefined;
   const selected = controls && tokens.find((token) => token.id === controls.selectedId);
   // The TV frame, in world pixels: the one being dragged, or the player camera widened to the TV's shape.
   const [frameDraft, setFrameDraft] = useState<WorldBox>();
@@ -417,7 +438,7 @@ export function MapCanvas({
   const frameBox = tv && limits ? boundFrame(frameOf(tv.camera, world, aspect), aspect, limits) : undefined;
   const shownFrame = tv ? (frameDraft ?? frameBox) : undefined;
   const frameMovable =
-    tv !== undefined && !tv.offline && !tv.locked && !measuring && !placingNow && !rulerOn && !panning;
+    tv !== undefined && !tv.offline && !tv.locked && !measuring && !placingNow && !rulerOn && !pingOn && !panning;
   // The camera that shows `box`; nothing is sent when that is the camera already (review C-M2, U-M1).
   const cameraFor = (box: WorldBox | 'fit'): PlayerCamera =>
     box === 'fit' || !limits ? FIT_CAMERA : rectOf(boundFrame(box, aspect, limits), world);
@@ -528,6 +549,24 @@ export function MapCanvas({
       if (event.key === 'Escape') {
         event.preventDefault();
         place.onCancel();
+        return;
+      }
+    }
+    // P turns the ping tool on and off; with it on, Enter pings the centre of the view and Escape leaves it.
+    if (pingTool && (event.key === 'p' || event.key === 'P')) {
+      event.preventDefault();
+      if (!event.repeat) pingTool.onToggle(!pingOn);
+      return;
+    }
+    if (pingOn && frame) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        if (!event.repeat) pingTool.onPing(toGrid(frame, centreWorld()));
+        return;
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        pingTool.onToggle(false);
         return;
       }
     }
@@ -777,6 +816,12 @@ export function MapCanvas({
     if (controls?.selectedId !== undefined) controls.onDeselect();
   }
 
+  // A click with the ping tool on pings the point clicked (TBL-01).
+  function onPingClick(event: Konva.KonvaEventObject<MouseEvent>) {
+    const at = event.target.getStage()?.getRelativePointerPosition();
+    if (at && frame && pingTool) pingTool.onPing(toGrid(frame, at));
+  }
+
   const panHandlers = { onWheel, onDragMove: onDrag, onDragEnd: onDrag };
   const handlers = !dm
     ? {}
@@ -791,7 +836,9 @@ export function MapCanvas({
           }
         : rulerOn
           ? { onWheel, onPointerDown: onRulerDown, onPointerMove: onRulerMove, onPointerUp: () => finishRuler() }
-          : { onWheel, onDragMove: onDrag, onDragEnd: onDrag, onClick: onStageClick };
+          : pingOn
+            ? { onWheel, onDragMove: onDrag, onDragEnd: onDrag, onClick: onPingClick }
+            : { onWheel, onDragMove: onDrag, onDragEnd: onDrag, onClick: onStageClick };
 
   const centre = { x: viewport.width / 2, y: viewport.height / 2 };
   const stage = (
@@ -1032,6 +1079,9 @@ export function MapCanvas({
           </Label>
         </Layer>
       ) : null}
+      {frame && ping ? (
+        <PingLayer pings={ping.shown} frame={frame} scale={camera.scale} labelScale={labelScale} />
+      ) : null}
       {place ? (
         // Where Enter places the token: the centre of the view, marked while placing (review).
         <Layer listening={false}>
@@ -1079,6 +1129,23 @@ export function MapCanvas({
           }),
         }
       : {};
+  // Where each ping is drawn, in screen pixels from the viewport's corner, for the end-to-end tests (TBL-01).
+  const pingState =
+    frame && ping && ping.shown.length > 0
+      ? {
+          'data-pings': JSON.stringify(
+            ping.shown.map((each) => {
+              const at = toWorld(frame, each);
+              return {
+                x: each.x,
+                y: each.y,
+                left: camera.x + at.x * camera.scale,
+                top: camera.y + at.y * camera.scale,
+              };
+            }),
+          ),
+        }
+      : {};
   // Where each token is drawn, in screen pixels from the viewport's corner, for the end-to-end tests.
   // The player mode lists the tokens it draws, visible ones only, with nothing a player's snapshot
   // does not already carry (LIV-03).
@@ -1107,6 +1174,7 @@ export function MapCanvas({
         className="eg-canvas eg-canvas--player"
         {...state}
         {...rulerState}
+        {...pingState}
         data-tokens={tokenBoxes}
       >
         {stage}
@@ -1131,13 +1199,15 @@ export function MapCanvas({
       ? t('canvas.helpPlace')
       : rulerOn
         ? t(tv ? 'canvas.helpRulerLive' : 'canvas.helpRuler')
-        : rulerTool && shownPath && !selected
-          ? t('canvas.helpRulerShown')
-          : selected
-            ? t('canvas.helpToken', { label: selected.label })
-            : tv
-              ? t(tv.locked ? 'canvas.helpLiveLocked' : 'canvas.helpLive')
-              : t('canvas.help');
+        : pingOn
+          ? t('canvas.helpPing')
+          : rulerTool && shownPath && !selected
+            ? t('canvas.helpRulerShown')
+            : selected
+              ? t('canvas.helpToken', { label: selected.label })
+              : tv
+                ? t(tv.locked ? 'canvas.helpLiveLocked' : 'canvas.helpLive')
+                : t('canvas.help');
   const history = rail?.history;
   return (
     <div className="eg-canvas eg-canvas--dm">
@@ -1146,7 +1216,7 @@ export function MapCanvas({
         className={
           panning
             ? 'eg-canvas__viewport eg-canvas__viewport--pan'
-            : measuring || placingNow || rulerOn
+            : measuring || placingNow || rulerOn || pingOn
               ? 'eg-canvas__viewport eg-canvas__viewport--measure'
               : 'eg-canvas__viewport'
         }
@@ -1158,7 +1228,9 @@ export function MapCanvas({
         {...state}
         {...frameState}
         {...rulerState}
+        {...pingState}
         data-ruler-tool={rulerTool ? (rulerOn ? 'on' : 'off') : undefined}
+        data-ping-tool={pingTool ? (pingOn ? 'on' : 'off') : undefined}
         // A right-button drag pans while measuring, so it opens no context menu (review U-M2).
         onContextMenu={rulerOn ? (event) => event.preventDefault() : undefined}
         data-tokens={tokenBoxes}
@@ -1174,7 +1246,7 @@ export function MapCanvas({
             type="button"
             className="eg-rail__tool"
             aria-label={t('canvas.toolSelect')}
-            aria-pressed={!rulerOn && !placingNow && !measuring}
+            aria-pressed={!rulerOn && !pingOn && !placingNow && !measuring}
             onClick={rail.onSelect}
           >
             <Icon name="select" size={20} strokeWidth={1.9} />
@@ -1193,8 +1265,10 @@ export function MapCanvas({
             type="button"
             className="eg-rail__tool"
             aria-label={t('canvas.toolPing')}
-            aria-disabled
-            aria-describedby={`${helpId}-later`}
+            aria-pressed={pingOn}
+            aria-disabled={!pingTool || undefined}
+            aria-describedby={pingTool ? undefined : `${helpId}-ping`}
+            onClick={() => pingTool?.onToggle(!pingOn)}
           >
             <Icon name="ping" size={20} />
           </button>
@@ -1207,6 +1281,9 @@ export function MapCanvas({
           >
             <Icon name="fog" size={20} />
           </button>
+          <span id={`${helpId}-ping`} className="eg-visually-hidden">
+            {t('canvas.pingLiveOnly')}
+          </span>
           <span id={`${helpId}-later`} className="eg-visually-hidden">
             {t('canvas.toolLater')}
           </span>
