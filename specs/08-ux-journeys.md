@@ -4,15 +4,16 @@ How the DM prepares and runs a session, what the TV shows, and how screens get c
 
 ## 1. DM workspace
 
-- The DM view MUST be one workspace: a left sidebar with the Campaign → Session → Scene tree, the scene canvas in the centre, the asset library as a right-hand panel, and a live bar at the top that names the live scene. [Q-023]
-- Campaigns, sessions and scenes MUST be creatable, renamable and deletable from the sidebar; sessions and scenes MUST also be reorderable, by dragging in the tree with a keyboard alternative, while campaigns are listed by name. [input, Q-023, Q-089, Q-090]
+- The DM view MUST be one workspace: a header that names the campaign and session and says what the TV shows, a left sidebar listing the current session's scenes, the scene canvas in the centre, and a right-hand panel whose tabs are the live scene's tokens and the asset library (§11). [Q-023, Q-100]
+- The Campaign → Session → Scene tree MUST be reachable from the header's session switcher, where campaigns and sessions are created, renamed, deleted and reordered. [Q-100]
+- Campaigns, sessions and scenes MUST be creatable, renamable and deletable; sessions MUST be reorderable by dragging in the tree and scenes by dragging in the scene list, each with a keyboard alternative, while campaigns are listed by name. [input, Q-023, Q-089, Q-090, Q-100]
 
 ## 2. Live mode and prep mode
 
 - The canvas MUST show one scene at a time: the live scene in live mode, any other scene in prep mode. [Q-024]
 - Live mode MUST be unmistakable (a persistent live indicator around the canvas), and every action in it reaches the TV; nothing done in prep mode reaches the TV. [Q-024]
-- The live bar MUST return the canvas to the live scene in one click. [Q-024]
-- "Go live" on the scene being edited MUST activate it, and a "Blank TV" action MUST clear the live scene (`04` §2). [Q-024, Q-025]
+- The header's live indicator MUST return the canvas to the live scene in one click. [Q-024, Q-100]
+- "Go live" on the scene being edited MUST activate it, and a "Go idle" action MUST clear the live scene (`04` §2). [Q-024, Q-025, Q-100]
 - In live mode the DM view MUST show the frame of what the TV sees, which the DM can move and resize to steer the player camera (`04` §9). [input, Q-080]
 
 ## 3. Canvas
@@ -22,7 +23,7 @@ How the DM prepares and runs a session, what the TV shows, and how screens get c
 
 ## 4. Player view
 
-- When no scene is live, the player view MUST show a dark idle screen with the product name only. [Q-025]
+- When no scene is live, the player view MUST show a dark idle screen with the product name and the line "The table is set. Waiting for the Dungeon Master.", and nothing else. [Q-025, Q-100]
 - When a scene goes live the player view MUST switch to it, fitted to the map (`04` §9). [input, Q-038]
 
 ## 5. Connecting a screen
@@ -60,3 +61,25 @@ The critical journeys MUST be these five: [Q-065]
 | Connect TV | "Connect a screen" → type URL on the TV → idle screen | §5, §4 |
 | Run | Go live → move, reveal, measure, steer the TV camera → prep the next scene → Go live on it | §2, `04` |
 | Recover | TV or laptop sleeps → reconnects → same state | `04` §6 |
+
+## 11. The 2026-09-30 redesign
+
+The DM view MUST provide, in the palette and typography of the redesign (`01` §9): [input, Q-100]
+
+- a header with the logo and wordmark, the campaign / session breadcrumb opening the session switcher, a live indicator reading "Players see {scene}" with Go idle, or an idle state with Go live, a counter of connected player views (0 in a warning colour) that opens "Connect a screen", and a settings button;
+- a left sidebar with the session's title and scene count, a button to add a scene, and each scene's thumbnail, name and token summary; the live scene marked "On the TV", every other scene with a button that puts it on the TV; and a "Next up" footer naming the scene after the live one with Go live (Shift+N);
+- above the canvas the scene's name and, on the live scene, the TV camera controls: Send my view, Fit map, TV zoom out and in, and Lock TV camera, which while on disables them and the TV frame;
+- on the canvas a tool rail (Select V, Ruler M, Ping P, Fog regions F, Add token T, Undo, Redo), the grid and diagonal rule in use bottom left, the DM's zoom bottom right, and a shortcut bar below;
+- the frame of what the TV shows in the accent colour, the map outside it dimmed (§2);
+- a popover on the selected token with its name and visibility, Hide or Reveal (H), Rename, and a menu with Delete, Duplicate and stacking;
+- in the right panel the live scene's tokens grouped by category, each with its visibility toggle; a row selects and centres its token;
+- tokens drawn as circles ringed by category, a hidden one with a dashed ring, a lighter fill, a crossed-eye badge and an italic label, so it is never taken for a visible one (§9);
+- no shortcut acting while a text field has focus.
+
+The table tools (`01` §9) MUST add to it: [input, Q-099]
+
+- Ping (P) on the live scene: a click, or Enter at the centre of the view, shows two expanding rings with a glowing centre at that point on every view for about two seconds (`04` §12);
+- the popover's condition chips, Bloodied, Unconscious, Dead and Concentrating, each a toggle, each marker drawn on both views with a shape or a badge, never by colour alone (`03` §1);
+- the fog tool (F): a rectangle drawn by a drag, a polygon corner by corner, on grid corners, named when drawn; a fogged region shown to the DM as a dashed blue outline over a hatch with its name, and to players as an opaque shape with a soft edge; in the right panel a list of the scene's regions, each with whether it is fogged, how many tokens inside it players cannot see, Reveal or Fog, rename and delete (`04` §13).
+
+The player view MUST show the live scene with a subtle vignette, labels sized to be read from 2–3 m, and the scene's name at the bottom left, fading after a few seconds; changes between idle and live, and between scenes, fade. [input, Q-100]

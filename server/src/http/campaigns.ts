@@ -13,6 +13,7 @@ import {
   SceneCreateBodySchema,
   SceneDuplicateBodySchema,
   SceneSchema,
+  SceneSummarySchema,
   SceneUpdateBodySchema,
   SessionCreateBodySchema,
   SessionSchema,
@@ -38,6 +39,7 @@ import {
   duplicateScene,
   listCampaigns,
   listScenes,
+  listSceneSummaries,
   listSessions,
   readCampaign,
   readScene,
@@ -168,6 +170,16 @@ export function registerCampaigns(
     },
   );
 
+  // How many tokens each scene holds and how many are hidden, for the scene list (UIX-01).
+  app.get<{ Params: IdParams }>(
+    PATHS.sceneSummaries,
+    { schema: { ...params, response: { 200: Type.Array(SceneSummarySchema) } } },
+    (request) => {
+      requireSession(request.params.id);
+      return listSceneSummaries(db, request.params.id);
+    },
+  );
+
   app.post<{ Params: IdParams; Body: SceneCreateBody }>(
     PATHS.scenes,
     { schema: { ...params, body: SceneCreateBodySchema, response: { 201: SceneSchema } } },
@@ -197,7 +209,8 @@ export function registerCampaigns(
   // Rename and setup: the map, whether players see the grid (PRP-02) and the calibration, which
   // also writes the map's preset (PRP-03, specs/03-domain-model.md §5, D-094).
   // A change to the live scene reaches both rooms as a fresh snapshot, the players' only when what
-  // they see changed: a rename reaches the DM's room alone (specs/04-live-sync.md §10, Q-015, LIV-04).
+  // they see changed: a rename reaches both, since the TV shows the scene's name (specs/04-live-sync.md §10,
+  // Q-015, LIV-04, UIX-01).
   app.patch<{ Params: IdParams; Body: SceneUpdateBody }>(
     PATHS.scene,
     { schema: { ...params, body: SceneUpdateBodySchema, response: { 200: SceneSchema } } },

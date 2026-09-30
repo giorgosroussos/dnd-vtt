@@ -11,7 +11,17 @@ import { BootScreen } from './BootScreen.js';
 import { DmErrorScreen } from './ErrorScreen.js';
 import { IdleScreen } from './IdleScreen.js';
 import { catalogue, t } from './messages.js';
-import { button, click, FakeServer, installDialog, settle, submit, type } from './testing/fakeServer.js';
+import {
+  button,
+  click,
+  FakeServer,
+  installDialog,
+  openLibrary,
+  openSetup,
+  settle,
+  submit,
+  type,
+} from './testing/fakeServer.js';
 import { installCanvas2d, installImageLoading, installResizeObserver } from './testing/canvas2d.js';
 import { render } from './testing/render.js';
 import { TEXT_ATTRIBUTES, scanIndexHtml, scanSource } from './testing/uiTextScan.js';
@@ -223,6 +233,7 @@ it('show only catalogue text: the new-asset dialog, and a refused asset deletion
   try {
     const { container, unmount } = render(DmView);
     await settle();
+    await openLibrary(container);
     await click(button(container, t('library.new')));
     expectCatalogueOnly(container.querySelector('dialog')!);
     await click(button(container.querySelector('dialog')!, t('assetForm.cancel')));
@@ -326,6 +337,7 @@ it('show only catalogue text: a selected scene with its map controls, its canvas
       createElement(ScenePanel, { sceneId: scene.id, name: scene.name, uploadLimit: 1 }),
     );
     await settle();
+    await openSetup(container);
     expectCatalogueOnly(container);
     const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
     Object.defineProperty(input, 'files', { configurable: true, value: [new File(['xx'], 'map.png')] });
@@ -336,6 +348,7 @@ it('show only catalogue text: a selected scene with its map controls, its canvas
     unmount();
     const big = render(createElement(ScenePanel, { sceneId: scene.id, name: scene.name, uploadLimit: 1024 }));
     await settle();
+    await openSetup(big.container);
     const bigInput = big.container.querySelector<HTMLInputElement>('input[type="file"]')!;
     Object.defineProperty(bigInput, 'files', { configurable: true, value: [new File(['xx'], 'map.png')] });
     bigInput.dispatchEvent(new Event('change', { bubbles: true }));

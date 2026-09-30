@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { cameraOf, selectScene, viewport, type Camera } from './canvas-view.js';
+import { cameraOf, sceneRow, selectScene, viewport, type Camera } from './canvas-view.js';
 import { openWorkspace, seedCampaign } from './dm.js';
 import { solidPng } from './png.js';
 
@@ -10,7 +10,7 @@ import { solidPng } from './png.js';
 
 const player = (page: Page) => page.locator('main[data-view="player"]');
 const tvCanvas = (page: Page) => page.locator('main[data-view="player"] .eg-canvas--player');
-const panel = (page: Page) => page.locator('main .eg-scene');
+const panel = (page: Page) => page.locator('main.eg-scene');
 const liveBar = (page: Page) => page.getByRole('region', { name: 'Live scene' });
 
 interface Box {
@@ -110,17 +110,13 @@ test('the DM steers the TV by moving and resizing its frame, the DM’s view sta
       })
       .toBe(Math.round((screen.width / screen.height) * 1000) / 1000);
 
-    // Steered by keyboard: T, − zooms the TV out, 0 fits it again, Escape stops steering. The status line
-    // this leaves also settles the layout, which moves the canvas when it first shows (G-022).
-    await viewport(dm).focus();
-    await dm.keyboard.press('t');
-    await dm.keyboard.press('-');
+    // Steered by the TV camera buttons (UIX-01): TV zoom out zooms the TV out, Fit map fits it again. The
+    // status line this leaves also settles the layout, which moves the canvas when it first shows (G-022).
+    await dm.getByRole('button', { name: 'TV zoom out' }).click();
     await expect.poll(async () => (await tvCamera(tv)).scale).toBeLessThan(start.scale * 0.9);
-    await dm.keyboard.press('0');
+    await dm.getByRole('button', { name: 'Fit map on the TV' }).click();
     await expect.poll(async () => (await tvCamera(tv)).scale).toBeCloseTo(start.scale, 4);
     await expect(panel(dm).getByRole('status')).toHaveText('The TV now shows the whole map.');
-    await dm.keyboard.press('Escape');
-    await expect(viewport(dm)).toHaveAttribute('data-tv-steering', 'off');
 
     // The whole frame is inside the DM's canvas, ready to grab, as it was straight after Go live (review U-H1).
     const canvasBox = (await viewport(dm).boundingBox())!;
@@ -175,22 +171,16 @@ test('the DM steers the TV by moving and resizing its frame, the DM’s view sta
     expect(await cameraOf(dm)).toEqual(dmView);
 
     // Another scene goes live: the TV is fitted to its grid extent (30 × 20 squares of 64 pixels).
-    await dm
-      .getByRole('navigation', { name: 'Campaigns, sessions and scenes' })
-      .getByRole('button', { name: 'Fog', exact: true })
-      .click();
+    await sceneRow(dm, 'Fog').click();
     await liveBar(dm).getByRole('button', { name: 'Go live: Fog' }).click();
-    await expect(liveBar(dm).getByRole('status')).toHaveText('Live: Fog');
+    await expect(liveBar(dm).getByRole('status')).toHaveText('Players see Fog');
     await expect
       .poll(async () => (await tvCamera(tv)).scale)
       .toBeCloseTo(fitted({ width: 1920, height: 1280 }, screen).scale, 4);
     near(await tvCamera(tv), fitted({ width: 1920, height: 1280 }, screen));
 
     // And the first scene live again is fitted to its map, not where it was steered.
-    await dm
-      .getByRole('navigation', { name: 'Campaigns, sessions and scenes' })
-      .getByRole('button', { name: names.scene, exact: true })
-      .click();
+    await sceneRow(dm, names.scene).click();
     await liveBar(dm)
       .getByRole('button', { name: `Go live: ${names.scene}` })
       .click();

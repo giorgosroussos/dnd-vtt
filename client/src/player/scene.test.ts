@@ -6,6 +6,7 @@ import {
   type PlayerMap,
   type PlayerSnapshot,
   type PlayerToken,
+  type RegionShape,
 } from '@emberglass/shared';
 import { applyPlayerEvent, fromSnapshot, type PlayerScene } from './scene.js';
 
@@ -59,17 +60,21 @@ class Server {
       image_id: 'b'.repeat(64),
       z_order: rank,
       label: token.label,
+      category: 'monster',
+      markers: [],
     };
   }
   snapshot(): PlayerSnapshot {
     return {
       role: 'players',
       scene: {
+        name: 'Crypt',
         map: MAP,
         grid: GRID,
         tokens: this.visible().map((token) => this.player(token)),
         camera: FIT_CAMERA,
         ruler: null,
+        fog: [],
       },
     };
   }
@@ -166,7 +171,31 @@ describe('the players’ events applied to the drawn state', () => {
       scene,
       server.event('token.added', { token: { ...token, notes: 'secret', asset_id: id(9) }, relabelled: [] }),
     );
-    expect(Object.keys(next!.tokens[0]!).sort()).toEqual(['id', 'image_id', 'label', 'size', 'x', 'y', 'z_order']);
+    expect(Object.keys(next!.tokens[0]!).sort()).toEqual([
+      'category',
+      'id',
+      'image_id',
+      'label',
+      'markers',
+      'size',
+      'x',
+      'y',
+      'z_order',
+    ]);
+  });
+
+  it('keeps a token’s markers from each event, a copy of them, and draws none when an event carries none (TBL-02)', () => {
+    const server = new Server([]);
+    const scene = fromSnapshot(server.snapshot());
+    server.stack.push({ id: id(1), label: 'Goblin', x: 0, y: 0, hidden: false });
+    const sent = { ...server.player(server.find(1)), markers: ['bloodied' as const] };
+    let next = applyPlayerEvent(scene, server.event('token.added', { token: sent, relabelled: [] }));
+    expect(next!.tokens[0]!.markers).toEqual(['bloodied']);
+    expect(next!.tokens[0]!.markers).not.toBe(sent.markers);
+    const without: Partial<typeof sent> = { ...sent };
+    delete without.markers;
+    next = applyPlayerEvent(next, server.event('token.updated', { token: without }));
+    expect(next!.tokens[0]!.markers).toEqual([]);
   });
 
   it('orders a snapshot by stacking order whatever order its tokens arrived in', () => {
@@ -222,7 +251,7 @@ describe('the player camera (LIV-06, specs/04-live-sync.md §9)', () => {
   const steered = { centre_x: 0.25, centre_y: 0.75, width: 0.5, height: 0.25 };
   const base = (camera = FIT_CAMERA): PlayerSnapshot => ({
     role: 'players',
-    scene: { map: MAP, grid: GRID, tokens: [], camera, ruler: null },
+    scene: { name: 'Crypt', map: MAP, grid: GRID, tokens: [], camera, ruler: null, fog: [] },
   });
 
   it('keeps the camera a snapshot carries, and fits the map when it carries none', () => {
@@ -249,7 +278,7 @@ describe('the ruler (LIV-07, specs/04-live-sync.md §11)', () => {
   const measurement = { from: { column: 1, row: 2 }, to: { column: 3, row: 5 }, feet: 15 };
   const base = (ruler: typeof measurement | null = null): PlayerSnapshot => ({
     role: 'players',
-    scene: { map: MAP, grid: GRID, tokens: [], camera: FIT_CAMERA, ruler },
+    scene: { name: 'Crypt', map: MAP, grid: GRID, tokens: [], camera: FIT_CAMERA, ruler, fog: [] },
   });
 
   it('keeps the measurement a snapshot carries, or none', () => {
@@ -281,5 +310,32 @@ describe('the ruler (LIV-07, specs/04-live-sync.md §11)', () => {
       ).toBe(scene);
     }
     expect(applyPlayerEvent(null, { type: 'ruler.shown', version: 2, payload: { ruler: measurement } })).toBeNull();
+  });
+});
+
+describe('the fog (TBL-03, specs/04-live-sync.md §13)', () => {
+  const room: RegionShape = { kind: 'rect', x: 4, y: 0, width: 4, height: 4 };
+  const corner: RegionShape = {
+    kind: 'polygon',
+    points: [
+      { x: 0, y: 0 },
+      { x: 2, y: 0 },
+      { x: 0, y: 2 },
+    ],
+  };
+
+  it('keeps the fogged shapes a snapshot carries, replaced by each fog.updated, and nothing else of them', () => {
+    const server = new Server([]);
+    const first = server.snapshot();
+    const scene = fromSnapshot({
+      ...first,
+      scene: { ...first.scene!, fog: [{ ...room, name: 'Back room' } as RegionShape] },
+    });
+    expect(scene!.fog).toEqual([room]);
+    const next = applyPlayerEvent(scene, server.event('fog.updated', { fog: [room, corner] }));
+    expect(next!.fog).toEqual([room, corner]);
+    expect(applyPlayerEvent(next, server.event('fog.updated', { fog: [] }))!.fog).toEqual([]);
+    // A malformed event keeps the fog: it never lifts by mistake.
+    expect(applyPlayerEvent(next, server.event('fog.updated', { fog: 'none' }))).toBe(next);
   });
 });

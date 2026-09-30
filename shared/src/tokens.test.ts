@@ -39,6 +39,6 @@ describe('token bodies (PRP-04, D-100)', () => {
 
   it('answers a token with its stored fields and the drawing fields of its asset', () => {
     expect(Object.keys(SceneTokenSchema.properties)).toEqual([...Object.keys(TokenSchema.properties), 'asset']);
-    expect(Object.keys(SceneTokenSchema.properties.asset.properties)).toEqual(['name', 'image_id', 'size']);
+    expect(Object.keys(SceneTokenSchema.properties.asset.properties)).toEqual(['name', 'image_id', 'size', 'category']);
   });
 });

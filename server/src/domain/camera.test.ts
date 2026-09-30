@@ -120,7 +120,7 @@ describe('camera.setPlayer and the reset on activation, against a real SQLite fi
     return result as LiveEffect[];
   };
   const refusal = (result: ReturnType<LiveCommands['apply']>): string => (result as ErrorEnvelope).error.code;
-  const memory = () => ({ camera: live.camera, screens, ruler: live.ruler });
+  const memory = () => ({ camera: live.camera, screens, ruler: live.ruler, history: live.history });
   const cameras = () => ({
     dm: readSnapshot(h.data.db, 'dm', memory()).scene?.camera,
     players: readSnapshot(h.data.db, 'players', memory()).scene?.camera,

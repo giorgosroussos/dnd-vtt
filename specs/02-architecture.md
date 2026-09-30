@@ -54,7 +54,7 @@ flowchart LR
 
 The REST API MUST be served under `/api`, with JSON bodies validated against schemas derived from the `shared` contract types. [D-015]
 
-The REST API MUST offer these resources and operations: [input, Q-001, Q-007, Q-051, Q-058, Q-085]
+The REST API MUST offer these resources and operations: [input, Q-001, Q-007, Q-051, Q-058, Q-085, Q-100]
 
 | Resource | Operations |
 | --- | --- |
@@ -63,9 +63,10 @@ The REST API MUST offer these resources and operations: [input, Q-001, Q-007, Q-
 | `/api/images` | upload, read metadata, update grid preset |
 | `/api/assets` | list with search and tag filter, create, update, delete, list usages |
 | `/api/campaigns`, `/api/campaigns/:id/sessions` | CRUD, ordering |
-| `/api/sessions/:id/scenes` | CRUD, ordering, duplicate |
-| `/api/scenes/:id` | setup (map, grid), tokens while not live |
+| `/api/sessions/:id/scenes` | CRUD, ordering, duplicate, each scene's token and hidden-token counts |
+| `/api/scenes/:id` | setup (map, grid), tokens and fog regions while not live |
 | `/api/settings` | ruler rule, upload limit, display variant size, PIN change |
+| `/api/screens` | how many player views are connected now (`08` §11) |
 
 Every `/api` route except `/api/auth` (PIN entry) and `/api/setup` MUST require a DM session (`07` §2). [Q-046]
 

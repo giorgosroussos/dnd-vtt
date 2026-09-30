@@ -15,3 +15,9 @@ Numbered SQL migrations, applied in order by `src/db/migrate.ts` before the serv
 `0001_initial_schema.sql` holds the eight entities of `specs/03-domain-model.md` §1 (SRV-01, D-075).
 
 `0002_scene_token_numbers.sql` adds `scene.token_numbers`, the highest token number issued per asset on the scene, so that no number is issued twice (PRP-04, Q-091, D-101).
+
+`0003_token_shown.sql` adds `token.shown`, whether players have seen the token, so a token hidden and revealed again keeps the label they saw; never sent to a client (Q-096, D-138).
+
+`0004_token_markers.sql` adds `token.markers`, the condition markers a token carries, a JSON array, none on an existing token (TBL-02, Q-099).
+
+`0005_regions.sql` adds `region`, the fog regions of a scene, deleted with it (TBL-03, Q-099).

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { nameButton, selectScene, viewport } from './canvas-view.js';
+import { sceneRow, selectScene, selectTokenRow, tokenMenu, tokenPopover, viewport } from './canvas-view.js';
 import { openWorkspace, seedCampaign } from './dm.js';
 import { solidPng } from './png.js';
 import { commandFromPage } from './socket.js';
@@ -11,9 +11,8 @@ import { commandFromPage } from './socket.js';
 
 const player = (page: Page) => page.locator('main[data-view="player"]');
 const tvCanvas = (page: Page) => page.locator('main[data-view="player"] .eg-canvas--player');
-const panel = (page: Page) => page.locator('main .eg-scene');
+const panel = (page: Page) => page.locator('main.eg-scene');
 const liveBar = (page: Page) => page.getByRole('region', { name: 'Live scene' });
-const tokenBar = (page: Page) => page.getByRole('group', { name: 'Tokens' });
 
 interface Drawn {
   id: string;
@@ -109,7 +108,7 @@ test('Ctrl+Z in live mode undoes a move, a reveal and a deletion on the TV, and 
     await expect.poll(async () => (await tvTokens(tv)).map((each) => each.id)).toEqual([ogreToken.id]);
 
     // Move the ogre a square, then Ctrl+Z: back where it was, on the TV too.
-    await tokenBar(dm).getByLabel('Selected token').selectOption({ label: ogreToken.label });
+    await selectTokenRow(dm, ogreToken.label);
     await viewport(dm).focus();
     await dm.keyboard.press('ArrowRight');
     await expect(panel(dm).getByRole('status')).toHaveText(`${ogreToken.label} moved to column 4, row 3.`);
@@ -119,9 +118,7 @@ test('Ctrl+Z in live mode undoes a move, a reveal and a deletion on the TV, and 
     await expect(panel(dm).getByRole('status')).toHaveText(`Undone: ${ogreToken.label} moved back to column 3, row 3.`);
 
     // Move the hidden wraith and undo it: nothing of it reaches the TV.
-    await tokenBar(dm)
-      .getByLabel('Selected token')
-      .selectOption({ label: `${wraithToken.label} (hidden)` });
+    await selectTokenRow(dm, wraithToken.label);
     await viewport(dm).focus();
     await dm.keyboard.press('ArrowDown');
     // Announced once the server answered: the canvas draws a move before that (D-115).
@@ -138,7 +135,7 @@ test('Ctrl+Z in live mode undoes a move, a reveal and a deletion on the TV, and 
     }
 
     // Reveal the wraith, then Ctrl+Z: gone from the TV again.
-    await tokenBar(dm)
+    await tokenPopover(dm)
       .getByRole('button', { name: `Reveal token ${wraithToken.label}` })
       .click();
     await expect
@@ -149,10 +146,8 @@ test('Ctrl+Z in live mode undoes a move, a reveal and a deletion on the TV, and 
     await expect.poll(async () => (await tvTokens(tv)).map((each) => each.id)).toEqual([ogreToken.id]);
 
     // Delete the ogre after the confirmation, then Ctrl+Z: the same token is back on the TV.
-    await tokenBar(dm).getByLabel('Selected token').selectOption({ label: ogreToken.label });
-    await tokenBar(dm)
-      .getByRole('button', { name: `Delete token ${ogreToken.label}` })
-      .click();
+    await selectTokenRow(dm, ogreToken.label);
+    await tokenMenu(dm, ogreToken.label, 'Delete');
     await dm.getByRole('dialog').getByRole('button', { name: 'Delete token', exact: true }).click();
     await expect.poll(async () => (await tvTokens(tv)).length).toBe(0);
     await viewport(dm).focus();
@@ -163,19 +158,19 @@ test('Ctrl+Z in live mode undoes a move, a reveal and a deletion on the TV, and 
 
     // Move the ogre again, then Ctrl+Z while preparing the other scene: nothing is sent, and the move
     // stands. Blank TV is then sent on the same socket, after anything the key presses sent.
-    await tokenBar(dm).getByLabel('Selected token').selectOption({ label: ogreToken.label });
+    await selectTokenRow(dm, ogreToken.label);
     await viewport(dm).focus();
     await dm.keyboard.press('ArrowRight');
     await expect(panel(dm).getByRole('status')).toHaveText(`${ogreToken.label} moved to column 4, row 3.`);
     await expect.poll(async () => (await tvTokens(tv)).find((each) => each.id === ogreToken.id)?.x).toBe(3);
-    await nameButton(dm, antechamber).click();
+    await sceneRow(dm, antechamber).click();
     await expect(dm.getByRole('heading', { level: 1 })).toHaveText(antechamber);
     await expect(panel(dm)).toHaveAttribute('data-mode', 'prep');
     const from = sent.length;
     await viewport(dm).focus();
     await dm.keyboard.press('Control+z');
     await dm.keyboard.press('Control+z');
-    await liveBar(dm).getByRole('button', { name: 'Blank TV' }).click();
+    await liveBar(dm).getByRole('button', { name: 'Go idle' }).click();
     await expect(player(tv)).toHaveAttribute('data-scene', 'idle');
     await expect.poll(() => sent.slice(from).some((frame) => frame.includes('"scene.deactivate"'))).toBe(true);
     const after = sent.slice(from);

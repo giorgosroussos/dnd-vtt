@@ -17,6 +17,9 @@ export const IMAGE_MIME_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as con
 export const ASSET_CATEGORIES = ['pc', 'npc', 'monster', 'object'] as const;
 export const TOKEN_SIZES = ['tiny', 'small', 'medium', 'large', 'huge', 'gargantuan'] as const;
 export const RULER_RULES = ['phb', 'dmg'] as const;
+// The condition markers a token may carry (TBL-02, specs/03-domain-model.md §1, Q-099), in the order
+// they are stored and drawn.
+export const TOKEN_MARKERS = ['bloodied', 'unconscious', 'dead', 'concentrating'] as const;
 // Prepared for later phases: one value each in the MVP (specs/03-domain-model.md §8).
 export const GRID_TYPES = ['square'] as const;
 export const RULES_VERSION = '5e-2014';
@@ -142,8 +145,50 @@ export const TokenSchema = Type.Object(
     y: Type.Number(),
     hidden: Type.Boolean(),
     z_order: Type.Integer(),
+    // Each marker at most once, in the order of TOKEN_MARKERS (TBL-02).
+    markers: Type.Array(Type.Enum(TOKEN_MARKERS), { uniqueItems: true, maxItems: TOKEN_MARKERS.length }),
     // Always empty in the MVP; Phase 2 links characters through it.
     character_id: Type.Null(),
+  },
+  strict,
+);
+
+// A fog region's outline (TBL-03, specs/03-domain-model.md §1, Q-099): a rectangle or a polygon in grid
+// units, its corners on grid corners, so every coordinate is a whole number of squares from the grid's
+// origin, bounded as the ruler's squares are. A rectangle is at least a square each way; a polygon has
+// 3 to 64 corners.
+const RegionCoordinate = Type.Integer({ minimum: -100_000, maximum: 100_000 });
+const RegionSide = Type.Integer({ minimum: 1, maximum: 200_000 });
+export const RegionPointSchema = Type.Object({ x: RegionCoordinate, y: RegionCoordinate }, strict);
+export const RegionShapeSchema = Type.Union([
+  Type.Object(
+    { kind: Type.Literal('rect'), x: RegionCoordinate, y: RegionCoordinate, width: RegionSide, height: RegionSide },
+    strict,
+  ),
+  Type.Object(
+    { kind: Type.Literal('polygon'), points: Type.Array(RegionPointSchema, { minItems: 3, maxItems: 64 }) },
+    strict,
+  ),
+]);
+// At least one character that is not white space, and no control character, as a token's label (Q-032).
+const NO_CONTROL = '\\u0000-\\u001f\\u007f-\\u009f';
+const RegionNameSchema = Type.String({
+  minLength: 1,
+  maxLength: 100,
+  pattern: `^[^${NO_CONTROL}]*[^\\s${NO_CONTROL}][^${NO_CONTROL}]*$`,
+});
+
+// A fog region of a scene (TBL-03): named for the DM, and fogged while `hidden`. Players never receive
+// its name or a region that is not fogged (specs/04-live-sync.md §4, §13).
+export const RegionSchema = Type.Object(
+  {
+    id: UuidSchema,
+    scene_id: UuidSchema,
+    name: RegionNameSchema,
+    // Where it comes in the scene's list, in the order the regions were drawn.
+    order: Type.Integer(),
+    shape: RegionShapeSchema,
+    hidden: Type.Boolean(),
   },
   strict,
 );
@@ -171,8 +216,12 @@ export type Campaign = Static<typeof CampaignSchema>;
 export type Session = Static<typeof SessionSchema>;
 export type Scene = Static<typeof SceneSchema>;
 export type Token = Static<typeof TokenSchema>;
+export type Region = Static<typeof RegionSchema>;
+export type RegionShape = Static<typeof RegionShapeSchema>;
+export type RegionPoint = Static<typeof RegionPointSchema>;
 export type Settings = Static<typeof SettingsSchema>;
 export type AssetCategory = (typeof ASSET_CATEGORIES)[number];
 export type TokenSize = (typeof TOKEN_SIZES)[number];
+export type TokenMarker = (typeof TOKEN_MARKERS)[number];
 export type RulerRule = (typeof RULER_RULES)[number];
 export type ImageMime = (typeof IMAGE_MIME_TYPES)[number];

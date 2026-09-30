@@ -1,6 +1,16 @@
-import { useEffect, useEffectEvent, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import {
+  useEffect,
+  useEffectEvent,
+  useId,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+  type Ref,
+} from 'react';
 import type Konva from 'konva';
-import { Circle, Group, Image as KonvaImage, Label, Layer, Line, Rect, Stage, Tag, Text } from 'react-konva';
+import { Circle, Group, Image as KonvaImage, Label, Layer, Line, Rect, Shape, Stage, Tag, Text } from 'react-konva';
 import {
   FIT_CAMERA,
   imageFileUrl,
@@ -8,22 +18,24 @@ import {
   type Image,
   type Measurement,
   type PlayerCamera,
+  type RegionShape,
   type Screen,
   type TokenSize,
 } from '@emberglass/shared';
-import { Button } from '../ui/Button.js';
+import { Icon } from '../ui/icons.js';
+import { CANVAS_FONT, THEME } from '../ui/theme.js';
 import { formatDecimal, formatNumber, normalise, type Rect as Box } from './calibration.js';
 import { t } from '../ui/messages.js';
 import {
   boundFrame,
   cameraForKey,
+  coverBox,
   fitBox,
   fitCamera,
   frameLimits,
   liveFitBox,
   sameRect,
   screenAspect,
-  frameForKey,
   frameOf,
   gridLines,
   mapInfo,
@@ -32,6 +44,7 @@ import {
   resizeBox,
   scaleBox,
   viewOf,
+  visibleBox,
   WHEEL_ZOOM_STEP,
   worldSize,
   ZOOM_STEP,
@@ -41,6 +54,8 @@ import {
   type Size,
 } from './geometry.js';
 import { labelOffset, rulerForKey, sameSquare, squareAt, squareCentre, type RulerPath } from './ruler.js';
+import { FogLayer, rectBetween, type FogDraft, type FogRegion } from './FogLayer.js';
+import { PingLayer, type PingPoint } from './PingLayer.js';
 import { TokenLayer, type TokenControls } from './TokenLayer.js';
 import {
   clampToWorld,
@@ -48,6 +63,7 @@ import {
   gridFrame,
   nudge,
   placePosition,
+  toGrid,
   toWorld,
   type CanvasToken,
   type Point,
@@ -66,10 +82,16 @@ import './canvas.css';
 //
 // The player camera (LIV-06, specs/04-live-sync.md §9, specs/08-ux-journeys.md §2, Q-080, D-046, D-119):
 // the player mode draws the part of the world the DM framed for the TV, fitted when the scene went
-// live. In live mode the DM mode draws that frame, widened to the TV's shape, over the map: its border
-// drags to pan the TV and its corners resize it to zoom, keeping the TV's shape, and the camera is sent
-// on the drop. The DM's own camera never moves with it. While steering is on (the toolbar's Steer the
-// TV), the view's keys and buttons move and zoom the frame instead of the DM's view.
+// live. In live mode the DM mode draws that frame, widened to the TV's shape, over the map, the map
+// outside it dimmed: its border drags to pan the TV and its corners resize it to zoom, keeping the TV's
+// shape, and the camera is sent on the drop. The DM's own camera never moves with it. The scene's TV
+// camera buttons (UIX-01, specs/08-ux-journeys.md §11) act through the canvas's handle: Send my view
+// frames what the DM's view shows, TV zoom scales the frame, Fit map fits it; while the TV camera is
+// locked the frame does not move and the handle sends nothing.
+//
+// The DM mode's chrome (UIX-01): a floating tool rail (Select, Ruler, Ping, Fog regions, Add token,
+// Undo, Redo), the grid and diagonal rule bottom left, and the DM's own zoom bottom right. Space held
+// down makes a drag pan the view, whatever the tool. A selected token's popover is placed beside it.
 //
 // The ruler (LIV-07, specs/06-grid-and-measurement.md §5, specs/04-live-sync.md §11, Q-027, Q-048): both
 // modes draw the measurement they are given, a line between two square centres and its distance beside
@@ -91,21 +113,27 @@ import './canvas.css';
 // scene is the page background of tokens.css, a map-less extent a neutral dark grey (D-016);
 // each grid line is light over a dark halo, so it shows on dark and light maps (D-093).
 export const CANVAS_COLOURS = {
-  void: '#14110f',
+  void: THEME.canvas,
   extent: '#2b2b2b',
-  grid: '#f2ece6',
-  halo: '#14110f',
-  // The accent of tokens.css, for the rectangle measured during calibration.
-  measure: '#f0a04b',
-  // The TV frame: live mode's colour (--color-danger of tokens.css, as the live outline), over a dark halo.
-  tvFrame: '#ff8f80',
+  grid: THEME.text,
+  halo: THEME.canvas,
+  // The accent, for the rectangle measured during calibration and the ruler.
+  measure: THEME.accent,
+  // The TV frame: the accent over a dark halo, the map outside it dimmed (UIX-01).
+  tvFrame: THEME.accent,
+  tvFrameText: THEME.onAccent,
+  tvDim: 'rgba(8, 6, 4, 0.42)',
 } as const;
 // The TV frame's corner handles and the width of its border's grip, in screen pixels.
 const HANDLE_PX = 12;
 const FRAME_GRIP_PX = 14;
 // A press-and-release shorter than this, in screen pixels either way, is a click, not a rectangle.
 const MIN_RECT_PX = 4;
-export const GRID_OPACITY = { shown: 0.7, faint: 0.25 } as const;
+// A light line over a dark halo shows on any map (D-093); at half strength it stays quiet under the tokens,
+// as the redesign's grid is (UIX-01).
+export const GRID_OPACITY = { shown: 0.5, faint: 0.22 } as const;
+// The strip the DM's tool rail covers, which a fitted map leaves free (UIX-01).
+export const RAIL_INSET_PX = 68;
 // The ruler's distance label, larger on the TV to be read across the room (LIV-07), and its gap to the end.
 const RULER_LABEL = {
   dm: { fontSize: 14, padding: 4, gap: { x: 12, y: 8 } },
@@ -173,11 +201,40 @@ export interface TvFrame {
   screen: Screen | null;
   /** The live connection is down: the frame is shown but cannot be moved (D-116). */
   offline: boolean;
-  /** While on, the view's keys and buttons steer the TV instead of the DM's own view. */
-  steering: boolean;
-  onSteer: (on: boolean) => void;
-  /** A new player camera: on a drop, a key press or a button. */
+  /** Lock TV camera (UIX-01): the frame is shown but cannot be moved, and the handle sends nothing. */
+  locked: boolean;
+  /** A new player camera: on a drop or one of the TV camera buttons. */
   onChange: (camera: PlayerCamera) => void;
+}
+
+/** What the scene's controls outside the canvas ask of it (UIX-01). */
+export interface CanvasHandle {
+  /** Frames on the TV what the DM's view shows now, in the TV's shape. */
+  sendView: () => void;
+  /** Zooms the TV in or out by one step, around the frame's centre. */
+  tvZoom: (direction: 'in' | 'out') => void;
+  /** Fits the whole map on the TV. */
+  tvFit: () => void;
+  /** Centres the DM's view on a token, keeping the zoom. */
+  centreOn: (tokenId: string) => void;
+}
+
+/** The DM mode's tool rail (UIX-01, specs/08-ux-journeys.md §11). */
+export interface CanvasRail {
+  /** Select: leaves the ruler and stops placing. */
+  onSelect: () => void;
+  /** Add token: opens the picker; absent while tokens cannot be added. */
+  onAddToken?: (() => void) | undefined;
+  /** Undo and Redo, in live mode. */
+  history?: { canUndo: boolean; canRedo: boolean; onUndo: () => void; onRedo: () => void } | undefined;
+}
+
+/** Where a selected token is drawn, in pixels from the canvas's corner, for its popover. */
+export interface TokenAnchor {
+  left: number;
+  top: number;
+  side: number;
+  viewport: Size;
 }
 
 type Corner = 'nw' | 'ne' | 'sw' | 'se';
@@ -202,6 +259,34 @@ export interface RulerTool {
   /** A new measurement: while a drag goes on (`final` false), and on its release or a key (true). */
   onMeasure: (path: RulerPath, final: boolean) => void;
   onClear: () => void;
+}
+
+/** The pings drawn (TBL-01), and in the DM view on the live scene the tool that pings. */
+export interface PingView {
+  shown: readonly PingPoint[];
+  tool?: PingTool | undefined;
+}
+
+export interface PingTool {
+  on: boolean;
+  onToggle: (on: boolean) => void;
+  /** A point pinged, in grid units: a click on the map, or Enter at the centre of the view. */
+  onPing: (at: Point) => void;
+}
+
+/** The fog regions drawn (TBL-03), and in the DM view the tool that draws them. */
+export interface FogView {
+  regions: readonly FogRegion[];
+  tool?: FogTool | undefined;
+}
+
+export interface FogTool {
+  on: boolean;
+  onToggle: (on: boolean) => void;
+  /** A shape drawn, its corners on grid corners. */
+  onDraw: (shape: RegionShape) => void;
+  /** A region's tag on the map clicked: it is fogged or revealed. */
+  onToggleRegion?: ((id: string) => void) | undefined;
 }
 
 /** A rectangle measured on the map during calibration, in the original image's pixels. */
@@ -254,10 +339,16 @@ export function MapCanvas({
   tokens = [],
   tokenControls,
   placing,
-  toolbar,
+  rail,
+  status,
+  popover,
+  ref,
+  labelScale = 1,
   camera: playerCamera,
   tvFrame,
   ruler,
+  ping,
+  fog,
 }: {
   grid: Grid;
   /** The scene's map image, or null for a scene without a map. */
@@ -274,14 +365,26 @@ export function MapCanvas({
   tokenControls?: CanvasTokenControls | undefined;
   /** DM view only: a token being placed by a click on the map. */
   placing?: Placing | undefined;
-  /** DM view only: the scene's own controls, on the toolbar's row before the view's (D-100). */
-  toolbar?: ReactNode;
+  /** DM view only: the tool rail (UIX-01). */
+  rail?: CanvasRail | undefined;
+  /** DM view only: the grid and diagonal rule, bottom left (UIX-01). */
+  status?: ReactNode;
+  /** DM view only: the selected token's popover, placed beside it (UIX-01). */
+  popover?: ((anchor: TokenAnchor) => ReactNode) | undefined;
+  /** DM view only: what the scene's TV camera buttons and token list ask of the canvas. */
+  ref?: Ref<CanvasHandle> | undefined;
+  /** Player view only: how much larger than the DM's labels and badges are drawn, to read across a room. */
+  labelScale?: number;
   /** Player view only: the player camera; fitted to the map when absent. */
   camera?: PlayerCamera | undefined;
   /** DM view in live mode only: the frame of what the TV sees, which steers it. */
   tvFrame?: TvFrame | undefined;
   /** The measurement drawn, and in the DM view the ruler tool (LIV-07). */
   ruler?: RulerView | undefined;
+  /** The pings drawn, and in the DM view the ping tool (TBL-01). */
+  ping?: PingView | undefined;
+  /** The fog regions drawn, and in the DM view the fog tool (TBL-03). */
+  fog?: FogView | undefined;
 }) {
   const helpId = useId();
   const [viewportRef, viewport] = useViewport();
@@ -299,8 +402,13 @@ export function MapCanvas({
   // In live mode the DM's view fits the map and the TV's fitted frame, with room around them, so the
   // frame's edges and corners can be grabbed (LIV-06 review U-H1); it never follows the TV's camera.
   const liveAspect = mode === 'dm' && ready && tvFrame ? screenAspect(tvFrame.screen) : undefined;
-  const fitted =
-    liveAspect === undefined ? fitCamera(world, viewport) : fitBox(liveFitBox(world, liveAspect), viewport);
+  // The DM's fit leaves the tool rail's strip free, so the map's left edge and the TV frame's corners are
+  // not under it (UIX-01).
+  const inset = mode === 'dm' && rail ? RAIL_INSET_PX : 0;
+  const fitArea = { width: Math.max(viewport.width - inset, 1), height: viewport.height };
+  const fittedInArea =
+    liveAspect === undefined ? fitCamera(world, fitArea) : fitBox(liveFitBox(world, liveAspect), fitArea);
+  const fitted = { ...fittedInArea, x: fittedInArea.x + inset };
   const camera =
     mode === 'dm'
       ? manual?.key === worldKey
@@ -331,8 +439,21 @@ export function MapCanvas({
   // The ruler measures only when neither calibration nor placing has the pointer, on a drawn grid.
   const rulerTool = dm && !measuring && !placingNow && frame ? ruler?.tool : undefined;
   const rulerOn = rulerTool?.on === true;
+  // The ping tool (TBL-01), under the same conditions; a click pings and a drag still pans.
+  const pingTool = dm && !measuring && !placingNow && frame ? ping?.tool : undefined;
+  const pingOn = pingTool?.on === true && !rulerOn;
+  // The fog tool (TBL-03): a drag draws a rectangle, clicks a polygon's corners, each on a grid corner.
+  const fogTool = dm && !measuring && !placingNow && frame ? fog?.tool : undefined;
+  const fogOn = fogTool?.on === true && !rulerOn && !pingOn;
+  const [fogDraft, setFogDraft] = useState<FogDraft>();
+  const fogPress = useRef<{ corner: Point; screen: Point }>(undefined);
+  if (!fogOn && fogDraft) setFogDraft(undefined);
+  // Space held down: a drag pans the view, whatever the tool (UIX-01).
+  const [spaceHeld, setSpaceHeld] = useState(false);
+  const panning = dm && spaceHeld;
   // Tokens are selected and dragged only when nothing else uses the pointer.
-  const controls = dm && !measuring && !placingNow && !rulerOn ? tokenControls : undefined;
+  const controls =
+    dm && !measuring && !placingNow && !rulerOn && !pingOn && !fogOn && !panning ? tokenControls : undefined;
   const selected = controls && tokens.find((token) => token.id === controls.selectedId);
   // The TV frame, in world pixels: the one being dragged, or the player camera widened to the TV's shape.
   const [frameDraft, setFrameDraft] = useState<WorldBox>();
@@ -343,16 +464,67 @@ export function MapCanvas({
   const limits = tv ? frameLimits(world, aspect, tv.screen) : undefined;
   const frameBox = tv && limits ? boundFrame(frameOf(tv.camera, world, aspect), aspect, limits) : undefined;
   const shownFrame = tv ? (frameDraft ?? frameBox) : undefined;
-  const steering = tv?.steering === true && !measuring && !placingNow && !rulerOn;
-  const frameMovable = tv !== undefined && !tv.offline && !measuring && !placingNow && !rulerOn;
+  const frameMovable =
+    tv !== undefined &&
+    !tv.offline &&
+    !tv.locked &&
+    !measuring &&
+    !placingNow &&
+    !rulerOn &&
+    !pingOn &&
+    !fogOn &&
+    !panning;
   // The camera that shows `box`; nothing is sent when that is the camera already (review C-M2, U-M1).
   const cameraFor = (box: WorldBox | 'fit'): PlayerCamera =>
     box === 'fit' || !limits ? FIT_CAMERA : rectOf(boundFrame(box, aspect, limits), world);
   const steerTo = (box: WorldBox | 'fit') => {
-    if (!tv) return;
+    if (!tv || tv.locked) return;
     const next = cameraFor(box);
     if (!sameRect(next, tv.camera)) tv.onChange(next);
   };
+
+  // The scene's TV camera buttons and token list (UIX-01).
+  useImperativeHandle(ref, () => ({
+    sendView: () => steerTo(coverBox(visibleBox(camera, viewport), aspect)),
+    tvZoom: (direction) => {
+      if (frameBox) steerTo(scaleBox(frameBox, direction === 'in' ? 1 / ZOOM_STEP : ZOOM_STEP));
+    },
+    tvFit: () => steerTo('fit'),
+    centreOn: (tokenId) => {
+      const token = tokens.find((each) => each.id === tokenId);
+      if (!token || !frame) return;
+      const at = toWorld(frame, token);
+      const half = (footprint(token.size) * frame.square) / 2;
+      changeCamera((current) => ({
+        ...current,
+        x: viewport.width / 2 - (at.x + half) * current.scale,
+        y: viewport.height / 2 - (at.y + half) * current.scale,
+      }));
+    },
+  }));
+
+  // Space held pans: read from the window, and not while a text field has focus.
+  useEffect(() => {
+    if (!dm) return;
+    const typing = (target: EventTarget | null) =>
+      target instanceof HTMLElement &&
+      (target.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement);
+    const down = (event: globalThis.KeyboardEvent) => {
+      if (event.code === 'Space' && !typing(event.target) && !event.repeat) setSpaceHeld(true);
+    };
+    const up = (event: globalThis.KeyboardEvent) => {
+      if (event.code === 'Space') setSpaceHeld(false);
+    };
+    const blur = () => setSpaceHeld(false);
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    window.addEventListener('blur', blur);
+    return () => {
+      window.removeEventListener('keydown', down);
+      window.removeEventListener('keyup', up);
+      window.removeEventListener('blur', blur);
+    };
+  }, [dm]);
   // The drag being measured: the ref is what the handlers read, the state what is drawn, so a
   // release seen twice (by the stage and by the window) reports once.
   const dragRef = useRef<Drag>(undefined);
@@ -415,7 +587,52 @@ export function MapCanvas({
         return;
       }
     }
-    // M turns the ruler on and off from the canvas itself, as T does steering (LIV-07).
+    // F turns the fog tool on and off; with it on, Enter puts a corner at the centre of the view (a second
+    // time at the same corner closes the polygon), Backspace takes the last corner off, and Escape drops the
+    // shape, or leaves the tool when there is none.
+    if (fogTool && (event.key === 'f' || event.key === 'F')) {
+      event.preventDefault();
+      if (!event.repeat) fogTool.onToggle(!fogOn);
+      return;
+    }
+    if (fogOn && frame) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        if (!event.repeat) fogCorner(cornerAt(centreWorld()));
+        return;
+      }
+      if (event.key === 'Backspace' && fogDraft?.kind === 'polygon') {
+        event.preventDefault();
+        const points = fogDraft.points.slice(0, -1);
+        setFogDraft(points.length > 0 ? { kind: 'polygon', points } : undefined);
+        return;
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        if (fogDraft) setFogDraft(undefined);
+        else fogTool.onToggle(false);
+        return;
+      }
+    }
+    // P turns the ping tool on and off; with it on, Enter pings the centre of the view and Escape leaves it.
+    if (pingTool && (event.key === 'p' || event.key === 'P')) {
+      event.preventDefault();
+      if (!event.repeat) pingTool.onToggle(!pingOn);
+      return;
+    }
+    if (pingOn && frame) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        if (!event.repeat) pingTool.onPing(toGrid(frame, centreWorld()));
+        return;
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        pingTool.onToggle(false);
+        return;
+      }
+    }
+    // M turns the ruler on and off from the canvas itself (LIV-07).
     if (rulerTool && (event.key === 'm' || event.key === 'M')) {
       event.preventDefault();
       if (!event.repeat) rulerTool.onToggle(!rulerOn);
@@ -442,31 +659,16 @@ export function MapCanvas({
       }
     }
     // With the ruler off, Escape still takes a measurement off, another browser's too (review U-L4), unless
-    // Escape means something else here first (steering, a selected token).
-    const rulerEscape = rulerTool && !rulerOn && shownPath && !steering && !selected && event.key === 'Escape';
+    // Escape means something else here first (a selected token).
+    const rulerEscape = rulerTool && !rulerOn && shownPath && !selected && event.key === 'Escape';
     if (rulerEscape) {
       event.preventDefault();
       rulerTool.onClear();
       return;
     }
-    // T turns steering the TV on and off from the canvas itself (review U-M5).
-    if (tv && !measuring && !placingNow && (event.key === 't' || event.key === 'T')) {
+    // Space pans with the pointer; on the map it scrolls nothing (UIX-01).
+    if (event.key === ' ') {
       event.preventDefault();
-      if (!event.repeat) tv.onSteer(!steering);
-      return;
-    }
-    if (steering && frameBox) {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        tv?.onSteer(false);
-        return;
-      }
-      const next = frameForKey(frameBox, event.key, event.shiftKey);
-      if (next) {
-        event.preventDefault();
-        // A held key sends once, not a command per repeat (review U-M1).
-        if (!event.repeat) steerTo(next);
-      }
       return;
     }
     // Fit, in live mode, fits the map and the TV's frame (review U-H1).
@@ -676,18 +878,79 @@ export function MapCanvas({
     if (controls?.selectedId !== undefined) controls.onDeselect();
   }
 
+  // The fog tool (TBL-03). The nearest grid corner to a point in the world.
+  const cornerAt = (at: Point): Point => {
+    const grid = toGrid(frame!, at);
+    return { x: Math.round(grid.x) + 0, y: Math.round(grid.y) + 0 };
+  };
+  const sameCorner = (a: Point, b: Point) => a.x === b.x && a.y === b.y;
+  /** A corner of the polygon being drawn: the first again, or the last twice, closes it. */
+  function fogCorner(corner: Point) {
+    const points = fogDraft?.kind === 'polygon' ? fogDraft.points : [];
+    const last = points.at(-1);
+    const closes = points.length >= 3 && (sameCorner(corner, points[0]!) || (last && sameCorner(corner, last)));
+    if (closes) {
+      setFogDraft(undefined);
+      fogTool?.onDraw({ kind: 'polygon', points });
+      return;
+    }
+    if (last && sameCorner(corner, last)) return;
+    setFogDraft({ kind: 'polygon', points: [...points, corner] });
+  }
+  function onFogDown(event: Konva.KonvaEventObject<PointerEvent>) {
+    const at = worldPoint(event);
+    if (!at || event.evt.button !== 0) return;
+    fogPress.current = { corner: cornerAt(at), screen: { x: event.evt.clientX, y: event.evt.clientY } };
+  }
+  function onFogMove(event: Konva.KonvaEventObject<PointerEvent>) {
+    const press = fogPress.current;
+    const at = worldPoint(event);
+    if (!press || !at) return;
+    const moved = Math.hypot(event.evt.clientX - press.screen.x, event.evt.clientY - press.screen.y);
+    // A drag, not a click: a rectangle from the corner pressed, unless a polygon is under way.
+    if (moved >= MIN_RECT_PX && fogDraft?.kind !== 'polygon') {
+      setFogDraft({ kind: 'rect', from: press.corner, to: cornerAt(at) });
+    }
+  }
+  function onFogUp(event: Konva.KonvaEventObject<PointerEvent>) {
+    const press = fogPress.current;
+    fogPress.current = undefined;
+    const at = worldPoint(event);
+    if (!press || !at) return;
+    if (fogDraft?.kind === 'rect') {
+      const shape = rectBetween(fogDraft.from, cornerAt(at));
+      setFogDraft(undefined);
+      if (shape) fogTool?.onDraw(shape);
+      return;
+    }
+    fogCorner(press.corner);
+  }
+
+  // A click with the ping tool on pings the point clicked (TBL-01).
+  function onPingClick(event: Konva.KonvaEventObject<MouseEvent>) {
+    const at = event.target.getStage()?.getRelativePointerPosition();
+    if (at && frame && pingTool) pingTool.onPing(toGrid(frame, at));
+  }
+
+  const panHandlers = { onWheel, onDragMove: onDrag, onDragEnd: onDrag };
   const handlers = !dm
     ? {}
-    : measuring
-      ? {
-          onWheel,
-          onPointerDown: onMeasureDown,
-          onPointerMove: onMeasureMove,
-          onPointerUp: (event: Konva.KonvaEventObject<PointerEvent>) => finishMeasure(worldPoint(event) ?? undefined),
-        }
-      : rulerOn
-        ? { onWheel, onPointerDown: onRulerDown, onPointerMove: onRulerMove, onPointerUp: () => finishRuler() }
-        : { onWheel, onDragMove: onDrag, onDragEnd: onDrag, onClick: onStageClick };
+    : panning
+      ? panHandlers
+      : measuring
+        ? {
+            onWheel,
+            onPointerDown: onMeasureDown,
+            onPointerMove: onMeasureMove,
+            onPointerUp: (event: Konva.KonvaEventObject<PointerEvent>) => finishMeasure(worldPoint(event) ?? undefined),
+          }
+        : rulerOn
+          ? { onWheel, onPointerDown: onRulerDown, onPointerMove: onRulerMove, onPointerUp: () => finishRuler() }
+          : pingOn
+            ? { onWheel, onDragMove: onDrag, onDragEnd: onDrag, onClick: onPingClick }
+            : fogOn
+              ? { onWheel, onPointerDown: onFogDown, onPointerMove: onFogMove, onPointerUp: onFogUp }
+              : { onWheel, onDragMove: onDrag, onDragEnd: onDrag, onClick: onStageClick };
 
   const centre = { x: viewport.width / 2, y: viewport.height / 2 };
   const stage = (
@@ -698,7 +961,7 @@ export function MapCanvas({
       y={camera.y}
       scaleX={camera.scale}
       scaleY={camera.scale}
-      draggable={dm && !measuring && !rulerOn}
+      draggable={dm && (panning || (!measuring && !rulerOn && !fogOn))}
       listening={dm}
       {...handlers}
     >
@@ -768,9 +1031,44 @@ export function MapCanvas({
           </Label>
         ) : null}
       </Layer>
-      {frame ? <TokenLayer tokens={tokens} frame={frame} scale={camera.scale} mode={mode} controls={controls} /> : null}
+      {frame && fog ? (
+        <FogLayer
+          regions={fog.regions}
+          frame={frame}
+          scale={camera.scale}
+          mode={mode}
+          draft={fogOn ? fogDraft : undefined}
+          onToggle={
+            dm && !fogOn && !rulerOn && !pingOn && !placingNow && !measuring ? fog.tool?.onToggleRegion : undefined
+          }
+        />
+      ) : null}
+      {frame ? (
+        <TokenLayer
+          tokens={tokens}
+          frame={frame}
+          scale={camera.scale}
+          mode={mode}
+          controls={controls}
+          labelScale={dm ? 1 : labelScale}
+        />
+      ) : null}
       {tv && shownFrame ? (
         <Layer name="tv-frame-layer" listening={frameMovable} opacity={tv.offline ? 0.5 : 1}>
+          {/* The map outside what the TV shows, dimmed (UIX-01): one shape with the frame cut out of it. */}
+          <Shape
+            name="tv-frame-dim"
+            listening={false}
+            fill={CANVAS_COLOURS.tvDim}
+            fillRule="evenodd"
+            sceneFunc={(context, shape) => {
+              const reach = Math.max(world.width, world.height) * 20;
+              context.beginPath();
+              context.rect(-reach, -reach, reach * 3, reach * 3);
+              context.rect(shownFrame.x, shownFrame.y, shownFrame.width, shownFrame.height);
+              context.fillStrokeShape(shape);
+            }}
+          />
           <Rect
             name="tv-frame-halo"
             {...shownFrame}
@@ -783,8 +1081,8 @@ export function MapCanvas({
             name="tv-frame"
             {...shownFrame}
             stroke={CANVAS_COLOURS.tvFrame}
-            strokeWidth={3}
-            {...(steering ? {} : { dash: [10, 5] })}
+            strokeWidth={2}
+            {...(tv.locked ? { dash: [10, 5] } : {})}
             strokeScaleEnabled={false}
             hitStrokeWidth={FRAME_GRIP_PX}
             fillEnabled={false}
@@ -808,14 +1106,22 @@ export function MapCanvas({
             name="tv-frame-label"
             x={shownFrame.x}
             y={shownFrame.y}
+            offsetY={24}
             scaleX={1 / camera.scale}
             scaleY={1 / camera.scale}
             listening={false}
           >
-            <Tag fill={CANVAS_COLOURS.tvFrame} />
-            <Text text={t('canvas.tvFrame')} fill={CANVAS_COLOURS.halo} fontSize={12} padding={3} />
+            <Tag fill={CANVAS_COLOURS.tvFrame} cornerRadius={[5, 5, 0, 0]} />
+            <Text
+              text={t(tv.locked ? 'canvas.tvFrameLocked' : 'canvas.tvFrame')}
+              fill={CANVAS_COLOURS.tvFrameText}
+              fontFamily={CANVAS_FONT}
+              fontStyle="bold"
+              fontSize={12}
+              padding={6}
+            />
           </Label>
-          {CORNERS.map((corner) => {
+          {(tv.locked ? [] : CORNERS).map((corner) => {
             const at = cornerOf(shownFrame, corner);
             const side = HANDLE_PX / camera.scale;
             return (
@@ -829,9 +1135,7 @@ export function MapCanvas({
                 width={side}
                 height={side}
                 fill={CANVAS_COLOURS.tvFrame}
-                stroke={CANVAS_COLOURS.halo}
-                strokeWidth={1}
-                strokeScaleEnabled={false}
+                cornerRadius={2 / camera.scale}
                 draggable={frameMovable}
                 onPointerDown={(event) => {
                   event.cancelBubble = true;
@@ -891,12 +1195,16 @@ export function MapCanvas({
             <Text
               text={distanceText}
               fill={CANVAS_COLOURS.grid}
+              fontFamily={CANVAS_FONT}
               fontSize={RULER_LABEL[mode].fontSize}
               fontStyle="bold"
               padding={RULER_LABEL[mode].padding}
             />
           </Label>
         </Layer>
+      ) : null}
+      {frame && ping ? (
+        <PingLayer pings={ping.shown} frame={frame} scale={camera.scale} labelScale={labelScale} />
       ) : null}
       {place ? (
         // Where Enter places the token: the centre of the view, marked while placing (review).
@@ -929,7 +1237,7 @@ export function MapCanvas({
           width: shownFrame.width * camera.scale,
           height: shownFrame.height * camera.scale,
         }),
-        'data-tv-steering': steering ? 'on' : 'off',
+        'data-tv-locked': tv?.locked ? 'on' : 'off',
       }
     : {};
   // The measurement drawn, its squares, distance and ends in screen pixels, for the end-to-end tests (LIV-07).
@@ -945,6 +1253,39 @@ export function MapCanvas({
           }),
         }
       : {};
+  // The fogged shapes drawn, in grid units, for the end-to-end tests (TBL-03): on the TV, what its snapshot
+  // carries; in the DM view each region with its state.
+  const fogState = fog
+    ? {
+        'data-fog': JSON.stringify(
+          dm
+            ? fog.regions.map((region) => ({
+                id: region.id,
+                name: region.name,
+                hidden: region.hidden,
+                shape: region.shape,
+              }))
+            : fog.regions.filter((region) => region.hidden).map((region) => region.shape),
+        ),
+      }
+    : {};
+  // Where each ping is drawn, in screen pixels from the viewport's corner, for the end-to-end tests (TBL-01).
+  const pingState =
+    frame && ping && ping.shown.length > 0
+      ? {
+          'data-pings': JSON.stringify(
+            ping.shown.map((each) => {
+              const at = toWorld(frame, each);
+              return {
+                x: each.x,
+                y: each.y,
+                left: camera.x + at.x * camera.scale,
+                top: camera.y + at.y * camera.scale,
+              };
+            }),
+          ),
+        }
+      : {};
   // Where each token is drawn, in screen pixels from the viewport's corner, for the end-to-end tests.
   // The player mode lists the tokens it draws, visible ones only, with nothing a player's snapshot
   // does not already carry (LIV-03).
@@ -956,6 +1297,7 @@ export function MapCanvas({
             id: token.id,
             label: token.label,
             ...(dm ? { hidden: token.hidden } : {}),
+            markers: token.markers ?? [],
             x: token.x,
             y: token.y,
             left: camera.x + at.x * camera.scale,
@@ -973,77 +1315,54 @@ export function MapCanvas({
         className="eg-canvas eg-canvas--player"
         {...state}
         {...rulerState}
+        {...pingState}
+        {...fogState}
         data-tokens={tokenBoxes}
       >
         {stage}
       </div>
     );
   }
+  const selectedAnchor =
+    popover && selected && frame
+      ? (() => {
+          const at = toWorld(frame, selected);
+          return {
+            left: camera.x + at.x * camera.scale,
+            top: camera.y + at.y * camera.scale,
+            side: footprint(selected.size) * frame.square * camera.scale,
+            viewport,
+          };
+        })()
+      : undefined;
+  const help = measuring
+    ? t('canvas.helpMeasure')
+    : placingNow
+      ? t('canvas.helpPlace')
+      : rulerOn
+        ? t(tv ? 'canvas.helpRulerLive' : 'canvas.helpRuler')
+        : pingOn
+          ? t('canvas.helpPing')
+          : fogOn
+            ? t('canvas.helpFog')
+            : rulerTool && shownPath && !selected
+              ? t('canvas.helpRulerShown')
+              : selected
+                ? t('canvas.helpToken', { label: selected.label })
+                : tv
+                  ? t(tv.locked ? 'canvas.helpLiveLocked' : 'canvas.helpLive')
+                  : t('canvas.help');
+  const history = rail?.history;
   return (
     <div className="eg-canvas eg-canvas--dm">
-      <div className="eg-canvas__toolbar">
-        {toolbar}
-        <div className="eg-canvas__view" role="group" aria-label={t('canvas.controls')}>
-          {rulerTool ? (
-            // Pressed only while measuring is in effect, as Steer the TV is.
-            <Button size="small" aria-pressed={rulerOn} onClick={() => rulerTool.onToggle(!rulerOn)}>
-              {t('canvas.ruler')}
-            </Button>
-          ) : null}
-          {tv ? (
-            // Pressed only while steering is in effect: never while placing or measuring (review U-M3).
-            <Button size="small" aria-pressed={steering} onClick={() => tv.onSteer(!steering)}>
-              {t('canvas.steerTv')}
-            </Button>
-          ) : null}
-          <Button
-            size="small"
-            onClick={() =>
-              steering && frameBox
-                ? steerTo(scaleBox(frameBox, 1 / ZOOM_STEP))
-                : changeCamera((current) => zoomAt(current, ZOOM_STEP, centre))
-            }
-          >
-            {t(steering ? 'canvas.tvZoomIn' : 'canvas.zoomIn')}
-          </Button>
-          <Button
-            size="small"
-            onClick={() =>
-              steering && frameBox
-                ? steerTo(scaleBox(frameBox, ZOOM_STEP))
-                : changeCamera((current) => zoomAt(current, 1 / ZOOM_STEP, centre))
-            }
-          >
-            {t(steering ? 'canvas.tvZoomOut' : 'canvas.zoomOut')}
-          </Button>
-          <Button size="small" onClick={() => (steering ? steerTo('fit') : setManual(undefined))}>
-            {t(steering ? 'canvas.tvFit' : 'canvas.fit')}
-          </Button>
-        </div>
-        <p id={helpId} className="eg-canvas__help">
-          {measuring
-            ? t('canvas.helpMeasure')
-            : placingNow
-              ? t('canvas.helpPlace')
-              : rulerOn
-                ? t(tv ? 'canvas.helpRulerLive' : 'canvas.helpRuler')
-                : rulerTool && shownPath && !steering && !selected
-                  ? t('canvas.helpRulerShown')
-                  : steering
-                    ? t('canvas.helpSteer')
-                    : selected
-                      ? t('canvas.helpToken', { label: selected.label })
-                      : tv
-                        ? t('canvas.helpLive')
-                        : t('canvas.help')}
-        </p>
-      </div>
       <div
         ref={viewportRef}
         className={
-          measuring || placingNow || rulerOn
-            ? 'eg-canvas__viewport eg-canvas__viewport--measure'
-            : 'eg-canvas__viewport'
+          panning
+            ? 'eg-canvas__viewport eg-canvas__viewport--pan'
+            : measuring || placingNow || rulerOn || pingOn || fogOn
+              ? 'eg-canvas__viewport eg-canvas__viewport--measure'
+              : 'eg-canvas__viewport'
         }
         role="application"
         aria-label={label}
@@ -1053,13 +1372,130 @@ export function MapCanvas({
         {...state}
         {...frameState}
         {...rulerState}
+        {...pingState}
         data-ruler-tool={rulerTool ? (rulerOn ? 'on' : 'off') : undefined}
+        data-ping-tool={pingTool ? (pingOn ? 'on' : 'off') : undefined}
+        data-fog-tool={fogTool ? (fogOn ? 'on' : 'off') : undefined}
+        data-fog-draft={fogOn && fogDraft ? JSON.stringify(fogDraft) : undefined}
+        {...fogState}
         // A right-button drag pans while measuring, so it opens no context menu (review U-M2).
         onContextMenu={rulerOn ? (event) => event.preventDefault() : undefined}
         data-tokens={tokenBoxes}
       >
         {stage}
       </div>
+      <p id={helpId} className="eg-visually-hidden">
+        {help}
+      </p>
+      {rail ? (
+        <div className="eg-rail" role="toolbar" aria-label={t('canvas.tools')} aria-orientation="vertical">
+          <button
+            type="button"
+            className="eg-rail__tool"
+            aria-label={t('canvas.toolSelect')}
+            aria-pressed={!rulerOn && !pingOn && !fogOn && !placingNow && !measuring}
+            onClick={rail.onSelect}
+          >
+            <Icon name="select" size={20} strokeWidth={1.9} />
+          </button>
+          <button
+            type="button"
+            className="eg-rail__tool"
+            aria-label={t('canvas.toolRuler')}
+            aria-pressed={rulerOn}
+            aria-disabled={!rulerTool || undefined}
+            onClick={() => rulerTool?.onToggle(!rulerOn)}
+          >
+            <Icon name="ruler" size={20} />
+          </button>
+          <button
+            type="button"
+            className="eg-rail__tool"
+            aria-label={t('canvas.toolPing')}
+            aria-pressed={pingOn}
+            aria-disabled={!pingTool || undefined}
+            aria-describedby={pingTool ? undefined : `${helpId}-ping`}
+            onClick={() => pingTool?.onToggle(!pingOn)}
+          >
+            <Icon name="ping" size={20} />
+          </button>
+          <button
+            type="button"
+            className="eg-rail__tool"
+            aria-label={t('canvas.toolFog')}
+            aria-pressed={fogOn}
+            aria-disabled={!fogTool || undefined}
+            onClick={() => fogTool?.onToggle(!fogOn)}
+          >
+            <Icon name="fog" size={20} />
+          </button>
+          <span id={`${helpId}-ping`} className="eg-visually-hidden">
+            {t('canvas.pingLiveOnly')}
+          </span>
+          <button
+            type="button"
+            className="eg-rail__tool"
+            data-tool="add-token"
+            aria-label={t('canvas.toolAddToken')}
+            aria-pressed={placingNow}
+            aria-disabled={!rail.onAddToken || undefined}
+            onClick={() => rail.onAddToken?.()}
+          >
+            <Icon name="addToken" size={20} />
+          </button>
+          <span className="eg-rail__divider" aria-hidden="true" />
+          <button
+            type="button"
+            className="eg-rail__tool"
+            aria-label={t('canvas.undo')}
+            aria-disabled={!history?.canUndo || undefined}
+            onClick={() => history?.onUndo()}
+          >
+            <Icon name="undo" size={20} />
+          </button>
+          <button
+            type="button"
+            className="eg-rail__tool"
+            aria-label={t('canvas.redo')}
+            aria-disabled={!history?.canRedo || undefined}
+            onClick={() => history?.onRedo()}
+          >
+            <Icon name="redo" size={20} />
+          </button>
+        </div>
+      ) : null}
+      {status ? <div className="eg-canvas__status">{status}</div> : null}
+      <div className="eg-canvas__zoom" role="group" aria-label={t('canvas.controls')}>
+        <button
+          type="button"
+          className="eg-icon-button"
+          aria-label={t('canvas.zoomOut')}
+          onClick={() => changeCamera((current) => zoomAt(current, 1 / ZOOM_STEP, centre))}
+        >
+          <Icon name="minus" />
+        </button>
+        <span className="eg-canvas__zoom-value">
+          {t('canvas.zoomValue', { percent: Math.round(camera.scale * 100) })}
+        </span>
+        <button
+          type="button"
+          className="eg-icon-button"
+          aria-label={t('canvas.zoomIn')}
+          onClick={() => changeCamera((current) => zoomAt(current, ZOOM_STEP, centre))}
+        >
+          <Icon name="plus" />
+        </button>
+        <span className="eg-canvas__zoom-divider" aria-hidden="true" />
+        <button
+          type="button"
+          className="eg-icon-button"
+          aria-label={t('canvas.fit')}
+          onClick={() => setManual(undefined)}
+        >
+          <Icon name="fit" />
+        </button>
+      </div>
+      {selectedAnchor && popover ? popover(selectedAnchor) : null}
     </div>
   );
 }

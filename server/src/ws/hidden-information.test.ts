@@ -15,7 +15,9 @@ import { applyPlayerEvent, startLive, type LiveHarness, type PlayerState } from 
 // a hidden token's included (LIV-05), activating another scene, reconnecting, since LIV-04 editing the
 // live scene's setup and assets over REST and deleting the live scene, since LIV-06 steering the
 // TV camera and screens reporting their viewports, and since LIV-07 measuring with the ruler on the live
-// scene, and on a scene that is not live, which reaches players not at all. It asserts that no hidden
+// scene, and on a scene that is not live, which reaches players not at all, since TBL-01 pinging both, since TBL-02 marking a hidden token and a visible one, and since TBL-03 a fog region
+// drawn, renamed, revealed, fogged again, undone and redone, with tokens placed, revealed, moved and deleted
+// under it. It asserts that no hidden
 // token's id, asset, image or name appears, and that the count of hidden tokens cannot be learnt
 // either: the whole recording is identical, byte for byte once identifiers are numbered by first
 // appearance, to the recording of the same session without any of the hidden-only steps
@@ -57,7 +59,9 @@ async function record(hidden: boolean): Promise<Recording> {
     lurker = await live.asset('Lurker', { category: 'monster', default_hidden: true, notes: 'Waits in the dark' });
     secrets.push(lurker.id, lurker.image_id, 'Lurker', 'Waits in the dark');
   }
-  secrets.push(goblin.id, kobold.id, sceneA.id, sceneB.id, sceneA.session_id, 'The crypt', 'The bridge');
+  // The live scene's name is shown on the TV (UIX-01, specs/04-live-sync.md §4), so it is no secret; the
+  // gate checks below that it reaches players only as a snapshot's `name`.
+  secrets.push(goblin.id, kobold.id, sceneA.id, sceneB.id, sceneA.session_id);
 
   // Preparation over REST; hidden tokens interleaved with the visible ones in the stacking order.
   const secret = async (sceneId: string, assetId: string, x: number, y: number): Promise<SceneToken | undefined> => {
@@ -160,6 +164,12 @@ async function record(hidden: boolean): Promise<Recording> {
     expect((ack as { error: { code: string } }).error.code).toBe('scene_not_live');
   });
   await step('the DM clears the measurement', () => send('ruler.clear', { scene_id: sceneA.id }));
+  // A ping (TBL-01, specs/04-live-sync.md §12): on the live scene both rooms see the point, on another nobody.
+  await step('the DM pings the live scene', () => send('ping', { scene_id: sceneA.id, x: 3.5, y: 2.5 }));
+  await step('the DM pings a scene that is not live', async () => {
+    const ack = await live.command(dm, 'ping', { scene_id: sceneB.id, x: 1, y: 1 });
+    expect((ack as { error: { code: string } }).error.code).toBe('scene_not_live');
+  });
   // A second DM browser measures and goes: its line leaves the TV with it (D-121, review T-M4).
   await step('a second DM browser measures and disconnects', async () => {
     const other = await live.connect({ cookie: live.cookie });
@@ -211,6 +221,18 @@ async function record(hidden: boolean): Promise<Recording> {
   await step('undo the add of a visible goblin', undo);
   await step('undo the add of a hidden lurker', undo, true);
   await step('undo with nothing left to undo', undo);
+  // Condition markers (TBL-02, specs/04-live-sync.md §4): a hidden token's reach players not at all, nor
+  // their undo; a visible token's reach them as a change of it.
+  await step(
+    'mark the hidden boss dead',
+    () => send('token.setMarkers', { token_id: boss!.id, markers: ['dead'] }),
+    true,
+  );
+  await step('mark the visible goblin bloodied', () =>
+    send('token.setMarkers', { token_id: firstGoblin.id, markers: ['bloodied'] }),
+  );
+  await step('undo the mark of the goblin', undo);
+  await step('undo the mark of the hidden boss', undo, true);
   await step('activate B', () => send('scene.activate', { scene_id: sceneB.id }));
   await step('a second screen reports its viewport and the DM steers the TV on B', async () => {
     const second = await live.connect();
@@ -262,6 +284,59 @@ async function record(hidden: boolean): Promise<Recording> {
   });
   await step('deactivate', () => send('scene.deactivate', {}));
   await step('activate A again', () => send('scene.activate', { scene_id: sceneA.id }));
+  // Fog regions (TBL-03, specs/04-live-sync.md §4, §13): players receive the fogged shapes, never a
+  // region's name or id, and a token under the fog is to them as a hidden one, placed, revealed, moved or
+  // deleted there; a hidden token stays hidden when the fog lifts.
+  const vault = { kind: 'rect', x: 8, y: 0, width: 4, height: 4 } as const;
+  let vaultId = '';
+  await step('draw the fogged vault', async () => {
+    const events = await send('region.add', { scene_id: sceneA.id, name: 'Treasure vault', shape: vault });
+    vaultId = (events[0]!.payload as { region: { id: string } }).region.id;
+    secrets.push(vaultId, 'Treasure vault');
+  });
+  // A lone sentry players see by its bare name: a second one placed under the fog must not rename it, or
+  // players would learn of the one they cannot see (numbering follows what they see, Q-092, Q-096).
+  const sentry = await live.asset('Sentry', { default_hidden: false });
+  await step('place a lone sentry', () => send('token.add', { scene_id: sceneA.id, asset_id: sentry.id, x: 3, y: 6 }));
+  await step(
+    'place a second sentry under the fog and delete it there',
+    async () => {
+      const id = tokenOf(await send('token.add', { scene_id: sceneA.id, asset_id: sentry.id, x: 9, y: 2 })).id;
+      secrets.push(id);
+      await send('token.delete', { token_id: id });
+    },
+    true,
+  );
+  await step('place a goblin under the fog', async () => {
+    const id = tokenOf(await send('token.add', { scene_id: sceneA.id, asset_id: goblin.id, x: 9, y: 1 })).id;
+    shownFrom.push({ id, step: 'reveal the vault' });
+  });
+  await step(
+    'place a lurker under the fog, reveal it and delete it there',
+    async () => {
+      const id = tokenOf(await send('token.add', { scene_id: sceneA.id, asset_id: lurker!.id, x: 10, y: 2 })).id;
+      secrets.push(id);
+      await send('token.setVisibility', { token_id: id, hidden: false });
+      await send('token.delete', { token_id: id });
+    },
+    true,
+  );
+  await step(
+    'place a hidden lurker under the fog, to stay hidden',
+    async () =>
+      secrets.push(tokenOf(await send('token.add', { scene_id: sceneA.id, asset_id: lurker!.id, x: 10, y: 1 })).id),
+    true,
+  );
+  await step('move the first goblin under the fog', () => send('token.move', { token_id: firstGoblin.id, x: 9, y: 3 }));
+  await step('move the first goblin out of the fog', () =>
+    send('token.move', { token_id: firstGoblin.id, x: 1, y: 1 }),
+  );
+  await step('rename the vault', () => send('region.rename', { region_id: vaultId, name: 'Treasure vault, sealed' }));
+  secrets.push('Treasure vault, sealed');
+  await step('reveal the vault', () => send('region.setHidden', { region_id: vaultId, hidden: false }));
+  await step('fog the vault again', () => send('region.setHidden', { region_id: vaultId, hidden: true }));
+  await step('undo the fog of the vault', undo);
+  await step('redo the fog of the vault', () => send('redo', {}));
   // Setup edits and asset changes over REST while A is live (LIV-04, specs/04-live-sync.md §10): a
   // visible change reaches players as a snapshot; one that touches only hidden tokens reaches them
   // not at all, so the recording stays that of the session without them.
@@ -315,6 +390,21 @@ describe('what a player view receives across a live session (specs/10-testing-ac
 
     const text = JSON.stringify(withHidden.steps);
     for (const secret of withHidden.secrets) expect(text, secret).not.toContain(secret);
+    // Scene names reach players only in a snapshot's `name` (UIX-01), and only while that scene is live:
+    // none before the step that activates it, none while another scene is live.
+    for (const name of ['The crypt', 'The bridge']) {
+      expect(text.replaceAll(/"name":"[^"]*"/g, ''), name).not.toContain(name);
+    }
+    const at = (step: string) => withHidden.steps.findIndex((each) => each.step === step);
+    const during = (from: string, to?: string) =>
+      JSON.stringify(withHidden.steps.slice(at(from), to === undefined ? undefined : at(to)));
+    expect(JSON.stringify(withHidden.steps.slice(0, at('activate A')))).not.toMatch(/The crypt|The bridge/);
+    expect(JSON.stringify(withHidden.steps[at('activate A')])).toContain('The crypt');
+    expect(during('activate A', 'activate B')).not.toContain('The bridge');
+    expect(JSON.stringify(withHidden.steps[at('activate B')])).toContain('The bridge');
+    expect(during('activate B', 'deactivate')).not.toContain('The crypt');
+    expect(during('deactivate', 'activate A again')).not.toMatch(/The crypt|The bridge/);
+    expect(during('activate A again')).not.toContain('The bridge');
     for (const forbidden of ['"hidden"', '"notes"', '"asset', '"scene_id"', '"session_id"', 'thumbnail', 'original']) {
       expect(text, forbidden).not.toContain(forbidden);
     }
@@ -342,6 +432,24 @@ describe('what a player view receives across a live session (specs/10-testing-ac
     ]);
     expect(eventsOf('the DM measures on a scene that is not live')).toEqual(['scene.snapshot']);
     expect(eventsOf('the DM clears the measurement')).toEqual(['ruler.cleared', 'scene.snapshot']);
+    expect(eventsOf('the DM pings the live scene')).toEqual(['ping', 'scene.snapshot']);
+    expect(eventsOf('mark the hidden boss dead')).toEqual(['scene.snapshot']);
+    expect(eventsOf('draw the fogged vault')).toEqual(['fog.updated', 'scene.snapshot']);
+    expect(eventsOf('place a lone sentry')).toEqual(['token.added', 'scene.snapshot']);
+    expect(eventsOf('place a second sentry under the fog and delete it there')).toEqual(['scene.snapshot']);
+    expect(eventsOf('place a goblin under the fog')).toEqual(['scene.snapshot']);
+    expect(eventsOf('place a lurker under the fog, reveal it and delete it there')).toEqual(['scene.snapshot']);
+    expect(eventsOf('move the first goblin under the fog')).toEqual(['token.removed', 'scene.snapshot']);
+    expect(eventsOf('move the first goblin out of the fog')).toEqual(['token.added', 'scene.snapshot']);
+    expect(eventsOf('rename the vault')).toEqual(['scene.snapshot']);
+    expect(eventsOf('reveal the vault')).toEqual(['fog.updated', 'token.added', 'scene.snapshot']);
+    expect(eventsOf('fog the vault again')).toEqual(['fog.updated', 'token.removed', 'scene.snapshot']);
+    expect(eventsOf('undo the fog of the vault')).toEqual(['fog.updated', 'token.added', 'scene.snapshot']);
+    expect(eventsOf('redo the fog of the vault')).toEqual(['fog.updated', 'token.removed', 'scene.snapshot']);
+    expect(eventsOf('mark the visible goblin bloodied')).toEqual(['token.updated', 'scene.snapshot']);
+    expect(eventsOf('undo the mark of the goblin')).toEqual(['token.updated', 'scene.snapshot']);
+    expect(eventsOf('undo the mark of the hidden boss')).toEqual(['scene.snapshot']);
+    expect(eventsOf('the DM pings a scene that is not live')).toEqual(['scene.snapshot']);
     expect(eventsOf('a second DM browser measures and disconnects')).toEqual([
       'ruler.shown',
       'ruler.cleared',

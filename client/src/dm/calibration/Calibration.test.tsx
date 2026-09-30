@@ -11,10 +11,11 @@ import {
   click,
   FakeServer,
   installDialog,
+  openSetup,
+  type Reply,
   settle,
   submit,
   type,
-  type Reply,
 } from '../../ui/testing/fakeServer.js';
 import { render, type Rendered } from '../../ui/testing/render.js';
 import { ScenePanel } from '../ScenePanel.js';
@@ -49,11 +50,13 @@ afterEach(() => {
   server.uninstall();
 });
 
+/** The scene's panel with its setup open, where Calibrate grid is (UIX-01: behind Scene setup). */
 async function open(target: Scene = scene): Promise<HTMLElement> {
   rendered = render(
     createElement(ScenePanel, { sceneId: target.id, name: target.name, uploadLimit: 50 * 1024 * 1024 }),
   );
   await settle();
+  await openSetup(rendered.container);
   return rendered.container;
 }
 

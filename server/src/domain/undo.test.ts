@@ -3,10 +3,10 @@ import type { CommandEnvelope, ErrorEnvelope, LibraryAsset, Scene, SceneToken } 
 import { readToken } from '../db/tokens.js';
 import { ok, startLive, type LiveHarness } from '../ws/testing/harness.js';
 import { createLiveCommands, type LiveCommands, type LiveEffect } from './live.js';
-import { inverseOf, UNDO_LIMIT, UndoHistory, type Inverse } from './undo.js';
+import { inverseOf, inverseOfInverse, UNDO_LIMIT, UndoHistory, type Inverse } from './undo.js';
 
 // LIV-05: the undo history and the inverse of each undoable command (specs/04-live-sync.md §8,
-// specs/10-testing-acceptance.md §2, Q-005, Q-050, D-040, D-117). The pure parts are tested on plain
+// specs/10-testing-acceptance.md §2, Q-005, Q-050, D-040, D-117), and redo beside it (UIX-01). The pure parts are tested on plain
 // values; the commands with their history against a real SQLite file (specs/10-testing-acceptance.md
 // §2), prepared over REST.
 
@@ -22,8 +22,9 @@ const token = (fields: Partial<SceneToken> = {}): SceneToken => ({
   y: 3,
   hidden: true,
   z_order: 4,
+  markers: [],
   character_id: null,
-  asset: { name: 'Lurker', image_id: 'a'.repeat(64), size: 'medium' },
+  asset: { name: 'Lurker', image_id: 'a'.repeat(64), size: 'medium', category: 'monster' },
   ...fields,
 });
 const command = (type: CommandEnvelope['type'], payload: Record<string, unknown> = {}): CommandEnvelope => ({
@@ -71,11 +72,16 @@ describe('the inverse of each undoable command (specs/04-live-sync.md §8)', () 
   });
 
   it('undoes a delete by putting back the same token, all of it, a hidden one included', () => {
-    for (const hidden of [false, true]) {
+    for (const [hidden, shown] of [
+      [false, true],
+      [true, false],
+      [true, true],
+    ] as const) {
       const deleted = token({ hidden });
-      expect(inverseOf(command('token.delete'), [{ type: 'token.removed', token: deleted }])).toEqual({
+      expect(inverseOf(command('token.delete'), [{ type: 'token.removed', token: deleted, shown }])).toEqual({
         type: 'token.add',
         restore: deleted,
+        shown,
       });
     }
   });
@@ -88,7 +94,7 @@ describe('the inverse of each undoable command (specs/04-live-sync.md §8)', () 
     expect(inverseOf(command('token.setVisibility'), [])).toBeUndefined();
     expect(inverseOf(command('scene.activate'), [{ type: 'activated' }])).toBeUndefined();
     expect(inverseOf(command('scene.deactivate'), [{ type: 'cleared' }])).toBeUndefined();
-    expect(inverseOf(command('undo'), [{ type: 'token.removed', token: token() }])).toBeUndefined();
+    expect(inverseOf(command('undo'), [{ type: 'token.removed', token: token(), shown: true }])).toBeUndefined();
   });
 });
 
@@ -336,5 +342,146 @@ describe('undo with the live commands, against a real SQLite file (specs/04-live
     const before = tokens();
     expect(refusal(undo())).toBe('reference_not_found');
     expect(tokens()).toEqual(before);
+  });
+});
+
+describe('redo (UIX-01, specs/04-live-sync.md §8)', () => {
+  it('redoes an undo by applying the inverse of the inverse, a restore undone by deleting again', () => {
+    const before = token({ x: 2, y: 3 });
+    const moved: LiveEffect = { type: 'token.updated', before: { ...before, x: 5 }, token: before, relabelled: [] };
+    expect(inverseOfInverse(move(5), [moved])).toEqual({
+      type: 'token.move',
+      payload: { token_id: before.id, x: 5, y: 3 },
+    });
+    expect(
+      inverseOfInverse({ type: 'token.add', restore: before, shown: true }, [
+        { type: 'token.added', token: before, relabelled: [] },
+      ]),
+    ).toEqual({ type: 'token.delete', payload: { token_id: before.id } });
+    expect(
+      inverseOfInverse({ type: 'token.delete', payload: { token_id: before.id } }, [
+        { type: 'token.removed', token: before, shown: false },
+      ]),
+    ).toEqual({ type: 'token.add', restore: before, shown: false });
+    expect(inverseOfInverse(move(5), [])).toBeUndefined();
+  });
+
+  it('keeps redos until a new command, which empties them; a redone command keeps them', () => {
+    const history = new UndoHistory();
+    history.recordRedo(id(9), move(1));
+    history.recordRedo(id(9), move(2));
+    expect(history.stateFor(id(9))).toEqual({ can_undo: false, can_redo: true });
+    expect(history.popRedo(id(9))).toEqual(move(2));
+    history.record(id(9), move(3), true);
+    expect(history.redoSize).toBe(1);
+    history.record(id(9), move(4));
+    expect(history.redoSize).toBe(0);
+    expect(history.stateFor(id(9))).toEqual({ can_undo: true, can_redo: false });
+  });
+
+  it('belongs to the live scene, as the history does: another scene empties both', () => {
+    const history = new UndoHistory();
+    history.record(id(9), move(1));
+    history.recordRedo(id(9), move(2));
+    expect(history.stateFor(id(8))).toEqual({ can_undo: false, can_redo: false });
+    expect(history.popRedo(id(8))).toBeUndefined();
+    expect(history.size).toBe(0);
+    expect(history.redoSize).toBe(0);
+  });
+});
+
+describe('redo with the live commands, against a real SQLite file (UIX-01)', () => {
+  let h: LiveHarness;
+  let live: LiveCommands;
+  let scene: Scene;
+  let other: Scene;
+  let goblin: LibraryAsset;
+
+  beforeEach(async () => {
+    h = await startLive();
+    live = createLiveCommands(h.data.db);
+    scene = await h.scene('Redo', (await h.image('redo map', 96)).id);
+    other = await h.scene('Redo other', (await h.image('redo map other', 80)).id);
+    goblin = await h.asset('Goblin');
+    live.apply(command('scene.activate', { scene_id: scene.id }));
+  });
+
+  afterEach(async () => {
+    await h.close();
+  });
+
+  const effects = (result: ReturnType<LiveCommands['apply']>): LiveEffect[] => {
+    expect(Array.isArray(result), JSON.stringify(result)).toBe(true);
+    return result as LiveEffect[];
+  };
+  const tokens = () => h.data.db.prepare('SELECT * FROM token ORDER BY id').all();
+  const add = () => {
+    const [effect] = effects(live.apply(command('token.add', { scene_id: scene.id, asset_id: goblin.id, x: 1, y: 1 })));
+    return (effect as { token: SceneToken }).token;
+  };
+  const undo = () => effects(live.apply(command('undo')));
+  const redo = () => effects(live.apply(command('redo')));
+
+  it('acknowledges redo with nothing to redo, changing and telling nothing', () => {
+    add();
+    const before = tokens();
+    expect(redo()).toEqual([]);
+    expect(tokens()).toEqual(before);
+  });
+
+  it('redoes a move, a hide and a delete, each undoable again, the database as after the command', () => {
+    const placed = add();
+    effects(live.apply(command('token.move', { token_id: placed.id, x: 6, y: 2 })));
+    const moved = tokens();
+    undo();
+    expect(redo()[0]).toMatchObject({ type: 'token.updated', token: { id: placed.id, x: 6, y: 2 } });
+    expect(tokens()).toEqual(moved);
+
+    effects(live.apply(command('token.setVisibility', { token_id: placed.id, hidden: true })));
+    undo();
+    expect(redo()[0]).toMatchObject({ type: 'token.updated', token: { id: placed.id, hidden: true } });
+
+    effects(live.apply(command('token.delete', { token_id: placed.id })));
+    const deleted = tokens();
+    undo();
+    expect(readToken(h.data.db, placed.id)).toBeDefined();
+    expect(redo()[0]).toMatchObject({ type: 'token.removed', token: { id: placed.id } });
+    expect(tokens()).toEqual(deleted);
+    // And undone once more: the same token back.
+    expect(undo()[0]).toMatchObject({ type: 'token.added', token: { id: placed.id } });
+  });
+
+  it('redoes several undos in order, newest undo first', () => {
+    const placed = add();
+    for (const x of [2, 3, 4]) effects(live.apply(command('token.move', { token_id: placed.id, x, y: 1 })));
+    undo();
+    undo();
+    expect(readToken(h.data.db, placed.id)).toMatchObject({ x: 2 });
+    redo();
+    expect(readToken(h.data.db, placed.id)).toMatchObject({ x: 3 });
+    redo();
+    expect(readToken(h.data.db, placed.id)).toMatchObject({ x: 4 });
+    expect(redo()).toEqual([]);
+  });
+
+  it('is emptied by a new command, and not by one that is not undoable', () => {
+    const placed = add();
+    effects(live.apply(command('token.move', { token_id: placed.id, x: 5, y: 5 })));
+    undo();
+    live.apply(command('ruler.update', { scene_id: scene.id, from: { column: 0, row: 0 }, to: { column: 2, row: 2 } }));
+    expect(live.history.redoSize).toBe(1);
+    effects(live.apply(command('token.move', { token_id: placed.id, x: 7, y: 7 })));
+    expect(live.history.redoSize).toBe(0);
+    expect(redo()).toEqual([]);
+  });
+
+  it('is emptied by activating another scene', () => {
+    const placed = add();
+    effects(live.apply(command('token.move', { token_id: placed.id, x: 5, y: 5 })));
+    undo();
+    live.apply(command('scene.activate', { scene_id: other.id }));
+    expect(live.history.stateFor(other.id)).toEqual({ can_undo: false, can_redo: false });
+    live.apply(command('scene.activate', { scene_id: scene.id }));
+    expect(redo()).toEqual([]);
   });
 });

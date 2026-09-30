@@ -261,8 +261,10 @@ describe('token commands and what each room receives (specs/04-live-sync.md §2,
     const w = await world();
     const { dm, tv } = await liveA(w);
     await acknowledged(dm, 'token.add', { scene_id: w.sceneA.id, asset_id: w.goblin.id, x: 5.5, y: 2 });
-    const [added] = await dm.settle();
+    const [added, history] = await dm.settle();
     expect(added).toMatchObject({ type: 'token.added', version: 3 });
+    // The first change on the live scene can be undone: the DM room alone hears so (UIX-01).
+    expect(history).toEqual({ type: 'history.changed', version: 4, payload: { can_undo: true, can_redo: false } });
     expect(isDmTokenEvent(added!.payload)).toBe(true);
     const { token } = payloadOf<TokenChange>(added);
     expect(token).toMatchObject({ scene_id: w.sceneA.id, label: 'Goblin 3', x: 5.5, y: 2, hidden: false });
@@ -274,19 +276,30 @@ describe('token commands and what each room receives (specs/04-live-sync.md §2,
     expect(Object.keys(sent.token).sort()).toEqual(PLAYER_KEYS);
     // On top of the two visible goblins: rank 2, whatever the hidden lurker's stored order.
     expect(sent).toEqual({
-      token: { id: token.id, x: 5.5, y: 2, size: 'medium', image_id: w.goblin.image_id, z_order: 2, label: 'Goblin 3' },
+      token: {
+        id: token.id,
+        x: 5.5,
+        y: 2,
+        size: 'medium',
+        image_id: w.goblin.image_id,
+        z_order: 2,
+        label: 'Goblin 3',
+        category: w.goblin.category,
+        markers: [],
+      },
       relabelled: [],
     });
 
     await acknowledged(dm, 'token.add', { scene_id: w.sceneA.id, asset_id: w.lurker.id, x: 7, y: 7 });
-    const [secret] = await dm.settle();
-    expect(secret).toMatchObject({ type: 'token.added', version: 4 });
+    const [secret, ...more] = await dm.settle();
+    expect(secret).toMatchObject({ type: 'token.added', version: 5 });
+    expect(more).toEqual([]);
     const lurker = payloadOf<TokenChange>(secret).token;
     // Placed hidden, it keeps the bare name (Q-092).
     expect(lurker).toMatchObject({ hidden: true, label: 'Lurker' });
     expect(tokenRow(lurker.id)).toMatchObject({ hidden: 1 });
     expect(await tv.settle()).toEqual([]);
-    expect([h.versions.dm.current(), h.versions.players.current()]).toEqual([4, 3]);
+    expect([h.versions.dm.current(), h.versions.players.current()]).toEqual([5, 3]);
   });
 
   it('token.move moves a token for both rooms when visible, and for dm only when hidden', async () => {
@@ -308,6 +321,8 @@ describe('token commands and what each room receives (specs/04-live-sync.md §2,
       image_id: w.goblin.image_id,
       z_order: 0,
       label: 'Goblin 1',
+      category: w.goblin.category,
+      markers: [],
     });
 
     await acknowledged(dm, 'token.move', { token_id: w.hidden.id, x: 4, y: 4 });
@@ -380,13 +395,16 @@ describe('token commands and what each room receives (specs/04-live-sync.md §2,
     const { dm, tv } = await liveA(w);
     await acknowledged(dm, 'token.delete', { token_id: w.goblins[0]!.id });
     expect(tokenRow(w.goblins[0]!.id)).toBeUndefined();
-    expect(await dm.settle()).toEqual([{ type: 'token.removed', version: 3, payload: { id: w.goblins[0]!.id } }]);
+    expect(await dm.settle()).toEqual([
+      { type: 'token.removed', version: 3, payload: { id: w.goblins[0]!.id } },
+      { type: 'history.changed', version: 4, payload: { can_undo: true, can_redo: false } },
+    ]);
     expect(await tv.settle()).toEqual([{ type: 'token.removed', version: 3, payload: { id: w.goblins[0]!.id } }]);
     await acknowledged(dm, 'token.delete', { token_id: w.hidden.id });
     expect(tokenRow(w.hidden.id)).toBeUndefined();
-    expect(await dm.settle()).toEqual([{ type: 'token.removed', version: 4, payload: { id: w.hidden.id } }]);
+    expect(await dm.settle()).toEqual([{ type: 'token.removed', version: 5, payload: { id: w.hidden.id } }]);
     expect(await tv.settle()).toEqual([]);
-    expect([h.versions.dm.current(), h.versions.players.current()]).toEqual([4, 3]);
+    expect([h.versions.dm.current(), h.versions.players.current()]).toEqual([5, 3]);
   });
 
   it('sends the players room payloads whose tokens carry exactly the player fields, and dm payloads in the DM shape', async () => {
@@ -415,9 +433,14 @@ describe('token commands and what each room receives (specs/04-live-sync.md §2,
         expect(text, forbidden).not.toContain(forbidden);
       }
     }
-    for (const event of (await dm.settle()).filter((each) => each.type !== 'token.removed')) {
+    const toDm = await dm.settle();
+    for (const event of toDm.filter((each) => each.type === 'token.added' || each.type === 'token.updated')) {
       expect(isDmTokenEvent(event.payload), JSON.stringify(event)).toBe(true);
     }
+    // Besides the token events, the DM room heard once that undo became possible (UIX-01).
+    expect(toDm.filter((each) => !each.type.startsWith('token.'))).toEqual([
+      { type: 'history.changed', version: 4, payload: { can_undo: true, can_redo: false } },
+    ]);
   });
 });
 
@@ -437,7 +460,10 @@ describe('last write wins and versions over the wire (specs/04-live-sync.md §2,
     for (const ack of await Promise.all(acks)) expect(ack).toEqual({ ok: true });
     const seenByDm = await dm.settle();
     const seenByOther = await other.settle();
-    expect(seenByDm).toHaveLength(20);
+    // Twenty moves, and once that undo became possible, after the first (UIX-01).
+    expect(seenByDm.filter((event) => event.type === 'token.updated')).toHaveLength(20);
+    expect(seenByDm.filter((event) => event.type === 'history.changed')).toHaveLength(1);
+    expect(seenByDm).toHaveLength(21);
     expect(seenByOther).toEqual(seenByDm);
     const last = payloadOf<TokenChange>(seenByDm.at(-1)).token;
     expect(tokenRow(goblin)).toMatchObject({ x: last.x, y: last.y });
@@ -454,8 +480,9 @@ describe('last write wins and versions over the wire (specs/04-live-sync.md §2,
         resolve(dm.events.length),
       );
     });
-    expect(heldAtAck - before).toBe(1);
-    expect(dm.events.at(-1)?.type).toBe('token.updated');
+    // The move, and that undo became possible (UIX-01), both before the answer.
+    expect(heldAtAck - before).toBe(2);
+    expect(dm.events.slice(before).map((event) => event.type)).toEqual(['token.updated', 'history.changed']);
   });
 
   it('gives each room ascending versions without a hole across real events, hidden ones advancing dm only', async () => {
@@ -475,7 +502,9 @@ describe('last write wins and versions over the wire (specs/04-live-sync.md §2,
     for (const [type, payload] of steps) await acknowledged(dm, type, payload);
     const dmVersions = (await dm.settle()).map((event) => event.version);
     const tvVersions = (await tv.settle()).map((event) => event.version);
-    expect(dmVersions).toEqual([3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    // One more for the DM room: undo became possible after the first add (UIX-01); the activation's
+    // snapshot carries the new scene's empty history, so it needs no event of its own.
+    expect(dmVersions).toEqual([3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
     // Players never heard of the lurker's add and move, nor of the hidden token's deletion.
     expect(tvVersions).toEqual([3, 4, 5, 6, 7, 8]);
   });
@@ -608,6 +637,15 @@ describe('player commands (specs/10-testing-acceptance.md §3, specs/07-security
     const valid: Record<string, unknown> = {
       'token.add': { scene_id: w.sceneA.id, asset_id: w.goblin.id, x: 1, y: 1 },
       'token.move': { token_id: w.goblins[0]!.id, x: 9, y: 9 },
+      'token.setMarkers': { token_id: w.goblins[0]!.id, markers: ['bloodied'] },
+      'region.add': {
+        scene_id: w.sceneA.id,
+        name: 'Back room',
+        shape: { kind: 'rect', x: 0, y: 0, width: 4, height: 4 },
+      },
+      'region.rename': { region_id: w.goblins[0]!.id, name: 'Cellar' },
+      'region.setHidden': { region_id: w.goblins[0]!.id, hidden: false },
+      'region.delete': { region_id: w.goblins[0]!.id },
       'token.delete': { token_id: w.goblins[0]!.id },
       'token.setVisibility': { token_id: w.hidden.id, hidden: false },
       'scene.activate': { scene_id: w.sceneB.id },
@@ -615,7 +653,9 @@ describe('player commands (specs/10-testing-acceptance.md §3, specs/07-security
       'camera.setPlayer': { scene_id: w.sceneA.id, camera: { centre_x: 0.1, centre_y: 0.1, width: 0.2, height: 0.2 } },
       'ruler.update': { scene_id: w.sceneA.id, from: { column: 1, row: 1 }, to: { column: 4, row: 3 } },
       'ruler.clear': { scene_id: w.sceneA.id },
+      ping: { scene_id: w.sceneA.id, x: 2.5, y: 1.5 },
       undo: {},
+      redo: {},
     };
     expect(Object.keys(valid).sort()).toEqual([...COMMAND_TYPES].sort());
     const before = dump();

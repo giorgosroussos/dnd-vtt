@@ -8,11 +8,11 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
 
 - **Outcome:** the player view is accepted on the owner's LG TV, in its built-in webOS browser, loading the large-scene fixture, and the display-version size is confirmed or changed (`10` §4, `05` §7). The run is recorded with its result, which is Phase 4's last exit criterion and the MVP's release gate (`13` §7, `10` §5). The residuals that need the owner's hardware are closed with their evidence or kept by a recorded decision: G-002, G-031, G-040, G-041, G-042.
 - **Specs:** `13` §7 REL-03, `10` §4, `05` §7, `08` §5, `08` §7, `07` §6; Q-019, Q-036, Q-053; G-002, G-031, G-040, G-041, G-042.
-- **Dependencies:** REL-02 (done, D-127 to D-136): the large-scene fixture (`node e2e/fixtures/large-scene.ts <folder>`), the acceptance journeys and the browser matrix.
+- **Dependencies:** REL-02 (done, D-127 to D-136): the large-scene fixture (`node e2e/fixtures/large-scene.ts <folder>`), the acceptance journeys and the browser matrix. Phase 5 (done, PR #26, D-139 to D-146): the run checks the redesigned TV and its table tools, ping, markers and fog, as they ship.
 - **Owner run needed:** the TV's model and webOS version, and access to the TV and to the owner's Windows PC and laptop; the run is the owner's, with the steps and what to record written for them first.
 - **Acceptance (executable where it can be):**
   - The TV's model and webOS version recorded in `docs/inputs/` (G-002), with an authority entry.
-  - On the TV: the Connect TV journey by the typed URL and by the QR code; the large-scene fixture's map and 50 tokens drawn; Go live, a move, a reveal, Blank TV and a network cut and restore followed; the ruler's distance label read from across the room; each with its result recorded.
+  - On the TV: the Connect TV journey by the typed URL and by the QR code; the large-scene fixture's map and 50 tokens drawn; Go live, a move, a reveal, Go idle (Blank TV, Q-100) and a network cut and restore followed; the ruler's distance label read from across the room; each with its result recorded.
   - The display-version size confirmed on the TV, or the default changed with a decision and its test (`05` §7).
   - The connect panel's prominent address checked on the owner's PC with its adapters (G-031): closed by an owner decision card and its test, or accepted by a recorded decision.
   - A first load of the LAN address in Firefox on the owner's Windows PC timed (G-040), with the cause fixed or the wait accepted by a decision.
@@ -24,4 +24,4 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
 
 ## Next
 
-None: REL-03 is the last package of `13` §7. After it, the MVP's release gate is `10` §5 with Phase 4's exit criteria.
+- None: REL-03 is the last package of `13` §7 and §10.

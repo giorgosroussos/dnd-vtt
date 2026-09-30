@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { Value } from 'typebox/value';
 import {
+  TOKEN_MARKERS,
   COMMAND_TYPES,
   CommandEnvelopeSchema,
   DmSnapshotSchema,
@@ -88,11 +89,21 @@ describe('snapshot payloads (specs/04-live-sync.md §4, LIV-01)', () => {
     image_id: 'a'.repeat(64),
     z_order: 0,
     label: 'Goblin 1',
+    category: 'monster',
+    markers: ['bloodied', 'concentrating'],
   };
 
-  it('gives a player token exactly the rendering fields: id, position, size, image, stacking order and label', () => {
+  it('refuses markers a token cannot carry: an unknown one, one twice, or more than there are (TBL-02)', () => {
+    for (const markers of [['poisoned'], ['dead', 'dead'], ['BLOODIED'], [...TOKEN_MARKERS, 'dead']]) {
+      expect(Value.Check(PlayerTokenSchema, { ...token, markers }), JSON.stringify(markers)).toBe(false);
+    }
+    expect(Value.Check(PlayerTokenSchema, { ...token, markers: [] })).toBe(true);
+    expect(Value.Check(PlayerTokenSchema, { ...token, markers: [...TOKEN_MARKERS] })).toBe(true);
+  });
+
+  it('gives a player token exactly the rendering fields: id, position, size, image, stacking order, label, category and markers', () => {
     expect(Object.keys(PlayerTokenSchema.properties).sort()).toEqual(
-      ['id', 'image_id', 'label', 'size', 'x', 'y', 'z_order'].sort(),
+      ['category', 'id', 'image_id', 'label', 'markers', 'size', 'x', 'y', 'z_order'].sort(),
     );
     expect(Value.Check(PlayerTokenSchema, token)).toBe(true);
   });
@@ -115,14 +126,34 @@ describe('snapshot payloads (specs/04-live-sync.md §4, LIV-01)', () => {
     expect(Value.Check(PlayerTokenSchema, { ...token, z_order: 0.5 })).toBe(false);
   });
 
-  it('gives players no scene id or name and only the display version of the map', () => {
-    expect(Object.keys(PlayerLiveSceneSchema.properties).sort()).toEqual(['camera', 'grid', 'map', 'ruler', 'tokens']);
+  it('gives players no scene id, the name the TV shows (UIX-01), the fogged shapes (TBL-03), and only the display version of the map', () => {
+    expect(Object.keys(PlayerLiveSceneSchema.properties).sort()).toEqual([
+      'camera',
+      'fog',
+      'grid',
+      'map',
+      'name',
+      'ruler',
+      'tokens',
+    ]);
     // A measurement is two squares and a distance: no scene, no token (LIV-07).
     expect(Object.keys(MeasurementSchema.properties).sort()).toEqual(['feet', 'from', 'to']);
     // The players' camera is the rectangle alone: no screen of another viewer (D-119).
     expect(Object.keys(PlayerCameraSchema.properties).sort()).toEqual(['centre_x', 'centre_y', 'height', 'width']);
     expect(Object.keys(PlayerMapSchema.properties).sort()).toEqual(['height', 'id', 'variants', 'width']);
     expect(Object.keys(PlayerMapSchema.properties.variants.properties)).toEqual(['display']);
+    // The fog is shapes alone: a fogged region's name and id never reach players (TBL-03).
+    expect(Value.Check(PlayerLiveSceneSchema.properties.fog, [{ kind: 'rect', x: 0, y: 0, width: 2, height: 2 }])).toBe(
+      true,
+    );
+    for (const extra of [{ name: 'Back room' }, { id: '00000000-0000-4000-8000-000000000001' }, { hidden: true }]) {
+      expect(
+        Value.Check(PlayerLiveSceneSchema.properties.fog, [
+          { kind: 'rect', x: 0, y: 0, width: 2, height: 2, ...extra },
+        ]),
+        JSON.stringify(extra),
+      ).toBe(false);
+    }
   });
 
   it('is strict at every level and says which room it is for', () => {
@@ -149,7 +180,7 @@ describe('live command and event payloads (specs/04-live-sync.md §2, §3, §4, 
   };
   const id = '00000000-0000-4000-8000-000000000001';
 
-  it('defines a payload for every command of specs/04-live-sync.md §2, LIV-07 the last', () => {
+  it('defines a payload for every command of specs/04-live-sync.md §2, redo (UIX-01), ping (TBL-01), token.setMarkers (TBL-02) and the region commands (TBL-03) the last', () => {
     expect(Object.keys(LIVE_COMMAND_PAYLOAD_SCHEMAS).sort()).toEqual([...COMMAND_TYPES].sort());
     expect(Object.keys(LIVE_COMMAND_PAYLOAD_SCHEMAS).sort()).toEqual(
       [
@@ -162,7 +193,14 @@ describe('live command and event payloads (specs/04-live-sync.md §2, §3, §4, 
         'token.delete',
         'token.move',
         'token.setVisibility',
+        'token.setMarkers',
+        'region.add',
+        'region.rename',
+        'region.setHidden',
+        'region.delete',
         'undo',
+        'redo',
+        'ping',
       ].sort(),
     );
     for (const type of Object.keys(LIVE_COMMAND_PAYLOAD_SCHEMAS)) expect(COMMAND_TYPES).toContain(type);

@@ -49,7 +49,19 @@ const megabytes = (bytes: number): string => String(Math.round((bytes / MB) * 10
 
 type FieldErrors = { limit?: string | undefined; display?: string | undefined };
 
-export function SettingsDialog({ onClose, onSaved }: { onClose: () => void; onSaved: (settings: Settings) => void }) {
+export function SettingsDialog({
+  onClose,
+  onSaved,
+  onSignOut,
+  signOutFailure,
+}: {
+  onClose: () => void;
+  onSaved: (settings: Settings) => void;
+  /** Signs this browser out of the DM view (specs/07-security-and-access.md §2, Q-058); here since UIX-01. */
+  onSignOut?: (() => void) | undefined;
+  /** Why the last sign-out failed. */
+  signOutFailure?: string | undefined;
+}) {
   const ids = useId();
   const headingId = `${ids}-heading`;
   const formRef = useRef<HTMLFormElement>(null);
@@ -226,7 +238,9 @@ export function SettingsDialog({ onClose, onSaved }: { onClose: () => void; onSa
         </form>
       ) : null}
       {loaded ? <PinChange /> : null}
+      {signOutFailure ? <Notice>{signOutFailure}</Notice> : null}
       <div className="eg-dialog__actions">
+        {onSignOut ? <Button onClick={onSignOut}>{t('dm.signOut')}</Button> : null}
         <Button onClick={onClose}>{t('settings.close')}</Button>
       </div>
     </Dialog>

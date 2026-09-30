@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { openLibrary, openTree, sceneRow } from './canvas-view.js';
 import { contrastFailures } from './contrast.js';
 import { openWorkspace, seedCampaign } from './dm.js';
 import { commandFromPage } from './socket.js';
@@ -159,9 +160,10 @@ test('every text in both views keeps readable contrast', async ({ page }) => {
     await page.waitForLoadState('networkidle');
     expect(await contrastFailures(page), path).toEqual([]);
   }
-  // The workspace with a campaign open, a create form and the delete dialog.
+  // The workspace with a campaign open in the session switcher, a create form and the delete dialog.
   await openWorkspace(page);
-  const tree = page.getByRole('navigation', { name: 'Campaigns, sessions and scenes' });
+  await openTree(page);
+  const tree = page.getByRole('region', { name: 'Campaigns, sessions and scenes' });
   await tree.getByRole('button', { name: 'Keyboard campaign', exact: true }).click();
   await expect(tree.getByRole('button', { name: 'Keyboard session', exact: true })).toBeVisible();
   await tree.getByRole('button', { name: 'New session' }).click();
@@ -170,7 +172,8 @@ test('every text in both views keeps readable contrast', async ({ page }) => {
   await expect(page.getByRole('dialog')).toContainText('Scenes: 0');
   expect(await contrastFailures(page), 'delete dialog').toEqual([]);
   await page.keyboard.press('Escape');
-  await page.getByRole('complementary', { name: 'Asset library' }).getByRole('button', { name: 'New asset' }).click();
+  await openLibrary(page);
+  await page.getByRole('tabpanel', { name: 'Library' }).getByRole('button', { name: 'New asset' }).click();
   await expect(page.getByRole('dialog', { name: 'New asset' })).toBeVisible();
   expect(await contrastFailures(page), 'asset dialog').toEqual([]);
   await page.keyboard.press('Escape');
@@ -207,16 +210,17 @@ test('the DM view’s load-failure state is reached, shown and operated by keybo
   // The server can serve the view again: Enter reloads the page, which now loads it.
   await page.unroute(chunk);
   await page.keyboard.press('Enter');
-  await expect(page.getByRole('navigation', { name: 'Campaigns, sessions and scenes' })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Scenes of this session' })).toBeVisible();
   await expect(page.locator('main[data-view="boot"]')).toHaveCount(0);
 });
 
 /**
- * Tabs until `target` has focus, starting from Sign out, the control just before the live bar, so the
- * walk is a few presses whatever earlier specs left in the shared data directory (review M8).
+ * Tabs until `target` has focus, starting from the header's breadcrumb, the control just before the live
+ * indicator, so the walk is a few presses whatever earlier specs left in the shared data directory
+ * (review M8, UIX-01).
  */
 async function tabTo(page: Page, target: ReturnType<Page['locator']>, limit = 12): Promise<void> {
-  await page.getByRole('banner').getByRole('button', { name: 'Sign out' }).focus();
+  await page.locator('.eg-header__crumbs').focus();
   for (let presses = 0; presses < limit; presses++) {
     await page.keyboard.press('Tab');
     if (await target.evaluate((element) => element === document.activeElement)) return;
@@ -232,9 +236,11 @@ async function hasRing(target: ReturnType<Page['locator']>): Promise<boolean> {
 }
 
 // The live controls appear only with a scene selected or a scene live, which the generic walk above
-// does not reach (it walks the workspace as it opens): Go live, Show live scene and Blank TV
+// does not reach (it walks the workspace as it opens): Go live, the live scene's name and Go idle
 // (LIV-04, specs/08-ux-journeys.md §2, §8).
-test('Go live, Show live scene and Blank TV are reached, shown and operated by keyboard alone', async ({ page }) => {
+test('Go live, the live scene’s name and Go idle are reached, shown and operated by keyboard alone', async ({
+  page,
+}) => {
   await openWorkspace(page);
   const campaign = `Keyboard live ${Date.now()}`;
   const campaignId = await seedCampaign(page, campaign, ['Live session']);
@@ -245,8 +251,9 @@ test('Go live, Show live scene and Blank TV are reached, shown and operated by k
     expect((await page.request.post(`/api/sessions/${session!.id}/scenes`, { data: { name } })).ok()).toBe(true);
   }
   await page.reload();
-  const tree = page.getByRole('navigation', { name: 'Campaigns, sessions and scenes' });
-  const panel = page.locator('main .eg-scene');
+  await openTree(page);
+  const tree = page.getByRole('region', { name: 'Campaigns, sessions and scenes' });
+  const panel = page.locator('main.eg-scene');
   const bar = page.getByRole('region', { name: 'Live scene' });
   try {
     await tree.getByRole('button', { name: campaign, exact: true }).click();
@@ -259,13 +266,14 @@ test('Go live, Show live scene and Blank TV are reached, shown and operated by k
     expect(await hasRing(goLive), 'Go live shows no focus indicator').toBe(true);
     await page.keyboard.press('Enter');
     await expect(panel).toHaveAttribute('data-mode', 'live');
-    // Go live is gone once it has worked: focus is on Blank TV, not lost (review M2).
-    await expect(bar.getByRole('button', { name: 'Blank TV' })).toBeFocused();
+    // Go live is gone once it has worked: focus is on Go idle, not lost (review M2).
+    await expect(bar.getByRole('button', { name: 'Go idle' })).toBeFocused();
     expect(await contrastFailures(page), 'live mode').toEqual([]);
 
-    await tree.getByRole('button', { name: 'Second hall', exact: true }).click();
+    await sceneRow(page, 'Second hall').click();
     await expect(panel).toHaveAttribute('data-mode', 'prep');
-    const showLive = bar.getByRole('button', { name: 'Show live scene' });
+    // The live scene's name in the live indicator returns the canvas to it (UIX-01).
+    const showLive = bar.getByRole('button', { name: 'Players see First hall: show the live scene' });
     await tabTo(page, showLive);
     expect(await hasRing(showLive), 'Show live scene shows no focus indicator').toBe(true);
     await page.keyboard.press('Enter');
@@ -273,9 +281,9 @@ test('Go live, Show live scene and Blank TV are reached, shown and operated by k
     await expect(panel).toHaveAttribute('data-mode', 'live');
     await expect(page.locator('#main')).toBeFocused();
 
-    const blank = bar.getByRole('button', { name: 'Blank TV' });
+    const blank = bar.getByRole('button', { name: 'Go idle' });
     await tabTo(page, blank);
-    expect(await hasRing(blank), 'Blank TV shows no focus indicator').toBe(true);
+    expect(await hasRing(blank), 'Go idle shows no focus indicator').toBe(true);
     await page.keyboard.press('Space');
     await expect(panel).toHaveAttribute('data-mode', 'prep');
     await expect(bar.getByRole('status')).toHaveText('Nothing is live. The TV shows the idle screen.');

@@ -264,6 +264,23 @@ export function scaleBox(box: Box, factor: number): Box {
   return { x: box.x + (box.width - width) / 2, y: box.y + (box.height - height) / 2, width, height };
 }
 
+/** The part of the world the DM's view shows, in world pixels (UIX-01: Send my view). */
+export function visibleBox(camera: Camera, viewport: Size): Box {
+  return {
+    x: -camera.x / camera.scale,
+    y: -camera.y / camera.scale,
+    width: viewport.width / camera.scale,
+    height: viewport.height / camera.scale,
+  };
+}
+
+/** The smallest box of the shape `aspect` that holds `box`, on the same centre. */
+export function coverBox(box: Box, aspect: number): Box {
+  const width = Math.max(box.width, box.height * aspect);
+  const height = width / aspect;
+  return { x: box.x + (box.width - width) / 2, y: box.y + (box.height - height) / 2, width, height };
+}
+
 /** The smallest frame, as a share of the world's larger side: about two squares of a 30-square map. */
 export const MIN_FRAME_SHARE = 0.05;
 /** A TV's width in CSS pixels while no screen has reported one, for the frame's limits. */

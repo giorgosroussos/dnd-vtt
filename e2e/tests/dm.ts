@@ -21,7 +21,9 @@ export async function signIn(page: Page): Promise<void> {
 export async function openWorkspace(page: Page): Promise<void> {
   await signIn(page);
   await page.goto('/dm');
-  await expect(page.getByRole('navigation', { name: 'Campaigns, sessions and scenes' })).toBeVisible();
+  // The workspace's header and its scene list (UIX-01).
+  await expect(page.locator('.eg-header__crumbs')).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Scenes of this session' })).toBeVisible();
 }
 
 /** Creates a campaign with sessions through the API; answers the campaign id. */

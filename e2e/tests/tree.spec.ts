@@ -1,11 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
+import { openTree } from './canvas-view.js';
 import { openWorkspace } from './dm.js';
 
-// The sidebar tree against the real server (PRP-01, specs/08-ux-journeys.md §1,
-// specs/03-domain-model.md §7, Q-089, D-078, D-085): build a campaign, rename,
-// reorder by dragging and by keyboard, delete through the confirmation.
+// The tree against the real server (PRP-01, specs/08-ux-journeys.md §1, specs/03-domain-model.md §7,
+// Q-089, D-078, D-085): build a campaign, rename, reorder by dragging and by keyboard, delete through the
+// confirmation. Since the redesign the tree is in the header's session switcher (UIX-01, Q-100).
 
-const tree = (page: Page) => page.getByRole('navigation', { name: 'Campaigns, sessions and scenes' });
+const tree = (page: Page) => page.getByRole('region', { name: 'Campaigns, sessions and scenes' });
 const nameButton = (page: Page, name: string) => tree(page).getByRole('button', { name, exact: true });
 // `has` is matched inside each row, so it takes a locator relative to it.
 const row = (page: Page, name: string) =>
@@ -23,6 +24,7 @@ async function create(page: Page, open: string, label: string, name: string) {
 test('the DM builds, renames, reorders and deletes in the tree', async ({ page }) => {
   const campaign = `Tree campaign ${Date.now()}`;
   await openWorkspace(page);
+  await openTree(page);
 
   await create(page, 'New campaign', 'Campaign name', campaign);
   await nameButton(page, campaign).click();
@@ -46,12 +48,14 @@ test('the DM builds, renames, reorders and deletes in the tree', async ({ page }
   await expect.poll(() => levelNames(page, 'session')).toEqual(['Two', 'One']);
   await expect(tree(page).getByRole('button', { name: 'Two', exact: true })).toBeFocused();
 
-  // Selecting a scene names it in the main area.
+  // Selecting a scene names it in the main area, and closes the switcher.
   await nameButton(page, 'Cave').click();
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Cave');
+  await expect(tree(page)).toHaveCount(0);
 
   // The server kept both orders.
   await page.reload();
+  await openTree(page);
   await nameButton(page, campaign).click();
   await expect.poll(() => levelNames(page, 'session')).toEqual(['Two', 'One']);
   await nameButton(page, 'One').click();

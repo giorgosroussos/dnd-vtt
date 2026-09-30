@@ -59,3 +59,15 @@ describe('the palette', () => {
     expect(contrast(colour('color-focus'), colour(background))).toBeGreaterThanOrEqual(3);
   });
 });
+
+describe('animations (D-146)', () => {
+  // An endless animation repaints its screen for as long as it shows, the idle TV for hours, and on a browser
+  // painting without compositing slows everything else: each one runs a few times and stops.
+  it.each(['./tokens.css', '../dm/dm.css', '../canvas/canvas.css'])('runs none for ever in %s', (file) => {
+    const sheet = readFileSync(new URL(file, import.meta.url), 'utf8');
+    expect(sheet).not.toMatch(/\binfinite\b/);
+    for (const [, iterations] of sheet.matchAll(/animation:[^;]*?\b(\d+)\s*;/g)) {
+      expect(Number(iterations)).toBeLessThanOrEqual(5);
+    }
+  });
+});

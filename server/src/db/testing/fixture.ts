@@ -17,8 +17,12 @@ export const FIXTURE_VERSION = 1;
 export const fixtureUuid = (n: number): string => `00000000-0000-4000-8000-${n.toString(16).padStart(12, '0')}`;
 export const fixtureSha256 = (n: number): string => createHash('sha256').update(`fixture image ${n}`).digest('hex');
 
+/** The tables of the fixture's version, each of which the fixture fills. */
 export const TABLES = ['image', 'asset', 'asset_tag', 'campaign', 'session', 'scene', 'token', 'settings'] as const;
 export type Table = (typeof TABLES)[number];
+/** Every table of the latest schema: the fixture's, and those later migrations add (0005, TBL-03). */
+export const SCHEMA_TABLES = [...TABLES, 'region'] as const;
+export type SchemaTable = (typeof SCHEMA_TABLES)[number];
 
 export function countRows(db: Database.Database): Record<Table, number> {
   return Object.fromEntries(
@@ -186,7 +190,13 @@ export function readEntities(db: Database.Database): Entities {
       ...without(without(row, 'grid_'), 'token_numbers'),
       grid: grid(row, 'grid_'),
     })) as Scene[],
-    token: all('token').map((row) => ({ ...row, hidden: row.hidden === 1 })) as Token[],
+    // Whether players have seen a token is the server's own too (Q-096).
+    // Markers (migration 0004, TBL-02) read as the array they are; a database before it carries none.
+    token: all('token').map((row) => ({
+      ...without(row, 'shown'),
+      hidden: row.hidden === 1,
+      markers: row.markers === undefined ? [] : (JSON.parse(row.markers as string) as unknown),
+    })) as Token[],
     settings: all('settings').map((row) => without(row, 'pin_hash')) as Settings[],
   };
 }

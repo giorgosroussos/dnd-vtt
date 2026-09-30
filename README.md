@@ -22,13 +22,13 @@ npm start
 On start the console prints the player view's address and a QR code for it, for example `http://192.168.1.20:3000/`, followed by the PC's other addresses.
 
 - **First run.** While no PIN is set, the console says so and prints the address to open. Open `http://localhost:3000/dm` (or your port, if you set `EMBERGLASS_PORT`) in a browser **on this PC** and choose the DM PIN (4 to 8 digits; 6 to 8 are much harder to guess). Setup is refused from any other device, and from this PC through its network address: use `localhost`.
-- **The TV.** Open the printed address in the TV's browser, or use Connect a screen in the DM view, which shows the same address and code. The player view needs no PIN.
+- **The TV.** Open the printed address in the TV's browser, or use Connect a screen in the DM view (the screens counter in its header), which shows the same address and code. The player view needs no PIN.
 - **The DM view.** On any browser on the Wi-Fi, open the same address followed by `/dm`, then enter the PIN. A browser stays signed in until the server restarts, the PIN changes or it signs out.
 - **Forgotten PIN.** Run `npm run reset-pin` in the Emberglass folder on this PC, then set a new one from `http://localhost:3000/dm` (or your port).
 
 ## Settings
 
-The DM view's Settings (in the live bar) change these without a restart:
+The DM view's Settings (the button at the right of its header; Sign out is in the same dialog) change these without a restart:
 
 - **The upload limit:** 50 MB by default, from 1 to 1,024 MB. The next upload is checked against it.
 - **The display size:** the longest side, in pixels, of the version of each map and token image that screens show. It is 4,096 by default, from 512 to 16,383. Choose a smaller size if the TV is slow or runs out of memory. After a change, every display version is made again in the background, and the TV shows each map at the new size once it is done. Originals, which calibration uses, never change.

@@ -30,6 +30,7 @@ const token: Token = {
   y: 7.125,
   hidden: true,
   z_order: 0,
+  markers: [],
   character_id: null,
 };
 

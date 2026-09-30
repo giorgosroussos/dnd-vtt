@@ -18,7 +18,7 @@ import { images, installCanvas2d, installImageLoading, installResizeObserver } f
 import { settle } from '../ui/testing/fakeServer.js';
 import { installFakeSockets } from '../ui/testing/fakeSocket.js';
 import { FOCUSABLE, render, type Rendered } from '../ui/testing/render.js';
-import { CURSOR_IDLE_MS, PlayerView } from './PlayerView.js';
+import { CURSOR_IDLE_MS, labelScaleFor, PlayerView } from './PlayerView.js';
 import { VIEWPORT_SETTLE_MS } from './usePlayerLive.js';
 
 // The player view (LIV-01, LIV-03; specs/08-ux-journeys.md §4, §9, specs/04-live-sync.md §4, §5,
@@ -38,6 +38,8 @@ const GRID: Grid = {
 };
 const MAP = { id: 'c'.repeat(64), width: 4000, height: 3000, variants: { display: { width: 2000, height: 1500 } } };
 const IMAGE = 'd'.repeat(64);
+// What the idle screen says (specs/08-ux-journeys.md §4, Q-100): the product name and the waiting line.
+const IDLE_TEXT = t('app.name') + t('idle.line');
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const token = (n: number, label: string, z_order: number, x = n): PlayerToken => ({
   id: id(n),
@@ -47,11 +49,13 @@ const token = (n: number, label: string, z_order: number, x = n): PlayerToken =>
   image_id: IMAGE,
   z_order,
   label,
+  category: 'monster',
+  markers: [],
 });
 
 const snapshot = (tokens: PlayerToken[], grid: Grid = GRID): PlayerSnapshot => ({
   role: 'players',
-  scene: { map: MAP, grid, tokens, camera: FIT_CAMERA, ruler: null },
+  scene: { name: 'Crypt', map: MAP, grid, tokens, camera: FIT_CAMERA, ruler: null, fog: [] },
 });
 
 let fake: ReturnType<typeof installFakeSockets>;
@@ -108,8 +112,8 @@ describe('player view connection', () => {
     await open({ role: 'players', scene: null });
     act(() => socket.drop('transport close'));
     expect(main().getAttribute('data-live')).toBe('reconnecting');
-    // Nobody operates the TV: no message, no control, the product name only (Q-025).
-    expect(main().textContent).toBe('Emberglass');
+    // Nobody operates the TV: no message, no control, the idle screen only (Q-025, Q-100).
+    expect(main().textContent).toBe(IDLE_TEXT);
     expect(rendered.container.querySelectorAll(FOCUSABLE)).toHaveLength(0);
     act(() => socket.open(snapshot([token(1, 'Goblin', 0)])));
     await settle();
@@ -135,11 +139,11 @@ describe('player view connection', () => {
 });
 
 describe('what the player view draws (specs/08-ux-journeys.md §4)', () => {
-  it('shows the dark idle screen with the product name only while nothing is live', async () => {
+  it('shows the dark idle screen with the product name and the waiting line only while nothing is live', async () => {
     await open({ role: 'players', scene: null });
     expect(main().dataset.scene).toBe('idle');
     expect(main().querySelector('.eg-idle')).not.toBeNull();
-    expect(main().textContent).toBe('Emberglass');
+    expect(main().textContent).toBe(IDLE_TEXT);
     expect(main().querySelector('canvas')).toBeNull();
   });
 
@@ -190,7 +194,7 @@ describe('what the player view draws (specs/08-ux-journeys.md §4)', () => {
     await open(snapshot([token(1, 'Goblin', 0)]));
     await deliver('scene.cleared', 2, {});
     expect(main().dataset.scene).toBe('idle');
-    expect(main().textContent).toBe('Emberglass');
+    expect(main().textContent).toBe(IDLE_TEXT);
     expect(main().querySelector('canvas')).toBeNull();
   });
 
@@ -213,7 +217,9 @@ describe('what the player view draws (specs/08-ux-journeys.md §4)', () => {
         tokens: [],
         camera: FIT_CAMERA,
         screen: null,
+        history: { can_undo: false, can_redo: false },
         ruler: null,
+        regions: [],
       },
     };
     act(() => fake.sockets[0]!.deliver({ type: 'scene.snapshot', version: 2, payload: dm }));
@@ -323,7 +329,15 @@ describe('ordering and replacement', () => {
       fake.sockets[0]!.open(
         {
           role: 'players',
-          scene: { map: other, grid: GRID, tokens: [token(7, 'Dragon', 0)], camera: FIT_CAMERA, ruler: null },
+          scene: {
+            name: 'Lair',
+            map: other,
+            grid: GRID,
+            tokens: [token(7, 'Dragon', 0)],
+            camera: FIT_CAMERA,
+            ruler: null,
+            fog: [],
+          },
         },
         5,
       ),
@@ -416,5 +430,65 @@ describe('the ruler on the TV (LIV-07, specs/04-live-sync.md §11, Q-027)', () =
     await open({ role: 'players', scene: { ...snapshot([]).scene!, ruler: measurement } });
     await deliver('scene.snapshot', 2, snapshot([]));
     expect(drawnRuler()).toBeNull();
+  });
+});
+
+describe('the redesign on the TV (UIX-01, specs/08-ux-journeys.md §11)', () => {
+  it('shows the live scene’s name at the bottom left over a vignette, and nothing of them while idle', async () => {
+    await open(snapshot([token(1, 'Goblin', 0)]));
+    expect(main().querySelector('.eg-player__plate')!.textContent).toBe('Crypt');
+    expect(main().querySelector('.eg-player__vignette')).not.toBeNull();
+    await deliver('scene.cleared', 2, {});
+    expect(main().querySelector('.eg-player__plate')).toBeNull();
+    expect(main().querySelector('.eg-player__vignette')).toBeNull();
+  });
+
+  it('fades in anew for another scene, and not for an event on the same one', async () => {
+    await open(snapshot([token(1, 'Goblin', 0)]));
+    const first = main().querySelector('.eg-player__fade');
+    await deliver('token.removed', 2, { id: id(1) });
+    expect(main().querySelector('.eg-player__fade')).toBe(first);
+    act(() => fake.sockets[0]!.open({ role: 'players', scene: { ...snapshot([]).scene!, name: 'Bridge' } }, 3));
+    await settle();
+    expect(main().querySelector('.eg-player__fade')).not.toBe(first);
+    expect(main().querySelector('.eg-player__plate')!.textContent).toBe('Bridge');
+  });
+
+  it('draws labels to be read across a room: in proportion to the screen, never below 1.6 times the DM’s', () => {
+    expect(labelScaleFor(1080)).toBeCloseTo(2.55, 6);
+    expect(labelScaleFor(2160)).toBeCloseTo(5.1, 6);
+    expect(labelScaleFor(720)).toBeCloseTo(1.7, 6);
+    expect(labelScaleFor(288)).toBe(1.6);
+  });
+});
+
+describe('pings on the TV (TBL-01, specs/04-live-sync.md §12)', () => {
+  const drawnPings = () => {
+    const state = main().querySelector<HTMLElement>('.eg-canvas--player')!.dataset.pings;
+    return state === undefined ? [] : (JSON.parse(state) as { x: number; y: number }[]);
+  };
+
+  it('draws each ping at its point in grid units, over the tokens, and lets every ping go on a snapshot', async () => {
+    await open(snapshot([token(1, 'Goblin', 0)]));
+    expect(drawnPings()).toEqual([]);
+    await deliver('ping', 2, { x: 4.5, y: 2.5 });
+    await deliver('ping', 3, { x: 10, y: 8 });
+    expect(drawnPings()).toMatchObject([
+      { x: 4.5, y: 2.5 },
+      { x: 10, y: 8 },
+    ]);
+    const layers = stage().getLayers();
+    const pingLayer = stage().findOne<Konva.Layer>('.ping-layer')!;
+    expect(layers.indexOf(pingLayer)).toBeGreaterThan(layers.findIndex((layer) => layer.findOne('.token')));
+    expect(pingLayer.find('.ping')).toHaveLength(2);
+    // Drawn where the grid puts the point: the map's squares are 50 display pixels at this grid.
+    expect(pingLayer.find('.ping')[0]!.position()).toEqual({ x: 225, y: 125 });
+    // A malformed ping is skipped; the TV still has no control.
+    await deliver('ping', 4, { x: 'left', y: 1 });
+    expect(drawnPings()).toHaveLength(2);
+    expect(rendered.container.querySelectorAll(FOCUSABLE)).toHaveLength(0);
+    await deliver('scene.snapshot', 5, snapshot([]));
+    expect(drawnPings()).toEqual([]);
+    expect(stage().findOne('.ping-layer')).toBeUndefined();
   });
 });

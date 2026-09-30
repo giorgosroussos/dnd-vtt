@@ -41,6 +41,7 @@ export const SceneTokenSchema = Type.Object(
         name: AssetSchema.properties.name,
         image_id: AssetSchema.properties.image_id,
         size: AssetSchema.properties.size,
+        category: AssetSchema.properties.category,
       },
       strict,
     ),
@@ -64,7 +65,7 @@ export const TokenChangeSchema = Type.Object(
 
 export const TOKEN_STACK = ['front', 'back'] as const;
 
-// Move, hide or reveal, relabel, restack (specs/04-live-sync.md §2). `stack` puts the token above
+// Move, hide or reveal, relabel, restack, mark (specs/04-live-sync.md §2, TBL-02). `stack` puts the token above
 // or below every other token of its scene. Revealing a token that still carries its asset's bare
 // name numbers it, unless the body also gives a label (Q-092).
 export const TokenUpdateBodySchema = Type.Object(
@@ -74,6 +75,8 @@ export const TokenUpdateBodySchema = Type.Object(
     hidden: Type.Optional(Type.Boolean()),
     label: Type.Optional(LabelSchema),
     stack: Type.Optional(Type.Enum(TOKEN_STACK)),
+    // The whole set of condition markers after the change (TBL-02).
+    markers: Type.Optional(TokenSchema.properties.markers),
   },
   { ...strict, minProperties: 1 },
 );

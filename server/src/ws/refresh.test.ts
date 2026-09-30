@@ -126,13 +126,13 @@ describe('a REST change to the live scene (04 §10, G-019)', () => {
     nothingHidden(hiddenGrid, w);
   });
 
-  it('tells only the DM room of a rename, which players do not see, and sends nothing for no change', async () => {
+  it('tells both rooms of a rename, since the TV shows the name (UIX-01), and sends nothing for no change', async () => {
     const w = await world();
-    const players = h.versions.players.current();
     ok(await patchScene(w.live.id, { name: 'The lair' }));
     expect(onlySnapshot(await w.dm.settle(), 'dm').scene?.scene.name).toBe('The lair');
-    expect(await w.player.settle()).toEqual([]);
-    expect(h.versions.players.current()).toBe(players);
+    const renamed = await w.player.settle();
+    expect(onlySnapshot(renamed, 'players').scene?.name).toBe('The lair');
+    nothingHidden(renamed, w);
     // Saving what is already stored changes nothing, so nobody is told.
     ok(await patchScene(w.live.id, { grid: { visible: true } }));
     expect(await w.dm.settle()).toEqual([]);

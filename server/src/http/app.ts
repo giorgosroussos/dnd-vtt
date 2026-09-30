@@ -13,6 +13,7 @@ import { registerAuth, type Auth } from './auth.js';
 import { registerCampaigns } from './campaigns.js';
 import { registerConnect } from './connect.js';
 import type { NetworkInterfaces } from '../connect.js';
+import { registerRegions } from './regions.js';
 import { registerTokens } from './tokens.js';
 import { imageFileRemover, registerImages } from './images.js';
 import { createDisplayRegenerator, type DisplayRegenerator } from '../images/regenerator.js';
@@ -129,7 +130,8 @@ export async function buildApp({
   registerCampaigns(app, db, removeImages, live.refresh);
   registerAssets(app, db, removeImages, live.refresh);
   registerTokens(app, db);
-  registerConnect(app, networkInterfaces);
+  registerRegions(app, db);
+  registerConnect(app, networkInterfaces, () => live.count('players'));
   const regenerator = createDisplayRegenerator({ db, imagesDir, logger, commit: live.refresh });
   // Before any onClose hook: the server closes the database in one registered after this (review C-M2).
   app.addHook('preClose', () => regenerator.stop());

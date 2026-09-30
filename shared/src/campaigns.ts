@@ -18,6 +18,7 @@ export const API_STRUCTURE_PATHS = {
   sessionDeletion: '/api/sessions/:id/deletion',
   scenes: '/api/sessions/:id/scenes',
   sceneOrder: '/api/sessions/:id/scenes/order',
+  sceneSummaries: '/api/sessions/:id/scenes/summary',
   scene: '/api/scenes/:id',
   sceneDeletion: '/api/scenes/:id/deletion',
   sceneDuplicate: '/api/scenes/:id/duplicate',
@@ -133,7 +134,16 @@ export const DeletionSummarySchema = Type.Object(
 
 export const DeleteBodySchema = Type.Object({ confirm: DeletionSummarySchema }, strict);
 
+// What the scene list shows under each scene's name (UIX-01, specs/08-ux-journeys.md §11): how many
+// tokens it holds and how many of them are hidden, in the session's scene order. DM only, like every
+// route here.
+export const SceneSummarySchema = Type.Object(
+  { id: UuidSchema, tokens: Type.Integer({ minimum: 0 }), hidden: Type.Integer({ minimum: 0 }) },
+  strict,
+);
+
 export type IdParams = Static<typeof IdParamsSchema>;
+export type SceneSummary = Static<typeof SceneSummarySchema>;
 export type CampaignCreateBody = Static<typeof CampaignCreateBodySchema>;
 export type CampaignUpdateBody = Static<typeof CampaignUpdateBodySchema>;
 export type SessionCreateBody = Static<typeof SessionCreateBodySchema>;

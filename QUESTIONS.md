@@ -38,7 +38,7 @@ Every card opens `Blocking` and is answered before the specification proceeds. `
 - Q-013 — Campaign export/import: MVP or Phase 2 — scope — Resolved
 - Q-014 — Token operations available on the live scene — scope — Resolved
 - Q-015 — Editing the live scene's setup while it is live — scope — Resolved
-- Q-016 — Table tools beyond the ruler — scope — Resolved
+- Q-016 — Table tools beyond the ruler — scope — Resolved — superseded by Q-099
 - Q-017 — How a DM installs and starts the MVP — scope — Resolved
 - Q-018 — Operating systems the server supports — scope — Resolved
 - Q-019 — Browsers the player view is accepted on — scope — Resolved
@@ -118,22 +118,15 @@ Every card opens `Blocking` and is answered before the specification proceeds. `
 - Q-093 — Version numbers that would reveal a hidden token — security — Resolved
 - Q-094 — Labels that would hint at a hidden token — security — Resolved
 - Q-095 — Where a token revealed live sits in the stacking order — security — Resolved
-- Q-096 — A lone token hidden and revealed again comes back numbered — ux — Blocking
+- Q-096 — A lone token hidden and revealed again comes back numbered — ux — Resolved
 - Q-097 — PIN guessing from many LAN addresses — security — Resolved
 - Q-098 — PIN guessing kept just under the server-wide budget — security — Resolved
+- Q-099 — Ping, condition markers and manual fog after the MVP — scope — Resolved
+- Q-100 — The redesigned DM view and idle screen against 08 — ux — Resolved
 
 ## Blocking
 
-### Q-096 — A lone token hidden and revealed again comes back numbered
-- Surface: ux
-- Source: Found while testing LIV-05's undo, 2026-09-27, reproduced in `server/src/domain/undo.test.ts`: `updateToken` (`server/src/db/tokens.ts`, PRP-04, LIV-02) numbers every token that carries its asset's bare name when it is revealed, so the lone visible "Goblin" hidden and revealed again becomes "Goblin 2", in preparation and on the TV. `05` §3 [Q-092] says a token is numbered "only when it is first shown to players" and "a single token keeps the bare name"; the server cannot tell a bare-named token that was shown from one placed hidden, and Q-094 B (storing whether players saw a token) was not chosen. Undo already restores the bare name (D-117); the ordinary hide and reveal do not.
-- Question: When a lone token that players saw with its asset's bare name is hidden and revealed again, what label should it come back with?
-- Options:
-  - A) Keep today's rule and amend `05` §3: a reveal numbers any bare-named token, so it comes back as the next number ("Goblin 2") → effect on ux: players see the only goblin renamed after a hide; no migration; the spec states the exception.
-  - B) Store per token whether it has been shown to players (an additive migration) and number only at the first showing → effect on ux: the token comes back as "Goblin", exactly as `05` §3 reads; a new column, set in placement, reveal and numbering, with its tests.
-  - C) Without a migration, keep the bare name on reveal when the scene has issued exactly one number for the asset and no other token of it is shown → effect on ux: the common case comes back as "Goblin", but a hidden Goblin placed after the first one was deleted is revealed as "Goblin" instead of "Goblin 2", against Q-091's example.
-- Recommendation: B, because it is the only option that makes the code do what `05` §3 already says, and the rename happens in front of players on the token they were watching, unlike the gap Q-094 B would have closed.
-- Blocks: specification
+None. Phase 0 can proceed.
 
 ## Open
 
@@ -326,6 +319,7 @@ None.
 - Recommendation: A, because the input lists the MVP explicitly and adding tools the owner did not name is scope growth.
 - Blocks: specification
 - Answer: A (2026-09-23; recommendation accepted)
+- Superseded by: Q-099
 
 ### Q-017 — How a DM installs and starts the MVP
 - Surface: scope
@@ -1216,6 +1210,18 @@ None.
 - Blocks: specification
 - Answer: A (2026-09-26; recommendation accepted)
 
+### Q-096 — A lone token hidden and revealed again comes back numbered
+- Surface: ux
+- Source: Found while testing LIV-05's undo, 2026-09-27, reproduced in `server/src/domain/undo.test.ts`: `updateToken` (`server/src/db/tokens.ts`, PRP-04, LIV-02) numbers every token that carries its asset's bare name when it is revealed, so the lone visible "Goblin" hidden and revealed again becomes "Goblin 2", in preparation and on the TV. `05` §3 [Q-092] says a token is numbered "only when it is first shown to players" and "a single token keeps the bare name"; the server cannot tell a bare-named token that was shown from one placed hidden, and Q-094 B (storing whether players saw a token) was not chosen. Undo already restores the bare name (D-117); the ordinary hide and reveal do not.
+- Question: When a lone token that players saw with its asset's bare name is hidden and revealed again, what label should it come back with?
+- Options:
+  - A) Keep today's rule and amend `05` §3: a reveal numbers any bare-named token, so it comes back as the next number ("Goblin 2") → effect on ux: players see the only goblin renamed after a hide; no migration; the spec states the exception.
+  - B) Store per token whether it has been shown to players (an additive migration) and number only at the first showing → effect on ux: the token comes back as "Goblin", exactly as `05` §3 reads; a new column, set in placement, reveal and numbering, with its tests.
+  - C) Without a migration, keep the bare name on reveal when the scene has issued exactly one number for the asset and no other token of it is shown → effect on ux: the common case comes back as "Goblin", but a hidden Goblin placed after the first one was deleted is revealed as "Goblin" instead of "Goblin 2", against Q-091's example.
+- Recommendation: B, because it is the only option that makes the code do what `05` §3 already says, and the rename happens in front of players on the token they were watching, unlike the gap Q-094 B would have closed.
+- Blocks: specification
+- Answer: B (2026-09-29; recommendation accepted)
+
 ### Q-097 — PIN guessing from many LAN addresses
 - Surface: security
 - Source: G-010, found by the SRV-02 review, 2026-09-24: `07` §6 [Q-009] bounds failed PIN attempts per client address only (`server/src/auth/lockout.ts`: 5 failures, then 1 minute, doubling), so a device on the Wi-Fi that changes its IPv4 address gets 5 fresh guesses per address, about 1,250 in the first minute from a /24, and a 4-digit PIN within hours. Nothing bounds failures across addresses. IPv6 cannot reach the server today (it listens on `0.0.0.0`); if it ever listens on `::`, keying by the full /128 would make the per-address lockout trivial to bypass. A signed-in DM session is what reveals hidden tokens, so a guessed PIN defeats the isolation of `04` §4. REL-01 must close G-010 by an owner decision and its test.
@@ -1239,3 +1245,26 @@ None.
 - Recommendation: A, because it closes the steady trickle with the same mechanism, loopback exemption and logging as Q-097's pause, is one sentence in the README, and costs a DM at a home table nothing.
 - Blocks: specification
 - Answer: A (2026-09-29; recommendation accepted)
+
+### Q-099 — Ping, condition markers and manual fog after the MVP
+- Surface: scope
+- Source: `requirements/2026-09-30-ui-redesign-brief.md` Part B, «Post-MVP features shown in the design»: ping, four condition markers (Bloodied, Unconscious, Dead, Concentrating) and manual fog regions. The pack has ping as a nice-to-have that MUST NOT be built in the MVP (`01` §6, Q-016) and fog of war and «HP and conditions on tokens» as Phase 2 (`01` §4, [input]); AGENTS.md lists fog and ping among the red lines. The MVP's work packages are done but REL-03, the owner's TV run.
+- Question: Are ping, four condition markers and manual fog regions built now, after the MVP's features and before REL-03, and do area-of-effect templates stay out?
+- Options:
+  - A) Build all three now, before REL-03, as the brief describes; area-of-effect templates stay a nice-to-have → effect on scope: a ninth entity (Region), a `markers` field on Token, new live commands and events, and a changed player-visibility rule; the TV acceptance run then checks them.
+  - B) Only the re-skin now; the three features wait until after the release → effect on scope: the pack stays as it is and the brief's Part B becomes a later card.
+  - C) Ping only, which stores nothing → effect on scope: one transient command and event; fog and conditions stay Phase 2.
+- Recommendation: A, because the owner asked for all three and the REL-03 run should check what ships.
+- Blocks: specification
+- Answer: A (2026-09-30; recommendation accepted)
+
+### Q-100 — The redesigned DM view and idle screen against 08
+- Surface: ux
+- Source: `requirements/2026-09-30-ui-redesign-brief.md` Part A and `Design.html`: a header with the campaign / session breadcrumb and a LIVE pill with Go idle; a left sidebar listing the current session's scenes; a tabbed right panel; the idle line «The table is set. Waiting for the Dungeon Master.». `08` §1 [Q-023] puts the Campaign → Session → Scene tree in the left sidebar and a live bar on top; §2 [Q-024, Q-025] names the action Blank TV; §4 [Q-025] shows the product name only when nothing is live.
+- Question: Where the 2026-09-30 brief's DM view layout, Go idle and idle screen differ from `08` §1, §2 and §4, which wins?
+- Options:
+  - A) The brief: the session's scenes in the left sidebar, the tree behind the breadcrumb's session switcher, the LIVE pill in the header, Go idle, and the idle screen's line → effect on ux: `08` §1, §2 and §4 are re-worded; every flow keeps a place (campaign and session management in the switcher).
+  - B) `08` as it stands: the tree stays in the sidebar, a live bar on top, Blank TV, the name alone → effect on ux: the re-skin keeps the old layout in the new palette and departs from the boards.
+- Recommendation: A, because the brief is the owner's latest statement and its layout keeps every flow reachable.
+- Blocks: specification
+- Answer: A (2026-09-30; recommendation accepted)

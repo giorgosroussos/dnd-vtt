@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { FIT_CAMERA, type DmSnapshot, type EventEnvelope, type Scene, type SceneToken } from '@emberglass/shared';
+import {
+  FIT_CAMERA,
+  type DmSnapshot,
+  type EventEnvelope,
+  type Region,
+  type Scene,
+  type SceneToken,
+} from '@emberglass/shared';
 import { applyDmEvent, fromDmSnapshot, type DmScene } from './dmScene.js';
 
 // The DM view's copy of the live scene (LIV-04, specs/04-live-sync.md §3, §5, D-109, G-018).
@@ -14,13 +21,23 @@ const token = (id: string, z_order: number, fields: Partial<SceneToken> = {}): S
   y: 0,
   hidden: false,
   z_order,
+  markers: [],
   character_id: null,
-  asset: { name: 'Goblin', image_id: 'f'.repeat(64), size: 'medium' },
+  asset: { name: 'Goblin', image_id: 'f'.repeat(64), size: 'medium', category: 'monster' },
   ...fields,
 });
 const snapshot = (tokens: SceneToken[]): DmSnapshot => ({
   role: 'dm',
-  scene: { scene, map: null, tokens, camera: FIT_CAMERA, screen: null, ruler: null },
+  scene: {
+    scene,
+    map: null,
+    tokens,
+    camera: FIT_CAMERA,
+    screen: null,
+    ruler: null,
+    history: { can_undo: false, can_redo: false },
+    regions: [],
+  },
 });
 let version = 1;
 const event = (type: EventEnvelope['type'], payload: object): EventEnvelope =>
@@ -86,5 +103,42 @@ describe('the ruler in the DM live scene (LIV-07)', () => {
     expect(applyDmEvent(live, event('ruler.shown', { ruler: { ...measurement, feet: undefined } }))).toBe(live);
     expect(applyDmEvent(live, event('ruler.shown', { ruler: { from: measurement.from, feet: 5 } }))).toBe(live);
     expect(applyDmEvent(null, event('ruler.shown', { ruler: measurement }))).toBeNull();
+  });
+});
+
+describe('the undo state (UIX-01, specs/04-live-sync.md §8)', () => {
+  it('follows history.changed, skipping a malformed one', () => {
+    const scene = fromDmSnapshot(snapshot([]));
+    const next = applyDmEvent(scene, event('history.changed', { can_undo: true, can_redo: false }));
+    expect(next?.history).toEqual({ can_undo: true, can_redo: false });
+    expect(applyDmEvent(next, event('history.changed', { can_undo: 'yes' }))?.history).toEqual({
+      can_undo: true,
+      can_redo: false,
+    });
+  });
+});
+
+describe('the fog regions (TBL-03, specs/04-live-sync.md §3)', () => {
+  const region = (n: number, fields: Partial<Region> = {}): Region => ({
+    id: `r${n}`,
+    scene_id: scene.id,
+    name: `Region ${n}`,
+    order: n,
+    shape: { kind: 'rect', x: n, y: 0, width: 2, height: 2 },
+    hidden: true,
+    ...fields,
+  });
+
+  it('adds, replaces and removes regions from their events, kept in the order drawn', () => {
+    let live = fromDmSnapshot(snapshot([]));
+    live = applyDmEvent(live, event('region.added', { region: region(2) }));
+    live = applyDmEvent(live, event('region.added', { region: region(1) }));
+    expect(live?.regions.map((each) => each.id)).toEqual(['r1', 'r2']);
+    live = applyDmEvent(live, event('region.updated', { region: region(2, { hidden: false, name: 'Study' }) }));
+    expect(live?.regions[1]).toMatchObject({ id: 'r2', hidden: false, name: 'Study' });
+    live = applyDmEvent(live, event('region.removed', { id: 'r1' }));
+    expect(live?.regions.map((each) => each.id)).toEqual(['r2']);
+    // A malformed event changes nothing.
+    expect(applyDmEvent(live, event('region.added', {}))).toBe(live);
   });
 });

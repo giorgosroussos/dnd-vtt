@@ -139,8 +139,9 @@ describe('placing a token', () => {
         y: 4.0625,
         hidden: true,
         z_order: 0,
+        markers: [],
         character_id: null,
-        asset: { name: 'Goblin', image_id: goblin.image_id, size: 'medium' },
+        asset: { name: 'Goblin', image_id: goblin.image_id, size: 'medium', category: 'monster' },
       },
       relabelled: [],
     });
@@ -311,8 +312,11 @@ describe('numbering (specs/05-assets-and-images.md §3, D-019, Q-063, Q-091)', (
     await place(cave.id, goblin.id);
     const doomed = await place(cave.id, goblin.id);
     ok(await remove(tokenUrl(doomed.token.id)), 204);
+    await changed((await list(cave.id))[0]!.id, { markers: ['bloodied'] });
     const copy = ok<Scene>(await post(`/api/scenes/${cave.id}/duplicate`, { name: 'Cave again' }), 201);
     expect(await labels(copy.id)).toEqual(['Goblin 1']);
+    // The copy's tokens carry the original's markers (TBL-02).
+    expect((await list(copy.id))[0]!.markers).toEqual(['bloodied']);
     expect((await place(copy.id, goblin.id)).token.label).toBe('Goblin 3');
     expect((await place(copy.id, goblin.id)).token.label).toBe('Goblin 4');
     expect((await place(cave.id, goblin.id)).token.label).toBe('Goblin 3');
@@ -387,6 +391,42 @@ describe('hidden tokens are numbered only when first shown (specs/05-assets-and-
     expect((await changed(c.token.id, { hidden: false })).label).toBe('Goblin 2');
   });
 
+  it('brings a lone token players saw as the bare name back with it after a hide, not as the next number (Q-096)', async () => {
+    const cave = await scene();
+    const goblin = await asset('Goblin', { category: 'npc' });
+    const lone = await place(cave.id, goblin.id);
+    expect(lone.token).toMatchObject({ label: 'Goblin', hidden: false });
+    expect((await changed(lone.token.id, { hidden: true })).label).toBe('Goblin');
+    const revealed = ok<TokenChange>(await patch(tokenUrl(lone.token.id), { hidden: false }));
+    expect(revealed).toMatchObject({ token: { label: 'Goblin', hidden: false }, relabelled: [] });
+    // A second goblin shown later still numbers them both, the first as 1 (Q-063, Q-091).
+    const second = await place(cave.id, goblin.id);
+    expect(second.token.label).toBe('Goblin 2');
+    expect(await labels(cave.id)).toEqual(['Goblin 1', 'Goblin 2']);
+  });
+
+  it('numbers a token placed hidden at its first showing only, and never again after a hide (Q-092, Q-096)', async () => {
+    const cave = await scene();
+    const goblin = await asset('Goblin', { category: 'monster' });
+    const [a, b] = [await place(cave.id, goblin.id), await place(cave.id, goblin.id)];
+    expect((await changed(a.token.id, { hidden: false })).label).toBe('Goblin');
+    expect((await changed(a.token.id, { hidden: true })).label).toBe('Goblin');
+    // Shown before: revealed with the label players saw, not numbered as a first showing.
+    expect((await changed(a.token.id, { hidden: false })).label).toBe('Goblin');
+    // b's first showing numbers it, and a with it.
+    expect((await changed(b.token.id, { hidden: false })).label).toBe('Goblin 2');
+    expect(await labels(cave.id)).toEqual(['Goblin 1', 'Goblin 2']);
+  });
+
+  it('never sends whether a token was shown to a client (Q-096)', async () => {
+    const cave = await scene();
+    const goblin = await asset('Goblin', { category: 'npc' });
+    const placed = await place(cave.id, goblin.id);
+    expect(Object.keys(placed.token)).not.toContain('shown');
+    const listed = ok<SceneToken[]>(await get(`/api/scenes/${cave.id}/tokens`));
+    for (const token of listed) expect(Object.keys(token)).not.toContain('shown');
+  });
+
   it('numbers a visible placement after the shown tokens only, never after a hidden one', async () => {
     const cave = await scene();
     const goblin = await asset('Goblin', { category: 'monster' });
@@ -409,6 +449,20 @@ describe('changing a token', () => {
     expect((await changed(token.id, { hidden: true })).hidden).toBe(true);
     expect((await changed(token.id, { label: '  Chief  ' })).label).toBe('Chief');
     expect(await list(cave.id)).toEqual([{ ...token, x: 7.5, y: 2.25, hidden: true, label: 'Chief' }]);
+  });
+
+  it('sets its condition markers, stored in the fixed order, and takes them off (TBL-02)', async () => {
+    const cave = await scene();
+    const { token } = await place(cave.id, (await asset('Goblin')).id);
+    expect(token.markers).toEqual([]);
+    expect((await changed(token.id, { markers: ['concentrating', 'unconscious'] })).markers).toEqual([
+      'unconscious',
+      'concentrating',
+    ]);
+    // Another change keeps them; an empty set takes them off.
+    expect((await changed(token.id, { x: 3 })).markers).toEqual(['unconscious', 'concentrating']);
+    expect((await list(cave.id))[0]!.markers).toEqual(['unconscious', 'concentrating']);
+    expect((await changed(token.id, { markers: [] })).markers).toEqual([]);
   });
 
   it('brings a token to the front or sends it to the back of its scene only', async () => {
@@ -475,6 +529,9 @@ describe('changing a token', () => {
       { stack: 'top' },
       { hidden: 'yes' },
       { x: Number.MAX_VALUE },
+      { markers: ['poisoned'] },
+      { markers: ['dead', 'dead'] },
+      { markers: 'dead' },
     ]) {
       expectFailure(await patch(tokenUrl(token.id), body), 400, 'validation_failed');
     }
@@ -493,7 +550,12 @@ describe('changing a token', () => {
     const { token } = await place(cave.id, goblin.id);
     const { id: newImage } = await image();
     ok(await patch(`/api/assets/${goblin.id}`, { image_id: newImage, size: 'huge' }));
-    expect((await list(cave.id))[0]!.asset).toEqual({ name: 'Goblin', image_id: newImage, size: 'huge' });
+    expect((await list(cave.id))[0]!.asset).toEqual({
+      name: 'Goblin',
+      image_id: newImage,
+      size: 'huge',
+      category: goblin.category,
+    });
     ok(await remove(tokenUrl(token.id)), 204);
     expect(await list(cave.id)).toEqual([]);
     expectFailure(await remove(tokenUrl(token.id)), 404, 'not_found');
@@ -507,7 +569,7 @@ describe('the live scene (specs/04-live-sync.md §2)', () => {
     const { token } = await place(cave.id, goblin.id);
     goLive(cave.id);
     expectFailure(await post(tokensUrl(cave.id), { asset_id: goblin.id, x: 0, y: 0 }), 409, 'scene_live');
-    for (const body of [{ x: 4 }, { hidden: false }, { label: 'Renamed' }, { stack: 'back' }]) {
+    for (const body of [{ x: 4 }, { hidden: false }, { label: 'Renamed' }, { stack: 'back' }, { markers: ['dead'] }]) {
       expectFailure(await patch(tokenUrl(token.id), body), 409, 'scene_live');
     }
     expectFailure(await remove(tokenUrl(token.id)), 409, 'scene_live');

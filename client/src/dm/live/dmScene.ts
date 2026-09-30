@@ -5,6 +5,10 @@ import type {
   DmSnapshot,
   DmTokenEventPayload,
   EventEnvelope,
+  HistoryChangedPayload,
+  Region,
+  RegionEventPayload,
+  RegionRemovedPayload,
   RulerShownPayload,
   SceneToken,
   TokenRemovedPayload,
@@ -19,7 +23,9 @@ import type {
 // lists them, so a live canvas draws what a fresh snapshot would. `camera.player` (LIV-06) replaces the
 // player camera and the screen shape the TV frame follows, so the frame follows another DM browser.
 // `ruler.shown` and `ruler.cleared` (LIV-07) replace and remove the measurement the TV shows, so the DM
-// sees what the TV sees, another DM browser's measurement included.
+// sees what the TV sees, another DM browser's measurement included. `history.changed` (UIX-01) replaces
+// whether undo and redo would change anything, which greys the rail's Undo and Redo. `region.added`,
+// `region.updated` and `region.removed` (TBL-03) keep the scene's fog regions, in the order drawn.
 
 /** The live scene, or null while nothing is live. */
 export type DmScene = DmLiveScene | null;
@@ -27,9 +33,12 @@ export type DmScene = DmLiveScene | null;
 const stacked = (tokens: readonly SceneToken[]): SceneToken[] =>
   [...tokens].sort((a, b) => a.z_order - b.z_order || a.id.localeCompare(b.id));
 
+const ordered = (regions: readonly Region[]): Region[] =>
+  [...regions].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+
 export function fromDmSnapshot(snapshot: DmSnapshot): DmScene {
   if (snapshot.scene === null) return null;
-  return { ...snapshot.scene, tokens: stacked(snapshot.scene.tokens) };
+  return { ...snapshot.scene, tokens: stacked(snapshot.scene.tokens), regions: ordered(snapshot.scene.regions) };
 }
 
 /** The scene after one `dm` event that is exactly the next version (the connection checks that). */
@@ -66,6 +75,22 @@ export function applyDmEvent(scene: DmScene, event: EventEnvelope): DmScene {
     }
     case 'ruler.cleared':
       return { ...scene, ruler: null };
+    case 'region.added':
+    case 'region.updated': {
+      const { region } = event.payload as unknown as Partial<RegionEventPayload>;
+      if (!region) return scene;
+      const rest = scene.regions.filter((each) => each.id !== region.id);
+      return { ...scene, regions: ordered([...rest, region]) };
+    }
+    case 'region.removed': {
+      const { id } = event.payload as unknown as Partial<RegionRemovedPayload>;
+      return { ...scene, regions: scene.regions.filter((each) => each.id !== id) };
+    }
+    case 'history.changed': {
+      const { can_undo, can_redo } = event.payload as unknown as Partial<HistoryChangedPayload>;
+      if (typeof can_undo !== 'boolean' || typeof can_redo !== 'boolean') return scene;
+      return { ...scene, history: { can_undo, can_redo } };
+    }
     default:
       return scene;
   }

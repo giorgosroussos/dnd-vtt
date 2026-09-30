@@ -58,20 +58,27 @@ test('a DM view and a player view open side by side from one server', async ({ b
 
 test('the player view is the idle screen: dark, the product name only, no control', async ({ page }) => {
   await page.goto('/');
-  await expect(page.locator('main[data-view="player"]')).toHaveText('Emberglass');
+  await expect(page.locator('main[data-view="player"]')).toHaveText(
+    /^Emberglass\s*The table is set\. Waiting for the Dungeon Master\.$/,
+  );
   const focusable = await page
     .locator('a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"]), [contenteditable="true"]')
     .count();
   expect(focusable).toBe(0);
   const background = await page.locator('.eg-idle').evaluate((element) => getComputedStyle(element).backgroundColor);
-  expect(background).toBe('rgb(20, 17, 15)');
-  // The screen is filled and the name sits in its centre.
+  // The TV's own dark background (UIX-01, specs/08-ux-journeys.md §11).
+  expect(background).toBe('rgb(10, 8, 6)');
+  // The screen is filled, the name is centred across it, and the logo, the name and the line together
+  // sit in its middle (UIX-01).
   const viewport = page.viewportSize()!;
   const idle = (await page.locator('.eg-idle').boundingBox())!;
   expect(idle).toEqual({ x: 0, y: 0, width: viewport.width, height: viewport.height });
   const name = (await page.locator('.eg-idle__name').boundingBox())!;
   expect(Math.abs(name.x + name.width / 2 - viewport.width / 2)).toBeLessThan(2);
-  expect(Math.abs(name.y + name.height / 2 - viewport.height / 2)).toBeLessThan(2);
+  const logo = (await page.locator('.eg-idle__logo').boundingBox())!;
+  const line = (await page.locator('.eg-idle__line').boundingBox())!;
+  expect(Math.abs((logo.y + line.y + line.height) / 2 - viewport.height / 2)).toBeLessThan(2);
+  expect(Math.abs(line.x + line.width / 2 - viewport.width / 2)).toBeLessThan(2);
 });
 
 test('both views request nothing but the local origin, their font and icon included', async ({ browser, baseURL }) => {
@@ -88,12 +95,13 @@ test('both views request nothing but the local origin, their font and icon inclu
     const fonts = seen.filter(({ url }) => url.endsWith('.woff2'));
     expect(fonts.length, `${path} loaded no font file`).toBeGreaterThan(0);
     for (const font of fonts) expect(font.status, font.url).toBe(200);
+    // Both views write in Alegreya Sans and title in Alegreya, the redesign's bundled faces (UIX-01).
     const loaded = await page.evaluate(() =>
-      [...document.fonts].some(
-        (face) => face.family.replace(/["']/g, '') === 'Inter Variable' && face.status === 'loaded',
+      ['Alegreya Sans', 'Alegreya'].filter((family) =>
+        [...document.fonts].some((face) => face.family.replace(/["']/g, '') === family && face.status === 'loaded'),
       ),
     );
-    expect(loaded, `${path} does not render with the bundled font`).toBe(true);
+    expect(loaded, `${path} does not render with the bundled fonts`).toEqual(['Alegreya Sans', 'Alegreya']);
 
     // The icon is declared, local and served. Headless Chromium does not fetch
     // favicons itself, so the test fetches the declared one.

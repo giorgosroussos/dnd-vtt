@@ -37,9 +37,9 @@ test('Connect TV: the URL in Connect a screen, typed on the TV, opens the idle s
       expect(response?.status()).toBe(200);
       await expect(player(tv)).toHaveAttribute('data-scene', 'idle', wait);
     });
-    await expect(player(tv)).toHaveText('Emberglass');
+    await expect(player(tv)).toHaveText(/^Emberglass\s*The table is set\. Waiting for the Dungeon Master\.$/);
     await expect(tv.locator('button, a[href], input, select, textarea, [tabindex]')).toHaveCount(0);
-    await expect(tv.locator('.eg-idle')).toHaveCSS('background-color', 'rgb(20, 17, 15)');
+    await expect(tv.locator('.eg-idle')).toHaveCSS('background-color', 'rgb(10, 8, 6)');
   } finally {
     await dmContext.close();
     await tvContext.close();

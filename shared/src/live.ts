@@ -3,6 +3,8 @@ import {
   GridSchema,
   ImageSchema,
   ImageVariantSchema,
+  RegionSchema,
+  RegionShapeSchema,
   SceneSchema,
   Sha256Schema,
   TokenSchema,
@@ -64,12 +66,19 @@ export const COMMAND_TYPES = [
   'token.move',
   'token.delete',
   'token.setVisibility',
+  'token.setMarkers',
+  'region.add',
+  'region.rename',
+  'region.setHidden',
+  'region.delete',
   'scene.activate',
   'scene.deactivate',
   'camera.setPlayer',
   'ruler.update',
   'ruler.clear',
+  'ping',
   'undo',
+  'redo',
 ] as const;
 
 // The events of specs/04-live-sync.md §3, exactly.
@@ -82,6 +91,12 @@ export const EVENT_TYPES = [
   'camera.player',
   'ruler.shown',
   'ruler.cleared',
+  'ping',
+  'history.changed',
+  'region.added',
+  'region.updated',
+  'region.removed',
+  'fog.updated',
 ] as const;
 
 export type CommandType = (typeof COMMAND_TYPES)[number];
@@ -149,6 +164,11 @@ export const PlayerTokenSchema = Type.Object(
     // The rank among the scene's visible tokens, bottom first, from 0.
     z_order: Type.Integer({ minimum: 0 }),
     label: TokenSchema.properties.label,
+    // What the token's ring is coloured by on the TV (UIX-01, specs/08-ux-journeys.md §11): what players
+    // already see of a visible token, never anything of a hidden one.
+    category: SceneTokenSchema.properties.asset.properties.category,
+    // The condition markers drawn on it (TBL-02), of a visible token only.
+    markers: TokenSchema.properties.markers,
   },
   strict,
 );
@@ -205,6 +225,8 @@ export type Measurement = Static<typeof MeasurementSchema>;
 
 export const PlayerLiveSceneSchema = Type.Object(
   {
+    // The live scene's name, shown at the bottom left of the TV (UIX-01, specs/08-ux-journeys.md §11).
+    name: SceneSchema.properties.name,
     map: Type.Union([PlayerMapSchema, Type.Null()]),
     // Needed even when players do not see the grid: tokens are placed in grid units.
     grid: GridSchema,
@@ -212,9 +234,17 @@ export const PlayerLiveSceneSchema = Type.Object(
     camera: PlayerCameraSchema,
     // The measurement shown on the TV, or null (LIV-07).
     ruler: Type.Union([MeasurementSchema, Type.Null()]),
+    // The shapes of the fogged regions, which the TV draws opaque over the map (TBL-03): no name, no id,
+    // nothing of a region that is revealed.
+    fog: Type.Array(RegionShapeSchema),
   },
   strict,
 );
+
+// Whether `undo` and `redo` would change anything on the live scene (UIX-01, specs/04-live-sync.md §8):
+// what the DM view's Undo and Redo buttons show. The DM room's only.
+export const UndoStateSchema = Type.Object({ can_undo: Type.Boolean(), can_redo: Type.Boolean() }, strict);
+export type UndoState = Static<typeof UndoStateSchema>;
 
 export const DmLiveSceneSchema = Type.Object(
   {
@@ -225,6 +255,9 @@ export const DmLiveSceneSchema = Type.Object(
     // The screen the TV frame follows, or null while no player view has reported one.
     screen: Type.Union([ScreenSchema, Type.Null()]),
     ruler: Type.Union([MeasurementSchema, Type.Null()]),
+    history: UndoStateSchema,
+    // The scene's fog regions, fogged and revealed, in the order they were drawn (TBL-03).
+    regions: Type.Array(RegionSchema),
   },
   strict,
 );
@@ -278,15 +311,43 @@ export const TokenAddPayloadSchema = Type.Object(
 export const TokenMovePayloadSchema = Type.Object({ token_id: UuidSchema, x: Coordinate, y: Coordinate }, strict);
 export const TokenSetVisibilityPayloadSchema = Type.Object({ token_id: UuidSchema, hidden: Type.Boolean() }, strict);
 export const TokenDeletePayloadSchema = Type.Object({ token_id: UuidSchema }, strict);
+// `token.setMarkers` (TBL-02, specs/04-live-sync.md §2): the whole set a token carries after it, stored in
+// the order of TOKEN_MARKERS whatever order it is sent in.
+export const TokenSetMarkersPayloadSchema = Type.Object(
+  { token_id: UuidSchema, markers: TokenSchema.properties.markers },
+  strict,
+);
 export const SceneActivatePayloadSchema = Type.Object({ scene_id: UuidSchema }, strict);
 export const SceneDeactivatePayloadSchema = Type.Object({}, strict);
 export const UndoPayloadSchema = Type.Object({}, strict);
+export const RedoPayloadSchema = Type.Object({}, strict);
 export const CameraSetPlayerPayloadSchema = Type.Object({ scene_id: UuidSchema, camera: PlayerCameraSchema }, strict);
 export const RulerUpdatePayloadSchema = Type.Object(
   { scene_id: UuidSchema, from: RulerSquareSchema, to: RulerSquareSchema },
   strict,
 );
 export const RulerClearPayloadSchema = Type.Object({ scene_id: UuidSchema }, strict);
+// `ping` (TBL-01, specs/04-live-sync.md §12): a point on the live scene in grid units, as token positions
+// are, which both rooms draw for a moment; it names the scene and is refused when that scene is not live.
+export const PingPayloadSchema = Type.Object({ scene_id: UuidSchema, x: Coordinate, y: Coordinate }, strict);
+// The fog region commands (TBL-03, specs/04-live-sync.md §2, §13): drawn on the live scene, named, fogged
+// or revealed and deleted, each undoable. `region.add` names the scene, refused when it is not live; a
+// new region is fogged unless it says otherwise.
+export const RegionAddPayloadSchema = Type.Object(
+  {
+    scene_id: UuidSchema,
+    name: RegionSchema.properties.name,
+    shape: RegionShapeSchema,
+    hidden: Type.Optional(Type.Boolean()),
+  },
+  strict,
+);
+export const RegionRenamePayloadSchema = Type.Object(
+  { region_id: UuidSchema, name: RegionSchema.properties.name },
+  strict,
+);
+export const RegionSetHiddenPayloadSchema = Type.Object({ region_id: UuidSchema, hidden: Type.Boolean() }, strict);
+export const RegionDeletePayloadSchema = Type.Object({ region_id: UuidSchema }, strict);
 
 /** The payload schema of every live command implemented so far; the server registers exactly these. */
 export const LIVE_COMMAND_PAYLOAD_SCHEMAS = {
@@ -294,24 +355,38 @@ export const LIVE_COMMAND_PAYLOAD_SCHEMAS = {
   'token.move': TokenMovePayloadSchema,
   'token.setVisibility': TokenSetVisibilityPayloadSchema,
   'token.delete': TokenDeletePayloadSchema,
+  'token.setMarkers': TokenSetMarkersPayloadSchema,
   'scene.activate': SceneActivatePayloadSchema,
   'scene.deactivate': SceneDeactivatePayloadSchema,
   'camera.setPlayer': CameraSetPlayerPayloadSchema,
   'ruler.update': RulerUpdatePayloadSchema,
   'ruler.clear': RulerClearPayloadSchema,
+  ping: PingPayloadSchema,
+  'region.add': RegionAddPayloadSchema,
+  'region.rename': RegionRenamePayloadSchema,
+  'region.setHidden': RegionSetHiddenPayloadSchema,
+  'region.delete': RegionDeletePayloadSchema,
   undo: UndoPayloadSchema,
+  redo: RedoPayloadSchema,
 } as const satisfies Partial<Record<CommandType, object>>;
 
 export type TokenAddPayload = Static<typeof TokenAddPayloadSchema>;
 export type TokenMovePayload = Static<typeof TokenMovePayloadSchema>;
 export type TokenSetVisibilityPayload = Static<typeof TokenSetVisibilityPayloadSchema>;
 export type TokenDeletePayload = Static<typeof TokenDeletePayloadSchema>;
+export type TokenSetMarkersPayload = Static<typeof TokenSetMarkersPayloadSchema>;
 export type SceneActivatePayload = Static<typeof SceneActivatePayloadSchema>;
 export type SceneDeactivatePayload = Static<typeof SceneDeactivatePayloadSchema>;
 export type UndoPayload = Static<typeof UndoPayloadSchema>;
+export type RedoPayload = Static<typeof RedoPayloadSchema>;
 export type CameraSetPlayerPayload = Static<typeof CameraSetPlayerPayloadSchema>;
 export type RulerUpdatePayload = Static<typeof RulerUpdatePayloadSchema>;
 export type RulerClearPayload = Static<typeof RulerClearPayloadSchema>;
+export type PingPayload = Static<typeof PingPayloadSchema>;
+export type RegionAddPayload = Static<typeof RegionAddPayloadSchema>;
+export type RegionRenamePayload = Static<typeof RegionRenamePayloadSchema>;
+export type RegionSetHiddenPayload = Static<typeof RegionSetHiddenPayloadSchema>;
+export type RegionDeletePayload = Static<typeof RegionDeletePayloadSchema>;
 
 // What each room's events carry (specs/04-live-sync.md §3, §4; D-049, Q-083, G-023, G-025). One
 // event per room per command, as the table of §3 has it. The DM's token events carry the token in
@@ -347,6 +422,20 @@ export const DmCameraPayloadSchema = Type.Object(
 export const RulerShownPayloadSchema = Type.Object({ ruler: MeasurementSchema }, strict);
 export const RulerClearedPayloadSchema = Type.Object({}, strict);
 
+// `ping` (TBL-01): the point pinged, the same to both rooms; it names no token and no scene, and nothing
+// keeps it, so no snapshot carries it.
+export const PingShownPayloadSchema = Type.Object({ x: Coordinate, y: Coordinate }, strict);
+
+// The fog regions (TBL-03): the DM's room hears of each region added, changed and removed, with its name;
+// the players' room only of the fogged shapes, all of them each time the set changes (`fog.updated`), and
+// of the tokens the change showed or covered as `token.added` and `token.removed`.
+export const RegionEventPayloadSchema = Type.Object({ region: RegionSchema }, strict);
+export const RegionRemovedPayloadSchema = Type.Object({ id: UuidSchema }, strict);
+export const FogUpdatedPayloadSchema = Type.Object({ fog: Type.Array(RegionShapeSchema) }, strict);
+
+// `history.changed` (UIX-01): the DM room's only. Players never learn anything of the undo history.
+export const HistoryChangedPayloadSchema = UndoStateSchema;
+
 export type DmTokenEventPayload = Static<typeof DmTokenEventPayloadSchema>;
 export type TokenRemovedPayload = Static<typeof TokenRemovedPayloadSchema>;
 export type PlayerTokenAddedPayload = Static<typeof PlayerTokenAddedPayloadSchema>;
@@ -356,6 +445,11 @@ export type PlayerCameraPayload = Static<typeof PlayerCameraPayloadSchema>;
 export type DmCameraPayload = Static<typeof DmCameraPayloadSchema>;
 export type RulerShownPayload = Static<typeof RulerShownPayloadSchema>;
 export type RulerClearedPayload = Static<typeof RulerClearedPayloadSchema>;
+export type PingShownPayload = Static<typeof PingShownPayloadSchema>;
+export type RegionEventPayload = Static<typeof RegionEventPayloadSchema>;
+export type RegionRemovedPayload = Static<typeof RegionRemovedPayloadSchema>;
+export type FogUpdatedPayload = Static<typeof FogUpdatedPayloadSchema>;
+export type HistoryChangedPayload = Static<typeof HistoryChangedPayloadSchema>;
 
 /** Every event of the dm room with its payload. */
 export type DmEvent =
@@ -365,7 +459,11 @@ export type DmEvent =
   | EventEnvelope<'scene.cleared', SceneClearedPayload>
   | EventEnvelope<'camera.player', DmCameraPayload>
   | EventEnvelope<'ruler.shown', RulerShownPayload>
-  | EventEnvelope<'ruler.cleared', RulerClearedPayload>;
+  | EventEnvelope<'ruler.cleared', RulerClearedPayload>
+  | EventEnvelope<'ping', PingShownPayload>
+  | EventEnvelope<'history.changed', HistoryChangedPayload>
+  | EventEnvelope<'region.added' | 'region.updated', RegionEventPayload>
+  | EventEnvelope<'region.removed', RegionRemovedPayload>;
 
 /** Every event of the players room with its payload: nothing here names a hidden token. */
 export type PlayerEvent =
@@ -376,4 +474,6 @@ export type PlayerEvent =
   | EventEnvelope<'scene.cleared', SceneClearedPayload>
   | EventEnvelope<'camera.player', PlayerCameraPayload>
   | EventEnvelope<'ruler.shown', RulerShownPayload>
-  | EventEnvelope<'ruler.cleared', RulerClearedPayload>;
+  | EventEnvelope<'ruler.cleared', RulerClearedPayload>
+  | EventEnvelope<'ping', PingShownPayload>
+  | EventEnvelope<'fog.updated', FogUpdatedPayload>;

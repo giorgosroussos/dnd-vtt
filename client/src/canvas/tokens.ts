@@ -1,4 +1,4 @@
-import { TOKEN_FOOTPRINT, type Grid, type TokenSize } from '@emberglass/shared';
+import { TOKEN_FOOTPRINT, type AssetCategory, type Grid, type TokenMarker, type TokenSize } from '@emberglass/shared';
 import { CELL_PX, squareSize, type MapInfo } from './geometry.js';
 
 // Where tokens go on the map canvas (PRP-04, specs/03-domain-model.md §4,
@@ -14,7 +14,7 @@ export interface Point {
   y: number;
 }
 
-/** A token as the canvas draws it: its own state and its asset's size and image. */
+/** A token as the canvas draws it: its own state and its asset's size, image and category. */
 export interface CanvasToken {
   id: string;
   label: string;
@@ -24,6 +24,9 @@ export interface CanvasToken {
   z_order: number;
   size: TokenSize;
   image_id: string;
+  category: AssetCategory;
+  /** The condition markers drawn on it (TBL-02); none when absent. */
+  markers?: readonly TokenMarker[] | undefined;
 }
 
 /** World pixels per square, and where grid unit (0, 0) lies. */

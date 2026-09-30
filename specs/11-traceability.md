@@ -2,7 +2,7 @@
 
 This matrix maps the commercial and product intent in `docs/inputs/` to the specified implementation and prevents both omissions and scope expansion. It is owner-maintained. Implementation status per work package lives in the root `TRACEABILITY.md`.
 
-Each row's status restates the tagged statement it cites in `01`. [input, Q-013, Q-016]
+Each row's status restates the tagged statement it cites in `01`. [input, Q-013, Q-099]
 
 | Original intent / requirement | Implemented feature/spec | Status |
 | --- | --- | --- |
@@ -37,7 +37,9 @@ Each row's status restates the tagged statement it cites in `01`. [input, Q-013,
 | Export/import campaign as zip | `01` §4 | Future (Phase 2) |
 | Characters with join link/QR; per-player permissions | `01` §4 | Future (Phase 2) |
 | Mobile UI | `01` §4 | Future (Phase 2) |
-| Initiative tracker; HP and conditions; fog of war | `01` §4 | Future (Phase 2) |
+| Initiative tracker; HP and conditions beyond four markers; automatic fog of war | `01` §4 | Future (Phase 2) |
+| Ping, four condition markers, manual fog regions | `01` §9 | Before the release (Q-099) |
+| The 2026-09-30 redesign of both views | `01` §9, `08` §11 | Before the release (Q-100) |
 | DM notes per scene; handouts | `01` §4 | Future (Phase 2) |
 | Character sheet with derived values; data-driven rules, SRD 5.1 import | `01` §4 | Future (Phase 2) |
 | Guided level-up; personal screen per player | `01` §5 | Future (Phase 3) |

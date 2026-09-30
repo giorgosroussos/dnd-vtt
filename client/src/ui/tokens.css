@@ -1,30 +1,87 @@
-/* Shared design tokens and base styles for both views (FND-04, D-069).
+/* Shared design tokens and base styles for both views (FND-04, D-069; UIX-01, the 2026-09-30 redesign,
+ * specs/08-ux-journeys.md §11).
  *
- * One dark palette serves the DM view and the TV: the player view's idle screen
- * is dark (specs/08-ux-journeys.md §4) and the DM works beside it at the table.
- * Every text colour is checked against the backgrounds it is drawn on in
- * tokens.test.ts, and the rendered pages again in e2e/tests/keyboard.spec.ts
- * (specs/08-ux-journeys.md §8). The font is bundled, never fetched (D-071). */
-@import '@fontsource-variable/inter';
+ * The palette is the redesign's, defined here once: components use these variables and the canvas
+ * reads the same values from ui/theme.ts, which theme.test.ts keeps equal. Every text colour is checked
+ * against the backgrounds it is drawn on in tokens.test.ts, and the rendered pages again in
+ * e2e/tests/keyboard.spec.ts (specs/08-ux-journeys.md §8). The fonts are bundled, never fetched
+ * (D-071, specs/02-architecture.md §6): Alegreya for titles and the wordmark, Alegreya Sans for the UI,
+ * both with their Greek subsets, and IBM Plex Mono for keys. */
+@import '@fontsource/alegreya/500.css';
+@import '@fontsource/alegreya/700.css';
+@import '@fontsource/alegreya-sans/400.css';
+@import '@fontsource/alegreya-sans/500.css';
+@import '@fontsource/alegreya-sans/700.css';
+@import '@fontsource/alegreya-sans/500-italic.css';
+@import '@fontsource/alegreya-sans/700-italic.css';
+@import '@fontsource/ibm-plex-mono/500.css';
 
 :root {
-  --color-bg: #14110f;
-  --color-surface: #221c18;
-  --color-border: #4a3f37;
-  --color-text: #f2ece6;
-  --color-text-muted: #b9ada2;
-  --color-accent: #f0a04b;
-  --color-on-accent: #14110f;
-  --color-danger: #ff8f80;
+  /* Surfaces */
+  --color-bg: #13100d;
+  --color-panel: #1a1612;
+  --color-raised: #1f1a15;
+  --color-surface: #221d18;
+  --color-hover: #2c251f;
+  --color-selected: #26201a;
+  --color-selected-edge: #4a3f34;
+  --color-canvas: #0e0c0a;
+  --color-divider: #2e2720;
+  --color-border: #3a3129;
+  --color-border-strong: #5a4d40;
+
+  /* Text */
+  --color-text: #ede3cf;
+  --color-text-muted: #c9bba4;
+  --color-text-caption: #a89a85;
+  --color-text-faint: #6e6152;
+
+  /* Accent (ember), live, hidden, connected */
+  --color-accent: #e8913a;
+  --color-accent-hover: #f2a04e;
+  --color-on-accent: #1a120a;
+  --color-live: #f2826b;
+  --color-live-edge: #e0533d;
+  --color-hidden: #8fb3d9;
+  --color-hidden-text: #bfd2e6;
+  --color-connected: #7fc98e;
+  --color-warning: #f2c14e;
+  --color-danger: #f2826b;
   --color-focus: #ffd27a;
 
-  --font-body: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --font-size-sm: 0.875rem;
-  --font-size-md: 1rem;
-  --font-size-lg: 1.25rem;
-  --font-size-xl: 2rem;
-  --font-size-display: clamp(3rem, 10vw, 8rem);
-  --line-height: 1.5;
+  /* The TV */
+  --color-player-bg: #0a0806;
+  --color-player-text: #f4ecdc;
+
+  /* Tokens and conditions */
+  --color-token-pc: #f0cd86;
+  --color-token-pc-fill: #2a2119;
+  --color-token-monster: #e0533d;
+  --color-token-monster-fill: #2a1712;
+  --color-token-other: #c9bba4;
+  --color-token-other-fill: #221d18;
+  --color-bloodied: #c8402c;
+  --color-bloodied-text: #f2a090;
+  --color-concentrating: #c7aef5;
+  --color-ping: #ffb35c;
+
+  /* The live tint (rgb(224 83 61) at 10% and 35% over the panel), blended in, so text on it is measured
+     against the colour it is really drawn on. */
+  --color-live-tint: #2e1c16;
+  --color-live-tint-edge: #5f2b21;
+  --overlay-panel: rgb(26 22 18 / 94%);
+
+  --font-title: 'Alegreya', Georgia, serif;
+  --font-body: 'Alegreya Sans', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.8125rem;
+  --font-size-md: 0.875rem;
+  --font-size-row: 0.9375rem;
+  --font-size-lg: 1.125rem;
+  --font-size-xl: 1.375rem;
+  --font-size-display: clamp(3rem, 10vw, 7rem);
+  --line-height: 1.4;
 
   --space-1: 0.25rem;
   --space-2: 0.5rem;
@@ -33,9 +90,14 @@
   --space-6: 1.5rem;
   --space-8: 2rem;
 
-  --radius: 0.375rem;
+  --radius: 0.5rem;
+  --radius-lg: 0.75rem;
   --focus-ring-width: 3px;
   --focus-ring-offset: 2px;
+
+  --header-height: 56px;
+  --sidebar-width: 256px;
+  --side-panel-width: 320px;
 
   color-scheme: dark;
 }
@@ -67,6 +129,22 @@ p {
   margin: 0;
 }
 
+button {
+  font: inherit;
+  color: inherit;
+}
+
+kbd {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: 0.6875rem;
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid var(--color-border);
+  background: var(--color-raised);
+  color: var(--color-text-muted);
+}
+
 /* The one focus indicator: every interactive element shows it when reached by
  * keyboard (specs/08-ux-journeys.md §8). Components never remove it. */
 :focus-visible {
@@ -82,16 +160,43 @@ main[tabindex='-1']:focus {
 }
 
 .eg-button {
-  font: inherit;
-  padding: var(--space-2) var(--space-4);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 var(--space-3);
   border-radius: var(--radius);
   border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--font-size-md);
+  font-weight: 500;
+  white-space: nowrap;
   cursor: pointer;
+}
+
+.eg-button:hover {
+  background: var(--color-hover);
+  border-color: var(--color-selected-edge);
 }
 
 .eg-button--primary {
   background: var(--color-accent);
   border-color: var(--color-accent);
+  color: var(--color-on-accent);
+  font-weight: 700;
+}
+
+.eg-button--primary:hover {
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+}
+
+.eg-button--primary kbd {
+  /* The on-accent colour at 15% over the accent, blended in. */
+  background: #c97e33;
+  border-color: #b06f2e;
   color: var(--color-on-accent);
 }
 
@@ -105,11 +210,19 @@ main[tabindex='-1']:focus {
   background: var(--color-danger);
   border-color: var(--color-danger);
   color: var(--color-on-accent);
+  font-weight: 700;
 }
 
 .eg-button--small {
-  padding: var(--space-1) var(--space-2);
+  min-height: 28px;
+  padding: 0 10px;
   font-size: var(--font-size-sm);
+}
+
+.eg-button--tiny {
+  min-height: 26px;
+  padding: 0 8px;
+  font-size: var(--font-size-xs);
 }
 
 /* Not dimmed with opacity, which would lower the contrast the checks cannot see:
@@ -122,19 +235,71 @@ main[tabindex='-1']:focus {
   color: var(--color-text-muted);
 }
 
+.eg-button[aria-pressed='true'] {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+/* A square button carrying only an icon; its name is its aria-label (UIX-01). */
+.eg-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.eg-icon-button:hover {
+  background: var(--color-hover);
+  color: var(--color-text);
+}
+
+.eg-icon-button--bordered {
+  width: 30px;
+  height: 30px;
+  border-color: var(--color-border);
+}
+
+.eg-icon-button[aria-pressed='true'] {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+.eg-icon-button[aria-disabled='true'] {
+  cursor: not-allowed;
+  color: var(--color-text-caption);
+  background: transparent;
+}
+
 .eg-field {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
 }
 
 .eg-field__input {
   font: inherit;
-  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-md);
+  padding: 6px var(--space-3);
   border-radius: var(--radius);
   border: 1px solid var(--color-border);
-  background: var(--color-surface);
+  background: var(--color-raised);
   color: var(--color-text);
+}
+
+.eg-field__input:hover {
+  border-color: var(--color-border-strong);
 }
 
 .eg-field__input[aria-invalid='true'] {
@@ -147,10 +312,10 @@ main[tabindex='-1']:focus {
 }
 
 .eg-notice {
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-2) var(--space-3);
   border-radius: var(--radius);
   border: 1px solid var(--color-danger);
-  background: var(--color-surface);
+  background: var(--color-raised);
   color: var(--color-text);
 }
 
@@ -159,6 +324,7 @@ main[tabindex='-1']:focus {
   position: absolute;
   left: var(--space-4);
   top: -100vh;
+  z-index: 50;
   padding: var(--space-2) var(--space-4);
   border-radius: var(--radius);
   background: var(--color-surface);
@@ -169,29 +335,93 @@ main[tabindex='-1']:focus {
   top: var(--space-4);
 }
 
-/* DM shell */
+/* A menu button's list (UIX-01). */
+.eg-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+.eg-menu__list {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 30;
+  min-width: 12rem;
+  margin: 0;
+  padding: var(--space-1);
+  list-style: none;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
+  background: var(--color-raised);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 55%);
+}
+
+.eg-menu__item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  padding: 6px var(--space-2);
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.eg-menu__item:hover,
+.eg-menu__item:focus-visible {
+  background: var(--color-hover);
+}
+
+.eg-menu__item--danger {
+  color: var(--color-danger);
+}
+
+.eg-menu__item[aria-disabled='true'] {
+  color: var(--color-text-muted);
+  cursor: not-allowed;
+}
+
+.eg-menu__reason {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-caption);
+}
+
+/* DM shell before the workspace: sign-in and first-run screens. */
 .eg-dm {
   display: flex;
   flex-direction: column;
-  min-height: 100%;
+  height: 100%;
+  min-height: 0;
 }
 
 .eg-dm__banner {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-6);
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-surface);
+  height: var(--header-height);
+  flex-shrink: 0;
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--color-divider);
+  background: var(--color-panel);
+}
+
+.eg-dm__logo {
+  display: inline-flex;
+  color: var(--color-accent);
 }
 
 .eg-dm__product {
-  font-size: var(--font-size-lg);
+  font-family: var(--font-title);
   font-weight: 700;
+  font-size: 1.3125rem;
+  letter-spacing: 0.2px;
 }
 
 .eg-dm__role {
-  color: var(--color-text-muted);
+  color: var(--color-text-caption);
 }
 
 .eg-dm__main {
@@ -203,6 +433,8 @@ main[tabindex='-1']:focus {
 }
 
 .eg-dm__heading {
+  font-family: var(--font-title);
+  font-weight: 700;
   font-size: var(--font-size-xl);
 }
 
@@ -210,10 +442,12 @@ main[tabindex='-1']:focus {
   color: var(--color-text-muted);
 }
 
-/* Player view: the idle screen, dark with the product name only (specs/08-ux-journeys.md §4). */
+/* Player view (specs/08-ux-journeys.md §4, §11). */
 main[data-view='player'],
 main[data-view='boot'] {
   height: 100%;
+  background: var(--color-player-bg);
+  color: var(--color-player-text);
 }
 
 /* The TV hides the pointer once it has been still for two seconds (specs/08-ux-journeys.md §9,
@@ -236,19 +470,154 @@ main[data-cursor='hidden'] * {
   color: var(--color-text-muted);
 }
 
-.eg-idle {
+/* Changes between idle and live, and between scenes, fade (UIX-01). */
+.eg-player__fade {
+  height: 100%;
+  animation: eg-fade-in 400ms ease-out;
+}
+
+@keyframes eg-fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+.eg-player__vignette {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 62%, rgb(10 8 6 / 55%) 100%);
+}
+
+/* The scene's name at the bottom left of the TV, fading after a few seconds (UIX-01). */
+.eg-player__plate {
+  position: fixed;
+  left: 2.1vw;
+  bottom: 3.3vh;
   display: flex;
   align-items: center;
+  gap: clamp(8px, 0.75vw, 14px);
+  max-width: 60vw;
+  padding: clamp(6px, 0.9vh, 10px) clamp(12px, 1vw, 20px);
+  border-radius: 12px;
+  background: rgb(10 8 6 / 72%);
+  color: var(--color-player-text);
+  pointer-events: none;
+  animation: eg-plate 7s ease-in forwards;
+}
+
+.eg-player__plate-logo {
+  display: inline-flex;
+  color: var(--color-accent);
+}
+
+.eg-player__plate-name {
+  font-family: var(--font-title);
+  font-weight: 700;
+  font-size: clamp(22px, 3.15vh, 48px);
+  letter-spacing: 0.3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes eg-plate {
+  0%,
+  80% {
+    opacity: 0.85;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+/* The idle screen: the wordmark over a slow ember glow (specs/08-ux-journeys.md §4, §11). */
+.eg-idle {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   justify-content: center;
+  gap: 3.3vh;
   height: 100%;
-  background: var(--color-bg);
+  background: var(--color-player-bg);
+  color: var(--color-player-text);
+}
+
+.eg-idle__glow {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 55vh;
+  height: 55vh;
+  margin: -27.5vh 0 0 -27.5vh;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgb(232 145 58 / 16%) 0%, rgb(232 145 58 / 0%) 70%);
+  /* Three breaths, then still (D-146): an endless animation repaints the idle TV for hours, and on a browser
+     painting without compositing (Windows WebKit in CI) slows everything else on the machine. */
+  animation: eg-ember 5s ease-in-out 3;
+}
+
+.eg-idle__logo {
+  position: relative;
+  display: inline-flex;
+  color: var(--color-accent);
+}
+
+.eg-idle__logo svg {
+  width: 11vh;
+  height: 11vh;
+}
+
+.eg-idle__text {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.7vh;
+  padding: 0 var(--space-4);
+  text-align: center;
 }
 
 .eg-idle__name {
+  font-family: var(--font-title);
   font-size: var(--font-size-display);
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--color-text);
+  font-size: clamp(3rem, 10.4vh, 9rem);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 1px;
+}
+
+.eg-idle__line {
+  font-size: clamp(1.25rem, 3.7vh, 3rem);
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+@keyframes eg-ember {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .eg-idle__glow,
+  .eg-player__fade {
+    animation: none;
+  }
 }
 
 /* Read by assistive technology, not shown: a name the layout already makes plain (D-096). */

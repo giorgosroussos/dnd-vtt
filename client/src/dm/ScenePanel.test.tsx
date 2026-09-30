@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { imageFileUrl, type GridPreset, type Scene } from '@emberglass/shared';
 import { t } from '../ui/messages.js';
 import { images, installCanvas2d, installImageLoading, installResizeObserver } from '../ui/testing/canvas2d.js';
-import { button, FakeServer, settle, submit, type Reply } from '../ui/testing/fakeServer.js';
+import { button, FakeServer, openSetup, settle, submit, type Reply } from '../ui/testing/fakeServer.js';
 import { render, type Rendered } from '../ui/testing/render.js';
 import { ScenePanel } from './ScenePanel.js';
 
@@ -34,9 +34,11 @@ afterEach(() => {
   server.uninstall();
 });
 
+/** The scene's panel with its setup open, which these tests exercise (UIX-01: behind Scene setup). */
 async function open(uploadLimit = 50 * MiB, target: Scene = scene): Promise<HTMLElement> {
   rendered = render(createElement(ScenePanel, { sceneId: target.id, name: target.name, uploadLimit }));
   await settle();
+  await openSetup(rendered.container);
   return rendered.container;
 }
 

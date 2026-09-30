@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { cameraOf, drawnAt, nameButton, overlayLineOffset, selectScene, viewport } from './canvas-view.js';
+import { cameraOf, drawnAt, openSetup, overlayLineOffset, sceneRow, selectScene, viewport } from './canvas-view.js';
 import { contrastFailures } from './contrast.js';
 import { openWorkspace, seedCampaign } from './dm.js';
 import { griddedPng } from './png.js';
@@ -129,6 +129,8 @@ test('known dimensions calibrate a map live, a reload keeps it, and a new scene 
   expect((await drawnAt(page, 1000 / 30 + 0.5, 60)).grid).toBeGreaterThan(0);
   expect(images).not.toContain(`/images/${map}/original`);
 
+  await openSetup(page);
+
   await page.getByRole('button', { name: 'Calibrate grid' }).click();
   await expect(calibrationPanel(page).getByLabel('Known dimensions')).toBeChecked();
   // At 1,280 × 720 the whole canvas is on screen while calibrating, unscrolled, and the magnifier
@@ -196,6 +198,7 @@ test('known dimensions calibrate a map live, a reload keeps it, and a new scene 
   await expectOverlayOnDrawnLines(page, drawn, [1, 24], [17]);
 
   // Recalibrating the later scene moves the preset, and the first scene keeps its own grid.
+  await openSetup(page);
   await page.getByRole('button', { name: 'Calibrate grid' }).click();
   await calibrationPanel(page).getByLabel('Fine tuning').check();
   await calibrationPanel(page).getByLabel('Offset x (px)').fill('20');
@@ -217,6 +220,7 @@ test('the rectangle method measures N × N drawn squares dragged on the map, and
   const scene = await newScene(page, seeded.sessionId, 'Rectangle hall', map);
   await page.reload();
   await selectScene(page, { ...seeded, scene: 'Rectangle hall' });
+  await openSetup(page);
   await page.getByRole('button', { name: 'Calibrate grid' }).click();
   await calibrationPanel(page).getByLabel('Rectangle', { exact: true }).check();
 
@@ -234,7 +238,7 @@ test('the rectangle method measures N × N drawn squares dragged on the map, and
   await page.mouse.up();
   await expect(calibrationPanel(page)).toContainText('Rectangle:');
   // Measured to a fraction of a pixel: the overlay lies on the drawn lines out to the far edge.
-  await page.getByRole('button', { name: 'Fit map' }).click();
+  await page.getByRole('button', { name: 'Fit map', exact: true }).click();
   await expectOverlayOnDrawnLines(page, drawn, [0, 11, 22], [0, 14]);
   await save(page);
   const saved = await gridOf(page, scene.id);
@@ -244,6 +248,7 @@ test('the rectangle method measures N × N drawn squares dragged on the map, and
   expect(saved).toMatchObject({ columns: 24, rows: 16 });
 
   // Fine tuning then sets it exactly, by typing and by the arrow keys.
+  await openSetup(page);
   await page.getByRole('button', { name: 'Calibrate grid' }).click();
   await calibrationPanel(page).getByLabel('Fine tuning').check();
   const size = calibrationPanel(page).getByLabel('Square size (px)');
@@ -272,6 +277,7 @@ test('fine tuning keeps a decimal square size exactly, and the overlay lies on a
   const scene = await newScene(page, seeded.sessionId, 'Fine hall', map);
   await page.reload();
   await selectScene(page, { ...seeded, scene: 'Fine hall' });
+  await openSetup(page);
   await page.getByRole('button', { name: 'Calibrate grid' }).click();
   await calibrationPanel(page).getByLabel('Fine tuning').check();
   const size = calibrationPanel(page).getByLabel('Square size (px)');
@@ -309,12 +315,19 @@ test('calibration is reached and operated by keyboard alone, with readable contr
     return (style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) > 0) || style.boxShadow !== 'none';
   };
   const calibrate = page.getByRole('button', { name: 'Calibrate grid' });
-  // Tab reaches Calibrate grid from the scene's name in the tree.
-  await nameButton(page, 'Keyboard hall').focus();
-  for (let presses = 0; presses < 40 && !(await calibrate.evaluate((e) => e === document.activeElement)); presses++) {
-    await page.keyboard.press('Tab');
-  }
-  await expect(calibrate).toBeFocused();
+  const setup = page.getByRole('button', { name: 'Scene setup' });
+  const tabTo = async (target: typeof calibrate) => {
+    for (let presses = 0; presses < 40 && !(await target.evaluate((e) => e === document.activeElement)); presses++) {
+      await page.keyboard.press('Tab');
+    }
+    await expect(target).toBeFocused();
+  };
+  // Tab reaches Scene setup from the scene's row in the scene list, Enter opens it, and Tab reaches
+  // Calibrate grid inside it (UIX-01).
+  await sceneRow(page, 'Keyboard hall').focus();
+  await tabTo(setup);
+  if ((await setup.getAttribute('aria-expanded')) !== 'true') await page.keyboard.press('Enter');
+  await tabTo(calibrate);
   expect(await calibrate.evaluate(ring)).toBe(true);
   await page.keyboard.press('Enter');
 

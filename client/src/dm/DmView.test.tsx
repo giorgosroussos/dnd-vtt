@@ -3,7 +3,17 @@ import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { t } from '../ui/messages.js';
 import { CONNECTION_NOTICE_DELAY_MS } from './LiveBar.js';
-import { button, click, FakeServer, installDialog, settle, submit, type } from '../ui/testing/fakeServer.js';
+import {
+  button,
+  click,
+  FakeServer,
+  installDialog,
+  liveText,
+  openSwitcher,
+  settle,
+  submit,
+  type,
+} from '../ui/testing/fakeServer.js';
 import { render, type Rendered } from '../ui/testing/render.js';
 import { DmView } from './DmView.js';
 
@@ -32,6 +42,12 @@ async function open(): Promise<HTMLElement> {
 
 const heading = (container: HTMLElement) => container.querySelector('h1')?.textContent;
 const inputs = (container: HTMLElement) => [...container.querySelectorAll('input')];
+
+/** Signs out from the Settings dialog, where Sign out is since the redesign (UIX-01). */
+async function signOut(view: HTMLElement): Promise<void> {
+  if (!view.querySelector('dialog[open]')) await click(button(view, t('settings.open')));
+  await click(button(view.querySelector('dialog')!, t('dm.signOut')));
+}
 
 describe('first run (specs/07-security-and-access.md §1)', () => {
   it('offers setup to a browser on the server PC while no PIN exists, and signs it in', async () => {
@@ -136,7 +152,7 @@ describe('PIN entry and sign-out (specs/07-security-and-access.md §2, §6)', ()
   it('signs out to the PIN form', async () => {
     server.signedIn = true;
     const view = await open();
-    await click(button(view, t('dm.signOut')));
+    await signOut(view);
     expect(server.writes()).toEqual(['DELETE /api/auth']);
     expect(heading(view)).toBe(t('signIn.heading'));
   });
@@ -145,19 +161,20 @@ describe('PIN entry and sign-out (specs/07-security-and-access.md §2, §6)', ()
     server.signedIn = true;
     const view = await open();
     server.before = (call) => (call.method === 'DELETE' ? Promise.reject(new TypeError('offline')) : undefined);
-    await click(button(view, t('dm.signOut')));
+    await signOut(view);
     expect(view.querySelector('nav')).not.toBeNull();
     expect(view.querySelector('[role="alert"]')!.textContent).toBe(
       t('dm.signOutFailed', { reason: t('error.code.network') }),
     );
     server.before = undefined;
-    await click(button(view, t('dm.signOut')));
+    await signOut(view);
     expect(heading(view)).toBe(t('signIn.heading'));
   });
 
   it('returns to the PIN form when the server no longer knows the session', async () => {
     server.signedIn = true;
     const view = await open();
+    await openSwitcher(view);
     server.signedIn = false;
     await click(button(view, t('tree.newCampaign')));
     await type(inputs(view)[0], 'Lost Mine');
@@ -180,8 +197,7 @@ describe('the view before the server answers', () => {
 });
 
 describe('the live connection (LIV-01, specs/04-live-sync.md §6, specs/07-security-and-access.md §2)', () => {
-  const liveBar = (container: HTMLElement) =>
-    container.querySelector(`section[aria-label="${t('liveBar.label')}"] [role="status"]`)?.textContent;
+  const liveBar = liveText;
   const waitPastNoticeDelay = () =>
     act(() => new Promise<void>((resolve) => setTimeout(resolve, CONNECTION_NOTICE_DELAY_MS + 50)));
   const deliver = async (run: () => void) => {
@@ -194,7 +210,7 @@ describe('the live connection (LIV-01, specs/04-live-sync.md §6, specs/07-secur
     const view = await open();
     expect(server.sockets).toHaveLength(1);
     await deliver(() => server.sockets[0]!.open({ role: 'dm', scene: null }));
-    await click(button(view, t('dm.signOut')));
+    await signOut(view);
     expect(server.sockets[0]!.connected).toBe(false);
     expect(heading(view)).toBe(t('signIn.heading'));
   });
@@ -210,7 +226,7 @@ describe('the live connection (LIV-01, specs/04-live-sync.md §6, specs/07-secur
     expect(liveBar(view)).toBe(t('liveBar.none'));
     await waitPastNoticeDelay();
     expect(liveBar(view)).toBe(t('liveBar.reconnecting'));
-    expect(view.querySelector('.eg-livebar__text--warning')).not.toBeNull();
+    expect(view.querySelector('.eg-live--warning')).not.toBeNull();
     await deliver(() => socket.open({ role: 'dm', scene: null }));
     expect(liveBar(view)).toBe(t('liveBar.none'));
     expect(view.querySelector('input[type="password"]')).toBeNull();
@@ -313,6 +329,7 @@ describe('the live connection (LIV-01, specs/04-live-sync.md §6, specs/07-secur
   it('gives the same reason when a request finds the session ended', async () => {
     server.signedIn = true;
     const view = await open();
+    await openSwitcher(view);
     server.signedIn = false;
     await click(button(view, t('tree.newCampaign')));
     await type(inputs(view)[0], 'Lost Mine');
@@ -324,7 +341,7 @@ describe('the live connection (LIV-01, specs/04-live-sync.md §6, specs/07-secur
   it('shows no reason after the DM signs out here', async () => {
     server.signedIn = true;
     const view = await open();
-    await click(button(view, t('dm.signOut')));
+    await signOut(view);
     expect(heading(view)).toBe(t('signIn.heading'));
     expect(view.querySelector('[role="alert"]')).toBeNull();
   });

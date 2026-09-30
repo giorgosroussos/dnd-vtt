@@ -15,7 +15,11 @@ flowchart LR
   P1 --> P3["Phase 3<br/>Live play"]
   P2 --> P3
   P3 --> P4["Phase 4<br/>Release"]
+  P3 --> P5["Phase 5<br/>Redesign and table tools"]
+  P5 --> P4
 ```
+
+Phase 5 was added after Phases 0 to 3 and REL-01, REL-02 were done (Q-099, Q-100): it runs before REL-03, so the owner's TV run accepts what ships.
 
 ## 3. Phase 0 — Foundations
 
@@ -276,3 +280,44 @@ Each lane uses a branch or worktree and integrates through small reviewed merges
 Each ticket MUST include spec references, dependency and allowed file surface, contract and schema impact, acceptance tests and explicit exclusions. [D-005]
 
 If a ticket reveals a locked-decision conflict, stop and create an ADR; do not improvise a redesign.
+
+## 10. Phase 5 — Redesign and table tools
+
+Goal: both views in the 2026-09-30 redesign, and the three table tools the owner moved before the release (`01` §9), with hidden information still never leaving the server.
+
+### Work packages
+
+`UIX-01` The redesign of both views
+
+- Palette, typography with the Greek subsets, bundled fonts, and the layout, controls and token visuals of `08` §11 (`01` §9, `02` §6).
+- The workspace of `08` §1, the header's live indicator and Go idle (`08` §2), the idle screen (`08` §4).
+- Redo beside undo, the count of connected player views, and the live scene's name on the TV (`04` §3, `04` §8).
+- Surfaces: data, security, scope, external, ux
+- Touches red line: yes
+- Contract change: yes
+
+`TBL-01` Ping
+
+- A ping on the live scene, in grid units, shown on every view and stored nowhere (`01` §9, `04` §2, `04` §3).
+- Surfaces: security, scope, ux
+- Touches red line: yes
+- Contract change: yes
+
+`TBL-02` Condition markers
+
+- Bloodied, Unconscious, Dead and Concentrating on a token, stored with it, set by a live command that undo covers and shown on every view (`01` §9, `03` §1, `04` §2, `04` §8).
+- Surfaces: data, security, scope, ux
+- Touches red line: yes
+- Contract change: yes
+
+`TBL-03` Manual fog regions
+
+- Regions drawn in grid units on grid corners, named, fogged and revealed, deleted and duplicated with their scene (`01` §9, `03` §1, `03` §7).
+- Tokens inside a fogged region filtered for players on the server, in snapshots, events, numbering and image files; the fog drawn by the player client as a mask (`04` §4, `07` §5, `10` §3).
+- Surfaces: data, security, scope, external, ux
+- Touches red line: yes
+- Contract change: yes
+
+### Exit criteria
+
+The hidden-information suite of `10` §3 passes with fog regions in its script; the run journey of `10` §5 passes in the new layout; screenshots of the three redesigned screens are compared with the design's boards.

@@ -12,9 +12,8 @@ import { expect, type Page, type TestInfo } from '@playwright/test';
 
 export const player = (page: Page) => page.locator('main[data-view="player"]');
 export const tvCanvas = (page: Page) => page.locator('main[data-view="player"] .eg-canvas--player');
-export const panel = (page: Page) => page.locator('main .eg-scene');
+export const panel = (page: Page) => page.locator('main.eg-scene');
 export const liveBar = (page: Page) => page.getByRole('region', { name: 'Live scene' });
-export const tokenBar = (page: Page) => page.getByRole('group', { name: 'Tokens' });
 export const status = (page: Page) => page.locator('main [role="status"]');
 
 export interface DrawnOnTv {

@@ -1,28 +1,42 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState, type Ref } from 'react';
 import type { LiveStatus } from '../live/connection.js';
+import { Icon } from '../ui/icons.js';
 import { t } from '../ui/messages.js';
 import type { DmScene } from './live/dmScene.js';
 
-// The live bar on top of the workspace (specs/08-ux-journeys.md §1, §2, Q-023, Q-024): which
-// scene the TV shows, or that nothing is live, read from the `dm` room's snapshots and events, so
-// it follows a scene made live or blanked from another DM browser as it happens (LIV-04, G-018).
-// Its controls (`actions`) return the canvas to the live scene, blank the TV and connect a screen.
-// While the live connection is down it says so instead,
-// since what it would name may no longer be true (specs/04-live-sync.md §6, LIV-01): only
-// after CONNECTION_NOTICE_DELAY_MS, so a blip is not announced twice, as connecting until a
-// first connection succeeds and as lost after one did, in the warning style (D-106).
+// The live indicator in the middle of the header (specs/08-ux-journeys.md §1, §2, §11, Q-023, Q-024, Q-100,
+// UIX-01): "LIVE · Players see {scene}" with Go idle while a scene is live, or the idle state with Go live,
+// read from the `dm` room's snapshots and events, so it follows a scene made live or idle from another DM
+// browser as it happens (LIV-04, G-018). The scene's name is a button that returns the canvas to the live
+// scene in one click. While the live connection is down it says so instead, since what it would name may
+// no longer be true (specs/04-live-sync.md §6, LIV-01): only after CONNECTION_NOTICE_DELAY_MS, so a blip is
+// not announced twice, as connecting until a first connection succeeds and as lost after one did, in the
+// warning style (D-106).
 export const CONNECTION_NOTICE_DELAY_MS = 1_000;
 
 export function LiveBar({
   scene,
   connection,
-  actions,
+  onShowLive,
+  goIdle,
+  goIdleRef,
+  goLive,
+  goLiveRef,
+  showingLive,
 }: {
   /** The live scene: undefined until the first snapshot, null while nothing is live. */
   scene: DmScene | undefined;
   connection?: LiveStatus | undefined;
-  /** The bar's controls after its status: Show live scene, Blank TV, Connect a screen. */
-  actions?: ReactNode;
+  /** Returns the canvas to the live scene. */
+  onShowLive?: (() => void) | undefined;
+  /** Clears the live scene (`scene.deactivate`). */
+  goIdle?: (() => void) | undefined;
+  goIdleRef?: Ref<HTMLButtonElement> | undefined;
+  /** Go live on the scene being edited, while nothing is live or another scene is. */
+  goLive?: { name: string; onGoLive: () => void } | undefined;
+  goLiveRef?: Ref<HTMLButtonElement> | undefined;
+  /** Whether the canvas shows the live scene already. */
+  showingLive?: boolean;
 }) {
   const down = connection !== undefined && connection !== 'connected';
   // The down period that has lasted long enough to be told, counted from each connection change.
@@ -39,28 +53,88 @@ export function LiveBar({
     down && lateFor === connection
       ? t(connection === 'reconnecting' ? 'liveBar.reconnecting' : 'liveBar.connecting')
       : undefined;
+  const refused = down || undefined;
 
-  let text: string | undefined;
-  if (connectionText) text = connectionText;
-  else if (scene === null) text = t('liveBar.none');
-  else if (scene) text = t('liveBar.live', { name: scene.scene.name });
+  const goLiveButton = goLive ? (
+    <button
+      ref={goLiveRef}
+      type="button"
+      className="eg-button eg-button--primary eg-button--small"
+      aria-label={t('liveBar.goLiveWith', { name: goLive.name })}
+      aria-disabled={refused}
+      onClick={goLive.onGoLive}
+    >
+      {t('liveBar.goLive')}
+    </button>
+  ) : null;
 
+  if (connectionText) {
+    return (
+      <section className="eg-live eg-live--warning" aria-label={t('liveBar.label')}>
+        <p className="eg-live__text" role="status">
+          {connectionText}
+        </p>
+      </section>
+    );
+  }
+  if (scene === undefined) {
+    return (
+      <section className="eg-live" aria-label={t('liveBar.label')}>
+        <p className="eg-live__text" role="status">
+          {t('dm.loading')}
+        </p>
+      </section>
+    );
+  }
+  if (scene === null) {
+    return (
+      <section className="eg-live eg-live--idle" aria-label={t('liveBar.label')}>
+        <span className="eg-live__badge eg-live__badge--idle" aria-hidden="true">
+          {t('liveBar.idleBadge')}
+        </span>
+        <p className="eg-live__text" role="status">
+          {t('liveBar.none')}
+        </p>
+        {goLiveButton}
+      </section>
+    );
+  }
   return (
-    <section className="eg-livebar" aria-label={t('liveBar.label')}>
-      <p
-        className={
-          connectionText
-            ? 'eg-livebar__text eg-livebar__text--warning'
-            : scene
-              ? 'eg-livebar__text eg-livebar__text--live'
-              : 'eg-livebar__text'
-        }
-        role="status"
-        title={text}
-      >
-        {text ?? t('dm.loading')}
+    <section className="eg-live eg-live--on" aria-label={t('liveBar.label')}>
+      <span className="eg-live__badge" aria-hidden="true">
+        <span className="eg-live__dot" />
+        {t('liveBar.liveBadge')}
+      </span>
+      <p className="eg-live__text" role="status">
+        {showingLive || !onShowLive ? (
+          <span className="eg-live__scene" title={scene.scene.name}>
+            {t('liveBar.playersSee')} <strong>{scene.scene.name}</strong>
+          </span>
+        ) : (
+          <button
+            type="button"
+            className="eg-live__scene eg-live__show"
+            title={scene.scene.name}
+            aria-label={t('liveBar.showLiveOf', { name: scene.scene.name })}
+            onClick={onShowLive}
+          >
+            {t('liveBar.playersSee')} <strong>{scene.scene.name}</strong>
+          </button>
+        )}
       </p>
-      {actions ? <div className="eg-livebar__actions">{actions}</div> : null}
+      {goLive ? goLiveButton : null}
+      {goIdle ? (
+        <button
+          ref={goIdleRef}
+          type="button"
+          className="eg-button eg-button--small"
+          aria-disabled={refused}
+          onClick={goIdle}
+        >
+          <Icon name="stop" size={12} />
+          {t('liveBar.blank')}
+        </button>
+      ) : null}
     </section>
   );
 }

@@ -1,20 +1,19 @@
 import { expect, test, type Page } from '@playwright/test';
-import { nameButton, onScreen, selectScene, viewport } from '../canvas-view.js';
+import {
+  onScreen,
+  openSetup,
+  sceneRow,
+  selectScene,
+  selectTokenRow,
+  tokenMenu,
+  tokenPopover,
+  viewport,
+} from '../canvas-view.js';
 import { openWorkspace, seedCampaign } from '../dm.js';
 import { pick } from '../prep.js';
 import { solidPng } from '../png.js';
 import { commandFromPage } from '../socket.js';
-import {
-  deleteAssets,
-  deleteCampaign,
-  liveBar,
-  panel,
-  player,
-  tokenBar,
-  tvCanvas,
-  tvTokens,
-  unique,
-} from './support.js';
+import { deleteAssets, deleteCampaign, liveBar, panel, player, tvCanvas, tvTokens, unique } from './support.js';
 
 // Journey 4, Run (specs/10-testing-acceptance.md §5, specs/08-ux-journeys.md §2, §10, specs/04-live-sync.md
 // §2–§4, §8, §9, §11, Q-024, Q-027, Q-080), in one test with a DM context and a player context, which is
@@ -52,6 +51,9 @@ function eventFramesOf(page: Page): string[] {
 test('Run: go live, move, reveal, hide, delete, undo, measure, steer the TV, prepare the next scene unseen, go live on it, Blank TV', async ({
   browser,
 }, info) => {
+  // A long journey: WebKit and Firefox on the CI runners take more than the default 30 s for it, as they do
+  // for Prepare; on Windows WebKit it ran out during the final cleanup, every step passed (CI, PR #26).
+  if (['webkit', 'firefox'].includes(info.project.name)) test.setTimeout(90_000);
   const dmContext = await browser.newContext();
   const tvContext = await browser.newContext();
   const dm = await dmContext.newPage();
@@ -131,16 +133,14 @@ test('Run: go live, move, reveal, hide, delete, undo, measure, steer the TV, pre
     }
 
     // Move the knight one square right.
-    await tokenBar(dm).getByLabel('Selected token').selectOption({ label: knightToken.label });
+    await selectTokenRow(dm, knightToken.label);
     await viewport(dm).focus();
     await dm.keyboard.press('ArrowRight');
     await expect.poll(async () => (await tvTokens(tv)).find((each) => each.id === knightToken.id)?.x).toBe(3);
 
     // Reveal the shade: now on the TV.
-    await tokenBar(dm)
-      .getByLabel('Selected token')
-      .selectOption({ label: `${shadeToken.label} (hidden)` });
-    await tokenBar(dm)
+    await selectTokenRow(dm, shadeToken.label);
+    await tokenPopover(dm)
       .getByRole('button', { name: `Reveal token ${shadeToken.label}` })
       .click();
     await expect
@@ -149,17 +149,15 @@ test('Run: go live, move, reveal, hide, delete, undo, measure, steer the TV, pre
     const shadeShown = (await tvTokens(tv)).find((each) => each.id === shadeToken.id)!.label;
 
     // Hide the knight: gone from the TV.
-    await tokenBar(dm).getByLabel('Selected token').selectOption({ label: knightToken.label });
-    await tokenBar(dm)
+    await selectTokenRow(dm, knightToken.label);
+    await tokenPopover(dm)
       .getByRole('button', { name: `Hide token ${knightToken.label}` })
       .click();
     await expect.poll(async () => (await tvTokens(tv)).map((each) => each.id)).toEqual([shadeToken.id]);
 
     // Delete the shade after the confirmation, then undo it: the same token is back on the TV.
-    await tokenBar(dm).getByLabel('Selected token').selectOption({ label: shadeShown });
-    await tokenBar(dm)
-      .getByRole('button', { name: `Delete token ${shadeShown}` })
-      .click();
+    await selectTokenRow(dm, shadeShown);
+    await tokenMenu(dm, shadeShown, 'Delete');
     await dm.getByRole('dialog').getByRole('button', { name: 'Delete token', exact: true }).click();
     await expect.poll(async () => (await tvTokens(tv)).length).toBe(0);
     await viewport(dm).focus();
@@ -169,7 +167,7 @@ test('Run: go live, move, reveal, hide, delete, undo, measure, steer the TV, pre
       .toEqual([{ id: shadeToken.id, label: shadeShown, x: 6, y: 3 }]);
 
     // Measure: the line and its distance are drawn on the TV, as the DM sees them; Escape clears it.
-    await panel(dm).getByRole('button', { name: 'Ruler', exact: true }).click();
+    await panel(dm).getByRole('button', { name: 'Ruler, M' }).click();
     await expect(viewport(dm)).toHaveAttribute('data-ruler-tool', 'on');
     await viewport(dm).scrollIntoViewIfNeeded();
     const box = (await viewport(dm).boundingBox())!;
@@ -191,29 +189,29 @@ test('Run: go live, move, reveal, hide, delete, undo, measure, steer the TV, pre
     await dm.keyboard.press('m');
     await expect(viewport(dm)).toHaveAttribute('data-ruler-tool', 'off');
 
-    // Steer the TV camera: T, then − zooms the TV out while the DM's own view stays; 0 fits it again.
+    // Steer the TV camera with its buttons (UIX-01): TV zoom out zooms the TV out while the DM's own view
+    // stays; Fit map fits it again.
     const fitted = await tvCamera(tv);
-    await viewport(dm).focus();
-    await dm.keyboard.press('t');
-    await dm.keyboard.press('-');
+    const own = await viewport(dm).getAttribute('data-camera-scale');
+    await dm.getByRole('button', { name: 'TV zoom out' }).click();
     await expect.poll(async () => (await tvCamera(tv)).scale).toBeLessThan(fitted.scale * 0.9);
-    await dm.keyboard.press('0');
+    expect(await viewport(dm).getAttribute('data-camera-scale')).toBe(own);
+    await dm.getByRole('button', { name: 'Fit map on the TV' }).click();
     await expect.poll(async () => (await tvCamera(tv)).scale).toBeCloseTo(fitted.scale, 4);
-    await dm.keyboard.press('Escape');
-    await expect(viewport(dm)).toHaveAttribute('data-tv-steering', 'off');
 
     // Prepare the next scene in prep mode: a token placed through the picker and its grid hidden
     // from players. Nothing of it reaches the TV, which keeps the live scene.
     const heard = tvFrames.length;
     const gridBefore = await tvCanvas(tv).getAttribute('data-grid');
-    await nameButton(dm, next).click();
+    await sceneRow(dm, next).click();
     await expect(dm.getByRole('heading', { level: 1 })).toHaveText(next);
     await expect(panel(dm)).toHaveAttribute('data-mode', 'prep');
-    await expect(liveBar(dm).getByRole('status')).toHaveText(`Live: ${names.scene}`);
+    await expect(liveBar(dm).getByRole('status')).toHaveText(`Players see ${names.scene}`);
     await pick(dm, ghoul.name);
     await expect(viewport(dm)).toBeFocused();
     await dm.keyboard.press('Enter');
     await expect(dm.locator('main [role="status"]')).toHaveText(`${ghoul.name} placed.`);
+    await openSetup(dm);
     await panel(dm).getByLabel('Players see the grid').uncheck();
     await expect
       .poll(
@@ -233,7 +231,7 @@ test('Run: go live, move, reveal, hide, delete, undo, measure, steer the TV, pre
     await liveBar(dm)
       .getByRole('button', { name: `Go live: ${next}` })
       .click();
-    await expect(liveBar(dm).getByRole('status')).toHaveText(`Live: ${next}`);
+    await expect(liveBar(dm).getByRole('status')).toHaveText(`Players see ${next}`);
     await expect(panel(dm)).toHaveAttribute('data-mode', 'live');
     await expect.poll(async () => (await tvTokens(tv)).map((each) => each.id)).toEqual([ghoulToken!.id]);
     await expect(tvCanvas(tv)).toHaveAttribute('data-grid', 'none');
@@ -247,9 +245,9 @@ test('Run: go live, move, reveal, hide, delete, undo, measure, steer the TV, pre
     expect(since[0]).toContain(ghoulToken!.id);
 
     // Blank TV: the idle screen, and the canvas back in prep mode.
-    await liveBar(dm).getByRole('button', { name: 'Blank TV' }).click();
+    await liveBar(dm).getByRole('button', { name: 'Go idle' }).click();
     await expect(player(tv)).toHaveAttribute('data-scene', 'idle');
-    await expect(player(tv)).toHaveText('Emberglass');
+    await expect(player(tv)).toHaveText(/^Emberglass\s*The table is set\. Waiting for the Dungeon Master\.$/);
     await expect(panel(dm)).toHaveAttribute('data-mode', 'prep');
     await expect(liveBar(dm).getByRole('status')).toHaveText('Nothing is live. The TV shows the idle screen.');
   } finally {

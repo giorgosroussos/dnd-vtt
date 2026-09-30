@@ -34,11 +34,11 @@ test('a DM view and a player view connect side by side, each to its own room', a
   await tv.goto('/');
   await expect(player(tv)).toHaveAttribute('data-live', 'connected');
   await expect(player(tv)).toHaveAttribute('data-snapshots', '1');
-  await expect(player(tv)).toHaveText('Emberglass');
+  await expect(player(tv)).toHaveText(/^Emberglass\s*The table is set\. Waiting for the Dungeon Master\.$/);
   // Each received the snapshot of its own room, from the session cookie alone.
   await expect.poll(() => dmRooms).toEqual(['dm']);
   await expect.poll(() => tvRooms).toEqual(['players']);
-  await expect(dm.getByRole('navigation', { name: 'Campaigns, sessions and scenes' })).toBeVisible();
+  await expect(dm.getByRole('navigation', { name: 'Scenes of this session' })).toBeVisible();
 
   await dmContext.close();
   await playerContext.close();
@@ -55,7 +55,7 @@ test('a player view opened in the DM browser still joins the players room (D-105
   await expect(player(tv)).toHaveAttribute('data-snapshots', '1');
   await expect.poll(() => tvRooms).toEqual(['players']);
   // The DM view in the same browser keeps its workspace.
-  await expect(dm.getByRole('navigation', { name: 'Campaigns, sessions and scenes' })).toBeVisible();
+  await expect(dm.getByRole('navigation', { name: 'Scenes of this session' })).toBeVisible();
   await context.close();
 });
 
@@ -70,7 +70,7 @@ test('a player view taken offline reconnects by itself and resynchronises from a
   await context.setOffline(true);
   await expect(player(tv)).toHaveAttribute('data-live', 'reconnecting');
   // The TV keeps its picture and shows no message or control meanwhile (Q-025).
-  await expect(player(tv)).toHaveText('Emberglass');
+  await expect(player(tv)).toHaveText(/^Emberglass\s*The table is set\. Waiting for the Dungeon Master\.$/);
 
   await context.setOffline(false);
   await expect(player(tv)).toHaveAttribute('data-live', 'connected', { timeout: 15_000 });
@@ -92,7 +92,7 @@ test('a DM view taken offline says it is reconnecting and comes back without ask
   await context.setOffline(false);
   await expect(liveBar(dm)).toHaveText(before!, { timeout: 15_000 });
   await expect(dm.getByRole('heading', { name: 'Enter the DM PIN' })).toHaveCount(0);
-  await expect(dm.getByRole('navigation', { name: 'Campaigns, sessions and scenes' })).toBeVisible();
+  await expect(dm.getByRole('navigation', { name: 'Scenes of this session' })).toBeVisible();
   await context.close();
 });
 
@@ -174,7 +174,9 @@ test('a DM context activates a scene through the socket and a player context rec
     expect(live.role).toBe('players');
     expect(live.scene.map.id).toBe(map.id);
     expect(live.scene.tokens.map((token) => token.id)).toEqual([visibleId]);
-    const text = JSON.stringify(snapshots);
+    // The live scene's name is shown on the TV (UIX-01, specs/04-live-sync.md §4); nothing else of it is sent.
+    expect((live.scene as unknown as { name: string }).name).toBe('Hidden lair');
+    const text = JSON.stringify(snapshots).replaceAll(/"name":"[^"]*"/g, '');
     for (const secret of [hiddenId, lurker.id, lurker.image_id, 'Lurker', scene.id, 'Hidden lair']) {
       expect(text, secret).not.toContain(secret);
     }

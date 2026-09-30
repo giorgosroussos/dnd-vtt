@@ -8,6 +8,11 @@ import {
   SettingsUpdateSchema,
   rulerFeet,
   TokenCreateBodySchema,
+  RegionCreateBodySchema,
+  RegionUpdateBodySchema,
+  type Region,
+  type RegionUpdateBody,
+  TOKEN_MARKERS,
   TokenUpdateBodySchema,
   type CommandAck,
   type CommandEnvelope,
@@ -31,6 +36,7 @@ import {
   type Screen,
   type Session,
 } from '@emberglass/shared';
+import { t } from '../messages.js';
 import { installFakeSockets, type FakeSocket } from './fakeSocket.js';
 
 // Test tooling only, never bundled: a scripted stand-in for the server behind
@@ -83,6 +89,9 @@ const DEFAULT_GRID: Scene['grid'] = {
 const CALIBRATION_KEYS = ['size', 'offset_x', 'offset_y', 'columns', 'rows'] as const;
 
 let counter = 0;
+/** What the history holds: a command, or a deleted token or fog region put back (LIV-05, TBL-03). */
+type Undoable = CommandEnvelope | { type: 'restore'; token: SceneToken } | { type: 'restoreRegion'; region: Region };
+
 const uuid = (): string => `00000000-0000-4000-8000-${String(++counter).padStart(12, '0')}`;
 
 export class FakeServer {
@@ -108,6 +117,8 @@ export class FakeServer {
   uploadedImage: Partial<Image> = {};
   /** Tokens with their state, served by the token routes (PRP-04, D-100). */
   sceneTokens: SceneToken[] = [];
+  /** The fog regions of every scene (TBL-03). */
+  regions: Region[] = [];
   /** The highest number issued per scene and asset, as `scene.token_numbers` (Q-091). */
   private issued: Record<string, number> = {};
   /** What GET /api/connect answers (LIV-03): two addresses and a code of the first. */
@@ -144,9 +155,12 @@ export class FakeServer {
    * The undo history of the live scene, newest last, as the server keeps it (LIV-05, D-117): the
    * inverse of each token command that changed something, emptied when the live scene changes.
    */
-  private undoHistory: (CommandEnvelope | { type: 'restore'; token: SceneToken })[] = [];
+  private undoHistory: Undoable[] = [];
   /** The live scene the undo history belongs to; a history used with another scene live is emptied. */
   private undoScene: string | null = null;
+  /** What redoes each undo, newest last, emptied by any new undoable command (UIX-01). */
+  private redoHistory: Undoable[] = [];
+
   before: Interceptor | undefined;
   private restore: (() => void) | undefined;
 
@@ -208,8 +222,9 @@ export class FakeServer {
       y: 0,
       hidden: asset.default_hidden,
       z_order: top + 1,
+      markers: [],
       character_id: null,
-      asset: { name: asset.name, image_id: asset.image_id, size: asset.size },
+      asset: { name: asset.name, image_id: asset.image_id, size: asset.size, category: asset.category },
       ...fields,
     };
     this.sceneTokens.push(token);
@@ -236,6 +251,52 @@ export class FakeServer {
     return this.sceneTokens
       .filter((each) => each.scene_id === sceneId)
       .sort((a, b) => a.z_order - b.z_order || a.id.localeCompare(b.id));
+  }
+
+  /** A region drawn on a scene, fogged unless told otherwise, after the scene's others (TBL-03). */
+  addRegion(sceneId: string, fields: Partial<Region> & { shape: Region['shape'] }): Region {
+    const order =
+      Math.max(0, ...this.regions.filter((each) => each.scene_id === sceneId).map((each) => each.order)) + 1;
+    const region: Region = { id: uuid(), scene_id: sceneId, name: 'Region', order, hidden: true, ...fields };
+    this.regions.push(region);
+    return region;
+  }
+
+  // As the server does: the live scene's regions are refused over REST (TBL-03).
+  private handleRegions(
+    method: string,
+    sceneId: string | undefined,
+    regionId: string | undefined,
+    b: Record<string, unknown>,
+  ): Reply {
+    if (sceneId !== undefined) {
+      if (!this.scenes.some((each) => each.id === sceneId)) return failure(404, 'not_found');
+      if (method === 'GET') {
+        return json(
+          200,
+          this.regions.filter((each) => each.scene_id === sceneId).sort((a, c) => a.order - c.order),
+        );
+      }
+      if (!Value.Check(RegionCreateBodySchema, b)) return failure(400, 'validation_failed');
+      if (sceneId === this.liveSceneId) return failure(409, 'scene_live');
+      const body = b;
+      return json(
+        201,
+        this.addRegion(sceneId, { name: body.name.trim(), shape: body.shape, hidden: body.hidden !== false }),
+      );
+    }
+    if (method === 'PATCH' && !Value.Check(RegionUpdateBodySchema, b)) return failure(400, 'validation_failed');
+    const region = this.regions.find((each) => each.id === regionId);
+    if (!region) return failure(404, 'not_found');
+    if (region.scene_id === this.liveSceneId) return failure(409, 'scene_live');
+    if (method === 'DELETE') {
+      this.regions = this.regions.filter((each) => each !== region);
+      return json(204);
+    }
+    const body = b as RegionUpdateBody;
+    if (body.name !== undefined) region.name = body.name.trim();
+    if (body.hidden !== undefined) region.hidden = body.hidden;
+    return json(200, { ...region });
   }
 
   // As D-100 does: the live scene's tokens are refused; positions and labels as sent.
@@ -272,6 +333,8 @@ export class FakeServer {
     const revealed =
       token.hidden && fields.hidden === false && fields.label === undefined && token.label === token.asset.name;
     Object.assign(token, fields, typeof fields.label === 'string' ? { label: fields.label.trim() } : {});
+    // Stored in the fixed order, as the server stores them (TBL-02).
+    if (fields.markers) token.markers = TOKEN_MARKERS.filter((marker) => fields.markers!.includes(marker));
     const renamed = revealed ? this.numberAs(token) : undefined;
     if (stack) {
       const others = this.tokensOf(token.scene_id)
@@ -307,6 +370,12 @@ export class FakeServer {
 
   /** Replaces `fetch`, `XMLHttpRequest` (uploads, D-090) and the live socket (LIV-01) until `uninstall`. */
   install(): this {
+    // What the workspace remembers between visits (UIX-01) never carries from one test to the next.
+    try {
+      window.localStorage?.clear();
+    } catch {
+      // No storage: nothing to clear.
+    }
     const original = globalThis.fetch;
     const fakeSockets = installFakeSockets((socket) => {
       socket.onCommand = (command, ack) => {
@@ -386,8 +455,23 @@ export class FakeServer {
         camera: { ...this.playerCamera },
         screen: this.screen && { ...this.screen },
         ruler: this.measurement(scene),
+        history: this.historyState(),
+        regions: this.regions.filter((each) => each.scene_id === scene.id).sort((a, b) => a.order - b.order),
       },
     };
+  }
+
+  /** Whether undo and redo would find anything on the live scene (UIX-01). */
+  historyState(): { can_undo: boolean; can_redo: boolean } {
+    const mine = this.liveSceneId !== null && this.undoScene === this.liveSceneId;
+    return { can_undo: mine && this.undoHistory.length > 0, can_redo: mine && this.redoHistory.length > 0 };
+  }
+
+  /** Tells the DM room of a new undo state, as the server does after a command, the same scene live (UIX-01). */
+  private tellHistory(before: string, live: string | null): void {
+    if (this.liveSceneId === null || this.liveSceneId !== live) return;
+    const state = this.historyState();
+    if (JSON.stringify(state) !== before) this.deliver('history.changed', state);
   }
 
   private measurement(scene: Scene) {
@@ -409,7 +493,12 @@ export class FakeServer {
   private withAsset(token: SceneToken): SceneToken {
     const asset = this.assets.find((each) => each.id === token.asset_id);
     return structuredClone(
-      asset ? { ...token, asset: { name: asset.name, image_id: asset.image_id, size: asset.size } } : token,
+      asset
+        ? {
+            ...token,
+            asset: { name: asset.name, image_id: asset.image_id, size: asset.size, category: asset.category },
+          }
+        : token,
     );
   }
 
@@ -439,17 +528,33 @@ export class FakeServer {
   private command(envelope: CommandEnvelope, sender?: FakeSocket): CommandAck {
     const live = this.liveSceneId;
     const before = new Map(this.sceneTokens.map((token) => [token.id, structuredClone(token)]));
+    const regionsBefore = new Map(this.regions.map((region) => [region.id, structuredClone(region)]));
     const version = this.dmVersion;
+    const undoBefore = JSON.stringify(this.historyState());
     const ack = this.apply(envelope);
     // As the server does: whoever measured last owns the line, even when it was already shown.
     if ('ok' in ack && envelope.type === 'ruler.update') this.rulerOwner = sender;
-    if (this.liveSceneId !== live) this.undoHistory = [];
-    else if ('ok' in ack && this.dmVersion !== version && envelope.type !== 'undo') {
+    if (this.liveSceneId !== live) {
+      this.undoHistory = [];
+      this.redoHistory = [];
+    } else if ('ok' in ack && this.dmVersion !== version && envelope.type !== 'undo' && envelope.type !== 'redo') {
       const p = envelope.payload;
       const was = before.get(String(p.token_id));
       const added = this.sceneTokens.find((token) => !before.has(token.id));
       const now = this.sceneTokens.find((token) => token.id === was?.id);
       const moved = was !== undefined && now !== undefined && (now.x !== was.x || now.y !== was.y);
+      const drawn = this.regions.find((region) => !regionsBefore.has(region.id));
+      const region = regionsBefore.get(String(p.region_id));
+      const regionInverse: Undoable | undefined =
+        envelope.type === 'region.add' && drawn
+          ? { type: 'region.delete', payload: { region_id: drawn.id } }
+          : envelope.type === 'region.rename' && region
+            ? { type: 'region.rename', payload: { region_id: region.id, name: region.name } }
+            : envelope.type === 'region.setHidden' && region
+              ? { type: 'region.setHidden', payload: { region_id: region.id, hidden: region.hidden } }
+              : envelope.type === 'region.delete' && region
+                ? { type: 'restoreRegion', region }
+                : undefined;
       const inverse =
         envelope.type === 'token.add' && added
           ? { type: 'token.delete' as const, payload: { token_id: added.id } }
@@ -457,16 +562,57 @@ export class FakeServer {
             ? { type: 'token.move' as const, payload: { token_id: was.id, x: was.x, y: was.y } }
             : envelope.type === 'token.setVisibility' && was
               ? { type: 'token.setVisibility' as const, payload: { token_id: was.id, hidden: was.hidden } }
-              : envelope.type === 'token.delete' && was
-                ? { type: 'restore' as const, token: was }
-                : undefined;
+              : envelope.type === 'token.setMarkers' && was
+                ? { type: 'token.setMarkers' as const, payload: { token_id: was.id, markers: [...was.markers] } }
+                : envelope.type === 'token.delete' && was
+                  ? { type: 'restore' as const, token: was }
+                  : regionInverse;
       if (inverse && live !== null) {
         if (this.undoScene !== live) this.undoHistory = [];
         this.undoScene = live;
         this.undoHistory.push(inverse);
         if (this.undoHistory.length > 100) this.undoHistory.shift();
+        this.redoHistory = [];
       }
     }
+    this.tellHistory(undoBefore, live);
+    return ack;
+  }
+
+  /** What undoes an inverse about to be applied, from the state before it (UIX-01). */
+  private inverseOfInverse(inverse: Undoable): Undoable | undefined {
+    if (inverse.type === 'restore') return { type: 'token.delete', payload: { token_id: inverse.token.id } };
+    if (inverse.type === 'restoreRegion') return { type: 'region.delete', payload: { region_id: inverse.region.id } };
+    if (inverse.type.startsWith('region.')) {
+      const region = this.regions.find((each) => each.id === inverse.payload.region_id);
+      if (!region) return undefined;
+      if (inverse.type === 'region.delete') return { type: 'restoreRegion', region: structuredClone(region) };
+      if (inverse.type === 'region.rename')
+        return { type: 'region.rename', payload: { region_id: region.id, name: region.name } };
+      return { type: 'region.setHidden', payload: { region_id: region.id, hidden: region.hidden } };
+    }
+    const token = this.sceneTokens.find((each) => each.id === inverse.payload.token_id);
+    if (!token) return undefined;
+    if (inverse.type === 'token.delete') return { type: 'restore', token: structuredClone(token) };
+    if (inverse.type === 'token.move')
+      return { type: 'token.move', payload: { token_id: token.id, x: token.x, y: token.y } };
+    if (inverse.type === 'token.setVisibility') {
+      return { type: 'token.setVisibility', payload: { token_id: token.id, hidden: token.hidden } };
+    }
+    if (inverse.type === 'token.setMarkers') {
+      return { type: 'token.setMarkers', payload: { token_id: token.id, markers: [...token.markers] } };
+    }
+    return undefined;
+  }
+
+  /** Applies again the most recently undone command, its inverse back in the history (UIX-01). */
+  private redo(): CommandAck {
+    if (this.undoScene !== this.liveSceneId) this.redoHistory = [];
+    const redo = this.redoHistory.pop();
+    if (!redo) return { ok: true };
+    const inverse = this.inverseOfInverse(redo);
+    const ack = this.applyInverse(redo);
+    if ('ok' in ack && inverse) this.undoHistory.push(inverse);
     return ack;
   }
 
@@ -477,6 +623,18 @@ export class FakeServer {
     if (this.undoScene !== this.liveSceneId) this.undoHistory = [];
     const inverse = this.undoHistory.pop();
     if (!inverse) return { ok: true };
+    const redo = this.inverseOfInverse(inverse);
+    const ack = this.applyInverse(inverse);
+    if ('ok' in ack && redo) this.redoHistory.push(redo);
+    return ack;
+  }
+
+  private applyInverse(inverse: Undoable): CommandAck {
+    if (inverse.type === 'restoreRegion') {
+      this.regions.push(structuredClone(inverse.region));
+      this.deliver('region.added', { region: { ...inverse.region } });
+      return { ok: true };
+    }
     if (inverse.type === 'restore') {
       const asset = this.assets.find((each) => each.id === inverse.token.asset_id);
       if (!asset) return { error: { code: 'reference_not_found', message: 'test' } };
@@ -561,6 +719,45 @@ export class FakeServer {
         });
         return { ok: true };
       }
+      case 'token.setMarkers': {
+        const token = liveToken();
+        if (token === undefined) return refuse('not_found');
+        if (token === 'not_live') return refuse('scene_not_live');
+        const markers = TOKEN_MARKERS.filter((marker) => (p.markers as string[]).includes(marker));
+        if (JSON.stringify(markers) === JSON.stringify(token.markers)) return { ok: true };
+        token.markers = markers;
+        this.deliver('token.updated', { token: this.withAsset(token), relabelled: [] });
+        return { ok: true };
+      }
+      case 'region.add': {
+        if (this.liveSceneId === null || p.scene_id !== this.liveSceneId) return refuse('scene_not_live');
+        const region = this.addRegion(this.liveSceneId, {
+          name: String(p.name).trim(),
+          shape: p.shape as Region['shape'],
+          hidden: p.hidden !== false,
+        });
+        this.deliver('region.added', { region: { ...region } });
+        return { ok: true };
+      }
+      case 'region.rename':
+      case 'region.setHidden': {
+        const region = this.regions.find((each) => each.id === p.region_id);
+        if (!region) return refuse('not_found');
+        if (region.scene_id !== this.liveSceneId) return refuse('scene_not_live');
+        const next = type === 'region.rename' ? { name: String(p.name).trim() } : { hidden: Boolean(p.hidden) };
+        if (Object.entries(next).every(([key, value]) => region[key as keyof Region] === value)) return { ok: true };
+        Object.assign(region, next);
+        this.deliver('region.updated', { region: { ...region } });
+        return { ok: true };
+      }
+      case 'region.delete': {
+        const region = this.regions.find((each) => each.id === p.region_id);
+        if (!region) return refuse('not_found');
+        if (region.scene_id !== this.liveSceneId) return refuse('scene_not_live');
+        this.regions = this.regions.filter((each) => each !== region);
+        this.deliver('region.removed', { id: region.id });
+        return { ok: true };
+      }
       case 'token.delete': {
         const token = liveToken();
         if (token === undefined) return refuse('not_found');
@@ -591,8 +788,15 @@ export class FakeServer {
         this.measureElsewhere(null);
         return { ok: true };
       }
+      case 'ping': {
+        if (this.liveSceneId === null || p.scene_id !== this.liveSceneId) return refuse('scene_not_live');
+        this.deliver('ping', { x: Number(p.x), y: Number(p.y) });
+        return { ok: true };
+      }
       case 'undo':
         return this.undo();
+      case 'redo':
+        return this.redo();
       default:
         return refuse('command_unsupported');
     }
@@ -797,6 +1001,26 @@ export class FakeServer {
     }
     if (!this.signedIn) return failure(401, 'unauthorized');
     if (path === '/api/connect' && method === 'GET') return json(200, this.connect);
+    // How many player views are connected (UIX-01): the open player sockets.
+    if (path === '/api/screens' && method === 'GET') {
+      return json(200, { count: this.sockets.filter((each) => each.connected && each.view === 'player').length });
+    }
+    // Each scene's token counts, for the scene list (UIX-01).
+    const summaries = /^\/api\/sessions\/([^/]+)\/scenes\/summary$/.exec(path);
+    if (summaries && method === 'GET') {
+      if (!this.sessions.some((each) => each.id === summaries[1])) return failure(404, 'not_found');
+      return json(
+        200,
+        this.scenesOf(summaries[1]!).map((scene) => {
+          const tokens = this.tokensOf(scene.id);
+          return {
+            id: scene.id,
+            tokens: tokens.length + (this.tokens[scene.id] ?? 0),
+            hidden: tokens.filter((each) => each.hidden).length,
+          };
+        }),
+      );
+    }
     if (path === '/api/settings') {
       // PATCH, as the server checks it (REL-01): strict and bounded, all or nothing.
       if (method === 'PATCH') {
@@ -836,6 +1060,10 @@ export class FakeServer {
     if (sceneTokens) return this.handleTokens(method, sceneTokens[1], undefined, b);
     const token = /^\/api\/tokens\/([^/]+)$/.exec(path);
     if (token) return this.handleTokens(method, undefined, token[1], b);
+    const sceneRegions = /^\/api\/scenes\/([^/]+)\/regions$/.exec(path);
+    if (sceneRegions) return this.handleRegions(method, sceneRegions[1], undefined, b);
+    const region = /^\/api\/regions\/([^/]+)$/.exec(path);
+    if (region) return this.handleRegions(method, undefined, region[1], b);
 
     const match =
       /^\/api\/(campaigns|sessions|scenes)(?:\/([^/]+))?(?:\/(sessions|scenes|deletion|order))?(?:\/(order))?$/.exec(
@@ -1027,4 +1255,82 @@ export function installDialog(): void {
     if (modal && !modal.contains(this)) return;
     focus.call(this, options);
   };
+}
+
+/** Opens the header's session switcher, which holds the Campaign → Session → Scene tree (UIX-01). */
+export async function openSwitcher(view: HTMLElement): Promise<HTMLElement> {
+  const open = view.querySelector<HTMLElement>('.eg-switcher');
+  if (open) return open;
+  await click(view.querySelector('.eg-header__crumbs'));
+  return view.querySelector<HTMLElement>('.eg-switcher')!;
+}
+
+/** What the header's live indicator says, its LIVE or IDLE badge aside (UIX-01). */
+export function liveText(view: HTMLElement): string {
+  const status = view.querySelector('.eg-live [role="status"]');
+  if (!status) return '';
+  const copy = status.cloneNode(true) as HTMLElement;
+  for (const badge of copy.querySelectorAll('.eg-live__badge')) badge.remove();
+  return copy.textContent.trim();
+}
+
+/** Shows the right-hand panel's Library tab (UIX-01). */
+export async function openLibrary(view: ParentNode): Promise<void> {
+  const tab = [...view.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(
+    (each) => each.textContent === t('side.library'),
+  );
+  if (tab && tab.getAttribute('aria-selected') !== 'true') await click(tab);
+}
+
+/** Opens the selected scene's setup: its map, the players' grid, feet per square and calibration (UIX-01). */
+export async function openSetup(view: ParentNode): Promise<void> {
+  const toggle = [...view.querySelectorAll<HTMLButtonElement>('button[aria-expanded]')].find(
+    (each) => each.textContent === t('sceneSetup.open'),
+  );
+  if (toggle && toggle.getAttribute('aria-expanded') !== 'true') await click(toggle);
+}
+
+/** Selects a scene of the current session in the left sidebar's scene list, by its name (UIX-01). */
+export async function selectScene(view: ParentNode, name: string): Promise<void> {
+  const row = [...view.querySelectorAll<HTMLButtonElement>('.eg-scenes__select')].find(
+    (each) => each.querySelector('.eg-scenes__name')?.textContent === name,
+  );
+  if (!row) throw new Error(`no scene named ${name} in the scene list`);
+  await click(row);
+}
+
+/** Selects a token by its label in the right panel's "In this scene" list (UIX-01). */
+export async function selectTokenRow(view: ParentNode, label: string): Promise<void> {
+  const row = [...view.querySelectorAll<HTMLButtonElement>('.eg-token-row__select')].find(
+    (each) => each.querySelector('.eg-token-row__name')?.textContent === label,
+  );
+  if (!row) throw new Error(`no token labelled ${label} in the list`);
+  await click(row);
+}
+
+/** The id of the token the list marks as selected, or '' when none is (UIX-01). */
+export function selectedTokenId(view: ParentNode): string {
+  return view.querySelector<HTMLElement>('.eg-token-row--selected')?.dataset.token ?? '';
+}
+
+/** The labels the "In this scene" list shows, in its order (UIX-01). */
+export function listedTokens(view: ParentNode): string[] {
+  return [...view.querySelectorAll('.eg-token-row__name')].map((each) => each.textContent ?? '');
+}
+
+/** The selected token's popover beside it on the map, if one is shown (UIX-01). */
+export function popover(view: ParentNode): HTMLElement | null {
+  return view.querySelector<HTMLElement>('.eg-popover');
+}
+
+/** Runs an item of the selected token's "…" menu in its popover: Duplicate, To front, To back, Delete (UIX-01). */
+export async function tokenMenu(view: ParentNode, label: string, item: string): Promise<void> {
+  const box = popover(view);
+  if (!box) throw new Error('no token popover is shown');
+  await click(button(box, t('tokens.moreOf', { label })));
+  const entry = [...box.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(
+    (each) => each.querySelector('span')?.textContent === item,
+  );
+  if (!entry) throw new Error(`no menu item ${item}`);
+  await click(entry);
 }

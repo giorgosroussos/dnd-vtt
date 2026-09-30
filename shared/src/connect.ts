@@ -43,3 +43,9 @@ export const ConnectInfoSchema = Type.Object(
 export type ConnectAddress = Static<typeof ConnectAddressSchema>;
 export type QrCode = Static<typeof QrCodeSchema>;
 export type ConnectInfo = Static<typeof ConnectInfoSchema>;
+
+// GET /api/screens (UIX-01, specs/08-ux-journeys.md §11): how many player views are connected now, the
+// header's screens counter. DM only, like every /api route; players never learn it.
+export const API_SCREENS_PATH = '/api/screens';
+export const ScreenCountSchema = Type.Object({ count: Type.Integer({ minimum: 0 }) }, { additionalProperties: false });
+export type ScreenCount = Static<typeof ScreenCountSchema>;

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { selectScene, tree, viewport } from './canvas-view.js';
+import { openSetup, sceneRow, selectScene, viewport } from './canvas-view.js';
 import { openWorkspace, seedCampaign } from './dm.js';
 import { solidPng } from './png.js';
 
@@ -11,7 +11,7 @@ import { solidPng } from './png.js';
 
 const player = (page: Page) => page.locator('main[data-view="player"]');
 const tvCanvas = (page: Page) => page.locator('main[data-view="player"] .eg-canvas--player');
-const panel = (page: Page) => page.locator('main .eg-scene');
+const panel = (page: Page) => page.locator('main.eg-scene');
 const liveBar = (page: Page) => page.getByRole('region', { name: 'Live scene' });
 
 interface Drawn {
@@ -80,7 +80,7 @@ test('a measurement on the live scene shows its line and distance on the TV and 
     await expect(tvCanvas(tv)).not.toHaveAttribute('data-ruler');
 
     // Measure by dragging on the DM's canvas, left to right across the middle of the map.
-    await panel(dm).getByRole('button', { name: 'Ruler', exact: true }).click();
+    await panel(dm).getByRole('button', { name: 'Ruler, M' }).click();
     await expect(viewport(dm)).toHaveAttribute('data-ruler-tool', 'on');
     // At 1,280 × 720 the canvas starts low in the page (G-022): brought into view before using the pointer.
     await viewport(dm).scrollIntoViewIfNeeded();
@@ -109,6 +109,7 @@ test('a measurement on the live scene shows its line and distance on the TV and 
     await expect(panel(dm).getByRole('status')).toHaveText(`Distance: ${onTv.feet} ft.`);
 
     // Feet per square set in the scene's setup: the TV's distance follows at once.
+    await openSetup(dm);
     await panel(dm).getByLabel('Feet per square').fill('10');
     await panel(dm).getByLabel('Feet per square').press('Enter');
     await expect.poll(async () => (await rulerOf(tvCanvas(tv)))?.feet).toBe(squares * 10);
@@ -134,10 +135,10 @@ test('a measurement on the live scene shows its line and distance on the TV and 
     await expect(tvCanvas(tv)).not.toHaveAttribute('data-ruler');
 
     // Prep mode, on a scene that is not live: the DM sees the measurement, the TV receives nothing at all.
-    await tree(dm).getByRole('button', { name: 'Crypt', exact: true }).click();
+    await sceneRow(dm, 'Crypt').click();
     await expect(panel(dm)).toHaveAttribute('data-mode', 'prep');
     const received = tvEvents.length;
-    await panel(dm).getByRole('button', { name: 'Ruler', exact: true }).click();
+    await panel(dm).getByRole('button', { name: 'Ruler, M' }).click();
     await viewport(dm).scrollIntoViewIfNeeded();
     const prep = (await viewport(dm).boundingBox())!;
     await dm.mouse.move(prep.x + prep.width * 0.3, prep.y + prep.height * 0.4);
@@ -146,8 +147,8 @@ test('a measurement on the live scene shows its line and distance on the TV and 
     await dm.mouse.up();
     await expect.poll(async () => (await rulerOf(viewport(dm)))?.feet ?? 0).toBeGreaterThan(0);
     await expect(panel(dm).getByRole('status')).toHaveText(/^Distance: \d+ ft\.$/);
-    // Whatever the TV might have been sent would have arrived by now: a Blank TV's event does.
-    await liveBar(dm).getByRole('button', { name: 'Blank TV' }).click();
+    // Whatever the TV might have been sent would have arrived by now: a Go idle's event does.
+    await liveBar(dm).getByRole('button', { name: 'Go idle' }).click();
     await expect(player(tv)).toHaveAttribute('data-scene', 'idle');
     expect(tvEvents.slice(received)).toEqual(['scene.cleared']);
   } finally {

@@ -82,6 +82,8 @@ const shape = (events: EventEnvelope[]) =>
     id: (event.payload as { id?: string; token?: { id: string } }).token?.id ?? (event.payload as { id?: string }).id,
   }));
 const tokenOf = (events: EventEnvelope[]) => (events[0]!.payload as TokenChange).token;
+// The DM room's `history.changed` in `shape`'s terms (UIX-01): it names no token.
+const history = { type: 'history.changed', id: undefined };
 
 describe('undo over the wire (specs/04-live-sync.md §8, D-040)', () => {
   it('acknowledges undo with nothing to undo and tells nobody, taking no version', async () => {
@@ -100,7 +102,9 @@ describe('undo over the wire (specs/04-live-sync.md §8, D-040)', () => {
     expect(added.tv).toEqual([]);
     const lurker = tokenOf(added.dm);
     const undone = await undo(w);
-    expect(shape(undone.dm)).toEqual([{ type: 'token.removed', id: lurker.id }]);
+    // Nothing is left to undo, and the add can be redone: the DM room hears so after the token (UIX-01).
+    expect(shape(undone.dm)).toEqual([{ type: 'token.removed', id: lurker.id }, history]);
+    expect(undone.dm[1]!.payload).toEqual({ can_undo: false, can_redo: true });
     expect(undone.tv).toEqual([]);
     expect(dump()).toEqual(before);
   });
@@ -114,7 +118,7 @@ describe('undo over the wire (specs/04-live-sync.md §8, D-040)', () => {
     const before = dump();
     expect((await step(w, 'token.move', { token_id: lurker.id, x: 6, y: 2 })).tv).toEqual([]);
     const undone = await undo(w);
-    expect(undone.dm).toHaveLength(1);
+    expect(shape(undone.dm)).toEqual([{ type: 'token.updated', id: lurker.id }, history]);
     expect(tokenOf(undone.dm)).toMatchObject({ id: lurker.id, x: 0, y: 0, hidden: true });
     expect(undone.tv).toEqual([]);
     expect(dump()).toEqual(before);
@@ -128,7 +132,9 @@ describe('undo over the wire (specs/04-live-sync.md §8, D-040)', () => {
     const before = dump();
     expect((await step(w, 'token.delete', { token_id: hidden.id })).tv).toEqual([]);
     const undone = await undo(w);
-    expect(shape(undone.dm)).toEqual([{ type: 'token.added', id: hidden.id }]);
+    // The add below it is still there to undo; the delete can now be redone (UIX-01).
+    expect(shape(undone.dm)).toEqual([{ type: 'token.added', id: hidden.id }, history]);
+    expect(undone.dm[1]!.payload).toEqual({ can_undo: true, can_redo: true });
     expect(tokenOf(undone.dm)).toEqual(hidden);
     expect(undone.tv).toEqual([]);
     expect(dump()).toEqual(before);
@@ -144,13 +150,27 @@ describe('undo over the wire (specs/04-live-sync.md §8, D-040)', () => {
     const revealed = await step(w, 'token.setVisibility', { token_id: hidden.id, hidden: false });
     expect(shape(revealed.tv)).toEqual([{ type: 'token.added', id: hidden.id }]);
     const undone = await undo(w);
-    expect(shape(undone.dm)).toEqual([{ type: 'token.updated', id: hidden.id }]);
+    expect(shape(undone.dm)).toEqual([{ type: 'token.updated', id: hidden.id }, history]);
     expect(tokenOf(undone.dm)).toMatchObject({ hidden: true });
     expect(undone.tv).toEqual([
       { type: 'token.removed', version: expect.any(Number) as number, payload: { id: hidden.id } },
     ]);
-    // The token is as it was; the number its first showing issued stays issued (Q-091, Q-092, D-117).
-    expect(row()).toEqual(before);
+    // The token is as it was, but players saw it: it stays shown, so a later reveal keeps its label
+    // (Q-096); the number its first showing issued stays issued (Q-091, Q-092, D-117).
+    expect(row()).toEqual({ ...(before as object), shown: 1 });
+  });
+
+  it('puts back whether players saw a deleted token, so its next reveal keeps the label they saw (Q-096)', async () => {
+    const w = await world();
+    const shown = () => h.data.db.prepare('SELECT shown FROM token WHERE id = ?').pluck().get(w.first.id);
+    expect(shown()).toBe(1);
+    await step(w, 'token.setVisibility', { token_id: w.first.id, hidden: true });
+    await step(w, 'token.delete', { token_id: w.first.id });
+    await undo(w);
+    expect(shown()).toBe(1);
+    const revealed = await step(w, 'token.setVisibility', { token_id: w.first.id, hidden: false });
+    expect((revealed.tv[0]!.payload as { token: { label: string } }).token.label).toBe('Goblin');
+    expect(JSON.stringify(revealed.tv)).not.toContain('shown');
   });
 
   it('undoes a hide: players hear token.added with the label they saw, and the database is as before', async () => {
@@ -207,7 +227,7 @@ describe('undo over the wire (specs/04-live-sync.md §8, D-040)', () => {
         else if (event.type === 'token.added' || event.type === 'token.updated') {
           const { token, relabelled } = event.payload as TokenChange;
           for (const each of [token, ...relabelled]) dm.set(each.id, each);
-        } else throw new Error(`unexpected ${event.type}`);
+        } else if (event.type !== 'history.changed') throw new Error(`unexpected ${event.type}`);
       }
     };
     const byId = (tokens: Iterable<SceneToken>) => [...tokens].sort((a, b) => a.id.localeCompare(b.id));
@@ -225,7 +245,10 @@ describe('undo over the wire (specs/04-live-sync.md §8, D-040)', () => {
     }
     for (let n = 0; n < commands.length; n++) {
       const events = await undo(w);
-      expect(events.dm, `undo ${n + 1}`).toHaveLength(1);
+      expect(
+        events.dm.filter((event) => event.type !== 'history.changed'),
+        `undo ${n + 1}`,
+      ).toHaveLength(1);
       applyDm(events.dm);
       for (const event of events.tv) player = applyPlayerEvent(player, event);
       const fresh = (await requestSnapshot(w.tv))!.payload as PlayerSnapshot;
@@ -304,7 +327,7 @@ describe('undo over the wire (specs/04-live-sync.md §8, D-040)', () => {
     await quiet();
   });
 
-  it('refuses an undo whose token is gone, as the inverse command would be, telling nobody', async () => {
+  it('refuses an undo whose token is gone, as the inverse command would be, telling nobody of any token', async () => {
     const w = await world();
     const other = await h.connect({ cookie: h.cookie });
     await step(w, 'token.move', { token_id: w.first.id, x: 4, y: 4 });
@@ -323,7 +346,11 @@ describe('undo over the wire (specs/04-live-sync.md §8, D-040)', () => {
     const ack = (await h.command(w.dm, 'undo', {})) as ErrorEnvelope;
     expect(ack.error.code).toBe('not_found');
     expect(dump()).toEqual(before);
-    expect(await w.dm.settle()).toEqual([]);
+    // The inverse that no longer applied was dropped, so nothing is left to undo: the DM room alone
+    // hears that, and nothing of any token (UIX-01).
+    expect(await w.dm.settle()).toEqual([
+      { type: 'history.changed', version: expect.any(Number) as number, payload: { can_undo: false, can_redo: false } },
+    ]);
     expect(await w.tv.settle()).toEqual([]);
   });
 });
@@ -332,3 +359,51 @@ async function requestSnapshot(client: Client): Promise<EventEnvelope | undefine
   await client.settle();
   return client.events.at(-1);
 }
+
+describe('redo over the wire (UIX-01, specs/04-live-sync.md §8)', () => {
+  const redo = (w: World) => step(w, 'redo', {});
+
+  it('redoes an undone reveal: players hear token.added again, the DM room the undo state after each step', async () => {
+    const w = await world();
+    const hidden = tokenOf(
+      (await step(w, 'token.add', { scene_id: w.sceneA.id, asset_id: w.lurker.id, x: 3, y: 3 })).dm,
+    );
+    await step(w, 'token.setVisibility', { token_id: hidden.id, hidden: false });
+    const undone = await undo(w);
+    expect(undone.dm.at(-1)?.payload).toEqual({ can_undo: true, can_redo: true });
+    const redone = await redo(w);
+    expect(shape(redone.dm)).toEqual([{ type: 'token.updated', id: hidden.id }, history]);
+    expect(redone.dm[1]!.payload).toEqual({ can_undo: true, can_redo: false });
+    expect(shape(redone.tv)).toEqual([{ type: 'token.added', id: hidden.id }]);
+    // Players never hear of the undo history.
+    for (const events of [undone.tv, redone.tv]) expect(JSON.stringify(events)).not.toContain('history');
+  });
+
+  it('acknowledges redo with nothing to redo and tells nobody', async () => {
+    const w = await world();
+    await step(w, 'token.move', { token_id: w.first.id, x: 3, y: 3 });
+    const versions = [h.versions.dm.current(), h.versions.players.current()];
+    expect(await redo(w)).toEqual({ dm: [], tv: [] });
+    expect([h.versions.dm.current(), h.versions.players.current()]).toEqual(versions);
+  });
+
+  it('empties the redo stack at a new command, telling the DM room once', async () => {
+    const w = await world();
+    await step(w, 'token.move', { token_id: w.first.id, x: 3, y: 3 });
+    await undo(w);
+    const moved = await step(w, 'token.move', { token_id: w.first.id, x: 5, y: 5 });
+    expect(shape(moved.dm)).toEqual([{ type: 'token.updated', id: w.first.id }, history]);
+    expect(moved.dm[1]!.payload).toEqual({ can_undo: true, can_redo: false });
+    expect(await redo(w)).toEqual({ dm: [], tv: [] });
+  });
+
+  it('carries the undo state in the DM snapshot, never in the players one', async () => {
+    const w = await world();
+    await step(w, 'token.move', { token_id: w.first.id, x: 3, y: 3 });
+    await undo(w);
+    const dmFresh = (await requestSnapshot(w.dm))!.payload as DmSnapshot;
+    expect(dmFresh.scene!.history).toEqual({ can_undo: false, can_redo: true });
+    const tvFresh = (await requestSnapshot(w.tv))!.payload as PlayerSnapshot;
+    expect(JSON.stringify(tvFresh)).not.toContain('can_');
+  });
+});
