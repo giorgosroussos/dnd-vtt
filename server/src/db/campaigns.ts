@@ -11,7 +11,9 @@ import {
   type SceneSummary,
   type Session,
 } from '@emberglass/shared';
+import { sightOf } from './fog.js';
 import { deleteUnreferencedImages, PRESET_COLUMNS, toPreset, updateGridPreset, type PresetRow } from './images.js';
+import { listTokens } from './tokens.js';
 
 // Campaigns, sessions and scenes in SQLite (specs/03-domain-model.md §2, §3, §5,
 // §6, §7, D-075, D-078). Every read and write names its columns. Identifiers are
@@ -204,15 +206,18 @@ export function listScenes(db: Database.Database, sessionId: string): Scene[] {
   return rows.map(toScene);
 }
 
-/** Each scene of a session with how many tokens it holds and how many are hidden, in scene order (UIX-01). */
+/**
+ * Each scene of a session with how many tokens it holds and how many players cannot see, hidden or under
+ * a fogged region (UIX-01, TBL-03), in scene order.
+ */
 export function listSceneSummaries(db: Database.Database, sessionId: string): SceneSummary[] {
-  return db
-    .prepare(
-      `SELECT scene.id, count(token.id) AS tokens, coalesce(sum(token.hidden), 0) AS hidden
-         FROM scene LEFT JOIN token ON token.scene_id = scene.id
-        WHERE scene.session_id = ? GROUP BY scene.id ORDER BY scene."order"`,
-    )
-    .all(sessionId) as SceneSummary[];
+  return db.transaction(() =>
+    listScenes(db, sessionId).map((scene) => {
+      const tokens = listTokens(db, scene.id) ?? [];
+      const seen = sightOf(db, scene.id);
+      return { id: scene.id, tokens: tokens.length, hidden: tokens.filter((token) => !seen(token)).length };
+    }),
+  )();
 }
 
 export function readScene(db: Database.Database, id: string): Scene | undefined {
@@ -471,6 +476,16 @@ export function duplicateScene(db: Database.Database, id: string, name: string):
         token.markers,
         token.character_id,
       );
+    }
+    // And its own copies of its fog regions, fogged or revealed as they are (TBL-03).
+    const regions = db
+      .prepare('SELECT name, "order", shape, hidden FROM region WHERE scene_id = ? ORDER BY "order", id')
+      .all(id) as { name: string; order: number; shape: string; hidden: 0 | 1 }[];
+    const insertRegion = db.prepare(
+      'INSERT INTO region (id, scene_id, name, "order", shape, hidden) VALUES (?, ?, ?, ?, ?, ?)',
+    );
+    for (const region of regions) {
+      insertRegion.run(randomUUID(), copyId, region.name, region.order, region.shape, region.hidden);
     }
     return true;
   })();

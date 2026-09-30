@@ -1,5 +1,7 @@
 import type Database from 'better-sqlite3';
 import type { GridPreset, Image, ImageMime, ImageVariants } from '@emberglass/shared';
+import { sightOf } from './fog.js';
+import { listTokens } from './tokens.js';
 
 // Images in SQLite (specs/03-domain-model.md §1, §3, §5, §7, D-075, D-080). The id is
 // the lowercase hex sha256 of the original bytes; the preset is stored as eight
@@ -142,24 +144,16 @@ export function deleteAllUnreferencedImages(db: Database.Database): string[] {
 /**
  * Whether a request without a DM session may fetch the image's display version
  * (specs/07-security-and-access.md §5, Q-012, G-020): only while it is the live scene's map or the
- * image of a visible token on the live scene. Read from the database on every request, never
- * cached, so hiding a token, deactivating, activating another scene or replacing the live map
- * revokes it at once, whatever else still uses the image.
+ * image of a token players see on the live scene: not hidden and under no fogged region (TBL-03). Read
+ * from the database on every request, never cached, so hiding a token, fogging the region it stands in,
+ * deactivating, activating another scene or replacing the live map revokes it at once, whatever else
+ * still uses the image.
  */
 export function isShownToPlayers(db: Database.Database, id: string): boolean {
-  return (
-    db
-      .prepare(
-        `SELECT EXISTS (
-           SELECT 1 FROM settings JOIN scene ON scene.id = settings.live_scene_id WHERE scene.map_image_id = ?
-           UNION ALL
-           SELECT 1 FROM settings
-             JOIN token ON token.scene_id = settings.live_scene_id
-             JOIN asset ON asset.id = token.asset_id
-           WHERE token.hidden = 0 AND asset.image_id = ?
-         )`,
-      )
-      .pluck()
-      .get(id, id) === 1
-  );
+  const live = db.prepare('SELECT live_scene_id FROM settings').pluck().get() as string | null;
+  if (live === null) return false;
+  const isMap = db.prepare('SELECT count(*) FROM scene WHERE id = ? AND map_image_id = ?').pluck().get(live, id) !== 0;
+  if (isMap) return true;
+  const seen = sightOf(db, live);
+  return (listTokens(db, live) ?? []).some((token) => token.asset.image_id === id && seen(token));
 }

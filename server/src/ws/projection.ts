@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import type { DmEvent, EventType, PlayerEvent, PlayerToken, SceneToken } from '@emberglass/shared';
+import { readFog, sightOf } from '../db/fog.js';
 import { readSettings } from '../db/settings.js';
 import { listTokens } from '../db/tokens.js';
 import type { LiveEffect } from '../domain/live.js';
@@ -15,6 +16,13 @@ import { liveMeasurement, readSnapshot, toPlayerToken, type LiveMemory } from '.
 // from the database after the change. Called in the same synchronous step as the command, so the
 // database it reads is the state the command left. The player camera (LIV-06) and the ruler (LIV-07)
 // reach both rooms alike, as a ping does (TBL-01): they say nothing of any token.
+//
+// Fog (TBL-03, specs/04-live-sync.md §4, §13): "visible" here is what players see, a token not hidden
+// whose centre is under no fogged region, judged by the fog as it stands after the change, which a token
+// command never changes. A move into the fog reaches players as `token.removed`, a move out of it as
+// `token.added`. A fog region reaches the DM's room with its name, the players' as the fogged shapes alone
+// (`fog.updated`), and only when the fogged set changed; the tokens it covered or showed follow as their
+// own effects.
 
 /** An event before it takes its room's version. */
 export type Unversioned<E> = E extends { type: infer T; payload: infer P }
@@ -62,15 +70,17 @@ export function project(db: Database.Database, effect: LiveEffect, memory: LiveM
       };
     case 'token.added': {
       const dm = { type: 'token.added', payload: { token: effect.token, relabelled: effect.relabelled } } as const;
-      if (effect.token.hidden) return { dm };
+      if (!sightOf(db, effect.token.scene_id)(effect.token)) return { dm };
       return { dm, players: { type: 'token.added', payload: shown(db, effect.token, effect.relabelled) } };
     }
     case 'token.updated': {
       const dm = { type: 'token.updated', payload: { token: effect.token, relabelled: effect.relabelled } } as const;
       const { before, token } = effect;
-      if (before.hidden && token.hidden) return { dm };
-      if (before.hidden) return { dm, players: { type: 'token.added', payload: shown(db, token, effect.relabelled) } };
-      if (token.hidden) return { dm, players: { type: 'token.removed', payload: { id: token.id } } };
+      const seen = sightOf(db, token.scene_id);
+      const [was, is] = [seen(before), seen(token)];
+      if (!was && !is) return { dm };
+      if (!was) return { dm, players: { type: 'token.added', payload: shown(db, token, effect.relabelled) } };
+      if (!is) return { dm, players: { type: 'token.removed', payload: { id: token.id } } };
       return {
         dm,
         players: { type: 'token.updated', payload: { token: playerTokens(db, token.scene_id, [token])[0]! } },
@@ -78,23 +88,55 @@ export function project(db: Database.Database, effect: LiveEffect, memory: LiveM
     }
     case 'token.removed': {
       const dm = { type: 'token.removed', payload: { id: effect.token.id } } as const;
-      if (effect.token.hidden) return { dm };
+      // Judged where it stood when deleted, under the fog as it is.
+      if (!sightOf(db, effect.token.scene_id)(effect.token)) return { dm };
       return { dm, players: { type: 'token.removed', payload: { id: effect.token.id } } };
     }
+    case 'region.added':
+      return {
+        dm: { type: 'region.added', payload: { region: effect.region } },
+        ...(effect.region.hidden ? fog(db, effect.region.scene_id) : {}),
+      };
+    case 'region.updated':
+      return {
+        dm: { type: 'region.updated', payload: { region: effect.region } },
+        // A rename changes nothing players see.
+        ...(effect.before.hidden !== effect.region.hidden ? fog(db, effect.region.scene_id) : {}),
+      };
+    case 'region.removed':
+      return {
+        dm: { type: 'region.removed', payload: { id: effect.region.id } },
+        ...(effect.region.hidden ? fog(db, effect.region.scene_id) : {}),
+      };
+    case 'token.appeared':
+      return {
+        ...(effect.renamed
+          ? { dm: { type: 'token.updated', payload: { token: effect.token, relabelled: effect.relabelled } } }
+          : {}),
+        players: { type: 'token.added', payload: shown(db, effect.token, effect.relabelled) },
+      };
+    case 'token.vanished':
+      return { players: { type: 'token.removed', payload: { id: effect.token.id } } };
   }
+}
+
+/** The fogged shapes of the scene now, as players receive them: no name, no id. */
+function fog(db: Database.Database, sceneId: string): Pick<RoomEvents, 'players'> {
+  return { players: { type: 'fog.updated', payload: { fog: readFog(db, sceneId) } } };
 }
 
 /** A token shown to players, with the visible token it renamed, if any (G-023). */
 function shown(db: Database.Database, token: SceneToken, relabelled: readonly SceneToken[]) {
-  // A renamed token is always visible (Q-092), but a hidden one would never be sent regardless.
-  const [first, ...renamed] = playerTokens(db, token.scene_id, [token, ...relabelled.filter((each) => !each.hidden)]);
+  // A renamed token is always one players see (Q-092, TBL-03), but one they cannot would never be sent regardless.
+  const seen = sightOf(db, token.scene_id);
+  const [first, ...renamed] = playerTokens(db, token.scene_id, [token, ...relabelled.filter(seen)]);
   return { token: first!, relabelled: renamed };
 }
 
-/** The given visible tokens as players receive them, ranked among the scene's visible tokens now. */
+/** The given tokens players see as they receive them, ranked among the scene's tokens they see now. */
 function playerTokens(db: Database.Database, sceneId: string, tokens: readonly SceneToken[]): PlayerToken[] {
   const ranks = new Map(
-    (listTokens(db, sceneId) ?? []).filter((each) => !each.hidden).map((each, rank) => [each.id, rank]),
+    (listTokens(db, sceneId) ?? []).filter(sightOf(db, sceneId)).map((each, rank) => [each.id, rank]),
   );
   return tokens.map((token) => {
     const rank = ranks.get(token.id);

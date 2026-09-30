@@ -906,6 +906,48 @@
   color: var(--color-text-caption);
 }
 
+/* The scene's fog regions (TBL-03): an icon, the name and state, Reveal or Fog, and a menu. */
+.eg-region-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px var(--space-1);
+  border-radius: var(--radius);
+}
+
+.eg-region-row:hover {
+  background: var(--color-hover);
+}
+
+.eg-region-row .eg-token-row__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.eg-region-row__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border: 2px dashed var(--color-hidden);
+  border-radius: 6px;
+  color: var(--color-hidden-text);
+}
+
+.eg-region-row:not([data-hidden]) .eg-region-row__icon {
+  border-style: dotted;
+  border-color: var(--color-border);
+  color: var(--color-text-caption);
+}
+
+.eg-regions__empty {
+  padding: 0 var(--space-1);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-caption);
+}
+
 .eg-token-row[data-hidden] .eg-token-row__name {
   font-style: italic;
   color: var(--color-hidden-text);

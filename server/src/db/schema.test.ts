@@ -17,6 +17,7 @@ import {
   SceneSchema,
   SessionSchema,
   SettingsSchema,
+  RegionSchema,
   TokenSchema,
 } from '@emberglass/shared';
 import { MIGRATIONS_DIR } from '../paths.js';
@@ -25,13 +26,14 @@ import { DATABASE_FILE, databasePath, openDatabase } from './database.js';
 import { loadMigrations, migrateDataDirectory } from './migrate.js';
 import {
   FIXTURE_VERSION,
+  SCHEMA_TABLES,
   TABLES,
   countRows,
   createFixtureDatabase,
   fixtureSha256,
   fixtureUuid,
   readEntities,
-  type Table,
+  type SchemaTable,
 } from './testing/fixture.js';
 
 // SRV-01: the schema of specs/03-domain-model.md §1–§4, §6 and §8, against a real
@@ -75,7 +77,7 @@ function specEntities(): { entity: string; fields: string[]; notes: string[]; te
     });
 }
 
-const TABLE_OF: Record<string, Table> = {
+const TABLE_OF: Record<string, SchemaTable> = {
   Image: 'image',
   Asset: 'asset',
   AssetTag: 'asset_tag',
@@ -83,6 +85,7 @@ const TABLE_OF: Record<string, Table> = {
   Session: 'session',
   Scene: 'scene',
   Token: 'token',
+  Region: 'region',
   Settings: 'settings',
 };
 
@@ -106,14 +109,14 @@ const columns = (
 const columnNames = (table: string): string[] => columns(table).map((c) => c.name);
 
 describe('migration 0001 on a fresh database', () => {
-  it('creates exactly the eight entities of specs/03-domain-model.md §1', () => {
+  it('creates exactly the nine entities of specs/03-domain-model.md §1', () => {
     migrated();
     const tables = db
       .prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
       .pluck()
       .all();
     expect(specEntities().map((e) => e.entity)).toEqual(Object.keys(TABLE_OF));
-    expect(tables).toEqual([...TABLES].sort());
+    expect(tables).toEqual([...SCHEMA_TABLES].sort());
   });
 
   it('stores every key field of specs/03-domain-model.md §1 and nothing else but the id', () => {
@@ -148,7 +151,7 @@ describe('migration 0001 on a fresh database', () => {
           .filter(Boolean)
           .join(' '),
       );
-    expect(Object.fromEntries(TABLES.map((t) => [t, declared(t)]))).toEqual({
+    expect(Object.fromEntries(SCHEMA_TABLES.map((t) => [t, declared(t)]))).toEqual({
       image: [
         'id TEXT NOT NULL',
         'mime TEXT NOT NULL',
@@ -219,6 +222,15 @@ describe('migration 0001 on a fresh database', () => {
         // Migration 0004 (TBL-02, Q-099).
         "markers TEXT NOT NULL DEFAULT '[]'",
       ],
+      // Migration 0005 (TBL-03, Q-099).
+      region: [
+        'id TEXT NOT NULL',
+        'scene_id TEXT NOT NULL',
+        'name TEXT NOT NULL',
+        'order INTEGER NOT NULL',
+        'shape TEXT NOT NULL',
+        'hidden INTEGER NOT NULL DEFAULT 1',
+      ],
       settings: [
         'id TEXT NOT NULL',
         'live_scene_id TEXT NULL',
@@ -242,7 +254,7 @@ describe('migration 0001 on a fresh database', () => {
 
   it('has exactly the relationships of specs/03-domain-model.md §2, with the deletion rules of §7', () => {
     migrated();
-    const keys = TABLES.flatMap((table) =>
+    const keys = SCHEMA_TABLES.flatMap((table) =>
       (db.prepare('SELECT * FROM pragma_foreign_key_list(?)').all(table) as Record<string, string>[]).map(
         (fk) => `${table}.${fk.from} -> ${fk.table}.${fk.to} on delete ${fk.on_delete}`,
       ),
@@ -250,6 +262,7 @@ describe('migration 0001 on a fresh database', () => {
     expect(keys).toEqual([
       'asset.image_id -> image.id on delete RESTRICT',
       'asset_tag.asset_id -> asset.id on delete CASCADE',
+      'region.scene_id -> scene.id on delete CASCADE',
       'scene.map_image_id -> image.id on delete RESTRICT',
       'scene.session_id -> session.id on delete CASCADE',
       'session.campaign_id -> campaign.id on delete CASCADE',
@@ -261,7 +274,7 @@ describe('migration 0001 on a fresh database', () => {
 
   it('indexes every foreign key (specs/14-agent-playbook.md §8)', () => {
     migrated();
-    for (const table of TABLES) {
+    for (const table of SCHEMA_TABLES) {
       const leading = (db.prepare('SELECT name FROM pragma_index_list(?)').pluck().all(table) as string[]).map(
         (index) => db.prepare('SELECT name FROM pragma_index_info(?) WHERE seqno = 0').pluck().get(index),
       );
@@ -280,7 +293,7 @@ describe('migration 0001 on a fresh database', () => {
       wr: number;
       strict: number;
     }[];
-    for (const table of TABLES) {
+    for (const table of SCHEMA_TABLES) {
       expect(
         list.find((t) => t.name === table),
         table,
@@ -545,6 +558,10 @@ describe('constraints refuse what the specifications forbid', () => {
           .run(id, IMAGE),
       () => db.prepare("INSERT INTO asset_tag (id, asset_id, tag) VALUES (?, ?, 'cave')").run(id, ASSET),
       () => insertToken({ id }),
+      () =>
+        db
+          .prepare("INSERT INTO region (id, scene_id, name, \"order\", shape) VALUES (?, ?, 'Back room', 1, '{}')")
+          .run(id, SCENE),
     ];
     for (const insert of inserts) expect(insert).toThrow(/CHECK constraint failed/);
   });
@@ -599,7 +616,7 @@ describe('constraints refuse what the specifications forbid', () => {
       "UPDATE image SET grid_preset_type = 'square', grid_preset_size = 70, grid_preset_offset_x = 0, grid_preset_offset_y = 0, " +
         'grid_preset_visible = 1, grid_preset_feet_per_square = 5, grid_preset_columns = 30, grid_preset_rows = 20',
     ).run();
-    const real = TABLES.flatMap((table) =>
+    const real = SCHEMA_TABLES.flatMap((table) =>
       columns(table)
         .filter((c) => c.type === 'REAL')
         .map((c) => [table, c.name] as const),
@@ -778,7 +795,7 @@ function contractColumns(schema: TSchema & { properties: Record<string, unknown>
   );
 }
 
-const CONTRACT: Record<Table, TSchema & { properties: Record<string, unknown> }> = {
+const CONTRACT: Record<SchemaTable, TSchema & { properties: Record<string, unknown> }> = {
   image: ImageSchema,
   asset: AssetSchema,
   asset_tag: AssetTagSchema,
@@ -786,6 +803,7 @@ const CONTRACT: Record<Table, TSchema & { properties: Record<string, unknown> }>
   session: SessionSchema,
   scene: SceneSchema,
   token: TokenSchema,
+  region: RegionSchema,
   settings: SettingsSchema,
 };
 
@@ -798,7 +816,7 @@ describe('the contract types in shared', () => {
       (table === 'settings' && column === 'pin_hash') ||
       (table === 'scene' && column === 'token_numbers') ||
       (table === 'token' && column === 'shown');
-    for (const table of TABLES) {
+    for (const table of SCHEMA_TABLES) {
       const stored = columnNames(table).filter((c) => !internal(table, c));
       expect(contractColumns(CONTRACT[table]).sort(), table).toEqual(stored.sort());
     }
@@ -907,6 +925,8 @@ describe('migrations on the generated fixture database (specs/14-agent-playbook.
       .all() as { hidden: 0 | 1; bare: 0 | 1; shown: 0 | 1 }[];
     expect(shown.length).toBeGreaterThan(0);
     for (const row of shown) expect(row.shown, JSON.stringify(row)).toBe(row.hidden === 0 || row.bare === 0 ? 1 : 0);
+    // Migration 0005 adds fog regions, none on an existing scene (TBL-03), each deleted with its scene.
+    expect(db.prepare('SELECT count(*) FROM region').pluck().get()).toBe(0);
     // Migration 0004 gives every existing token no markers (TBL-02), and refuses anything but a JSON array.
     expect(db.prepare('SELECT DISTINCT markers FROM token').pluck().all()).toEqual(['[]']);
     for (const markers of ['bloodied', '{"dead":true}', '[']) {

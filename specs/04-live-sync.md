@@ -19,6 +19,10 @@ Commands flow from a DM socket to the server; the server MUST reject any command
 | `token.delete` | remove a token from the live scene | yes |
 | `token.setVisibility` | hide or reveal a token | yes |
 | `token.setMarkers` | set the condition markers a token carries (`03` §1) | yes |
+| `region.add` | draw a fog region on the live scene, fogged unless it says otherwise (§13) | yes |
+| `region.rename` | rename a fog region | yes |
+| `region.setHidden` | fog or reveal a fog region | yes |
+| `region.delete` | delete a fog region | yes |
 | `scene.activate` | make a scene the live scene | no |
 | `scene.deactivate` | clear the live scene; the player view goes idle | no |
 | `camera.setPlayer` | set the player camera | no |
@@ -39,23 +43,26 @@ Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-02
 | Event | `dm` room | `players` room |
 | --- | --- | --- |
 | `scene.snapshot` | full scene, all tokens | visible tokens only, player fields only |
-| `token.added` | on add | on add of a visible token, and on reveal |
+| `token.added` | on add | on add of a visible token, on reveal, and when a token leaves the fog or the fog over it lifts |
 | `token.updated` | on move, visibility or markers change | on move or markers change of a visible token |
-| `token.removed` | on delete | on delete of a visible token, and on hide |
+| `token.removed` | on delete | on delete of a visible token, on hide, and when the fog covers a token |
 | `scene.cleared` | on deactivate | on deactivate |
 | `camera.player` | on change | on change |
 | `ruler.shown`, `ruler.cleared` | on change | on change |
 | `ping` | on ping | on ping |
 | `history.changed` | when whether undo or redo would change anything changes | never |
+| `region.added`, `region.updated`, `region.removed` | on add, rename, fog or reveal, delete | never |
+| `fog.updated` | never | when the set of fogged regions changes: their shapes only |
 
 ## 4. Role-filtered projection
 
 - The DM room MUST receive the full live state; the players room MUST receive only visible content. [input]
+- A token MUST count as visible to players only when it is not hidden AND its centre is not inside a fogged region (§13); a centre on a region's edge counts as inside. Every players' snapshot, event, rank, label numbering and image file MUST follow this rule. [input, Q-099]
 - Filtering MUST happen on the server before emitting, never in the player client. [input]
 - Revealing a token MUST reach players as `token.added`, and hiding it as `token.removed`. [input]
 - A player client MUST NOT receive anything from which the existence of a hidden token can be learnt: no hidden token, no hidden token's ID, asset or image, no count. [input]
 - A player-room token MUST carry only what rendering needs: ID, position, size, image reference, stacking order, label, its asset's category, which colours its ring, and its condition markers; asset notes and defaults are never sent, and a hidden token's markers never reach players. [Q-047, Q-032, Q-100, Q-099]
-- The players' snapshot MUST carry the live scene's name, shown on the TV (`08` §11); the undo state MUST NOT reach players, nor the count of connected player views, which the DM view reads over REST (`02` §5). [input, Q-100]
+- The players' snapshot MUST carry the live scene's name, shown on the TV (`08` §11), and the shapes of its fogged regions, never their names or a revealed region; the undo state MUST NOT reach players, nor the count of connected player views, which the DM view reads over REST (`02` §5). [input, Q-100]
 - The grid overlay MUST NOT be drawn on the player view when the scene's grid is set hidden for players (`06` §2). [input]
 
 ## 5. Snapshot and versioning
@@ -77,7 +84,7 @@ Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-02
 
 ## 8. Undo
 
-- The server MUST keep the inverse of every undoable DM command on the live scene: move, add, delete, visibility, markers. [input, Q-099]
+- The server MUST keep the inverse of every undoable DM command on the live scene: move, add, delete, visibility, markers, and the fog region commands. [input, Q-099]
 - Ctrl+Z in the DM view MUST cause the most recent inverse command to be applied as an ordinary command, so synchronisation does not change. [input]
 - Ctrl+Z sends `undo`; the server applies the inverse from its history through the ordinary command path. [D-040]
 - The undo history MUST be held in memory only, cleared when another scene is activated or the server restarts, and bounded to the last 100 commands. [Q-005]
@@ -104,3 +111,10 @@ Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-02
 
 - A `ping` MUST name the live scene and a point on it in grid units, as token positions are (`03` §4); a ping naming a scene that is not live MUST be refused and sent to nobody. [Q-099]
 - Both rooms MUST receive the point as a `ping` event, drawn on each view for about two seconds; a ping names no token and MUST NOT be stored, undone or carried in a snapshot, so a view that connects later never sees it. [input, Q-099]
+
+## 13. Fog regions
+
+- A fog region MUST be drawn in grid units with its corners on grid corners, as a rectangle or a polygon, and named; the DM MUST be able to fog and reveal it, rename it and delete it, in preparation and on the live scene (`03` §1). [input, Q-099]
+- The fog MUST be a mask the player view draws over the map; the map's pixels are not withheld, since the table is trusted. [input, Q-099]
+- Revealing a region, deleting a fogged one, or undoing the command that fogged it MUST reach players as `fog.updated` and a `token.added` for every token it lets them see; fogging a region MUST reach them as `fog.updated` and a `token.removed` for every token it covers; both are computed in the same step as the change. [input, Q-099]
+- A token MUST be numbered the first time players can see it, whatever made it so (`05` §3), so that a token placed visible inside the fog renames no token players see. [Q-092, Q-096, Q-099]

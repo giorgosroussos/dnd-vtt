@@ -10,6 +10,8 @@ import {
   type TokenSize,
   type TokenStack,
 } from '@emberglass/shared';
+import { sightOf } from './fog.js';
+import { refusal, type TokenScope } from './scope.js';
 
 // Tokens of a scene in SQLite (PRP-04, specs/03-domain-model.md §1, §2, §4,
 // specs/05-assets-and-images.md §2–§5, specs/04-live-sync.md §2, D-019, Q-063, Q-091). Every
@@ -20,6 +22,11 @@ import {
 // is for, checked inside the transaction that would change the token: preparation (REST) is refused
 // on the live scene, whose tokens change only by the live commands, and a live command is refused
 // on any scene that is not live (LIV-02, specs/04-live-sync.md §2, D-100).
+//
+// Numbering follows what players see (TBL-03, Q-092, Q-096): a token is numbered, and marked shown, the
+// first time players can see it, not hidden and under no fogged region, whatever made it so: a placement,
+// a reveal, a move out of the fog or the fog lifted. `showNewlySeen` does it after every write, so a token
+// placed visible inside the fog renames no sibling players see until they can see it too.
 
 const COLUMNS = `token.id, token.scene_id, token.asset_id, token.label, token.x, token.y, token.hidden,
   token.z_order, token.markers, token.character_id, asset.name AS asset_name, asset.image_id AS asset_image_id,
@@ -65,19 +72,7 @@ const toToken = (row: Row): SceneToken => ({
 const shownOf = (db: Database.Database, id: string): boolean =>
   db.prepare('SELECT shown FROM token WHERE id = ?').pluck().get(id) === 1;
 
-const isLive = (db: Database.Database, sceneId: string): boolean =>
-  (db.prepare('SELECT live_scene_id FROM settings').pluck().get() as string | null) === sceneId;
-
-/** Who writes: preparation over REST, or a live command over the WebSocket (LIV-02). */
-export type TokenScope = 'prep' | 'live';
-
-/** Why a write in `scope` to a token of the scene is refused, if it is. */
-const refusal = (db: Database.Database, sceneId: string, scope: TokenScope): 'live' | 'not_live' | undefined => {
-  const live = isLive(db, sceneId);
-  if (scope === 'prep' && live) return 'live';
-  if (scope === 'live' && !live) return 'not_live';
-  return undefined;
-};
+export type { TokenScope };
 
 export function readToken(db: Database.Database, id: string): SceneToken | undefined {
   const row = db.prepare(`SELECT ${COLUMNS} ${FROM} WHERE token.id = ?`).get(id) as Row | undefined;
@@ -113,13 +108,11 @@ function numberAs(
   id: string,
 ): string | undefined {
   const numbers = db.prepare('SELECT token_numbers FROM scene WHERE id = ?').pluck().get(sceneId) as string;
-  const others = (
-    db
-      .prepare(
-        'SELECT id, label, hidden FROM token WHERE scene_id = ? AND asset_id = ? AND id <> ? ORDER BY z_order, id',
-      )
-      .all(sceneId, asset.id, id) as { id: string; label: string; hidden: 0 | 1 }[]
-  ).map((token) => ({ ...token, hidden: token.hidden === 1 }));
+  // Players' view of the others: one they cannot see is as a hidden one (TBL-03).
+  const seen = sightOf(db, sceneId);
+  const others = (listTokens(db, sceneId) ?? [])
+    .filter((token) => token.asset_id === asset.id && token.id !== id)
+    .map((token) => ({ id: token.id, label: token.label, hidden: !seen(token) }));
   const issued = (JSON.parse(numbers) as Record<string, number>)[asset.id] ?? 0;
   const numbering = nextLabel(asset.name, numberingPeers(asset.name, others), issued);
   db.prepare('UPDATE token SET label = ? WHERE id = ?').run(numbering.label, id);
@@ -135,9 +128,43 @@ function numberAs(
 }
 
 /**
+ * Marks shown every token of the scene players can see now and had never seen, numbering each that still
+ * carries its asset's bare name, bottom of the stack first (Q-092, Q-096, TBL-03), except those in
+ * `keepLabel`, whose label the same change gave. Answers each token numbered, with the lone bare-named
+ * token its number renamed "<name> 1", if any. The caller's transaction holds it all.
+ */
+export function showNewlySeen(
+  db: Database.Database,
+  sceneId: string,
+  keepLabel: ReadonlySet<string> = new Set(),
+): { id: string; relabel: string | undefined }[] {
+  const seen = sightOf(db, sceneId);
+  const numbered: { id: string; relabel: string | undefined }[] = [];
+  for (const token of listTokens(db, sceneId) ?? []) {
+    if (!seen(token) || shownOf(db, token.id)) continue;
+    db.prepare('UPDATE token SET shown = 1 WHERE id = ?').run(token.id);
+    // Read again: numbering an earlier one may have renamed this one "<name> 1" already.
+    const now = readToken(db, token.id)!;
+    if (keepLabel.has(token.id) || now.label !== now.asset.name) continue;
+    numbered.push({
+      id: token.id,
+      relabel: numberAs(db, sceneId, { id: now.asset_id, name: now.asset.name }, token.id),
+    });
+  }
+  return numbered;
+}
+
+/** The ids of the tokens whose label a numbering pass changed, other than `except`. */
+const renamedBy = (numbered: readonly { id: string; relabel: string | undefined }[], except: string): string[] =>
+  [...new Set(numbered.flatMap(({ id, relabel }) => (relabel === undefined ? [id] : [id, relabel])))].filter(
+    (each) => each !== except,
+  );
+
+/**
  * Places a token of the asset at (x, y), on top of the scene's other tokens. It starts hidden
  * when its asset's `default_hidden` is set (specs/05-assets-and-images.md §4): then it takes the
- * bare name and no number, which it gets when revealed (Q-092); a visible one is numbered at once.
+ * bare name and no number, which it gets when players first see it (Q-092, TBL-03); a visible one is
+ * numbered at once, unless it is placed under the fog.
  */
 export function createToken(
   db: Database.Database,
@@ -167,16 +194,12 @@ export function createToken(
       fields.y,
       asset.default_hidden,
       (top ?? -1) + 1,
-      // Placed visible is its first showing (Q-096).
-      asset.default_hidden === 1 ? 0 : 1,
+      // Shown, and numbered, by the pass below when players can see it (Q-096, TBL-03).
+      0,
     );
-    const renamed =
-      asset.default_hidden === 1 ? undefined : numberAs(db, sceneId, { id: fields.asset_id, name: asset.name }, id);
-    return {
-      outcome: 'created',
-      token: readToken(db, id)!,
-      relabelled: renamed ? [readToken(db, renamed)!] : [],
-    };
+    // Numbered first, then read: the token's own label may be the one that changes.
+    const renamed = renamedBy(showNewlySeen(db, sceneId), id);
+    return { outcome: 'created', token: readToken(db, id)!, relabelled: renamed.map((each) => readToken(db, each)!) };
   })();
 }
 
@@ -243,20 +266,15 @@ export function updateToken(
       JSON.stringify(markersOf(fields.markers ?? before.markers)),
       id,
     );
-    const revealed = before.hidden && fields.hidden === false;
     // Numbered only at its first showing (Q-096): a token players saw is revealed with the label
-    // they saw, bare name included.
-    const firstShowing = revealed && !shownOf(db, id);
-    if (revealed) db.prepare('UPDATE token SET shown = 1 WHERE id = ?').run(id);
-    const renamed =
-      firstShowing && fields.label === undefined && before.label === before.asset.name
-        ? numberAs(db, before.scene_id, { id: before.asset_id, name: before.asset.name }, id)
-        : undefined;
+    // they saw, bare name included; one given a label by the same change keeps it. A move out of the fog
+    // is a first showing too (TBL-03).
+    const numbered = showNewlySeen(db, before.scene_id, fields.label === undefined ? new Set() : new Set([id]));
     return {
       outcome: 'updated',
       before,
       token: readToken(db, id)!,
-      relabelled: renamed ? [readToken(db, renamed)!] : [],
+      relabelled: renamedBy(numbered, id).map((each) => readToken(db, each)!),
     };
   })();
 }
@@ -282,7 +300,7 @@ export function deleteToken(db: Database.Database, id: string, scope: TokenScope
 }
 
 export type TokenRestoreOutcome =
-  | { outcome: 'restored'; token: SceneToken }
+  | { outcome: 'restored'; token: SceneToken; relabelled: SceneToken[] }
   | { outcome: 'not_found' }
   | { outcome: 'asset_not_found' }
   | { outcome: 'live' }
@@ -330,6 +348,13 @@ export function restoreToken(
       token.character_id,
       shown ? 1 : 0,
     );
-    return { outcome: 'restored', token: readToken(db, token.id)! };
+    // Put back where players can see it though they never did (the fog lifted meanwhile): numbered as at
+    // a first showing (TBL-03).
+    const renamed = renamedBy(showNewlySeen(db, token.scene_id), token.id);
+    return {
+      outcome: 'restored',
+      token: readToken(db, token.id)!,
+      relabelled: renamed.map((each) => readToken(db, each)!),
+    };
   })();
 }

@@ -5,6 +5,11 @@ import {
   type CommandEnvelope,
   type ErrorEnvelope,
   type PingPayload,
+  type Region,
+  type RegionAddPayload,
+  type RegionDeletePayload,
+  type RegionRenamePayload,
+  type RegionSetHiddenPayload,
   type RulerClearPayload,
   type RulerUpdatePayload,
   type SceneActivatePayload,
@@ -15,6 +20,7 @@ import {
   type TokenSetMarkersPayload,
   type TokenSetVisibilityPayload,
 } from '@emberglass/shared';
+import { createRegion, deleteRegion, restoreRegion, updateRegion, type RegionWriteOutcome } from '../db/regions.js';
 import { readSettings, setLiveScene } from '../db/settings.js';
 import { createToken, deleteToken, readToken, restoreToken, updateToken } from '../db/tokens.js';
 import { PlayerCameraState, sameCamera } from './camera.js';
@@ -50,7 +56,21 @@ export type LiveEffect =
   /** The measurement was taken off: both rooms receive `ruler.cleared`. */
   | { type: 'ruler.cleared' }
   /** A point of the live scene was pinged (TBL-01): both rooms receive `ping`; nothing keeps it. */
-  | { type: 'ping'; x: number; y: number };
+  | { type: 'ping'; x: number; y: number }
+  /**
+   * A fog region drawn, changed or deleted (TBL-03): the DM's room hears of the region, the players' of the
+   * fogged shapes when they changed. `before` is the region before a change.
+   */
+  | { type: 'region.added'; region: Region }
+  | { type: 'region.updated'; before: Region; region: Region }
+  | { type: 'region.removed'; region: Region }
+  /**
+   * A token players now see because the fog changed (TBL-03): they receive `token.added`; the DM's room
+   * hears of it only when its label, or `relabelled`'s, changed as it was first shown.
+   */
+  | { type: 'token.appeared'; token: SceneToken; relabelled: SceneToken[]; renamed: boolean }
+  /** A token players no longer see because the fog covers it: they receive `token.removed`. */
+  | { type: 'token.vanished'; token: SceneToken };
 
 export type LiveResult = LiveEffect[] | ErrorEnvelope;
 
@@ -58,6 +78,35 @@ const sameMarkers = (a: readonly string[], b: readonly string[]) =>
   a.length === b.length && a.every((marker, index) => marker === b[index]);
 
 const tokenNotFound = (): ErrorEnvelope => errorEnvelope('not_found', 'No such token.');
+const regionNotFound = (): ErrorEnvelope => errorEnvelope('not_found', 'No such fog region.');
+
+/**
+ * The effects of a write to the fog: the region's, then each token the fog now covers, then each it shows,
+ * bottom of the stack first, so that players insert each at its rank, with the token its numbering renamed
+ * if players saw that one already.
+ */
+function fogChanged(result: RegionWriteOutcome, kind: 'added' | 'updated' | 'removed'): LiveResult {
+  if (result.outcome === 'not_found') return regionNotFound();
+  if (result.outcome !== 'written') return notLive();
+  const { before, region, appeared, vanished } = result;
+  const own: LiveEffect =
+    kind === 'added'
+      ? { type: 'region.added', region }
+      : kind === 'removed'
+        ? { type: 'region.removed', region }
+        : { type: 'region.updated', before: before!, region };
+  return [
+    own,
+    ...vanished.map((token): LiveEffect => ({ type: 'token.vanished', token })),
+    ...appeared.map(({ token, relabelled, numbered }): LiveEffect => ({
+      type: 'token.appeared',
+      token,
+      relabelled,
+      // The DM's room hears of it only when a label changed as it was first shown.
+      renamed: numbered || relabelled.length > 0,
+    })),
+  ];
+}
 const notLive = (): ErrorEnvelope => errorEnvelope('scene_not_live', 'The scene is not live.');
 
 /** Applies a valid live command; the envelope and payload were checked against their schemas. */
@@ -91,6 +140,29 @@ export function applyLiveCommand(db: Database.Database, command: CommandEnvelope
       const result = updateToken(db, token_id, { markers }, 'live');
       if (result.outcome === 'updated' && sameMarkers(result.before.markers, result.token.markers)) return [];
       return changed(result);
+    }
+    case 'region.add': {
+      const { scene_id, name, shape, hidden } = command.payload as RegionAddPayload;
+      const result = createRegion(db, scene_id, { name, shape, hidden }, 'live');
+      // An unknown scene cannot be the live one: said as not live, as for token.add.
+      return result.outcome === 'not_found' ? notLive() : fogChanged(result, 'added');
+    }
+    case 'region.rename': {
+      const { region_id, name } = command.payload as RegionRenamePayload;
+      const result = updateRegion(db, region_id, { name }, 'live');
+      if (result.outcome === 'written' && result.before?.name === result.region.name) return [];
+      return fogChanged(result, 'updated');
+    }
+    case 'region.setHidden': {
+      const { region_id, hidden } = command.payload as RegionSetHiddenPayload;
+      const result = updateRegion(db, region_id, { hidden }, 'live');
+      // Fogging a fogged region or revealing a revealed one changes nothing, so nobody is told.
+      if (result.outcome === 'written' && result.before?.hidden === hidden) return [];
+      return fogChanged(result, 'updated');
+    }
+    case 'region.delete': {
+      const { region_id } = command.payload as RegionDeletePayload;
+      return fogChanged(deleteRegion(db, region_id, 'live'), 'removed');
     }
     case 'token.delete': {
       const { token_id } = command.payload as TokenDeletePayload;
@@ -131,11 +203,12 @@ export function applyInverse(db: Database.Database, inverse: Inverse): LiveResul
     if (result.outcome === 'updated' && !result.before.hidden) return [];
     return changed(result);
   }
+  if (inverse.type === 'region.restore') return fogChanged(restoreRegion(db, inverse.restore, 'live'), 'added');
   if (inverse.type !== 'token.add') return applyLiveCommand(db, inverse);
   const result = restoreToken(db, inverse.restore, 'live', inverse.shown);
   switch (result.outcome) {
     case 'restored':
-      return [{ type: 'token.added', token: result.token, relabelled: [] }];
+      return [{ type: 'token.added', token: result.token, relabelled: result.relabelled }];
     case 'asset_not_found':
       return errorEnvelope('reference_not_found', 'The asset does not exist.');
     default:

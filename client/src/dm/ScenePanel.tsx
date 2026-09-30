@@ -13,6 +13,8 @@ import {
   type Scene,
   type SceneGridUpdate,
   type SceneToken,
+  type Region,
+  type RegionShape,
   type TokenMarker,
   type TokenUpdateBody,
 } from '@emberglass/shared';
@@ -24,6 +26,7 @@ import {
   type CanvasTokenControls,
   type Measure,
   type Placing,
+  type FogTool,
   type PingTool,
   type RulerTool,
   type TvFrame,
@@ -50,6 +53,8 @@ import { entityPath } from './tree/paths.js';
 import { DeleteTokenDialog, RenameDialog } from './tokens/TokenBar.js';
 import { TokenList } from './tokens/TokenList.js';
 import { TokenPicker } from './tokens/TokenPicker.js';
+import { DeleteRegionDialog, RegionList, RegionNameDialog } from './regions/RegionList.js';
+import { useSceneRegions } from './regions/useSceneRegions.js';
 import { MARKER_NAMES, TokenPopover } from './tokens/TokenPopover.js';
 import { toCanvasToken, useSceneTokens } from './tokens/useSceneTokens.js';
 
@@ -304,6 +309,11 @@ export function ScenePanel({
   liveNow.current = isLive;
   // The ping tool (TBL-01): on the live scene only, so it stops when the scene stops being live.
   const [pingOn, setPingOn] = useState(false);
+  // The fog tool (TBL-03), in preparation and on the live scene; a shape drawn waits for its name.
+  const [fogOn, setFogOn] = useState(false);
+  const [naming, setNaming] = useState<RegionShape>();
+  const [renamingRegion, setRenamingRegion] = useState<Region>();
+  const [deletingRegion, setDeletingRegion] = useState<Region>();
   const [rulerMode, setRulerMode] = useState(isLive);
   if (rulerMode !== isLive) {
     setRulerMode(isLive);
@@ -322,6 +332,7 @@ export function ScenePanel({
     if (id !== undefined) {
       stopMeasuring();
       setPingOn(false);
+      setFogOn(false);
     }
   };
   const [picking, setPicking] = useState(false);
@@ -744,6 +755,7 @@ export function ScenePanel({
         onToggle: (on) => {
           if (!on) return stopMeasuring();
           setPingOn(false);
+          setFogOn(false);
           setRulerOn(true);
           onRulerOn?.();
           setSelectedToken(undefined);
@@ -768,6 +780,7 @@ export function ScenePanel({
           onToggle: (on) => {
             if (on) {
               stopMeasuring();
+              setFogOn(false);
               setSelectedToken(undefined);
               if (placingAsset) setPlacingAsset(undefined);
             }
@@ -778,6 +791,52 @@ export function ScenePanel({
             void command('ping', { scene_id: sceneId, x: at.x, y: at.y }, 'scene.pingFailed');
           },
         };
+
+  // Fog regions (TBL-03, specs/04-live-sync.md §13): drawn with the fog tool, named, then fogged or revealed
+  // from the list or their tag on the map. On the live scene each change is a region command, undoable; in
+  // preparation a REST write, after which the tokens are read again, since one players see for the first
+  // time is numbered.
+  const sceneRegions = useSceneRegions(sceneId, live, isLive, () => {
+    sceneTokens.retry();
+    onTokensChanged?.();
+  });
+  const regions = sceneRegions.regions ?? [];
+  async function regionWrite(write: () => Promise<string | undefined>, done: string): Promise<boolean> {
+    setLiveFailure(undefined);
+    // Not connected: nothing is sent, and the head already says why, as for undo (D-116).
+    if (offline) {
+      announce(t('fog.offline'));
+      return false;
+    }
+    const reason = await write();
+    if (reason === undefined) announce(done);
+    else setLiveFailure(t('fog.failed', { reason }));
+    return reason === undefined;
+  }
+  const toggleRegion = (region: Region) =>
+    void regionWrite(
+      () => sceneRegions.setHidden(region.id, !region.hidden),
+      t(region.hidden ? 'fog.revealed' : 'fog.fogged', { name: region.name }),
+    );
+  const fogTool: FogTool | undefined = draft
+    ? undefined
+    : {
+        on: fogOn,
+        onToggle: (on) => {
+          if (on) {
+            stopMeasuring();
+            setPingOn(false);
+            setSelectedToken(undefined);
+            if (placingAsset) setPlacingAsset(undefined);
+          }
+          setFogOn(on);
+        },
+        onDraw: (shape) => openDialog(() => setNaming(shape)),
+        onToggleRegion: (id) => {
+          const region = regions.find((each) => each.id === id);
+          if (region) toggleRegion(region);
+        },
+      };
 
   // One undo at a time: Ctrl+Z pressed again, or held down, before the server answers is ignored,
   // so a held key never unwinds the live scene one change after another (LIV-05 review U5).
@@ -855,6 +914,9 @@ export function ScenePanel({
     } else if (key === 'p' && pingTool) {
       event.preventDefault();
       pingTool.onToggle(!pingOn);
+    } else if (key === 'f' && fogTool) {
+      event.preventDefault();
+      fogTool.onToggle(!fogOn);
     } else if (key === 't' && canAddToken) {
       event.preventDefault();
       openPicker();
@@ -905,6 +967,7 @@ export function ScenePanel({
   function openPicker() {
     setStatus(undefined);
     setPingOn(false);
+    setFogOn(false);
     setPicking(true);
   }
 
@@ -912,6 +975,7 @@ export function ScenePanel({
   function selectTool() {
     stopMeasuring();
     setPingOn(false);
+    setFogOn(false);
     if (placingAsset) setPlacingAsset(undefined);
   }
 
@@ -1003,9 +1067,25 @@ export function ScenePanel({
       onToggleHidden={toggleHidden}
       onRevealAll={(hidden) => void revealAll(hidden)}
       onAdd={canAddToken ? openPicker : undefined}
+      regions={regions}
     />
   ) : tokenFailure ? null : (
     <p className="eg-dm__status">{t('tokens.loading')}</p>
+  );
+  const sceneTab = (
+    <>
+      {tokenList}
+      {sceneRegions.regions ? (
+        <RegionList
+          regions={regions}
+          tokens={tokens ?? []}
+          onDraw={fogTool ? () => fogTool.onToggle(true) : undefined}
+          onToggle={toggleRegion}
+          onRename={(region) => openDialog(() => setRenamingRegion(region))}
+          onDelete={(region) => openDialog(() => setDeletingRegion(region))}
+        />
+      ) : null}
+    </>
   );
 
   const percent = Math.round((progress ?? 0) * 100);
@@ -1265,6 +1345,7 @@ export function ScenePanel({
                     tvFrame={tvFrame}
                     ruler={{ shown: shownRuler, tool: rulerTool }}
                     ping={{ shown: isLive && live ? live.pings : [], tool: pingTool }}
+                    fog={{ regions, tool: fogTool }}
                   />
                   {map && draft ? <CornerMagnifier map={map} calibration={draft.calibration} /> : null}
                 </div>
@@ -1295,6 +1376,47 @@ export function ScenePanel({
                 }}
                 onClose={() => {
                   setRenaming(undefined);
+                  refocus.current = 'opener';
+                }}
+              />
+            ) : null}
+            {naming ? (
+              <RegionNameDialog
+                heading={t('fog.newHeading')}
+                initial={t('fog.defaultName', { count: regions.length + 1 })}
+                save={t('fog.newSave')}
+                onSave={(name) => regionWrite(() => sceneRegions.add(name, naming), t('fog.drawn', { name }))}
+                onClose={() => {
+                  setNaming(undefined);
+                  refocus.current = 'opener';
+                }}
+              />
+            ) : null}
+            {renamingRegion ? (
+              <RegionNameDialog
+                heading={t('fog.renameHeading', { name: renamingRegion.name })}
+                initial={renamingRegion.name}
+                save={t('fog.renameSave')}
+                onSave={(name) =>
+                  regionWrite(() => sceneRegions.rename(renamingRegion.id, name), t('fog.renamed', { name }))
+                }
+                onClose={() => {
+                  setRenamingRegion(undefined);
+                  refocus.current = 'opener';
+                }}
+              />
+            ) : null}
+            {deletingRegion ? (
+              <DeleteRegionDialog
+                region={deletingRegion}
+                onConfirm={() => {
+                  const region = deletingRegion;
+                  setDeletingRegion(undefined);
+                  refocus.current = 'opener';
+                  void regionWrite(() => sceneRegions.remove(region.id), t('fog.deleted', { name: region.name }));
+                }}
+                onClose={() => {
+                  setDeletingRegion(undefined);
                   refocus.current = 'opener';
                 }}
               />
@@ -1345,7 +1467,7 @@ export function ScenePanel({
           loading
         )}
       </main>
-      <SidePanel tab={sideTab} onTab={onSideTab} scene={tokenList} library={library} />
+      <SidePanel tab={sideTab} onTab={onSideTab} scene={sceneTab} library={library} />
     </>
   );
 }

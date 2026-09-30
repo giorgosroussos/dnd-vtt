@@ -6,6 +6,7 @@ import {
   type PlayerMap,
   type PlayerSnapshot,
   type PlayerToken,
+  type RegionShape,
 } from '@emberglass/shared';
 import { applyPlayerEvent, fromSnapshot, type PlayerScene } from './scene.js';
 
@@ -73,6 +74,7 @@ class Server {
         tokens: this.visible().map((token) => this.player(token)),
         camera: FIT_CAMERA,
         ruler: null,
+        fog: [],
       },
     };
   }
@@ -249,7 +251,7 @@ describe('the player camera (LIV-06, specs/04-live-sync.md §9)', () => {
   const steered = { centre_x: 0.25, centre_y: 0.75, width: 0.5, height: 0.25 };
   const base = (camera = FIT_CAMERA): PlayerSnapshot => ({
     role: 'players',
-    scene: { name: 'Crypt', map: MAP, grid: GRID, tokens: [], camera, ruler: null },
+    scene: { name: 'Crypt', map: MAP, grid: GRID, tokens: [], camera, ruler: null, fog: [] },
   });
 
   it('keeps the camera a snapshot carries, and fits the map when it carries none', () => {
@@ -276,7 +278,7 @@ describe('the ruler (LIV-07, specs/04-live-sync.md §11)', () => {
   const measurement = { from: { column: 1, row: 2 }, to: { column: 3, row: 5 }, feet: 15 };
   const base = (ruler: typeof measurement | null = null): PlayerSnapshot => ({
     role: 'players',
-    scene: { name: 'Crypt', map: MAP, grid: GRID, tokens: [], camera: FIT_CAMERA, ruler },
+    scene: { name: 'Crypt', map: MAP, grid: GRID, tokens: [], camera: FIT_CAMERA, ruler, fog: [] },
   });
 
   it('keeps the measurement a snapshot carries, or none', () => {
@@ -308,5 +310,32 @@ describe('the ruler (LIV-07, specs/04-live-sync.md §11)', () => {
       ).toBe(scene);
     }
     expect(applyPlayerEvent(null, { type: 'ruler.shown', version: 2, payload: { ruler: measurement } })).toBeNull();
+  });
+});
+
+describe('the fog (TBL-03, specs/04-live-sync.md §13)', () => {
+  const room: RegionShape = { kind: 'rect', x: 4, y: 0, width: 4, height: 4 };
+  const corner: RegionShape = {
+    kind: 'polygon',
+    points: [
+      { x: 0, y: 0 },
+      { x: 2, y: 0 },
+      { x: 0, y: 2 },
+    ],
+  };
+
+  it('keeps the fogged shapes a snapshot carries, replaced by each fog.updated, and nothing else of them', () => {
+    const server = new Server([]);
+    const first = server.snapshot();
+    const scene = fromSnapshot({
+      ...first,
+      scene: { ...first.scene!, fog: [{ ...room, name: 'Back room' } as RegionShape] },
+    });
+    expect(scene!.fog).toEqual([room]);
+    const next = applyPlayerEvent(scene, server.event('fog.updated', { fog: [room, corner] }));
+    expect(next!.fog).toEqual([room, corner]);
+    expect(applyPlayerEvent(next, server.event('fog.updated', { fog: [] }))!.fog).toEqual([]);
+    // A malformed event keeps the fog: it never lifts by mistake.
+    expect(applyPlayerEvent(next, server.event('fog.updated', { fog: 'none' }))).toBe(next);
   });
 });

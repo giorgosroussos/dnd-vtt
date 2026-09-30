@@ -1,4 +1,5 @@
-import type { AssetCategory, SceneToken } from '@emberglass/shared';
+import type { AssetCategory, Region, SceneToken } from '@emberglass/shared';
+import { fogOver } from '../regions/RegionList.js';
 import { Icon } from '../../ui/icons.js';
 import { t, type MessageKey } from '../../ui/messages.js';
 import { initialsOf } from '../../canvas/TokenLayer.js';
@@ -24,9 +25,14 @@ const GROUPS: { key: 'party' | 'monsters' | 'others'; heading: MessageKey; categ
 // what it is or that it is hidden, with its eye toggle; a hidden row is italic, its avatar ring dashed and
 // its eye crossed out, so it never reads as a visible one. A row selects its token and centres the map on
 // it. Every control is a native button, so the keyboard reaches all of it.
-/** A row's status line: hidden or what it is, then its condition markers, if any (TBL-02). */
-function statusOf(token: SceneToken): string {
-  const status = token.hidden ? t('sceneTokens.hidden') : t(CATEGORY_NAMES[token.asset.category]);
+/**
+ * A row's status line: hidden or what it is, then the fogged region it stands in (TBL-03), then its condition
+ * markers (TBL-02), if any.
+ */
+function statusOf(token: SceneToken, regions: readonly Region[]): string {
+  const own = token.hidden ? t('sceneTokens.hidden') : t(CATEGORY_NAMES[token.asset.category]);
+  const fog = fogOver(token, regions);
+  const status = fog ? t('sceneTokens.inFog', { status: own, name: fog.name }) : own;
   if (token.markers.length === 0) return status;
   const markers = token.markers.map((marker) => t(MARKER_NAMES[marker])).join(t('sceneTokens.markerSeparator'));
   return t('sceneTokens.withMarkers', { status, markers });
@@ -39,8 +45,11 @@ export function TokenList({
   onToggleHidden,
   onRevealAll,
   onAdd,
+  regions = [],
 }: {
   tokens: readonly SceneToken[];
+  /** The scene's fog regions, which a token's status names when it stands in a fogged one (TBL-03). */
+  regions?: readonly Region[];
   selectedId: string | undefined;
   onSelect: (token: SceneToken) => void;
   onToggleHidden: (token: SceneToken) => void;
@@ -102,7 +111,7 @@ export function TokenList({
                     </span>
                     <span className="eg-token-row__text">
                       <span className="eg-token-row__name">{token.label}</span>
-                      <span className="eg-token-row__status">{statusOf(token)}</span>
+                      <span className="eg-token-row__status">{statusOf(token, regions)}</span>
                     </span>
                   </button>
                   <button

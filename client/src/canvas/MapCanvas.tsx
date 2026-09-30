@@ -18,6 +18,7 @@ import {
   type Image,
   type Measurement,
   type PlayerCamera,
+  type RegionShape,
   type Screen,
   type TokenSize,
 } from '@emberglass/shared';
@@ -53,6 +54,7 @@ import {
   type Size,
 } from './geometry.js';
 import { labelOffset, rulerForKey, sameSquare, squareAt, squareCentre, type RulerPath } from './ruler.js';
+import { FogLayer, rectBetween, type FogDraft, type FogRegion } from './FogLayer.js';
 import { PingLayer, type PingPoint } from './PingLayer.js';
 import { TokenLayer, type TokenControls } from './TokenLayer.js';
 import {
@@ -272,6 +274,21 @@ export interface PingTool {
   onPing: (at: Point) => void;
 }
 
+/** The fog regions drawn (TBL-03), and in the DM view the tool that draws them. */
+export interface FogView {
+  regions: readonly FogRegion[];
+  tool?: FogTool | undefined;
+}
+
+export interface FogTool {
+  on: boolean;
+  onToggle: (on: boolean) => void;
+  /** A shape drawn, its corners on grid corners. */
+  onDraw: (shape: RegionShape) => void;
+  /** A region's tag on the map clicked: it is fogged or revealed. */
+  onToggleRegion?: ((id: string) => void) | undefined;
+}
+
 /** A rectangle measured on the map during calibration, in the original image's pixels. */
 export interface Measure {
   rect: Box | undefined;
@@ -331,6 +348,7 @@ export function MapCanvas({
   tvFrame,
   ruler,
   ping,
+  fog,
 }: {
   grid: Grid;
   /** The scene's map image, or null for a scene without a map. */
@@ -365,6 +383,8 @@ export function MapCanvas({
   ruler?: RulerView | undefined;
   /** The pings drawn, and in the DM view the ping tool (TBL-01). */
   ping?: PingView | undefined;
+  /** The fog regions drawn, and in the DM view the fog tool (TBL-03). */
+  fog?: FogView | undefined;
 }) {
   const helpId = useId();
   const [viewportRef, viewport] = useViewport();
@@ -422,11 +442,18 @@ export function MapCanvas({
   // The ping tool (TBL-01), under the same conditions; a click pings and a drag still pans.
   const pingTool = dm && !measuring && !placingNow && frame ? ping?.tool : undefined;
   const pingOn = pingTool?.on === true && !rulerOn;
+  // The fog tool (TBL-03): a drag draws a rectangle, clicks a polygon's corners, each on a grid corner.
+  const fogTool = dm && !measuring && !placingNow && frame ? fog?.tool : undefined;
+  const fogOn = fogTool?.on === true && !rulerOn && !pingOn;
+  const [fogDraft, setFogDraft] = useState<FogDraft>();
+  const fogPress = useRef<{ corner: Point; screen: Point }>(undefined);
+  if (!fogOn && fogDraft) setFogDraft(undefined);
   // Space held down: a drag pans the view, whatever the tool (UIX-01).
   const [spaceHeld, setSpaceHeld] = useState(false);
   const panning = dm && spaceHeld;
   // Tokens are selected and dragged only when nothing else uses the pointer.
-  const controls = dm && !measuring && !placingNow && !rulerOn && !pingOn && !panning ? tokenControls : undefined;
+  const controls =
+    dm && !measuring && !placingNow && !rulerOn && !pingOn && !fogOn && !panning ? tokenControls : undefined;
   const selected = controls && tokens.find((token) => token.id === controls.selectedId);
   // The TV frame, in world pixels: the one being dragged, or the player camera widened to the TV's shape.
   const [frameDraft, setFrameDraft] = useState<WorldBox>();
@@ -438,7 +465,15 @@ export function MapCanvas({
   const frameBox = tv && limits ? boundFrame(frameOf(tv.camera, world, aspect), aspect, limits) : undefined;
   const shownFrame = tv ? (frameDraft ?? frameBox) : undefined;
   const frameMovable =
-    tv !== undefined && !tv.offline && !tv.locked && !measuring && !placingNow && !rulerOn && !pingOn && !panning;
+    tv !== undefined &&
+    !tv.offline &&
+    !tv.locked &&
+    !measuring &&
+    !placingNow &&
+    !rulerOn &&
+    !pingOn &&
+    !fogOn &&
+    !panning;
   // The camera that shows `box`; nothing is sent when that is the camera already (review C-M2, U-M1).
   const cameraFor = (box: WorldBox | 'fit'): PlayerCamera =>
     box === 'fit' || !limits ? FIT_CAMERA : rectOf(boundFrame(box, aspect, limits), world);
@@ -549,6 +584,33 @@ export function MapCanvas({
       if (event.key === 'Escape') {
         event.preventDefault();
         place.onCancel();
+        return;
+      }
+    }
+    // F turns the fog tool on and off; with it on, Enter puts a corner at the centre of the view (a second
+    // time at the same corner closes the polygon), Backspace takes the last corner off, and Escape drops the
+    // shape, or leaves the tool when there is none.
+    if (fogTool && (event.key === 'f' || event.key === 'F')) {
+      event.preventDefault();
+      if (!event.repeat) fogTool.onToggle(!fogOn);
+      return;
+    }
+    if (fogOn && frame) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        if (!event.repeat) fogCorner(cornerAt(centreWorld()));
+        return;
+      }
+      if (event.key === 'Backspace' && fogDraft?.kind === 'polygon') {
+        event.preventDefault();
+        const points = fogDraft.points.slice(0, -1);
+        setFogDraft(points.length > 0 ? { kind: 'polygon', points } : undefined);
+        return;
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        if (fogDraft) setFogDraft(undefined);
+        else fogTool.onToggle(false);
         return;
       }
     }
@@ -816,6 +878,54 @@ export function MapCanvas({
     if (controls?.selectedId !== undefined) controls.onDeselect();
   }
 
+  // The fog tool (TBL-03). The nearest grid corner to a point in the world.
+  const cornerAt = (at: Point): Point => {
+    const grid = toGrid(frame!, at);
+    return { x: Math.round(grid.x) + 0, y: Math.round(grid.y) + 0 };
+  };
+  const sameCorner = (a: Point, b: Point) => a.x === b.x && a.y === b.y;
+  /** A corner of the polygon being drawn: the first again, or the last twice, closes it. */
+  function fogCorner(corner: Point) {
+    const points = fogDraft?.kind === 'polygon' ? fogDraft.points : [];
+    const last = points.at(-1);
+    const closes = points.length >= 3 && (sameCorner(corner, points[0]!) || (last && sameCorner(corner, last)));
+    if (closes) {
+      setFogDraft(undefined);
+      fogTool?.onDraw({ kind: 'polygon', points });
+      return;
+    }
+    if (last && sameCorner(corner, last)) return;
+    setFogDraft({ kind: 'polygon', points: [...points, corner] });
+  }
+  function onFogDown(event: Konva.KonvaEventObject<PointerEvent>) {
+    const at = worldPoint(event);
+    if (!at || event.evt.button !== 0) return;
+    fogPress.current = { corner: cornerAt(at), screen: { x: event.evt.clientX, y: event.evt.clientY } };
+  }
+  function onFogMove(event: Konva.KonvaEventObject<PointerEvent>) {
+    const press = fogPress.current;
+    const at = worldPoint(event);
+    if (!press || !at) return;
+    const moved = Math.hypot(event.evt.clientX - press.screen.x, event.evt.clientY - press.screen.y);
+    // A drag, not a click: a rectangle from the corner pressed, unless a polygon is under way.
+    if (moved >= MIN_RECT_PX && fogDraft?.kind !== 'polygon') {
+      setFogDraft({ kind: 'rect', from: press.corner, to: cornerAt(at) });
+    }
+  }
+  function onFogUp(event: Konva.KonvaEventObject<PointerEvent>) {
+    const press = fogPress.current;
+    fogPress.current = undefined;
+    const at = worldPoint(event);
+    if (!press || !at) return;
+    if (fogDraft?.kind === 'rect') {
+      const shape = rectBetween(fogDraft.from, cornerAt(at));
+      setFogDraft(undefined);
+      if (shape) fogTool?.onDraw(shape);
+      return;
+    }
+    fogCorner(press.corner);
+  }
+
   // A click with the ping tool on pings the point clicked (TBL-01).
   function onPingClick(event: Konva.KonvaEventObject<MouseEvent>) {
     const at = event.target.getStage()?.getRelativePointerPosition();
@@ -838,7 +948,9 @@ export function MapCanvas({
           ? { onWheel, onPointerDown: onRulerDown, onPointerMove: onRulerMove, onPointerUp: () => finishRuler() }
           : pingOn
             ? { onWheel, onDragMove: onDrag, onDragEnd: onDrag, onClick: onPingClick }
-            : { onWheel, onDragMove: onDrag, onDragEnd: onDrag, onClick: onStageClick };
+            : fogOn
+              ? { onWheel, onPointerDown: onFogDown, onPointerMove: onFogMove, onPointerUp: onFogUp }
+              : { onWheel, onDragMove: onDrag, onDragEnd: onDrag, onClick: onStageClick };
 
   const centre = { x: viewport.width / 2, y: viewport.height / 2 };
   const stage = (
@@ -849,7 +961,7 @@ export function MapCanvas({
       y={camera.y}
       scaleX={camera.scale}
       scaleY={camera.scale}
-      draggable={dm && (panning || (!measuring && !rulerOn))}
+      draggable={dm && (panning || (!measuring && !rulerOn && !fogOn))}
       listening={dm}
       {...handlers}
     >
@@ -919,6 +1031,18 @@ export function MapCanvas({
           </Label>
         ) : null}
       </Layer>
+      {frame && fog ? (
+        <FogLayer
+          regions={fog.regions}
+          frame={frame}
+          scale={camera.scale}
+          mode={mode}
+          draft={fogOn ? fogDraft : undefined}
+          onToggle={
+            dm && !fogOn && !rulerOn && !pingOn && !placingNow && !measuring ? fog.tool?.onToggleRegion : undefined
+          }
+        />
+      ) : null}
       {frame ? (
         <TokenLayer
           tokens={tokens}
@@ -1129,6 +1253,22 @@ export function MapCanvas({
           }),
         }
       : {};
+  // The fogged shapes drawn, in grid units, for the end-to-end tests (TBL-03): on the TV, what its snapshot
+  // carries; in the DM view each region with its state.
+  const fogState = fog
+    ? {
+        'data-fog': JSON.stringify(
+          dm
+            ? fog.regions.map((region) => ({
+                id: region.id,
+                name: region.name,
+                hidden: region.hidden,
+                shape: region.shape,
+              }))
+            : fog.regions.filter((region) => region.hidden).map((region) => region.shape),
+        ),
+      }
+    : {};
   // Where each ping is drawn, in screen pixels from the viewport's corner, for the end-to-end tests (TBL-01).
   const pingState =
     frame && ping && ping.shown.length > 0
@@ -1176,6 +1316,7 @@ export function MapCanvas({
         {...state}
         {...rulerState}
         {...pingState}
+        {...fogState}
         data-tokens={tokenBoxes}
       >
         {stage}
@@ -1202,13 +1343,15 @@ export function MapCanvas({
         ? t(tv ? 'canvas.helpRulerLive' : 'canvas.helpRuler')
         : pingOn
           ? t('canvas.helpPing')
-          : rulerTool && shownPath && !selected
-            ? t('canvas.helpRulerShown')
-            : selected
-              ? t('canvas.helpToken', { label: selected.label })
-              : tv
-                ? t(tv.locked ? 'canvas.helpLiveLocked' : 'canvas.helpLive')
-                : t('canvas.help');
+          : fogOn
+            ? t('canvas.helpFog')
+            : rulerTool && shownPath && !selected
+              ? t('canvas.helpRulerShown')
+              : selected
+                ? t('canvas.helpToken', { label: selected.label })
+                : tv
+                  ? t(tv.locked ? 'canvas.helpLiveLocked' : 'canvas.helpLive')
+                  : t('canvas.help');
   const history = rail?.history;
   return (
     <div className="eg-canvas eg-canvas--dm">
@@ -1217,7 +1360,7 @@ export function MapCanvas({
         className={
           panning
             ? 'eg-canvas__viewport eg-canvas__viewport--pan'
-            : measuring || placingNow || rulerOn || pingOn
+            : measuring || placingNow || rulerOn || pingOn || fogOn
               ? 'eg-canvas__viewport eg-canvas__viewport--measure'
               : 'eg-canvas__viewport'
         }
@@ -1232,6 +1375,9 @@ export function MapCanvas({
         {...pingState}
         data-ruler-tool={rulerTool ? (rulerOn ? 'on' : 'off') : undefined}
         data-ping-tool={pingTool ? (pingOn ? 'on' : 'off') : undefined}
+        data-fog-tool={fogTool ? (fogOn ? 'on' : 'off') : undefined}
+        data-fog-draft={fogOn && fogDraft ? JSON.stringify(fogDraft) : undefined}
+        {...fogState}
         // A right-button drag pans while measuring, so it opens no context menu (review U-M2).
         onContextMenu={rulerOn ? (event) => event.preventDefault() : undefined}
         data-tokens={tokenBoxes}
@@ -1247,7 +1393,7 @@ export function MapCanvas({
             type="button"
             className="eg-rail__tool"
             aria-label={t('canvas.toolSelect')}
-            aria-pressed={!rulerOn && !pingOn && !placingNow && !measuring}
+            aria-pressed={!rulerOn && !pingOn && !fogOn && !placingNow && !measuring}
             onClick={rail.onSelect}
           >
             <Icon name="select" size={20} strokeWidth={1.9} />
@@ -1277,16 +1423,14 @@ export function MapCanvas({
             type="button"
             className="eg-rail__tool"
             aria-label={t('canvas.toolFog')}
-            aria-disabled
-            aria-describedby={`${helpId}-later`}
+            aria-pressed={fogOn}
+            aria-disabled={!fogTool || undefined}
+            onClick={() => fogTool?.onToggle(!fogOn)}
           >
             <Icon name="fog" size={20} />
           </button>
           <span id={`${helpId}-ping`} className="eg-visually-hidden">
             {t('canvas.pingLiveOnly')}
-          </span>
-          <span id={`${helpId}-later`} className="eg-visually-hidden">
-            {t('canvas.toolLater')}
           </span>
           <button
             type="button"

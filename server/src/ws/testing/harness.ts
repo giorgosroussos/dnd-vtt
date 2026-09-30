@@ -190,14 +190,21 @@ export async function startLive({
 /** A player's copy of the live scene, kept from its snapshot and events as a player client would. */
 export interface PlayerState {
   version: number;
-  scene: { map: unknown; grid: unknown; tokens: Record<string, unknown>[]; camera: unknown; ruler: unknown } | null;
+  scene: {
+    map: unknown;
+    grid: unknown;
+    tokens: Record<string, unknown>[];
+    camera: unknown;
+    ruler: unknown;
+    fog: unknown;
+  } | null;
 }
 
 /**
  * Applies the players' events as `shared/src/live.ts` states them: an added token goes in at its
  * rank, a removed one leaves, a moved one is replaced, a renamed one takes its new label, and
  * `camera.player` replaces the camera (LIV-06), `ruler.shown` and `ruler.cleared` the measurement
- * (LIV-07). Throws on a version that is not the next one,
+ * (LIV-07), `fog.updated` the fogged shapes (TBL-03). Throws on a version that is not the next one,
  * which is a gap.
  */
 export function applyPlayerEvent(state: PlayerState, event: EventEnvelope): PlayerState {
@@ -218,6 +225,10 @@ export function applyPlayerEvent(state: PlayerState, event: EventEnvelope): Play
   }
   if (event.type === 'ruler.cleared') {
     next.scene!.ruler = null;
+    return next;
+  }
+  if (event.type === 'fog.updated') {
+    next.scene!.fog = structuredClone((event.payload as { fog: unknown }).fog);
     return next;
   }
   const tokens = next.scene!.tokens;

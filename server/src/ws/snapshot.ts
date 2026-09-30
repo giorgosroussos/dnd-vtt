@@ -11,7 +11,9 @@ import type {
   SceneToken,
 } from '@emberglass/shared';
 import { readScene } from '../db/campaigns.js';
+import { readFog, sightOf } from '../db/fog.js';
 import { readImage } from '../db/images.js';
+import { listRegions } from '../db/regions.js';
 import { readSettings } from '../db/settings.js';
 import { listTokens } from '../db/tokens.js';
 import type { PlayerCameraState, ScreenRegistry } from '../domain/camera.js';
@@ -47,7 +49,9 @@ export function liveMeasurement(db: Database.Database, scene: Scene, memory: Liv
 // follows (D-119). Both carry the measurement shown on the TV (LIV-07), so a screen reconnecting, or
 // asking again after a gap, keeps the line the others show; a measurement names no token (D-121).
 // The players' carries the live scene's name, shown on the TV (UIX-01); the DM's alone carries the
-// undo history's state.
+// undo history's state. The DM's carries the scene's fog regions, names included; the players' the fogged
+// shapes alone, and only the tokens they can see: not hidden and under no fogged region (TBL-03), each
+// ranked among those.
 
 export function readSnapshot(db: Database.Database, role: 'dm', memory: LiveMemory): DmSnapshot;
 export function readSnapshot(db: Database.Database, role: 'players', memory: LiveMemory): PlayerSnapshot;
@@ -68,6 +72,7 @@ function readDm(db: Database.Database, memory: LiveMemory): DmSnapshot {
       screen: memory.screens.chosen(),
       ruler: liveMeasurement(db, live.scene, memory),
       history: memory.history.stateFor(live.scene.id),
+      regions: listRegions(db, live.scene.id) ?? [],
     },
   };
 }
@@ -76,8 +81,8 @@ function readPlayers(db: Database.Database, memory: LiveMemory): PlayerSnapshot 
   const live = readLive(db);
   if (!live) return { role: 'players', scene: null };
   const { scene, map, tokens } = live;
-  // listTokens answers bottom of the stack first; the rank counts visible tokens only.
-  const visible = tokens.filter((token) => !token.hidden);
+  // listTokens answers bottom of the stack first; the rank counts the tokens players see only.
+  const visible = tokens.filter(sightOf(db, scene.id));
   return {
     role: 'players',
     scene: {
@@ -87,6 +92,7 @@ function readPlayers(db: Database.Database, memory: LiveMemory): PlayerSnapshot 
       tokens: visible.map(toPlayerToken),
       camera: { ...memory.camera.of(scene.id) },
       ruler: liveMeasurement(db, scene, memory),
+      fog: readFog(db, scene.id),
     },
   };
 }

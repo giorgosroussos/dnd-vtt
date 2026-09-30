@@ -76,4 +76,10 @@ The DM view MUST provide, in the palette and typography of the redesign (`01` §
 - tokens drawn as circles ringed by category, a hidden one with a dashed ring, a lighter fill, a crossed-eye badge and an italic label, so it is never taken for a visible one (§9);
 - no shortcut acting while a text field has focus.
 
+The table tools (`01` §9) MUST add to it: [input, Q-099]
+
+- Ping (P) on the live scene: a click, or Enter at the centre of the view, shows two expanding rings with a glowing centre at that point on every view for about two seconds (`04` §12);
+- the popover's condition chips, Bloodied, Unconscious, Dead and Concentrating, each a toggle, each marker drawn on both views with a shape or a badge, never by colour alone (`03` §1);
+- the fog tool (F): a rectangle drawn by a drag, a polygon corner by corner, on grid corners, named when drawn; a fogged region shown to the DM as a dashed blue outline over a hatch with its name, and to players as an opaque shape with a soft edge; in the right panel a list of the scene's regions, each with whether it is fogged, how many tokens inside it players cannot see, Reveal or Fog, rename and delete (`04` §13).
+
 The player view MUST show the live scene with a subtle vignette, labels sized to be read from 2–3 m, and the scene's name at the bottom left, fading after a few seconds; changes between idle and live, and between scenes, fade. [input, Q-100]

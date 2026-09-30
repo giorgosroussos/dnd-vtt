@@ -8,7 +8,7 @@ import {
   type TokenSize,
 } from '@emberglass/shared';
 import { deleteUnreferencedImages, imageExists } from './images.js';
-import { forgetTokenNumbers } from './tokens.js';
+import { forgetTokenNumbers, showNewlySeen } from './tokens.js';
 
 // The shared asset library in SQLite (specs/03-domain-model.md §1, §2, §7,
 // specs/05-assets-and-images.md §1, §4, §5, D-020, D-022, D-075, D-083). Every read
@@ -172,6 +172,12 @@ export function updateAsset(
       db.prepare('UPDATE token SET label = ? WHERE asset_id = ? AND label = ?').run(fields.name, id, row.name);
     }
     if (fields.tags !== undefined) writeTags(db, id, fields.tags);
+    // A new size moves each token's centre, which may leave the fog: a token players now see for the first
+    // time is numbered as at any first showing (TBL-03, Q-096).
+    if (fields.size !== undefined) {
+      const scenes = db.prepare('SELECT DISTINCT scene_id FROM token WHERE asset_id = ?').pluck().all(id) as string[];
+      for (const sceneId of scenes) showNewlySeen(db, sceneId);
+    }
     const removedImages = fields.image_id !== undefined ? deleteUnreferencedImages(db, [before]) : [];
     return { outcome: 'updated', asset: readAsset(db, id)!, removedImages };
   })();

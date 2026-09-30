@@ -8,6 +8,10 @@ import {
   SettingsUpdateSchema,
   rulerFeet,
   TokenCreateBodySchema,
+  RegionCreateBodySchema,
+  RegionUpdateBodySchema,
+  type Region,
+  type RegionUpdateBody,
   TOKEN_MARKERS,
   TokenUpdateBodySchema,
   type CommandAck,
@@ -85,6 +89,9 @@ const DEFAULT_GRID: Scene['grid'] = {
 const CALIBRATION_KEYS = ['size', 'offset_x', 'offset_y', 'columns', 'rows'] as const;
 
 let counter = 0;
+/** What the history holds: a command, or a deleted token or fog region put back (LIV-05, TBL-03). */
+type Undoable = CommandEnvelope | { type: 'restore'; token: SceneToken } | { type: 'restoreRegion'; region: Region };
+
 const uuid = (): string => `00000000-0000-4000-8000-${String(++counter).padStart(12, '0')}`;
 
 export class FakeServer {
@@ -110,6 +117,8 @@ export class FakeServer {
   uploadedImage: Partial<Image> = {};
   /** Tokens with their state, served by the token routes (PRP-04, D-100). */
   sceneTokens: SceneToken[] = [];
+  /** The fog regions of every scene (TBL-03). */
+  regions: Region[] = [];
   /** The highest number issued per scene and asset, as `scene.token_numbers` (Q-091). */
   private issued: Record<string, number> = {};
   /** What GET /api/connect answers (LIV-03): two addresses and a code of the first. */
@@ -146,11 +155,11 @@ export class FakeServer {
    * The undo history of the live scene, newest last, as the server keeps it (LIV-05, D-117): the
    * inverse of each token command that changed something, emptied when the live scene changes.
    */
-  private undoHistory: (CommandEnvelope | { type: 'restore'; token: SceneToken })[] = [];
+  private undoHistory: Undoable[] = [];
   /** The live scene the undo history belongs to; a history used with another scene live is emptied. */
   private undoScene: string | null = null;
   /** What redoes each undo, newest last, emptied by any new undoable command (UIX-01). */
-  private redoHistory: (CommandEnvelope | { type: 'restore'; token: SceneToken })[] = [];
+  private redoHistory: Undoable[] = [];
 
   before: Interceptor | undefined;
   private restore: (() => void) | undefined;
@@ -242,6 +251,52 @@ export class FakeServer {
     return this.sceneTokens
       .filter((each) => each.scene_id === sceneId)
       .sort((a, b) => a.z_order - b.z_order || a.id.localeCompare(b.id));
+  }
+
+  /** A region drawn on a scene, fogged unless told otherwise, after the scene's others (TBL-03). */
+  addRegion(sceneId: string, fields: Partial<Region> & { shape: Region['shape'] }): Region {
+    const order =
+      Math.max(0, ...this.regions.filter((each) => each.scene_id === sceneId).map((each) => each.order)) + 1;
+    const region: Region = { id: uuid(), scene_id: sceneId, name: 'Region', order, hidden: true, ...fields };
+    this.regions.push(region);
+    return region;
+  }
+
+  // As the server does: the live scene's regions are refused over REST (TBL-03).
+  private handleRegions(
+    method: string,
+    sceneId: string | undefined,
+    regionId: string | undefined,
+    b: Record<string, unknown>,
+  ): Reply {
+    if (sceneId !== undefined) {
+      if (!this.scenes.some((each) => each.id === sceneId)) return failure(404, 'not_found');
+      if (method === 'GET') {
+        return json(
+          200,
+          this.regions.filter((each) => each.scene_id === sceneId).sort((a, c) => a.order - c.order),
+        );
+      }
+      if (!Value.Check(RegionCreateBodySchema, b)) return failure(400, 'validation_failed');
+      if (sceneId === this.liveSceneId) return failure(409, 'scene_live');
+      const body = b;
+      return json(
+        201,
+        this.addRegion(sceneId, { name: body.name.trim(), shape: body.shape, hidden: body.hidden !== false }),
+      );
+    }
+    if (method === 'PATCH' && !Value.Check(RegionUpdateBodySchema, b)) return failure(400, 'validation_failed');
+    const region = this.regions.find((each) => each.id === regionId);
+    if (!region) return failure(404, 'not_found');
+    if (region.scene_id === this.liveSceneId) return failure(409, 'scene_live');
+    if (method === 'DELETE') {
+      this.regions = this.regions.filter((each) => each !== region);
+      return json(204);
+    }
+    const body = b as RegionUpdateBody;
+    if (body.name !== undefined) region.name = body.name.trim();
+    if (body.hidden !== undefined) region.hidden = body.hidden;
+    return json(200, { ...region });
   }
 
   // As D-100 does: the live scene's tokens are refused; positions and labels as sent.
@@ -401,6 +456,7 @@ export class FakeServer {
         screen: this.screen && { ...this.screen },
         ruler: this.measurement(scene),
         history: this.historyState(),
+        regions: this.regions.filter((each) => each.scene_id === scene.id).sort((a, b) => a.order - b.order),
       },
     };
   }
@@ -472,6 +528,7 @@ export class FakeServer {
   private command(envelope: CommandEnvelope, sender?: FakeSocket): CommandAck {
     const live = this.liveSceneId;
     const before = new Map(this.sceneTokens.map((token) => [token.id, structuredClone(token)]));
+    const regionsBefore = new Map(this.regions.map((region) => [region.id, structuredClone(region)]));
     const version = this.dmVersion;
     const undoBefore = JSON.stringify(this.historyState());
     const ack = this.apply(envelope);
@@ -486,6 +543,18 @@ export class FakeServer {
       const added = this.sceneTokens.find((token) => !before.has(token.id));
       const now = this.sceneTokens.find((token) => token.id === was?.id);
       const moved = was !== undefined && now !== undefined && (now.x !== was.x || now.y !== was.y);
+      const drawn = this.regions.find((region) => !regionsBefore.has(region.id));
+      const region = regionsBefore.get(String(p.region_id));
+      const regionInverse: Undoable | undefined =
+        envelope.type === 'region.add' && drawn
+          ? { type: 'region.delete', payload: { region_id: drawn.id } }
+          : envelope.type === 'region.rename' && region
+            ? { type: 'region.rename', payload: { region_id: region.id, name: region.name } }
+            : envelope.type === 'region.setHidden' && region
+              ? { type: 'region.setHidden', payload: { region_id: region.id, hidden: region.hidden } }
+              : envelope.type === 'region.delete' && region
+                ? { type: 'restoreRegion', region }
+                : undefined;
       const inverse =
         envelope.type === 'token.add' && added
           ? { type: 'token.delete' as const, payload: { token_id: added.id } }
@@ -497,7 +566,7 @@ export class FakeServer {
                 ? { type: 'token.setMarkers' as const, payload: { token_id: was.id, markers: [...was.markers] } }
                 : envelope.type === 'token.delete' && was
                   ? { type: 'restore' as const, token: was }
-                  : undefined;
+                  : regionInverse;
       if (inverse && live !== null) {
         if (this.undoScene !== live) this.undoHistory = [];
         this.undoScene = live;
@@ -511,10 +580,17 @@ export class FakeServer {
   }
 
   /** What undoes an inverse about to be applied, from the state before it (UIX-01). */
-  private inverseOfInverse(
-    inverse: CommandEnvelope | { type: 'restore'; token: SceneToken },
-  ): CommandEnvelope | { type: 'restore'; token: SceneToken } | undefined {
+  private inverseOfInverse(inverse: Undoable): Undoable | undefined {
     if (inverse.type === 'restore') return { type: 'token.delete', payload: { token_id: inverse.token.id } };
+    if (inverse.type === 'restoreRegion') return { type: 'region.delete', payload: { region_id: inverse.region.id } };
+    if (inverse.type.startsWith('region.')) {
+      const region = this.regions.find((each) => each.id === inverse.payload.region_id);
+      if (!region) return undefined;
+      if (inverse.type === 'region.delete') return { type: 'restoreRegion', region: structuredClone(region) };
+      if (inverse.type === 'region.rename')
+        return { type: 'region.rename', payload: { region_id: region.id, name: region.name } };
+      return { type: 'region.setHidden', payload: { region_id: region.id, hidden: region.hidden } };
+    }
     const token = this.sceneTokens.find((each) => each.id === inverse.payload.token_id);
     if (!token) return undefined;
     if (inverse.type === 'token.delete') return { type: 'restore', token: structuredClone(token) };
@@ -553,7 +629,12 @@ export class FakeServer {
     return ack;
   }
 
-  private applyInverse(inverse: CommandEnvelope | { type: 'restore'; token: SceneToken }): CommandAck {
+  private applyInverse(inverse: Undoable): CommandAck {
+    if (inverse.type === 'restoreRegion') {
+      this.regions.push(structuredClone(inverse.region));
+      this.deliver('region.added', { region: { ...inverse.region } });
+      return { ok: true };
+    }
     if (inverse.type === 'restore') {
       const asset = this.assets.find((each) => each.id === inverse.token.asset_id);
       if (!asset) return { error: { code: 'reference_not_found', message: 'test' } };
@@ -646,6 +727,35 @@ export class FakeServer {
         if (JSON.stringify(markers) === JSON.stringify(token.markers)) return { ok: true };
         token.markers = markers;
         this.deliver('token.updated', { token: this.withAsset(token), relabelled: [] });
+        return { ok: true };
+      }
+      case 'region.add': {
+        if (this.liveSceneId === null || p.scene_id !== this.liveSceneId) return refuse('scene_not_live');
+        const region = this.addRegion(this.liveSceneId, {
+          name: String(p.name).trim(),
+          shape: p.shape as Region['shape'],
+          hidden: p.hidden !== false,
+        });
+        this.deliver('region.added', { region: { ...region } });
+        return { ok: true };
+      }
+      case 'region.rename':
+      case 'region.setHidden': {
+        const region = this.regions.find((each) => each.id === p.region_id);
+        if (!region) return refuse('not_found');
+        if (region.scene_id !== this.liveSceneId) return refuse('scene_not_live');
+        const next = type === 'region.rename' ? { name: String(p.name).trim() } : { hidden: Boolean(p.hidden) };
+        if (Object.entries(next).every(([key, value]) => region[key as keyof Region] === value)) return { ok: true };
+        Object.assign(region, next);
+        this.deliver('region.updated', { region: { ...region } });
+        return { ok: true };
+      }
+      case 'region.delete': {
+        const region = this.regions.find((each) => each.id === p.region_id);
+        if (!region) return refuse('not_found');
+        if (region.scene_id !== this.liveSceneId) return refuse('scene_not_live');
+        this.regions = this.regions.filter((each) => each !== region);
+        this.deliver('region.removed', { id: region.id });
         return { ok: true };
       }
       case 'token.delete': {
@@ -950,6 +1060,10 @@ export class FakeServer {
     if (sceneTokens) return this.handleTokens(method, sceneTokens[1], undefined, b);
     const token = /^\/api\/tokens\/([^/]+)$/.exec(path);
     if (token) return this.handleTokens(method, undefined, token[1], b);
+    const sceneRegions = /^\/api\/scenes\/([^/]+)\/regions$/.exec(path);
+    if (sceneRegions) return this.handleRegions(method, sceneRegions[1], undefined, b);
+    const region = /^\/api\/regions\/([^/]+)$/.exec(path);
+    if (region) return this.handleRegions(method, undefined, region[1], b);
 
     const match =
       /^\/api\/(campaigns|sessions|scenes)(?:\/([^/]+))?(?:\/(sessions|scenes|deletion|order))?(?:\/(order))?$/.exec(
