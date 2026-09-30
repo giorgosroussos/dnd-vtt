@@ -491,7 +491,7 @@ describe('the ruler (LIV-07, specs/06-grid-and-measurement.md §5, specs/04-live
     expect(stage.findOne('.ruler-layer')).toBeUndefined();
     expect(view.querySelector('[data-ruler]')).toBeNull();
     // The player view has no ruler control.
-    expect(button(view, t('canvas.ruler'))).toBeUndefined();
+    expect(button(view, t('canvas.toolRuler'))).toBeUndefined();
   });
 
   it('shows a decimal distance as the catalogue formats it', async () => {
@@ -514,7 +514,8 @@ describe('the ruler (LIV-07, specs/06-grid-and-measurement.md §5, specs/04-live
       ruler: { shown: null, tool: { on: true, onToggle, onMeasure, onClear: vi.fn() } },
     });
     expect(stage.draggable()).toBe(false);
-    expect(button(view, t('canvas.ruler'))!.getAttribute('aria-pressed')).toBe('true');
+    // Measuring is in effect; the rail's Ruler button shows it too (the keyboard test below).
+    expect(viewport(view).dataset.rulerTool).toBe('on');
     expect(document.getElementById(viewport(view).getAttribute('aria-describedby')!)!.textContent).toBe(
       t('canvas.helpRuler'),
     );
@@ -544,8 +545,14 @@ describe('the ruler (LIV-07, specs/06-grid-and-measurement.md §5, specs/04-live
     const onToggle = vi.fn();
     const onClear = vi.fn();
     const tool = { on: false, onToggle, onMeasure, onClear };
-    const { view } = await draw({ grid: GRID, map: MAP, mode: 'dm', ruler: { shown: null, tool } });
-    expect(button(view, t('canvas.ruler'))!.getAttribute('aria-pressed')).toBe('false');
+    const { view } = await draw({
+      grid: GRID,
+      map: MAP,
+      mode: 'dm',
+      rail: { onSelect: vi.fn() },
+      ruler: { shown: null, tool },
+    });
+    expect(button(view, t('canvas.toolRuler'))!.getAttribute('aria-pressed')).toBe('false');
     press(viewport(view), 'm');
     expect(onToggle).toHaveBeenLastCalledWith(true);
     // While off, Enter measures nothing (and the arrows pan the view as ever).
@@ -640,8 +647,7 @@ describe('the ruler (LIV-07, specs/06-grid-and-measurement.md §5, specs/04-live
         camera: { centre_x: 0.5, centre_y: 0.5, width: 0.5, height: 0.5 },
         screen: null,
         offline: false,
-        steering: false,
-        onSteer: vi.fn(),
+        locked: false,
         onChange: vi.fn(),
       },
       ruler: { shown: null, tool: { on: true, onToggle: vi.fn(), onMeasure: vi.fn(), onClear: vi.fn() } },
@@ -676,6 +682,7 @@ describe('the ruler (LIV-07, specs/06-grid-and-measurement.md §5, specs/04-live
       z_order: 0,
       size: 'medium' as const,
       image_id: 'd'.repeat(64),
+      category: 'monster' as const,
     };
     const { stage } = await draw({
       grid: GRID,

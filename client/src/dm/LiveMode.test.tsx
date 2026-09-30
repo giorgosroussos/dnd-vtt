@@ -4,9 +4,24 @@ import Konva from 'konva';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandAck, LibraryAsset, Scene, SceneToken } from '@emberglass/shared';
 import { t } from '../ui/messages.js';
+import { RAIL_INSET_PX } from '../canvas/MapCanvas.js';
 import { CONNECTION_NOTICE_DELAY_MS } from './LiveBar.js';
 import { installCanvas2d, installImageLoading, installResizeObserver } from '../ui/testing/canvas2d.js';
-import { button, click, FakeServer, installDialog, settle, submit, type Reply } from '../ui/testing/fakeServer.js';
+import {
+  button,
+  click,
+  FakeServer,
+  installDialog,
+  liveText,
+  openSetup,
+  openSwitcher,
+  popover,
+  selectedTokenId,
+  settle,
+  submit,
+  tokenMenu,
+  type Reply,
+} from '../ui/testing/fakeServer.js';
 import { render, type Rendered } from '../ui/testing/render.js';
 import { Workspace } from './Workspace.js';
 
@@ -54,20 +69,25 @@ async function open(): Promise<HTMLElement> {
   await settle();
   await server.openSockets();
   const view = rendered.container;
+  // The session opened from the header's switcher, its scenes then in the scene list (UIX-01).
+  await openSwitcher(view);
   await click(button(view, 'Lost Mine'));
-  await click(button(view, 'One'));
+  await click(button(view, t('tree.openOf', { name: 'One' })));
   return view;
 }
 
 async function selectScene(view: HTMLElement, scene: Scene) {
-  await click(view.querySelector(`[data-item="${scene.id}"] [data-action="name"]`));
+  await click(view.querySelector(`[data-scene="${scene.id}"] .eg-scenes__select`));
 }
 
 const panel = (view: HTMLElement) => view.querySelector<HTMLElement>('.eg-scene')!;
 const mode = (view: HTMLElement) => panel(view).dataset.mode;
 const indicator = (view: HTMLElement) => view.querySelector('.eg-scene__canvas--live');
-const liveBar = (view: HTMLElement) =>
-  view.querySelector(`section[aria-label="${t('liveBar.label')}"] [role="status"]`)!.textContent;
+const liveBar = liveText;
+// The header's live indicator naming the live scene, as `liveText` reads it (UIX-01).
+const playersSee = (name: string) => `${t('liveBar.playersSee')} ${name}`;
+// The scene's name in the live indicator, which returns the canvas to the live scene (UIX-01).
+const showLiveButton = (view: HTMLElement) => view.querySelector<HTMLButtonElement>('.eg-live__show');
 const heading = (view: HTMLElement) => panel(view).querySelector('h1')!.textContent;
 const viewport = (view: HTMLElement) => view.querySelector<HTMLElement>('[role="application"]')!;
 const stage = () => Konva.stages.filter((each) => each.findOne('.tokens')).at(-1)!;
@@ -75,20 +95,25 @@ const drawn = () =>
   stage()
     .find<Konva.Label>('.token-label')
     .map((label) => label.findOne<Konva.Text>('Text')!.text());
-const tokenSelect = (view: HTMLElement) =>
-  [...view.querySelectorAll('select')].find((each) => each.labels?.[0]?.textContent === t('tokens.selected'))!;
+// Add token on the tool rail (UIX-01).
+const addButton = (view: HTMLElement) => button(view, t('canvas.toolAddToken'));
+/** A button of the selected token's popover by the start of its text: Hide, Reveal, Rename. */
+const popoverButton = (view: HTMLElement, text: string) =>
+  [...(popover(view)?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find((each) =>
+    each.textContent?.startsWith(text),
+  );
+/** Deletes the selected token from its popover's menu, confirming it. */
+async function deleteSelected(view: HTMLElement) {
+  const label = popover(view)!.querySelector('.eg-popover__name')!.textContent;
+  await tokenMenu(view, label, t('tokens.delete'));
+  await click(button(document.querySelector('dialog[open]')!, t('tokens.deleteDialog.confirm')));
+}
 const picker = () => document.querySelector<HTMLDialogElement>('dialog[open]')!;
 const tokenWrites = () => server.writes().filter((write) => /\/tokens(\/|$)/.test(write));
-const bar = (view: HTMLElement) => view.querySelector<HTMLElement>('.eg-tokens')!;
 const commands = () => server.sockets.flatMap((socket) => socket.commands());
 
 async function selectToken(view: HTMLElement, id: string) {
-  const select = tokenSelect(view);
-  act(() => {
-    select.value = id;
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-  });
-  await settle();
+  await click(view.querySelector(`[data-token="${id}"] .eg-token-row__select`));
 }
 
 function press(element: HTMLElement, key: string) {
@@ -126,7 +151,7 @@ describe('one canvas, prep mode and live mode (08 §2, Q-024)', () => {
     expect(panel(view).textContent).toContain(t('scene.live'));
     expect(viewport(view).getAttribute('aria-label')).toBe(t('canvas.labelLive', { name: 'Cave' }));
     expect(goLiveButton(view)).toBeUndefined();
-    expect(liveBar(view)).toBe(t('liveBar.live', { name: 'Cave' }));
+    expect(liveBar(view)).toBe(playersSee('Cave'));
     // The DM sees every token of the live scene, the hidden one included.
     expect(drawn().sort()).toEqual(['Goblin', 'Lurker']);
   });
@@ -170,11 +195,11 @@ describe('one canvas, prep mode and live mode (08 §2, Q-024)', () => {
     const view = await open();
     await selectScene(view, hall);
     expect(mode(view)).toBe('prep');
-    await click(button(view, t('liveBar.showLive')));
+    await click(showLiveButton(view));
     expect(heading(view)).toBe('Cave');
     expect(mode(view)).toBe('live');
     // Shown only when the canvas is not on the live scene already.
-    expect(view.textContent).not.toContain(t('liveBar.showLive'));
+    expect(showLiveButton(view)).toBeNull();
   });
 });
 
@@ -184,14 +209,14 @@ describe('the token controls in live mode send the live commands (04 §2, D-109,
     const view = await open();
     await selectScene(view, cave);
     // Place: the add flow, then Enter at the centre of the view.
-    await click(button(view, t('tokens.add')));
+    await click(addButton(view));
     await click(button(picker(), t('tokens.picker.chooseOf', { name: 'Goblin' })));
     press(viewport(view), 'Enter');
     await settle();
     const add = commands().at(-1)!;
     expect(add).toMatchObject({ type: 'token.add', payload: { scene_id: cave.id, asset_id: goblin.id } });
     const placed = server.sceneTokens.at(-1)!;
-    expect(tokenSelect(view).value).toBe(placed.id);
+    expect(selectedTokenId(view)).toBe(placed.id);
     expect(drawn()).toContain(placed.label);
     expect(view.querySelector('[role="status"].eg-scene__progress')?.textContent).toBe(
       t('tokens.placed', { label: placed.label }),
@@ -203,14 +228,13 @@ describe('the token controls in live mode send the live commands (04 §2, D-109,
     expect(commands().at(-1)).toEqual({ type: 'token.move', payload: { token_id: placed.id, x: x + 1, y } });
     expect(server.sceneTokens.at(-1)).toMatchObject({ x: x + 1, y });
     // Hide and reveal.
-    await click(button(bar(view), t('tokens.hide')));
+    await click(popoverButton(view, t('tokens.hide')));
     expect(commands().at(-1)).toEqual({ type: 'token.setVisibility', payload: { token_id: placed.id, hidden: true } });
     expect(server.sceneTokens.at(-1)!.hidden).toBe(true);
-    await click(button(bar(view), t('tokens.reveal')));
+    await click(popoverButton(view, t('tokens.reveal')));
     expect(commands().at(-1)).toEqual({ type: 'token.setVisibility', payload: { token_id: placed.id, hidden: false } });
     // Delete, after the confirmation.
-    await click(button(bar(view), t('tokens.delete')));
-    await click(button(picker(), t('tokens.deleteDialog.confirm')));
+    await deleteSelected(view);
     expect(commands().at(-1)).toEqual({ type: 'token.delete', payload: { token_id: placed.id } });
     expect(server.sceneTokens.some((each) => each.id === placed.id)).toBe(false);
     expect(drawn()).not.toContain(placed.label);
@@ -219,21 +243,38 @@ describe('the token controls in live mode send the live commands (04 §2, D-109,
     expect(server.calls.some((call) => call.path.endsWith('/tokens'))).toBe(false);
   });
 
-  it('offers no rename or stacking order in live mode, and both again in prep mode (04 §2)', async () => {
+  it('refuses rename and stacking order in live mode, saying why, and offers both again in prep mode (04 §2, D-139)', async () => {
     server.liveSceneId = cave.id;
     const view = await open();
     await selectScene(view, cave);
     await selectToken(view, caveGoblin.id);
-    expect(bar(view).textContent).toContain(t('tokens.hide'));
-    for (const key of ['tokens.rename', 'tokens.front', 'tokens.back'] as const) {
-      expect(bar(view).textContent).not.toContain(t(key));
+    expect(popoverButton(view, t('tokens.hide'))).toBeDefined();
+    const rename = () => button(popover(view)!, t('tokens.renameOf', { label: 'Goblin' }))!;
+    const menuItems = async () => {
+      await click(button(popover(view)!, t('tokens.moreOf', { label: 'Goblin' })));
+      const items = [...popover(view)!.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+      const state = (name: string) => items.find((item) => item.textContent?.startsWith(name))!;
+      return { front: state(t('tokens.front')), back: state(t('tokens.back')) };
+    };
+    // Kept in their places, refusing, with the reason (the popover's note and each item's).
+    expect(rename().getAttribute('aria-disabled')).toBe('true');
+    expect(popover(view)!.textContent).toContain(t('tokens.prepOnlyNote'));
+    let { front, back } = await menuItems();
+    for (const item of [front, back]) {
+      expect(item.getAttribute('aria-disabled')).toBe('true');
+      expect(item.textContent).toContain(t('tokens.prepOnly'));
     }
+    await click(front);
+    await click(rename());
+    expect(document.querySelector('dialog[open]')).toBeNull();
+    expect(commands().filter((command) => command.type.startsWith('token.'))).toEqual([]);
+
     await click(button(view, t('liveBar.blank')));
     await settle();
     await selectToken(view, caveGoblin.id);
-    for (const key of ['tokens.rename', 'tokens.front', 'tokens.back'] as const) {
-      expect(bar(view).textContent).toContain(t(key));
-    }
+    expect(rename().getAttribute('aria-disabled')).toBeNull();
+    ({ front, back } = await menuItems());
+    for (const item of [front, back]) expect(item.getAttribute('aria-disabled')).toBeNull();
   });
 
   it('shows a refused move where it was and says why', async () => {
@@ -260,7 +301,7 @@ describe('following another DM browser (G-018)', () => {
     act(() => {
       server.deliver('scene.snapshot', server.dmSnapshot());
     });
-    expect(liveBar(view)).toBe(t('liveBar.live', { name: 'Hall' }));
+    expect(liveBar(view)).toBe(playersSee('Hall'));
     server.liveSceneId = null;
     act(() => {
       server.deliver('scene.cleared', {});
@@ -293,13 +334,14 @@ describe('following another DM browser (G-018)', () => {
     });
     await settle();
     expect(mode(view)).toBe('prep');
-    expect(liveBar(view)).toBe(t('liveBar.live', { name: 'Hall' }));
+    expect(liveBar(view)).toBe(playersSee('Hall'));
   });
 
   it('a setup change saved in live mode reaches the canvas through the snapshot it causes (04 §10)', async () => {
     server.liveSceneId = cave.id;
     const view = await open();
     await selectScene(view, cave);
+    await openSetup(view);
     const box = panel(view).querySelector<HTMLInputElement>('input[type="checkbox"]')!;
     expect(box.checked).toBe(true);
     act(() => box.click());
@@ -364,7 +406,7 @@ describe('a live change shows at once and keeps the latest (review M5)', () => {
     await selectScene(view, cave);
     await selectToken(view, caveGoblin.id);
     const held = holdCommands();
-    await click(button(bar(view), t('tokens.hide')));
+    await click(popoverButton(view, t('tokens.hide')));
     expect(drawnToken(view, caveGoblin.id)?.hidden).toBe(true);
     await held.release({ error: { code: 'scene_not_live', message: 'test' } });
     expect(drawnToken(view, caveGoblin.id)?.hidden).toBe(false);
@@ -379,7 +421,7 @@ describe('focus after the live bar’s actions (08 §8, review M2)', () => {
     await goLive(view);
     expect(document.activeElement).toBe(button(view, t('liveBar.blank')));
     await selectScene(view, hall);
-    await click(button(view, t('liveBar.showLive')));
+    await click(showLiveButton(view));
     expect(heading(view)).toBe('Cave');
     expect(document.activeElement?.id).toBe('main');
     await click(button(view, t('liveBar.blank')));
@@ -387,9 +429,19 @@ describe('focus after the live bar’s actions (08 §8, review M2)', () => {
     expect(document.activeElement).toBe(goLiveButton(view));
   });
 
-  it('goes to Connect a screen after Blank TV when no scene is selected', async () => {
+  it('goes to Connect a screen after Go idle when no scene is selected', async () => {
     server.liveSceneId = cave.id;
     const view = await open();
+    // The scene on screen deleted, the live one left live: nothing is selected (03 §7).
+    await selectScene(view, hall);
+    await click(button(view, t('scenes.actionsOf', { name: 'Hall' })));
+    await click(
+      [...view.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(
+        (item) => item.textContent === t('tree.delete'),
+      ),
+    );
+    await click(button(document.querySelector('dialog[open]')!, t('delete.confirm')));
+    expect(heading(view)).toBe(t('workspace.noScene'));
     await click(button(view, t('liveBar.blank')));
     await settle();
     expect(document.activeElement).toBe(button(view, t('connect.open')));
@@ -402,7 +454,7 @@ describe('while the connection is down (review M3, M4)', () => {
     const view = await open();
     await selectScene(view, hall);
     expect(panel(view).querySelector('.eg-scene__mode')).toBeNull();
-    await click(button(view, t('liveBar.showLive')));
+    await click(showLiveButton(view));
     expect(panel(view).querySelector('.eg-scene__mode')?.textContent).toBe(t('scene.live'));
     expect(indicator(view)?.classList.contains('eg-scene__canvas--offline')).toBe(false);
     act(() => server.sockets[0]!.drop());
@@ -535,13 +587,12 @@ describe('Ctrl+Z in live mode undoes the last change on the live scene (04 §8, 
     const view = await open();
     await selectScene(view, cave);
     await selectToken(view, caveGoblin.id);
-    await click(button(bar(view), t('tokens.hide')));
-    await click(button(bar(view), t('tokens.delete')));
-    await click(button(picker(), t('tokens.deleteDialog.confirm')));
+    await click(popoverButton(view, t('tokens.hide')));
+    await deleteSelected(view);
     expect(drawn()).not.toContain('Goblin');
 
     // Focus on the token bar's Add button, not the canvas; Cmd+Z as on a Mac.
-    undoKey(button(bar(view), t('tokens.add'))!, { ctrlKey: false, metaKey: true });
+    undoKey(addButton(view)!, { ctrlKey: false, metaKey: true });
     await settle();
     expect(drawn()).toContain('Goblin');
     expect(server.sceneTokens.find((each) => each.id === caveGoblin.id)).toMatchObject({ hidden: true });
@@ -576,7 +627,7 @@ describe('Ctrl+Z in live mode undoes the last change on the live scene (04 §8, 
     undoKey(viewport(view), { altKey: true });
     undoKey(viewport(view), { key: 'y' });
     await selectToken(view, caveGoblin.id);
-    await click(button(bar(view), t('tokens.delete')));
+    await tokenMenu(view, 'Goblin', t('tokens.delete'));
     undoKey(picker());
     await settle();
     expect(undos()).toEqual([]);
@@ -611,11 +662,10 @@ describe('Ctrl+Z in live mode undoes the last change on the live scene (04 §8, 
       return status(view);
     };
     await selectToken(view, caveGoblin.id);
-    await click(button(bar(view), t('tokens.hide')));
+    await click(popoverButton(view, t('tokens.hide')));
     await selectToken(view, caveLurker.id);
-    await click(button(bar(view), t('tokens.delete')));
-    await click(button(picker(), t('tokens.deleteDialog.confirm')));
-    await click(button(view, t('tokens.add')));
+    await deleteSelected(view);
+    await click(addButton(view));
     await click(button(picker(), t('tokens.picker.chooseOf', { name: 'Goblin' })));
     press(viewport(view), 'Enter');
     await settle();
@@ -624,8 +674,8 @@ describe('Ctrl+Z in live mode undoes the last change on the live scene (04 §8, 
     expect(await undone()).toBe(t('scene.undoneRestoredHidden', { label: 'Lurker' }));
     expect(await undone()).toBe(t('scene.undoneShown', { label: 'Goblin' }));
     await selectToken(view, caveGoblin.id);
-    await click(button(bar(view), t('tokens.hide')));
-    await click(button(bar(view), t('tokens.reveal')));
+    await click(popoverButton(view, t('tokens.hide')));
+    await click(popoverButton(view, t('tokens.reveal')));
     // An ordinary reveal numbers the bare-named goblin (Q-096); undoing it hides it under that label.
     const label = server.sceneTokens.find((each) => each.id === caveGoblin.id)!.label;
     expect(await undone()).toBe(t('scene.undoneHidden', { label }));
@@ -702,6 +752,7 @@ describe('Ctrl+Z in live mode undoes the last change on the live scene (04 §8, 
     server.liveSceneId = cave.id;
     const view = await open();
     await selectScene(view, cave);
+    await openSetup(view);
     await click(button(view, t('calibration.open')));
     undoKey(viewport(view));
     undoKey(document.body);
@@ -713,7 +764,7 @@ describe('Ctrl+Z in live mode undoes the last change on the live scene (04 §8, 
     server.liveSceneId = cave.id;
     const view = await open();
     await selectScene(view, hall);
-    await click(button(view, t('liveBar.showLive')));
+    await click(showLiveButton(view));
     await selectToken(view, caveGoblin.id);
     press(viewport(view), 'ArrowRight');
     await settle();
@@ -760,8 +811,11 @@ describe('the TV frame steers the player camera (LIV-06; 04 §9, 08 §2, Q-080, 
       );
   const frameNode = () => stage().findOne<Konva.Rect>('.tv-frame');
   const handle = (corner: string) => stage().findOne<Konva.Rect>(`.tv-frame-handle-${corner}`)!;
-  const steerButton = (view: HTMLElement) => button(view, t('canvas.steerTv'));
-  const pressed = (view: HTMLElement) => steerButton(view)?.getAttribute('aria-pressed');
+  // The TV camera controls above the canvas (UIX-01, D-140).
+  const tvControls = (view: HTMLElement) =>
+    view.querySelector<HTMLElement>(`[role="group"][aria-label="${t('tvCamera.label')}"]`);
+  const lockButton = (view: HTMLElement) => button(view, t('tvCamera.lock'));
+  const pressed = (view: HTMLElement) => lockButton(view)?.getAttribute('aria-pressed');
 
   async function liveCave(): Promise<HTMLElement> {
     server.liveSceneId = cave.id;
@@ -792,7 +846,7 @@ describe('the TV frame steers the player camera (LIV-06; 04 §9, 08 §2, Q-080, 
     await selectScene(view, hall);
     expect(frameOnScreen(view)).toBeNull();
     expect(frameNode()).toBeUndefined();
-    expect(steerButton(view)).toBeUndefined();
+    expect(tvControls(view)).toBeNull();
     await selectScene(view, cave);
     await goLive(view);
     const frame = frameOnScreen(view)!;
@@ -804,8 +858,11 @@ describe('the TV frame steers the player camera (LIV-06; 04 §9, 08 §2, Q-080, 
     expect(frame.top).toBeGreaterThan(0);
     expect(frame.left + frame.width).toBeLessThan(VIEW.width);
     expect(frame.top + frame.height).toBeLessThan(VIEW.height);
-    expect(frame.left + frame.width / 2).toBeCloseTo(VIEW.width / 2, 6);
+    // Centred in the canvas beside the tool rail, whose strip a fitted view leaves free (UIX-01).
+    expect(frame.left).toBeGreaterThan(RAIL_INSET_PX);
+    expect(frame.left + frame.width / 2).toBeCloseTo((VIEW.width + RAIL_INSET_PX) / 2, 6);
     expect(frameNode()).toBeDefined();
+    expect(tvControls(view)).not.toBeNull();
     expect(pressed(view)).toBe('false');
     // Fit, by button or 0, fits the map and the frame again, as live mode opened.
     await click(button(view, t('canvas.zoomIn')));
@@ -819,11 +876,12 @@ describe('the TV frame steers the player camera (LIV-06; 04 §9, 08 §2, Q-080, 
     const view = await liveCave();
     await selectScene(view, hall);
     expect(frameOnScreen(view)).toBeNull();
-    await click(button(view, t('liveBar.showLive')));
+    await click(showLiveButton(view));
     expect(frameOnScreen(view)).not.toBeNull();
+    await openSetup(view);
     await click(button(view, t('calibration.open')));
     expect(frameOnScreen(view)).toBeNull();
-    expect(steerButton(view)).toBeUndefined();
+    expect(tvControls(view)).toBeNull();
     await click(button(view, t('calibration.cancel')));
     expect(frameOnScreen(view)).not.toBeNull();
     await click(button(view, t('liveBar.blank')));
@@ -923,80 +981,60 @@ describe('the TV frame steers the player camera (LIV-06; 04 §9, 08 §2, Q-080, 
     expect(cameras()).toEqual([]);
   });
 
-  it('is steered by keyboard: T or Steer the TV, then arrows, + and −, 0 and Escape, the DM’s view unchanged', async () => {
+  it('is steered by the TV camera buttons: Send my view, TV zoom in and out, and Fit map, the DM’s view unchanged', async () => {
     const view = await liveCave();
-    const before = dmCamera(view);
-    await click(steerButton(view));
-    expect(pressed(view)).toBe('true');
-    expect(viewport(view).dataset.tvSteering).toBe('on');
-    expect(view.querySelector('.eg-canvas__help')!.textContent).toBe(t('canvas.helpSteer'));
-    key(viewport(view), 'ArrowRight');
-    await settle();
+    // The DM zooms and pans their own view, which sends nothing (04 §9).
     key(viewport(view), '+');
-    await settle();
-    key(viewport(view), '0');
-    await settle();
-    const sent = cameras();
-    expect(sent).toHaveLength(3);
-    expect(sent[0]!.centre_x).toBeGreaterThan(0.5);
-    expect(sent[1]!.width).toBeLessThan(sent[0]!.width);
-    expect(sent[2]).toEqual({ centre_x: 0.5, centre_y: 0.5, width: 1, height: 1 });
-    expect(status(view)).toBe(t('scene.tvFitted'));
-    expect(dmCamera(view)).toEqual(before);
-    // 0 again changes nothing and sends nothing (review C-M2, U-M1).
-    key(viewport(view), '0');
-    await settle();
-    expect(cameras()).toHaveLength(3);
-    // The view's buttons steer the TV too while steering.
-    await click(button(view, t('canvas.tvZoomIn')));
-    expect(cameras()).toHaveLength(4);
-    key(viewport(view), 'Escape');
-    await settle();
-    expect(pressed(view)).toBe('false');
-    // Once steering stops, the keys move the DM's own view again and send nothing.
-    key(viewport(view), 'ArrowRight');
-    await settle();
-    expect(cameras()).toHaveLength(4);
-    expect(dmCamera(view).x).toBe(before.x - 64);
-    // T on the canvas turns steering on and off (review U-M5).
-    key(viewport(view), 't');
-    await settle();
-    expect(pressed(view)).toBe('true');
-    key(viewport(view), 'T');
-    await settle();
-    expect(pressed(view)).toBe('false');
-  });
-
-  it('sends one command for a held key, not one per repeat (review U-M1)', async () => {
-    const view = await liveCave();
-    key(viewport(view), 't');
-    await settle();
-    key(viewport(view), 'ArrowLeft');
-    for (let n = 0; n < 5; n++) key(viewport(view), 'ArrowLeft', { repeat: true });
-    await settle();
-    expect(cameras()).toHaveLength(1);
-  });
-
-  it('stops steering when a token is chosen, when placing starts, and when the scene leaves live mode (review U-M3, U-M4)', async () => {
-    const view = await liveCave();
-    key(viewport(view), 't');
-    await settle();
-    expect(pressed(view)).toBe('true');
-    // Choosing a token gives the arrow keys back to it.
-    await selectToken(view, caveGoblin.id);
-    expect(pressed(view)).toBe('false');
     key(viewport(view), 'ArrowRight');
     await settle();
     expect(cameras()).toEqual([]);
-    expect(commands().filter((each) => each.type === 'token.move')).toHaveLength(1);
-    // Blank TV and live again: steering starts off.
-    key(viewport(view), 't');
-    await settle();
+    const mine = dmCamera(view);
+    await click(button(view, t('tvCamera.sendView')));
+    // The TV now shows what the DM's view shows, in the TV's shape: the view's height, widened to 16:9.
+    const seen = { x: -mine.x / mine.scale, y: -mine.y / mine.scale, height: VIEW.height / mine.scale };
+    const width = seen.height * (16 / 9);
+    const [sent] = cameras();
+    expect(sent!.centre_x).toBeCloseTo((seen.x + VIEW.width / mine.scale / 2) / WORLD.width, 5);
+    expect(sent!.centre_y).toBeCloseTo((seen.y + seen.height / 2) / WORLD.height, 5);
+    expect(sent!.width).toBeCloseTo(width / WORLD.width, 5);
+    expect(sent!.height).toBeCloseTo(seen.height / WORLD.height, 5);
+    expect(status(view)).toBe(t('scene.tvSteered'));
+    await click(button(view, t('canvas.tvZoomIn')));
+    await click(button(view, t('canvas.tvZoomOut')));
+    const [, zoomedIn, zoomedOut] = cameras();
+    expect(zoomedIn!.width).toBeCloseTo(sent!.width / 1.25, 5);
+    expect(zoomedOut!.width).toBeCloseTo(sent!.width, 5);
+    await click(button(view, t('canvas.tvFit')));
+    expect(cameras().at(-1)).toEqual({ centre_x: 0.5, centre_y: 0.5, width: 1, height: 1 });
+    expect(status(view)).toBe(t('scene.tvFitted'));
+    // Fit again changes nothing and sends nothing (review C-M2, U-M1).
+    await click(button(view, t('canvas.tvFit')));
+    expect(cameras()).toHaveLength(4);
+    expect(dmCamera(view)).toEqual(mine);
+  });
+
+  it('while Lock TV camera is on, its buttons and the frame move nothing, and it stays on across scenes in this view (D-140)', async () => {
+    const view = await liveCave();
+    await click(lockButton(view));
     expect(pressed(view)).toBe('true');
-    await click(button(view, t('liveBar.blank')));
-    await settle();
-    await goLive(view);
+    expect(status(view)).toBe(t('tvCamera.locked'));
+    expect(viewport(view).dataset.tvLocked).toBe('on');
+    for (const name of [t('tvCamera.sendView'), t('canvas.tvFit'), t('canvas.tvZoomIn'), t('canvas.tvZoomOut')]) {
+      expect(button(view, name)!.getAttribute('aria-disabled'), name).toBe('true');
+      await click(button(view, name));
+    }
+    expect(frameNode()!.draggable()).toBe(false);
+    expect(stage().find('.tv-frame-handle')).toHaveLength(0);
+    expect(cameras()).toEqual([]);
+    // Kept by the workspace: another scene and back, still locked.
+    await selectScene(view, hall);
+    await selectScene(view, cave);
+    expect(pressed(view)).toBe('true');
+    await click(lockButton(view));
     expect(pressed(view)).toBe('false');
+    expect(frameNode()!.draggable()).toBe(true);
+    await click(button(view, t('canvas.tvZoomIn')));
+    expect(cameras()).toHaveLength(1);
   });
 
   it('while not connected, cannot be moved and says why without sending (review U-M2)', async () => {
@@ -1005,10 +1043,7 @@ describe('the TV frame steers the player camera (LIV-06; 04 §9, 08 §2, Q-080, 
     await settle();
     const before = frameOnScreen(view)!;
     expect(frameNode()!.draggable()).toBe(false);
-    key(viewport(view), 't');
-    await settle();
-    key(viewport(view), 'ArrowRight');
-    await settle();
+    await click(button(view, t('canvas.tvZoomIn')));
     expect(cameras()).toEqual([]);
     expect(status(view)).toBe(t('scene.tvOffline'));
     expect(frameOnScreen(view)).toEqual(before);
@@ -1041,7 +1076,7 @@ describe('the ruler (LIV-07, specs/06-grid-and-measurement.md §5, specs/04-live
     } | null;
     return drawn && { from: drawn.from, to: drawn.to, feet: drawn.feet };
   };
-  const rulerButton = (view: HTMLElement) => button(view, t('canvas.ruler'))!;
+  const rulerButton = (view: HTMLElement) => button(view, t('canvas.toolRuler'))!;
   const distance = (feet: number) => t('ruler.distance', { feet: String(feet) });
 
   /** Turns the ruler on, starts at the centre of the view and moves the end by the given arrows. */
@@ -1256,17 +1291,17 @@ describe('the ruler (LIV-07, specs/06-grid-and-measurement.md §5, specs/04-live
     expect(status(view)).toBe(t('scene.rulerOffline'));
   });
 
-  it('turns off when steering the TV, choosing a token or calibrating starts, and turning it on ends steering', async () => {
+  it('turns off when Select is chosen, a token is chosen or calibrating starts', async () => {
     server.liveSceneId = cave.id;
     const view = await open();
     await selectScene(view, cave);
     await click(rulerButton(view));
     expect(viewport(view).dataset.rulerTool).toBe('on');
-    await click(button(view, t('canvas.steerTv')));
+    expect(rulerButton(view).getAttribute('aria-pressed')).toBe('true');
+    // Select on the rail, or V, leaves the ruler (UIX-01).
+    await click(button(view, t('canvas.toolSelect')));
     expect(viewport(view).dataset.rulerTool).toBe('off');
-    expect(viewport(view).dataset.tvSteering).toBe('on');
     await click(rulerButton(view));
-    expect(viewport(view).dataset.tvSteering).toBe('off');
     // Choosing a token ends measuring and takes the measurement off the TV (review C-M1).
     press(viewport(view), 'Enter');
     await settle();
@@ -1279,6 +1314,7 @@ describe('the ruler (LIV-07, specs/06-grid-and-measurement.md §5, specs/04-live
     await click(rulerButton(view));
     press(viewport(view), 'Enter');
     await settle();
+    await openSetup(view);
     await click(button(view, t('calibration.open')));
     expect(server.ruler).toBeNull();
     expect(rulers().at(-1)?.type).toBe('ruler.clear');
@@ -1414,6 +1450,7 @@ describe('the ruler (LIV-07, specs/06-grid-and-measurement.md §5, specs/04-live
     await selectScene(view, cave);
     await measureByKeys(view, 'ArrowRight', 'ArrowRight', 'ArrowRight');
     expect(shown(view)?.feet).toBe(15);
+    await openSetup(view);
     const field = [...view.querySelectorAll('input')].find(
       (each) => each.labels?.[0]?.textContent === t('sceneGrid.feet'),
     )!;
@@ -1451,6 +1488,11 @@ describe('the ruler (LIV-07, specs/06-grid-and-measurement.md §5, specs/04-live
   describe('saving feet per square (review U-L1, C-L4)', () => {
     const feetField = (view: HTMLElement) =>
       [...view.querySelectorAll('input')].find((each) => each.labels?.[0]?.textContent === t('sceneGrid.feet'))!;
+    // The setup is behind Scene setup (UIX-01).
+    const openFeet = async (view: HTMLElement) => {
+      await openSetup(view);
+      return feetField(view);
+    };
     const typeInto = (field: HTMLInputElement, value: string) =>
       act(() => {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, value);
@@ -1461,7 +1503,7 @@ describe('the ruler (LIV-07, specs/06-grid-and-measurement.md §5, specs/04-live
     it('puts a value out of bounds back when focus leaves the field, and says so in the status line', async () => {
       const view = await open();
       await selectScene(view, cave);
-      const field = feetField(view);
+      const field = await openFeet(view);
       typeInto(field, '0');
       act(() => {
         field.focus();
@@ -1477,7 +1519,7 @@ describe('the ruler (LIV-07, specs/06-grid-and-measurement.md §5, specs/04-live
     it('sends one save for Enter then leaving the field', async () => {
       const view = await open();
       await selectScene(view, cave);
-      const field = feetField(view);
+      const field = await openFeet(view);
       typeInto(field, '10');
       act(() => {
         field.focus();
@@ -1491,7 +1533,7 @@ describe('the ruler (LIV-07, specs/06-grid-and-measurement.md §5, specs/04-live
     it('keeps what is typed while a save runs, and leaves Calibrate usable meanwhile', async () => {
       const view = await open();
       await selectScene(view, cave);
-      const field = feetField(view);
+      const field = await openFeet(view);
       let release: (() => void) | undefined;
       server.before = (call) =>
         call.method === 'PATCH' && !release
@@ -1501,6 +1543,7 @@ describe('the ruler (LIV-07, specs/06-grid-and-measurement.md §5, specs/04-live
       await submit(field.form);
       expect(release).toBeDefined();
       typeInto(field, '20');
+      await openSetup(view);
       await click(button(view, t('calibration.open')));
       expect(view.querySelector('.eg-calibration')).not.toBeNull();
       await act(async () => {
@@ -1514,7 +1557,7 @@ describe('the ruler (LIV-07, specs/06-grid-and-measurement.md §5, specs/04-live
     it('keeps the value typed during a save in the field once the save lands', async () => {
       const view = await open();
       await selectScene(view, cave);
-      const field = feetField(view);
+      const field = await openFeet(view);
       let release: (() => void) | undefined;
       server.before = (call) =>
         call.method === 'PATCH' && !release
@@ -1540,6 +1583,7 @@ describe('the ruler (LIV-07, specs/06-grid-and-measurement.md §5, specs/04-live
     await selectScene(view, cave);
     await measureByKeys(view, 'ArrowRight', 'ArrowRight');
     expect(shown(view)?.feet).toBe(10);
+    await openSetup(view);
     const field = [...view.querySelectorAll('input')].find(
       (each) => each.labels?.[0]?.textContent === t('sceneGrid.feet'),
     )!;

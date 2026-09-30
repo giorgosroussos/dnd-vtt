@@ -127,10 +127,10 @@ describe('the view shells', () => {
   it.each([
     ['the player view', PlayerView],
     ['its fallback', IdleScreen],
-  ])('%s has no control and shows the product name only', (_name, View) => {
+  ])('%s has no control and shows the idle screen only', (_name, View) => {
     rendered = render(View);
     expect(rendered.container.querySelectorAll(FOCUSABLE)).toHaveLength(0);
-    expect(rendered.container.textContent).toBe(t('app.name'));
+    expect(rendered.container.textContent).toBe(t('app.name') + t('idle.line'));
   });
 
   it('each path loads its own view inside an error boundary', async () => {

@@ -17,7 +17,7 @@ import { readSettings, setLiveScene } from '../db/settings.js';
 import { createToken, deleteToken, readToken, restoreToken, updateToken } from '../db/tokens.js';
 import { PlayerCameraState, sameCamera } from './camera.js';
 import { RulerState, samePath } from './ruler.js';
-import { inverseOf, UndoHistory, type Inverse } from './undo.js';
+import { inverseOf, inverseOfInverse, UndoHistory, type Inverse } from './undo.js';
 
 // The live commands (LIV-02; specs/04-live-sync.md §2, specs/05-assets-and-images.md §3, §4,
 // Q-014, Q-092, D-064). Each is applied to the database in one transaction, last write wins: no
@@ -171,8 +171,24 @@ export function createLiveCommands(
   const apply = (command: CommandEnvelope, sender?: string): LiveResult => {
     switch (command.type) {
       case 'undo': {
-        const inverse = history.pop(liveSceneId());
-        return inverse === undefined ? [] : applyInverse(db, inverse);
+        const live = liveSceneId();
+        const inverse = history.pop(live);
+        if (inverse === undefined) return [];
+        const result = applyInverse(db, inverse);
+        const redo = Array.isArray(result) ? inverseOfInverse(inverse, result) : undefined;
+        if (redo !== undefined && live !== null) history.recordRedo(live, redo);
+        return result;
+      }
+      case 'redo': {
+        // As undo: the most recent undone command applied again through the ordinary path, its inverse
+        // back in the history (UIX-01, specs/04-live-sync.md §8).
+        const live = liveSceneId();
+        const redo = history.popRedo(live);
+        if (redo === undefined) return [];
+        const result = applyInverse(db, redo);
+        const inverse = Array.isArray(result) ? inverseOfInverse(redo, result) : undefined;
+        if (inverse !== undefined && live !== null) history.record(live, inverse, true);
+        return result;
       }
       case 'scene.activate':
       case 'scene.deactivate': {

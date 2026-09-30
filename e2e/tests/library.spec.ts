@@ -1,5 +1,6 @@
 import { writeFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
+import { openLibrary } from './canvas-view.js';
 import { openWorkspace } from './dm.js';
 import { solidPng } from './png.js';
 
@@ -8,7 +9,8 @@ import { solidPng } from './png.js';
 // asset is created from a generated image in one action, found by search and by
 // tag, edited and deleted.
 
-const library = (page: Page) => page.getByRole('complementary', { name: 'Asset library' });
+// The right-hand panel's Library tab since the redesign (UIX-01).
+const library = (page: Page) => page.getByRole('tabpanel', { name: 'Library' });
 
 test('the DM creates an asset with its image, finds it, edits it and deletes it', async ({ page }) => {
   const name = `Library goblin ${Date.now()}`;
@@ -16,6 +18,7 @@ test('the DM creates an asset with its image, finds it, edits it and deletes it'
   await expect(page.getByRole('region', { name: 'Live scene' })).toContainText(
     'Nothing is live. The TV shows the idle screen.',
   );
+  await openLibrary(page);
 
   await library(page).getByRole('button', { name: 'New asset' }).click();
   const dialog = page.getByRole('dialog', { name: 'New asset' });
@@ -65,6 +68,7 @@ test('the DM creates an asset with its image, finds it, edits it and deletes it'
 
 test('a file over the upload limit is refused before it is sent', async ({ page }) => {
   await openWorkspace(page);
+  await openLibrary(page);
   const uploads: string[] = [];
   page.on('request', (request) => {
     if (request.url().endsWith('/api/images')) uploads.push(request.method());

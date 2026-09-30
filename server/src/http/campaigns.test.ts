@@ -386,6 +386,29 @@ describe('robustness of the order and idempotency (SRV-03 review)', () => {
   });
 });
 
+describe('the scene list summary (UIX-01, specs/08-ux-journeys.md §11)', () => {
+  it('counts each scene’s tokens and hidden tokens, in the session’s scene order, an empty scene included', async () => {
+    const session = await newSession((await newCampaign()).id);
+    const cellar = await newScene(session.id, 'Cellar');
+    const road = await newScene(session.id, 'Road');
+    const tavern = await newScene(session.id, 'Tavern');
+    const asset = insertAsset();
+    insertTokens(cellar.id, asset, 5);
+    insertTokens(tavern.id, asset, 2);
+    ok(await put(`/api/sessions/${session.id}/scenes/order`, { ids: [tavern.id, cellar.id, road.id] }));
+    // insertTokens hides every second token: two of five, one of two.
+    expect(ok(await get(`/api/sessions/${session.id}/scenes/summary`))).toEqual([
+      { id: tavern.id, tokens: 2, hidden: 1 },
+      { id: cellar.id, tokens: 5, hidden: 2 },
+      { id: road.id, tokens: 0, hidden: 0 },
+    ]);
+  });
+
+  it('answers 404 for an unknown session', async () => {
+    expectFailure(await get(`/api/sessions/${randomUUID()}/scenes/summary`), 404, 'not_found');
+  });
+});
+
 describe('the grid of a new scene (specs/03-domain-model.md §5, §6)', () => {
   it('copies the grid preset of its map image', async () => {
     const session = await newSession((await newCampaign()).id);
@@ -659,6 +682,7 @@ describe('access and queries (specs/02-architecture.md §5, specs/07-security-an
     'GET /api/sessions/:id/scenes',
     'POST /api/sessions/:id/scenes',
     'PUT /api/sessions/:id/scenes/order',
+    'GET /api/sessions/:id/scenes/summary',
     'GET /api/scenes/:id',
     'PATCH /api/scenes/:id',
     'DELETE /api/scenes/:id',

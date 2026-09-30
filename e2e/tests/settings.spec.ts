@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { selectScene, viewport } from './canvas-view.js';
+import { openSetup, selectScene, viewport } from './canvas-view.js';
 import { openWorkspace, seedCampaign } from './dm.js';
 import { solidPng } from './png.js';
 
@@ -12,14 +12,15 @@ import { solidPng } from './png.js';
 const MB = 1024 * 1024;
 const player = (page: Page) => page.locator('main[data-view="player"]');
 const tvCanvas = (page: Page) => page.locator('main[data-view="player"] .eg-canvas--player');
-const panel = (page: Page) => page.locator('main .eg-scene');
+const panel = (page: Page) => page.locator('main.eg-scene');
 const liveBar = (page: Page) => page.getByRole('region', { name: 'Live scene' });
 const feetOn = async (page: Page): Promise<number | undefined> =>
   (JSON.parse((await tvCanvas(page).getAttribute('data-ruler')) ?? 'null') as { feet: number } | null)?.feet;
 
 /** Opens Settings from the keyboard, runs `change` there, saves with Enter and closes with Escape. */
 async function saveSettings(dm: Page, change: (dialog: ReturnType<Page['getByRole']>) => Promise<void>) {
-  const open = liveBar(dm).getByRole('button', { name: 'Settings' });
+  // In the header, beside the screens counter (UIX-01).
+  const open = dm.getByRole('banner').getByRole('button', { name: 'Settings', exact: true });
   await open.focus();
   await dm.keyboard.press('Enter');
   const dialog = dm.getByRole('dialog', { name: 'Settings' });
@@ -42,7 +43,7 @@ test('settings saved in the DM view take effect with no restart: the upload limi
   const tv = await playerContext.newPage();
   await openWorkspace(dm);
 
-  // A long live scene name: at 1,024 px the live bar still keeps one line (review U-M4).
+  // A long live scene name: at 1,024 px the live indicator still keeps one line (review U-M4).
   await dm.setViewportSize({ width: 1024, height: 700 });
   const names = {
     campaign: `Settings REL-01 ${Date.now()}`,
@@ -73,6 +74,7 @@ test('settings saved in the DM view take effect with no restart: the upload limi
       await dm.keyboard.press('Enter');
     });
     await selectScene(dm, names);
+    await openSetup(dm);
     await dm.getByLabel('Map image: PNG, JPEG or WebP').setInputFiles({
       name: 'big.png',
       mimeType: 'image/png',
@@ -97,12 +99,12 @@ test('settings saved in the DM view take effect with no restart: the upload limi
       .click();
     await expect(panel(dm)).toHaveAttribute('data-mode', 'live');
     await expect(player(tv)).toHaveAttribute('data-scene', 'live');
-    await panel(dm).getByRole('button', { name: 'Ruler', exact: true }).click();
+    await panel(dm).getByRole('button', { name: 'Ruler, M' }).click();
     await viewport(dm).focus();
     for (const key of ['Enter', 'ArrowRight', 'ArrowDown', 'ArrowRight', 'ArrowDown']) await dm.keyboard.press(key);
     // Two diagonals: 10 ft by the PHB rule.
     await expect.poll(() => feetOn(tv)).toBe(10);
-    // The live bar keeps one line with the long name and all its buttons.
+    // The header's live indicator keeps one line with the long name and its buttons.
     expect((await liveBar(dm).boundingBox())!.height).toBeLessThanOrEqual(42);
     await saveSettings(dm, async (dialog) => {
       // Tab to the rule, arrow to DMG, back to a text field and Enter.

@@ -343,6 +343,7 @@ describe('snapshots for each role (specs/04-live-sync.md §3, §4, §5)', () => 
         image_id: live.goblin.image_id,
         z_order: 0,
         label: 'Goblin 1',
+        category: live.goblin.category,
       },
       {
         id: live.visible[1]!.id,
@@ -352,14 +353,17 @@ describe('snapshots for each role (specs/04-live-sync.md §3, §4, §5)', () => 
         image_id: live.goblin.image_id,
         z_order: 1,
         label: 'Goblin 2',
+        category: live.goblin.category,
       },
     ]);
     for (const token of tokens)
       expect(Object.keys(token).sort()).toEqual(Object.keys(PlayerTokenSchema.properties).sort());
 
     // Nothing from which the hidden token can be learnt: no id, asset, image, name or notes;
-    // nothing of the scene record, the session or the campaign; no asset of any token.
-    const text = JSON.stringify(payload);
+    // nothing of the scene record but its name, which the TV shows (UIX-01, specs/04-live-sync.md §4);
+    // nothing of the session or the campaign; no asset of any token.
+    expect(snapshot.scene!.name).toBe('Lair of the lurker');
+    const text = JSON.stringify({ ...payload, scene: { ...snapshot.scene, name: undefined } });
     for (const secret of [
       live.hidden.id,
       live.lurker.id,
@@ -369,7 +373,6 @@ describe('snapshots for each role (specs/04-live-sync.md §3, §4, §5)', () => 
       live.goblin.id,
       live.scene.id,
       live.scene.session_id,
-      'Lair of the lurker',
       'Night one',
       'Secret campaign',
       '"hidden"',

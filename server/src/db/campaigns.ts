@@ -8,6 +8,7 @@ import {
   type Grid,
   type SceneGridUpdate,
   type Scene,
+  type SceneSummary,
   type Session,
 } from '@emberglass/shared';
 import { deleteUnreferencedImages, PRESET_COLUMNS, toPreset, updateGridPreset, type PresetRow } from './images.js';
@@ -200,6 +201,17 @@ export function listScenes(db: Database.Database, sessionId: string): Scene[] {
     .prepare(`SELECT ${SCENE_COLUMNS} FROM scene WHERE session_id = ? ORDER BY "order"`)
     .all(sessionId) as SceneRow[];
   return rows.map(toScene);
+}
+
+/** Each scene of a session with how many tokens it holds and how many are hidden, in scene order (UIX-01). */
+export function listSceneSummaries(db: Database.Database, sessionId: string): SceneSummary[] {
+  return db
+    .prepare(
+      `SELECT scene.id, count(token.id) AS tokens, coalesce(sum(token.hidden), 0) AS hidden
+         FROM scene LEFT JOIN token ON token.scene_id = scene.id
+        WHERE scene.session_id = ? GROUP BY scene.id ORDER BY scene."order"`,
+    )
+    .all(sessionId) as SceneSummary[];
 }
 
 export function readScene(db: Database.Database, id: string): Scene | undefined {

@@ -70,6 +70,7 @@ export const COMMAND_TYPES = [
   'ruler.update',
   'ruler.clear',
   'undo',
+  'redo',
 ] as const;
 
 // The events of specs/04-live-sync.md §3, exactly.
@@ -82,6 +83,7 @@ export const EVENT_TYPES = [
   'camera.player',
   'ruler.shown',
   'ruler.cleared',
+  'history.changed',
 ] as const;
 
 export type CommandType = (typeof COMMAND_TYPES)[number];
@@ -149,6 +151,9 @@ export const PlayerTokenSchema = Type.Object(
     // The rank among the scene's visible tokens, bottom first, from 0.
     z_order: Type.Integer({ minimum: 0 }),
     label: TokenSchema.properties.label,
+    // What the token's ring is coloured by on the TV (UIX-01, specs/08-ux-journeys.md §11): what players
+    // already see of a visible token, never anything of a hidden one.
+    category: SceneTokenSchema.properties.asset.properties.category,
   },
   strict,
 );
@@ -205,6 +210,8 @@ export type Measurement = Static<typeof MeasurementSchema>;
 
 export const PlayerLiveSceneSchema = Type.Object(
   {
+    // The live scene's name, shown at the bottom left of the TV (UIX-01, specs/08-ux-journeys.md §11).
+    name: SceneSchema.properties.name,
     map: Type.Union([PlayerMapSchema, Type.Null()]),
     // Needed even when players do not see the grid: tokens are placed in grid units.
     grid: GridSchema,
@@ -216,6 +223,11 @@ export const PlayerLiveSceneSchema = Type.Object(
   strict,
 );
 
+// Whether `undo` and `redo` would change anything on the live scene (UIX-01, specs/04-live-sync.md §8):
+// what the DM view's Undo and Redo buttons show. The DM room's only.
+export const UndoStateSchema = Type.Object({ can_undo: Type.Boolean(), can_redo: Type.Boolean() }, strict);
+export type UndoState = Static<typeof UndoStateSchema>;
+
 export const DmLiveSceneSchema = Type.Object(
   {
     scene: SceneSchema,
@@ -225,6 +237,7 @@ export const DmLiveSceneSchema = Type.Object(
     // The screen the TV frame follows, or null while no player view has reported one.
     screen: Type.Union([ScreenSchema, Type.Null()]),
     ruler: Type.Union([MeasurementSchema, Type.Null()]),
+    history: UndoStateSchema,
   },
   strict,
 );
@@ -281,6 +294,7 @@ export const TokenDeletePayloadSchema = Type.Object({ token_id: UuidSchema }, st
 export const SceneActivatePayloadSchema = Type.Object({ scene_id: UuidSchema }, strict);
 export const SceneDeactivatePayloadSchema = Type.Object({}, strict);
 export const UndoPayloadSchema = Type.Object({}, strict);
+export const RedoPayloadSchema = Type.Object({}, strict);
 export const CameraSetPlayerPayloadSchema = Type.Object({ scene_id: UuidSchema, camera: PlayerCameraSchema }, strict);
 export const RulerUpdatePayloadSchema = Type.Object(
   { scene_id: UuidSchema, from: RulerSquareSchema, to: RulerSquareSchema },
@@ -300,6 +314,7 @@ export const LIVE_COMMAND_PAYLOAD_SCHEMAS = {
   'ruler.update': RulerUpdatePayloadSchema,
   'ruler.clear': RulerClearPayloadSchema,
   undo: UndoPayloadSchema,
+  redo: RedoPayloadSchema,
 } as const satisfies Partial<Record<CommandType, object>>;
 
 export type TokenAddPayload = Static<typeof TokenAddPayloadSchema>;
@@ -309,6 +324,7 @@ export type TokenDeletePayload = Static<typeof TokenDeletePayloadSchema>;
 export type SceneActivatePayload = Static<typeof SceneActivatePayloadSchema>;
 export type SceneDeactivatePayload = Static<typeof SceneDeactivatePayloadSchema>;
 export type UndoPayload = Static<typeof UndoPayloadSchema>;
+export type RedoPayload = Static<typeof RedoPayloadSchema>;
 export type CameraSetPlayerPayload = Static<typeof CameraSetPlayerPayloadSchema>;
 export type RulerUpdatePayload = Static<typeof RulerUpdatePayloadSchema>;
 export type RulerClearPayload = Static<typeof RulerClearPayloadSchema>;
@@ -347,6 +363,9 @@ export const DmCameraPayloadSchema = Type.Object(
 export const RulerShownPayloadSchema = Type.Object({ ruler: MeasurementSchema }, strict);
 export const RulerClearedPayloadSchema = Type.Object({}, strict);
 
+// `history.changed` (UIX-01): the DM room's only. Players never learn anything of the undo history.
+export const HistoryChangedPayloadSchema = UndoStateSchema;
+
 export type DmTokenEventPayload = Static<typeof DmTokenEventPayloadSchema>;
 export type TokenRemovedPayload = Static<typeof TokenRemovedPayloadSchema>;
 export type PlayerTokenAddedPayload = Static<typeof PlayerTokenAddedPayloadSchema>;
@@ -356,6 +375,7 @@ export type PlayerCameraPayload = Static<typeof PlayerCameraPayloadSchema>;
 export type DmCameraPayload = Static<typeof DmCameraPayloadSchema>;
 export type RulerShownPayload = Static<typeof RulerShownPayloadSchema>;
 export type RulerClearedPayload = Static<typeof RulerClearedPayloadSchema>;
+export type HistoryChangedPayload = Static<typeof HistoryChangedPayloadSchema>;
 
 /** Every event of the dm room with its payload. */
 export type DmEvent =
@@ -365,7 +385,8 @@ export type DmEvent =
   | EventEnvelope<'scene.cleared', SceneClearedPayload>
   | EventEnvelope<'camera.player', DmCameraPayload>
   | EventEnvelope<'ruler.shown', RulerShownPayload>
-  | EventEnvelope<'ruler.cleared', RulerClearedPayload>;
+  | EventEnvelope<'ruler.cleared', RulerClearedPayload>
+  | EventEnvelope<'history.changed', HistoryChangedPayload>;
 
 /** Every event of the players room with its payload: nothing here names a hidden token. */
 export type PlayerEvent =

@@ -88,11 +88,12 @@ describe('snapshot payloads (specs/04-live-sync.md §4, LIV-01)', () => {
     image_id: 'a'.repeat(64),
     z_order: 0,
     label: 'Goblin 1',
+    category: 'monster',
   };
 
-  it('gives a player token exactly the rendering fields: id, position, size, image, stacking order and label', () => {
+  it('gives a player token exactly the rendering fields: id, position, size, image, stacking order, label and category', () => {
     expect(Object.keys(PlayerTokenSchema.properties).sort()).toEqual(
-      ['id', 'image_id', 'label', 'size', 'x', 'y', 'z_order'].sort(),
+      ['category', 'id', 'image_id', 'label', 'size', 'x', 'y', 'z_order'].sort(),
     );
     expect(Value.Check(PlayerTokenSchema, token)).toBe(true);
   });
@@ -115,8 +116,15 @@ describe('snapshot payloads (specs/04-live-sync.md §4, LIV-01)', () => {
     expect(Value.Check(PlayerTokenSchema, { ...token, z_order: 0.5 })).toBe(false);
   });
 
-  it('gives players no scene id or name and only the display version of the map', () => {
-    expect(Object.keys(PlayerLiveSceneSchema.properties).sort()).toEqual(['camera', 'grid', 'map', 'ruler', 'tokens']);
+  it('gives players no scene id, the name the TV shows (UIX-01), and only the display version of the map', () => {
+    expect(Object.keys(PlayerLiveSceneSchema.properties).sort()).toEqual([
+      'camera',
+      'grid',
+      'map',
+      'name',
+      'ruler',
+      'tokens',
+    ]);
     // A measurement is two squares and a distance: no scene, no token (LIV-07).
     expect(Object.keys(MeasurementSchema.properties).sort()).toEqual(['feet', 'from', 'to']);
     // The players' camera is the rectangle alone: no screen of another viewer (D-119).
@@ -149,7 +157,7 @@ describe('live command and event payloads (specs/04-live-sync.md §2, §3, §4, 
   };
   const id = '00000000-0000-4000-8000-000000000001';
 
-  it('defines a payload for every command of specs/04-live-sync.md §2, LIV-07 the last', () => {
+  it('defines a payload for every command of specs/04-live-sync.md §2, redo (UIX-01) the last', () => {
     expect(Object.keys(LIVE_COMMAND_PAYLOAD_SCHEMAS).sort()).toEqual([...COMMAND_TYPES].sort());
     expect(Object.keys(LIVE_COMMAND_PAYLOAD_SCHEMAS).sort()).toEqual(
       [
@@ -163,6 +171,7 @@ describe('live command and event payloads (specs/04-live-sync.md §2, §3, §4, 
         'token.move',
         'token.setVisibility',
         'undo',
+        'redo',
       ].sort(),
     );
     for (const type of Object.keys(LIVE_COMMAND_PAYLOAD_SCHEMAS)) expect(COMMAND_TYPES).toContain(type);

@@ -129,7 +129,7 @@ export async function buildApp({
   registerCampaigns(app, db, removeImages, live.refresh);
   registerAssets(app, db, removeImages, live.refresh);
   registerTokens(app, db);
-  registerConnect(app, networkInterfaces);
+  registerConnect(app, networkInterfaces, () => live.count('players'));
   const regenerator = createDisplayRegenerator({ db, imagesDir, logger, commit: live.refresh });
   // Before any onClose hook: the server closes the database in one registered after this (review C-M2).
   app.addHook('preClose', () => regenerator.stop());

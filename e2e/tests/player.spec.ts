@@ -104,7 +104,7 @@ test('a player context draws the scene a DM context activates, visible tokens on
   try {
     await tv.goto('/');
     await expect(player(tv)).toHaveAttribute('data-scene', 'idle');
-    await expect(player(tv)).toHaveText('Emberglass');
+    await expect(player(tv)).toHaveText(/^Emberglass\s*The table is set\. Waiting for the Dungeon Master\.$/);
 
     // Activation: the map fitted, the visible tokens with their labels, no hidden one.
     expect(await commandFromPage(dm, 'scene.activate', { scene_id: scene.id })).toEqual({ ok: true });
@@ -175,7 +175,7 @@ test('a player context draws the scene a DM context activates, visible tokens on
     // Deactivating shows the idle screen again.
     expect(await commandFromPage(dm, 'scene.deactivate', {})).toEqual({ ok: true });
     await expect(player(tv)).toHaveAttribute('data-scene', 'idle');
-    await expect(player(tv)).toHaveText('Emberglass');
+    await expect(player(tv)).toHaveText(/^Emberglass\s*The table is set\. Waiting for the Dungeon Master\.$/);
 
     // Only display versions, and never the image of a token while hidden: the wraith's image was
     // fetched only once it was revealed, which the socket frames show came first.
@@ -186,8 +186,11 @@ test('a player context draws the scene a DM context activates, visible tokens on
       0,
       frames.findIndex((frame) => frame.includes(wraithToken.id)),
     );
+    // The live scene's name reaches the TV only as its snapshots' `name`, which the TV shows (UIX-01).
+    const heard = beforeReveal.join('\n');
+    expect(heard).toContain('"name":"Crypt of secrets"');
     for (const secret of [wraithToken.id, wraith.image_id, 'Wraith', scene.id, 'Crypt of secrets']) {
-      expect(beforeReveal.join('\n'), secret).not.toContain(secret);
+      expect(heard.replaceAll(/"name":"[^"]*"/g, ''), secret).not.toContain(secret);
     }
     // No control on the TV at any point.
     await expect(tv.locator('button, a[href], input, [tabindex]')).toHaveCount(0);
@@ -257,7 +260,7 @@ test('the player view keeps the idle look when its code cannot load, and comes b
   await page.goto('/');
   const boot = page.locator('main[data-view="boot"]');
   await expect(boot).toHaveAttribute('data-boot', 'failed');
-  await expect(boot).toHaveText('Emberglass');
+  await expect(boot).toHaveText(/^Emberglass\s*The table is set\. Waiting for the Dungeon Master\.$/);
   await expect(page.locator('button, a[href], input, [tabindex]')).toHaveCount(0);
   // The server is unreachable for one of the TV's checks, as while it restarts (D-114).
   const isPage = (url: URL) => url.pathname === '/';

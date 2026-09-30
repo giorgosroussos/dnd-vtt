@@ -2,7 +2,7 @@ import { writeFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import { contrastFailures } from './contrast.js';
 import { openWorkspace, seedCampaign } from './dm.js';
-import { cameraOf, drawnAt, nameButton, near, selectScene, viewport } from './canvas-view.js';
+import { cameraOf, drawnAt, near, openSetup, sceneRow, selectScene, viewport } from './canvas-view.js';
 import { solidPng } from './png.js';
 
 // The canvas and the grid overlay against the real server (PRP-02, specs/08-ux-journeys.md §3,
@@ -59,7 +59,8 @@ test('the DM attaches a map, sees it with the overlay, hides the grid for player
   expect((await drawnAt(page, 64, 32, 1)).grid).toBeGreaterThan(40);
   expect((await drawnAt(page, 96, 32)).grid).toBe(0);
 
-  // Attach a generated map: uploaded and set on the scene in one action (G-016).
+  // Attach a generated map: uploaded and set on the scene in one action (G-016), in the scene's setup.
+  await openSetup(page);
   await page.getByLabel('Map image: PNG, JPEG or WebP').setInputFiles({
     name: 'cave.png',
     mimeType: 'image/png',
@@ -90,7 +91,7 @@ test('the DM attaches a map, sees it with the overlay, hides the grid for player
   const zoomed = await cameraOf(page);
   await page.keyboard.press('ArrowLeft');
   await expect.poll(async () => (await cameraOf(page)).x).toBeGreaterThan(zoomed.x);
-  await page.getByRole('button', { name: 'Fit map' }).click();
+  await page.getByRole('button', { name: 'Fit map', exact: true }).click();
   await expect.poll(() => cameraOf(page)).toEqual(fitted);
 
   // The wheel zooms about the pointer: the world point under it stays under it. The stage
@@ -117,6 +118,7 @@ test('the DM attaches a map, sees it with the overlay, hides the grid for player
   // Reload: the map and the players' grid setting were saved.
   await page.reload();
   await selectScene(page, names);
+  await openSetup(page);
   await expect(page.getByRole('button', { name: 'Replace map' })).toBeVisible();
   await expect(page.getByLabel('Players see the grid')).not.toBeChecked();
   await expect(viewport(page)).toHaveAttribute('data-grid', 'faint');
@@ -124,14 +126,14 @@ test('the DM attaches a map, sees it with the overlay, hides the grid for player
     .poll(async () => near((await drawnAt(page, SQUARE * 4.5, SQUARE * 3.5)).map, [...MAP_COLOUR, 255]))
     .toBe(true);
 
-  // Only the display version of this map was ever requested (specs/07-security-and-access.md §5);
-  // other specs' thumbnails, if any, are no concern of this one.
+  // The canvas asked only for the display version of this map (specs/07-security-and-access.md §5), and the
+  // scene list for its thumbnail (UIX-01); never the original, which only calibration's magnifier loads.
   const { map_image_id: mapId } = (await (await page.request.get(`/api/scenes/${names.id}`)).json()) as {
     map_image_id: string;
   };
   const ofMap = imageRequests.filter((path) => path.startsWith(`/images/${mapId}/`));
   expect(ofMap.length).toBeGreaterThan(0);
-  expect(new Set(ofMap)).toEqual(new Set([`/images/${mapId}/display`]));
+  expect(new Set(ofMap)).toEqual(new Set([`/images/${mapId}/display`, `/images/${mapId}/thumbnail`]));
   expect(elsewhere).toEqual([]);
 });
 
@@ -148,6 +150,7 @@ test('a map over the upload limit is refused before it is sent', async ({ page }
   // Playwright passes no buffer over 50 MB.
   const huge = test.info().outputPath('huge-map.png');
   writeFileSync(huge, Buffer.alloc(51 * 1024 * 1024));
+  await openSetup(page);
   await page.getByLabel('Map image: PNG, JPEG or WebP').setInputFiles(huge);
   await expect(page.locator('main')).toContainText('This file is 51 MB; the upload limit is 50 MB.');
   await page.getByRole('button', { name: 'Attach map' }).click();
@@ -162,17 +165,20 @@ test('the canvas of a selected scene is reached, shown and operated by keyboard 
   const names = await seedScene(page, 'Canvas keys');
   await page.reload();
   await selectScene(page, names);
+  const setup = page.getByRole('button', { name: 'Scene setup' });
   const controls = [
+    setup,
     page.getByLabel('Map image: PNG, JPEG or WebP'),
     page.getByRole('button', { name: 'Attach map' }),
     page.getByLabel('Players see the grid'),
-    page.getByRole('button', { name: 'Zoom in' }),
-    page.getByRole('button', { name: 'Zoom out' }),
-    page.getByRole('button', { name: 'Fit map' }),
     viewport(page),
+    page.getByRole('button', { name: 'Zoom out' }),
+    page.getByRole('button', { name: 'Zoom in' }),
+    page.getByRole('button', { name: 'Fit map', exact: true }),
   ];
-  // Tab from the scene's own name in the tree reaches each control in order, each with a ring.
-  await nameButton(page, names.scene).focus();
+  // Tab from the scene's row in the scene list reaches each control in order, each with a ring; Enter on
+  // Scene setup opens the setup the next controls are in (UIX-01).
+  await sceneRow(page, names.scene).focus();
   for (const control of controls) {
     for (let presses = 0; presses < 40; presses++) {
       if (await control.evaluate((element) => element === document.activeElement)) break;
@@ -184,15 +190,17 @@ test('the canvas of a selected scene is reached, shown and operated by keyboard 
       return (style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) > 0) || style.boxShadow !== 'none';
     });
     expect(ring).toBe(true);
+    if (control === setup && (await setup.getAttribute('aria-expanded')) !== 'true') await page.keyboard.press('Enter');
   }
 
   // Operated by keys: the viewport's keys, the buttons by Enter and Space, the checkbox by Space.
+  await viewport(page).focus();
   const fitted = await cameraOf(page);
   await page.keyboard.press('=');
   await expect.poll(async () => (await cameraOf(page)).scale).toBeGreaterThan(fitted.scale);
   await page.keyboard.press('ArrowDown');
   await expect.poll(async () => (await cameraOf(page)).y).toBeLessThan(fitted.y);
-  await page.getByRole('button', { name: 'Fit map' }).focus();
+  await page.getByRole('button', { name: 'Fit map', exact: true }).focus();
   await page.keyboard.press('Enter');
   await expect.poll(() => cameraOf(page)).toEqual(fitted);
   await page.getByRole('button', { name: 'Zoom in' }).focus();

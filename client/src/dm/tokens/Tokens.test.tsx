@@ -5,14 +5,29 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { LibraryAsset, Scene } from '@emberglass/shared';
 import { t } from '../../ui/messages.js';
 import { installCanvas2d, installImageLoading, installResizeObserver } from '../../ui/testing/canvas2d.js';
-import { button, click, FakeServer, installDialog, settle, submit, type } from '../../ui/testing/fakeServer.js';
+import {
+  button,
+  click,
+  FakeServer,
+  installDialog,
+  listedTokens,
+  openSetup,
+  popover,
+  selectedTokenId,
+  selectTokenRow,
+  settle,
+  submit,
+  tokenMenu,
+  type,
+} from '../../ui/testing/fakeServer.js';
 import { render, type Rendered } from '../../ui/testing/render.js';
 import { SEARCH_DELAY_MS } from '../library/useAssetSearch.js';
 import { ScenePanel } from '../ScenePanel.js';
 
 // Tokens in preparation, in the scene panel (PRP-04, specs/05-assets-and-images.md §2–§5,
-// specs/06-grid-and-measurement.md §4, specs/04-live-sync.md §2, specs/08-ux-journeys.md §8, §9,
-// D-019, D-100), against a scripted server behind fetch.
+// specs/06-grid-and-measurement.md §4, specs/04-live-sync.md §2, specs/08-ux-journeys.md §8, §9, §11,
+// D-019, D-100), against a scripted server behind fetch: added from the tool rail, selected on the map or
+// in the "In this scene" list, and changed from the popover beside the selected token (UIX-01).
 
 let server: FakeServer;
 let rendered: Rendered | undefined;
@@ -58,8 +73,10 @@ const labels = () =>
   stage()
     .find<Konva.Label>('.token-label')
     .map((label) => label.findOne<Konva.Text>('Text')!.text());
-const tokenSelect = (view: HTMLElement) =>
-  [...view.querySelectorAll('select')].find((each) => each.labels?.[0]?.textContent === t('tokens.selected'))!;
+// Add token on the tool rail (UIX-01).
+const addButton = (view: HTMLElement) => button(view, t('canvas.toolAddToken'));
+const selectedLabel = (view: HTMLElement) =>
+  view.querySelector('.eg-token-row--selected .eg-token-row__name')?.textContent;
 
 function press(element: HTMLElement, key: string) {
   act(() => {
@@ -84,18 +101,14 @@ async function clickMap(gx: number, gy: number, altKey = false) {
 }
 
 async function addThroughPicker(view: HTMLElement, asset: LibraryAsset) {
-  await click(button(view, t('tokens.add')));
+  await click(addButton(view));
   await click(button(picker(), t('tokens.picker.chooseOf', { name: asset.name })));
 }
 
-async function selectToken(view: HTMLElement, label: string) {
-  const select = tokenSelect(view);
-  const option = [...select.options].find((each) => each.textContent?.startsWith(label))!;
-  act(() => {
-    select.value = option.value;
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-  });
-  await settle();
+const selectToken = selectTokenRow;
+
+async function selectTokenById(view: HTMLElement, id: string) {
+  await click(view.querySelector(`[data-token="${id}"] .eg-token-row__select`));
 }
 
 describe('the add flow: button, picker, click on the map (specs/05-assets-and-images.md §5)', () => {
@@ -118,7 +131,7 @@ describe('the add flow: button, picker, click on the map (specs/05-assets-and-im
     expect(status(view)).toBe(t('tokens.placed', { label: 'Goblin' }));
     // The new token is selected; a second hidden one takes the bare name too, numbered only when
     // it is shown to players (Q-092).
-    expect(tokenSelect(view).value).toBe(server.sceneTokens[0]!.id);
+    expect(selectedTokenId(view)).toBe(server.sceneTokens[0]!.id);
     await addThroughPicker(view, goblin);
     await clickMap(1.2, 1.2, true);
     expect(labels()).toEqual(['Goblin', 'Goblin']);
@@ -129,7 +142,7 @@ describe('the add flow: button, picker, click on the map (specs/05-assets-and-im
 
   it('searches and filters in the picker as the library does', async () => {
     const view = await open();
-    await click(button(view, t('tokens.add')));
+    await click(addButton(view));
     const names = () => [...picker().querySelectorAll('.eg-library__name')].map((each) => each.textContent);
     expect(names()).toEqual(['Goblin', 'Hero']);
     await type(picker().querySelector('input[type="search"]'), 'her');
@@ -147,7 +160,7 @@ describe('the add flow: button, picker, click on the map (specs/05-assets-and-im
     expect(server.calls.some((call) => call.path === '/api/assets?tag=cave')).toBe(true);
     await click(button(picker(), t('tokens.picker.cancel')));
     expect(picker()).toBeNull();
-    expect(document.activeElement).toBe(button(view, t('tokens.add')));
+    expect(document.activeElement).toBe(addButton(view));
   });
 
   it('places at the centre of the view by Enter, and Escape cancels placing', async () => {
@@ -157,7 +170,7 @@ describe('the add flow: button, picker, click on the map (specs/05-assets-and-im
     await settle();
     expect(view.textContent).not.toContain(t('tokens.placing', { name: 'Hero' }));
     expect(server.writes()).toEqual([]);
-    expect(document.activeElement).toBe(button(view, t('tokens.add')));
+    expect(document.activeElement).toBe(addButton(view));
     await addThroughPicker(view, hero);
     press(viewport(view), 'Enter');
     await settle();
@@ -192,30 +205,26 @@ describe('changing tokens (specs/04-live-sync.md §2, D-100)', () => {
     const view = await open();
     expect(labels()).toEqual(['Goblin 1', 'Goblin 2']);
     await selectToken(view, 'Goblin 1');
-    // Each action is named after the token it acts on, apart from the tree's own Delete buttons.
-    for (const key of [
-      'tokens.revealOf',
-      'tokens.renameOf',
-      'tokens.frontOf',
-      'tokens.backOf',
-      'tokens.deleteOf',
-    ] as const) {
-      expect(button(view, t(key, { label: 'Goblin 1' })), key).toBeDefined();
+    // The popover beside it names each action after the token it acts on (UIX-01).
+    for (const key of ['tokens.revealOf', 'tokens.renameOf', 'tokens.moreOf'] as const) {
+      expect(button(popover(view)!, t(key, { label: 'Goblin 1' })), key).toBeDefined();
     }
-    await click(button(view, t('tokens.reveal')));
+    expect(popover(view)!.textContent).toContain(t('tokens.playersCannotSee'));
+    await click(button(view, t('tokens.revealOf', { label: 'Goblin 1' })));
     expect(server.calls.at(-1)).toMatchObject({ method: 'PATCH', body: { hidden: false } });
-    expect(button(view, t('tokens.hide'))).toBeDefined();
-    expect(tokenSelect(view).selectedOptions[0]!.textContent).toBe('Goblin 1');
+    expect(button(view, t('tokens.hideOf', { label: 'Goblin 1' }))).toBeDefined();
+    expect(popover(view)!.textContent).toContain(t('tokens.playersCanSee'));
+    expect(selectedLabel(view)).toBe('Goblin 1');
 
-    await click(button(view, t('tokens.front')));
+    await tokenMenu(view, 'Goblin 1', t('tokens.front'));
     expect(server.calls.at(-1)).toMatchObject({ method: 'PATCH', body: { stack: 'front' } });
     expect(labels()).toEqual(['Goblin 2', 'Goblin 1']);
-    await click(button(view, t('tokens.back')));
+    await tokenMenu(view, 'Goblin 1', t('tokens.back'));
     expect(labels()).toEqual(['Goblin 1', 'Goblin 2']);
 
     // Focused first, as a click or the keyboard leaves it in a browser.
-    button(view, t('tokens.rename'))!.focus();
-    await click(button(view, t('tokens.rename')));
+    button(view, t('tokens.renameOf', { label: 'Goblin 1' }))!.focus();
+    await click(button(view, t('tokens.renameOf', { label: 'Goblin 1' })));
     const field = document.querySelector<HTMLInputElement>('dialog[open] input')!;
     await type(field, '   ');
     await submit(document.querySelector('dialog[open] form'));
@@ -224,13 +233,13 @@ describe('changing tokens (specs/04-live-sync.md §2, D-100)', () => {
     await submit(document.querySelector('dialog[open] form'));
     expect(document.querySelector('dialog[open]')).toBeNull();
     expect(labels()).toContain('Chief');
-    expect(document.activeElement).toBe(button(view, t('tokens.rename')));
+    expect(document.activeElement).toBe(button(view, t('tokens.renameOf', { label: 'Chief' })));
 
-    await click(button(view, t('tokens.delete')));
+    await tokenMenu(view, 'Chief', t('tokens.delete'));
     expect(document.querySelector('dialog[open]')!.textContent).toContain(t('tokens.deleteDialog.body'));
     await click(button(document.querySelector('dialog[open]')!, t('tokens.deleteDialog.cancel')));
     expect(server.sceneTokens).toHaveLength(2);
-    await click(button(view, t('tokens.delete')));
+    await tokenMenu(view, 'Chief', t('tokens.delete'));
     await click(button(document.querySelector('dialog[open]')!, t('tokens.deleteDialog.confirm')));
     expect(server.sceneTokens.map((each) => each.label)).toEqual(['Goblin 2']);
     expect(labels()).toEqual(['Goblin 2']);
@@ -242,22 +251,14 @@ describe('changing tokens (specs/04-live-sync.md §2, D-100)', () => {
     server.addToken(scene.id, goblin, { x: 3, y: 1 });
     const view = await open();
     expect(labels()).toEqual(['Goblin', 'Goblin']);
-    expect([...tokenSelect(view).options].map((option) => option.textContent)).toEqual([
-      t('tokens.none'),
-      t('tokens.optionHidden', { label: 'Goblin' }),
-      t('tokens.optionHidden', { label: 'Goblin' }),
-    ]);
-    act(() => {
-      tokenSelect(view).value = server.sceneTokens[0]!.id;
-      tokenSelect(view).dispatchEvent(new Event('change', { bubbles: true }));
-    });
-    await click(button(view, t('tokens.reveal')));
+    // Both listed as hidden, italic with their eye crossed out (UIX-01).
+    expect(listedTokens(view)).toEqual(['Goblin', 'Goblin']);
+    expect(view.querySelectorAll('.eg-token-row[data-hidden]')).toHaveLength(2);
+    await selectTokenById(view, server.sceneTokens[0]!.id);
+    await click(button(view, t('tokens.revealOf', { label: 'Goblin' })));
     expect(labels()).toEqual(['Goblin', 'Goblin']);
-    act(() => {
-      tokenSelect(view).value = server.sceneTokens[1]!.id;
-      tokenSelect(view).dispatchEvent(new Event('change', { bubbles: true }));
-    });
-    await click(button(view, t('tokens.reveal')));
+    await selectTokenById(view, server.sceneTokens[1]!.id);
+    await click(button(view, t('tokens.revealOf', { label: 'Goblin' })));
     expect(labels()).toEqual(['Goblin 1', 'Goblin 2']);
     expect(server.calls.filter((call) => call.method === 'GET' && call.path.endsWith('/tokens'))).toHaveLength(1);
   });
@@ -273,7 +274,7 @@ describe('changing tokens (specs/04-live-sync.md §2, D-100)', () => {
     });
     await settle();
     expect(server.sceneTokens[0]).toMatchObject({ x: 4, y: 3 });
-    expect(tokenSelect(view).value).toBe(placed.id);
+    expect(selectedTokenId(view)).toBe(placed.id);
     // Two keys in quick succession while the first move is unanswered: each moves a square at once,
     // and the second is sent only once the first is answered, so the server ends where the view does.
     let release: (() => void) | undefined;
@@ -305,7 +306,7 @@ describe('changing tokens (specs/04-live-sync.md §2, D-100)', () => {
     server.liveSceneId = scene.id;
     const view = await open();
     await selectToken(view, 'Goblin');
-    await click(button(view, t('tokens.reveal')));
+    await click(button(view, t('tokens.revealOf', { label: 'Goblin' })));
     expect(view.querySelector('[role="alert"]')!.textContent).toBe(t('error.code.scene_live'));
     expect(stage().findOne('.token-hidden-marker')).toBeDefined();
     expect(server.sceneTokens[0]!.hidden).toBe(true);
@@ -321,7 +322,7 @@ describe('changing tokens (specs/04-live-sync.md §2, D-100)', () => {
     expect(labels()).toEqual(['Goblin']);
     expect(document.activeElement).toBe(viewport(view));
     await selectToken(view, 'Goblin');
-    await click(button(view, t('tokens.delete')));
+    await tokenMenu(view, 'Goblin', t('tokens.delete'));
     await click(button(document.querySelector('dialog[open]')!, t('tokens.deleteDialog.confirm')));
     expect(view.querySelector('[role="alert"]')!.textContent).toBe(t('error.code.scene_live'));
     expect(labels()).toEqual(['Goblin']);
@@ -333,7 +334,7 @@ describe('changing tokens (specs/04-live-sync.md §2, D-100)', () => {
     const view = await open();
     server.liveSceneId = scene.id;
     await selectToken(view, 'Goblin');
-    await click(button(view, t('tokens.rename')));
+    await click(button(view, t('tokens.renameOf', { label: 'Goblin' })));
     await type(document.querySelector('dialog[open] input'), 'Chief');
     await submit(document.querySelector('dialog[open] form'));
     const dialog = document.querySelector('dialog[open]')!;
@@ -363,23 +364,21 @@ describe('changing tokens (specs/04-live-sync.md §2, D-100)', () => {
     expect(server.calls.filter((call) => call.method === 'GET' && call.path.endsWith('/tokens'))).toHaveLength(1);
   });
 
-  it('returns focus where the DM was: the map after placing, the Delete button after keeping, Add token after deleting (review)', async () => {
+  it('returns focus where the DM was: the map after placing, the menu that asked after keeping, Add token after deleting (review)', async () => {
     const view = await open();
     await addThroughPicker(view, goblin);
     await clickMap(2.5, 2.5);
     expect(document.activeElement).toBe(viewport(view));
-    const remove = button(view, t('tokens.deleteOf', { label: 'Goblin' }))!;
-    remove.focus();
-    await click(remove);
+    await tokenMenu(view, 'Goblin', t('tokens.delete'));
     // The dialog opens on the button that keeps the token.
     expect(document.activeElement).toBe(
       button(document.querySelector('dialog[open]')!, t('tokens.deleteDialog.cancel')),
     );
     await click(button(document.querySelector('dialog[open]')!, t('tokens.deleteDialog.cancel')));
-    expect(document.activeElement).toBe(button(view, t('tokens.deleteOf', { label: 'Goblin' })));
-    await click(button(view, t('tokens.deleteOf', { label: 'Goblin' })));
+    expect(document.activeElement).toBe(button(view, t('tokens.moreOf', { label: 'Goblin' })));
+    await tokenMenu(view, 'Goblin', t('tokens.delete'));
     await click(button(document.querySelector('dialog[open]')!, t('tokens.deleteDialog.confirm')));
-    expect(document.activeElement).toBe(button(view, t('tokens.add')));
+    expect(document.activeElement).toBe(addButton(view));
   });
 
   it("sends a deletion only after the token's pending move has been answered (review)", async () => {
@@ -395,7 +394,7 @@ describe('changing tokens (specs/04-live-sync.md §2, D-100)', () => {
     };
     press(viewport(view), 'ArrowRight');
     await settle();
-    await click(button(view, t('tokens.delete')));
+    await tokenMenu(view, 'Goblin', t('tokens.delete'));
     await click(button(document.querySelector('dialog[open]')!, t('tokens.deleteDialog.confirm')));
     expect(server.writes().filter((write) => write.startsWith('DELETE'))).toEqual([]);
     release!();
@@ -409,9 +408,9 @@ describe('changing tokens (specs/04-live-sync.md §2, D-100)', () => {
     server.addToken(scene.id, goblin, { x: 1, y: 1 });
     const view = await open();
     await selectToken(view, 'Goblin');
-    await click(button(view, t('tokens.reveal')));
+    await click(button(view, t('tokens.revealOf', { label: 'Goblin' })));
     expect(status(view)).toBe(t('tokens.revealed', { label: 'Goblin' }));
-    await click(button(view, t('tokens.front')));
+    await tokenMenu(view, 'Goblin', t('tokens.front'));
     expect(status(view)).toBe(t('tokens.toFront', { label: 'Goblin' }));
     press(viewport(view), 'ArrowDown');
     await settle();
@@ -427,11 +426,12 @@ describe('changing tokens (specs/04-live-sync.md §2, D-100)', () => {
         : undefined;
     const view = await open();
     expect(view.textContent).toContain(t('tokens.loadFailed', { reason: t('error.code.internal_error') }));
-    expect(button(view, t('tokens.add'))).toBeUndefined();
+    // The rail's Add token refuses until the tokens have arrived.
+    expect(addButton(view)!.getAttribute('aria-disabled')).toBe('true');
     fail = false;
     await click(button(view, t('tokens.retry')));
     expect(labels()).toEqual(['Goblin']);
-    expect(button(view, t('tokens.add'))).toBeDefined();
+    expect(addButton(view)!.getAttribute('aria-disabled')).toBeNull();
     expect(button(view, t('tokens.retry'))).toBeUndefined();
   });
 
@@ -453,8 +453,10 @@ describe('changing tokens (specs/04-live-sync.md §2, D-100)', () => {
   it('draws the tokens but offers no token control while calibrating', async () => {
     server.addToken(scene.id, goblin, { x: 1, y: 1 });
     const view = await open();
+    await openSetup(view);
     await click(button(view, t('calibration.open')));
-    expect(button(view, t('tokens.add'))).toBeUndefined();
+    // Calibrating takes the canvas: no tool rail, no Add token.
+    expect(addButton(view)).toBeUndefined();
     expect(labels()).toEqual(['Goblin']);
     expect(stage().findOne<Konva.Group>('.token')!.draggable()).toBe(false);
   });
@@ -464,6 +466,6 @@ describe('changing tokens (specs/04-live-sync.md §2, D-100)', () => {
     server.addToken(open2.id, hero, { x: 2, y: 2 });
     const view = await open(open2);
     expect(labels()).toEqual(['Hero']);
-    expect(button(view, t('tokens.add'))).toBeDefined();
+    expect(addButton(view)).toBeDefined();
   });
 });

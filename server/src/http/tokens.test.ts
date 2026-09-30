@@ -140,7 +140,7 @@ describe('placing a token', () => {
         hidden: true,
         z_order: 0,
         character_id: null,
-        asset: { name: 'Goblin', image_id: goblin.image_id, size: 'medium' },
+        asset: { name: 'Goblin', image_id: goblin.image_id, size: 'medium', category: 'monster' },
       },
       relabelled: [],
     });
@@ -529,7 +529,12 @@ describe('changing a token', () => {
     const { token } = await place(cave.id, goblin.id);
     const { id: newImage } = await image();
     ok(await patch(`/api/assets/${goblin.id}`, { image_id: newImage, size: 'huge' }));
-    expect((await list(cave.id))[0]!.asset).toEqual({ name: 'Goblin', image_id: newImage, size: 'huge' });
+    expect((await list(cave.id))[0]!.asset).toEqual({
+      name: 'Goblin',
+      image_id: newImage,
+      size: 'huge',
+      category: goblin.category,
+    });
     ok(await remove(tokenUrl(token.id)), 204);
     expect(await list(cave.id)).toEqual([]);
     expectFailure(await remove(tokenUrl(token.id)), 404, 'not_found');

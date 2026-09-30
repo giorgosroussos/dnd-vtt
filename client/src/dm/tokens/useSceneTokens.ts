@@ -30,6 +30,7 @@ export const toCanvasToken = (token: SceneToken): CanvasToken => ({
   z_order: token.z_order,
   size: token.asset.size,
   image_id: token.asset.image_id,
+  category: token.asset.category,
 });
 
 export type ChangeResult =

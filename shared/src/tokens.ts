@@ -41,6 +41,7 @@ export const SceneTokenSchema = Type.Object(
         name: AssetSchema.properties.name,
         image_id: AssetSchema.properties.image_id,
         size: AssetSchema.properties.size,
+        category: AssetSchema.properties.category,
       },
       strict,
     ),

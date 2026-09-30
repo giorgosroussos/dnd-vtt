@@ -179,9 +179,10 @@ describe('the process command validator', () => {
     'ruler.update',
     'ruler.clear',
     'undo',
+    'redo',
   ];
   // The commands whose payload is empty, so that `{}` is valid.
-  const EMPTY = ['scene.deactivate', 'undo'];
+  const EMPTY = ['scene.deactivate', 'undo', 'redo'];
 
   it('registers a payload schema for every command of specs/04-live-sync.md §2 and no other', () => {
     expect(Object.keys(COMMAND_PAYLOAD_SCHEMAS).sort()).toEqual([...LIVE].sort());

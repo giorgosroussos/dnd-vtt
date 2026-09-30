@@ -5,7 +5,17 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { imageFileUrl, type Scene } from '@emberglass/shared';
 import { t } from '../ui/messages.js';
 import { images, installCanvas2d, installImageLoading, installResizeObserver } from '../ui/testing/canvas2d.js';
-import { button, click, FakeServer, installDialog, settle, type Reply } from '../ui/testing/fakeServer.js';
+import {
+  button,
+  click,
+  FakeServer,
+  installDialog,
+  openSetup,
+  openSwitcher,
+  selectScene,
+  settle,
+  type Reply,
+} from '../ui/testing/fakeServer.js';
 import { render, type Rendered } from '../ui/testing/render.js';
 import { DmView } from './DmView.js';
 
@@ -39,6 +49,7 @@ async function open(): Promise<HTMLElement> {
   rendered = render(DmView);
   await settle();
   const view = rendered.container;
+  await openSwitcher(view);
   await click(button(view, 'Lost Mine'));
   await click(button(view, 'One'));
   return view;
@@ -58,10 +69,12 @@ describe('switching scenes while a request runs', () => {
         : undefined;
     const view = await open();
     await click(button(view, 'Cave'));
+    await openSetup(view);
     act(() => gridBox(view).click());
     await settle();
-    await click(button(view, 'Hall'));
+    await selectScene(view, 'Hall');
     expect(main(view).querySelector('h1')!.textContent).toBe('Hall');
+    await openSetup(view);
     // The answer for the cave arrives now, with a map: nothing of it reaches the hall.
     release({ status: 200, body: { ...cave, map_image_id: map.id, grid: { ...cave.grid, visible: false } } });
     await settle();
@@ -91,7 +104,7 @@ describe('switching scenes while a request runs', () => {
         : undefined;
     const view = await open();
     await click(button(view, 'Cave'));
-    await click(button(view, 'Hall'));
+    await selectScene(view, 'Hall');
     release({ status: 200, body: map });
     await settle();
     expect(main(view).querySelector('h1')!.textContent).toBe('Hall');

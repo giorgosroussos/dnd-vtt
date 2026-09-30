@@ -23,6 +23,7 @@ Commands flow from a DM socket to the server; the server MUST reject any command
 | `camera.setPlayer` | set the player camera | no |
 | `ruler.update`, `ruler.clear` | show or clear a measurement on the TV | no |
 | `undo` | apply the most recent inverse command | — |
+| `redo` | apply again the most recently undone command | — |
 
 - The token commands on the live scene MUST be exactly `token.add`, `token.move`, `token.setVisibility` and `token.delete`; label and stacking order are edited only on scenes that are not live. [input, Q-014]
 - Clearing the live scene MUST be possible at any time with `scene.deactivate`. [Q-025]
@@ -42,6 +43,7 @@ Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-02
 | `scene.cleared` | on deactivate | on deactivate |
 | `camera.player` | on change | on change |
 | `ruler.shown`, `ruler.cleared` | on change | on change |
+| `history.changed` | when whether undo or redo would change anything changes | never |
 
 ## 4. Role-filtered projection
 
@@ -49,7 +51,8 @@ Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-02
 - Filtering MUST happen on the server before emitting, never in the player client. [input]
 - Revealing a token MUST reach players as `token.added`, and hiding it as `token.removed`. [input]
 - A player client MUST NOT receive anything from which the existence of a hidden token can be learnt: no hidden token, no hidden token's ID, asset or image, no count. [input]
-- A player-room token MUST carry only what rendering needs: ID, position, size, image reference, stacking order and label; asset notes and defaults are never sent. [Q-047, Q-032]
+- A player-room token MUST carry only what rendering needs: ID, position, size, image reference, stacking order, label and its asset's category, which colours its ring; asset notes and defaults are never sent. [Q-047, Q-032, Q-100]
+- The players' snapshot MUST carry the live scene's name, shown on the TV (`08` §11); the undo state MUST NOT reach players, nor the count of connected player views, which the DM view reads over REST (`02` §5). [input, Q-100]
 - The grid overlay MUST NOT be drawn on the player view when the scene's grid is set hidden for players (`06` §2). [input]
 
 ## 5. Snapshot and versioning
@@ -76,6 +79,7 @@ Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-02
 - Ctrl+Z sends `undo`; the server applies the inverse from its history through the ordinary command path. [D-040]
 - The undo history MUST be held in memory only, cleared when another scene is activated or the server restarts, and bounded to the last 100 commands. [Q-005]
 - Setup edits to the live scene (`04` §10) MUST NOT be undoable. [Q-050]
+- Redo MUST apply again, through the ordinary command path, the most recent command undone; any new undoable command that changes something MUST empty the redo stack, which is held and cleared like the history. [input]
 
 ## 9. Cameras
 

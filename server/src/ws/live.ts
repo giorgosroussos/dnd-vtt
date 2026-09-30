@@ -19,6 +19,7 @@ import {
   type SnapshotAck,
   type Screen,
   type SnapshotEvent,
+  type UndoState,
   type ViewportAck,
 } from '@emberglass/shared';
 import { isLoopback, lockoutKey, normalizeAddress } from '../auth/lockout.js';
@@ -28,6 +29,7 @@ import { PlayerCameraState, ScreenRegistry, sameScreen } from '../domain/camera.
 import { dispatchCommand, validateCommand, type CommandValidator } from '../domain/commands.js';
 import { createLiveCommands, type LiveEffect, type LiveResult } from '../domain/live.js';
 import { RulerState } from '../domain/ruler.js';
+import { UndoHistory } from '../domain/undo.js';
 import { liveVersions, type VersionCounters } from '../domain/version.js';
 import { isSameOriginHeaders, type Auth } from '../http/auth.js';
 import { createLineLimiter, type LineLimiterOptions } from '../log/limiter.js';
@@ -91,6 +93,11 @@ import { readSnapshot, type LiveMemory } from './snapshot.js';
 // limits count it, so a device opening hundreds cannot make every broadcast cost that many
 // encodings (G-029); a socket past the cap is refused in the handshake, before it joins a room or
 // hears anything. The server PC itself is not capped, nor is a DM view.
+//
+// The undo state (UIX-01, specs/04-live-sync.md §8): whether undo and redo would find anything, sent to the
+// DM room as `history.changed` after a command or a REST change that altered it, read before and after in
+// the same synchronous step; a change that sends the DM room a snapshot or `scene.cleared` needs none, since
+// the snapshot carries the state and nothing is live after a clear. Players never hear it.
 
 export interface LiveSocketOptions {
   db: Database.Database;
@@ -103,6 +110,8 @@ export interface LiveSocketOptions {
   screens?: ScreenRegistry | undefined;
   /** The measurement shown on the TV (LIV-07); tests pass their own. */
   ruler?: RulerState | undefined;
+  /** The undo history (LIV-05, UIX-01); tests pass their own. */
+  history?: UndoHistory | undefined;
   /** Command validation and the step that applies a valid command; tests only replace them. */
   commands?:
     | {
@@ -166,7 +175,8 @@ export function attachLiveSocket(
     // One measurement per server process, in memory only (specs/04-live-sync.md §11).
     ruler = new RulerState(),
     // One undo history per server process, in memory only (specs/04-live-sync.md §8, Q-005).
-    commands = { validate: validateCommand, ...createLiveCommands(db, undefined, camera, ruler) },
+    history = new UndoHistory(),
+    commands = { validate: validateCommand, ...createLiveCommands(db, history, camera, ruler) },
     foreignUpgrade = () => false,
     snapshotIntervalMs = SNAPSHOT_INTERVAL_MS,
     maxPendingPackets = MAX_PENDING_PACKETS,
@@ -176,7 +186,7 @@ export function attachLiveSocket(
   }: LiveSocketOptions,
 ): LiveSocket {
   for (const counter of Object.values(versions)) if (counter.current() === 0) counter.next();
-  const memory: LiveMemory = { camera, screens, ruler };
+  const memory: LiveMemory = { camera, screens, ruler, history };
 
   const io = new Server(app.server, {
     path: SOCKET_PATH,
@@ -251,8 +261,8 @@ export function attachLiveSocket(
     // What the DM room was last told of the screen the frame follows, so a shape it already has is not
     // sent again (review S-M1).
     if (room === 'dm' && event.type === 'scene.snapshot') {
-      const scene = (event.payload as { scene: { screen: Screen | null } | null }).scene;
-      if (scene) toldScreen = scene.screen;
+      const payload = event.payload as { scene: { screen: Screen | null } | null };
+      if (payload.scene) toldScreen = payload.scene.screen;
     }
     for (const id of io.sockets.adapter.rooms.get(room) ?? []) {
       const socket = io.sockets.sockets.get(id);
@@ -268,6 +278,7 @@ export function attachLiveSocket(
   // hidden token (a renamed or re-imaged asset whose live tokens are all hidden): the DM's room gets
   // its snapshot, theirs stays silent and keeps its version (specs/04-live-sync.md §4, §5, Q-093).
   const refresh = <T>(work: () => T): T => {
+    const undoBefore = undoState();
     const before = { dm: readSnapshot(db, 'dm', memory), players: readSnapshot(db, 'players', memory) };
     const world = liveWorld(db);
     const result = work();
@@ -283,12 +294,28 @@ export function attachLiveSocket(
       publish([{ type: 'cleared' }]);
       return result;
     }
+    let snapshotToDm = false;
     for (const room of ROOMS) {
       if (JSON.stringify(before[room]) !== JSON.stringify(after[room])) {
         broadcast(room, { type: 'scene.snapshot', payload: after[room] });
+        if (room === 'dm') snapshotToDm = true;
       }
     }
+    if (!snapshotToDm) tellHistory(undoBefore);
     return result;
+  };
+
+  // Whether undo and redo would find anything on the live scene now, or null while nothing is live.
+  const undoState = (): UndoState | null => {
+    const live = readSettings(db).live_scene_id;
+    return live === null ? null : history.stateFor(live);
+  };
+  // The DM room is told the undo state when it differs from `before`, with the same scene live.
+  const tellHistory = (before: UndoState | null): void => {
+    const now = undoState();
+    if (now === null || before === null) return;
+    if (before.can_undo === now.can_undo && before.can_redo === now.can_redo) return;
+    broadcast('dm', { type: 'history.changed', payload: { ...now } });
   };
 
   const publish = (effects: readonly LiveEffect[]): void => {
@@ -398,6 +425,8 @@ export function attachLiveSocket(
       // blank every screen (review L2). A failed apply changed nothing: its transaction rolled back.
       try {
         let effects: readonly LiveEffect[] = [];
+        const liveBefore = readSettings(db).live_scene_id;
+        const undoBefore = undoState();
         const ack = dispatchCommand(
           typeof args[0] === 'function' ? undefined : args[0],
           commands.validate,
@@ -408,6 +437,8 @@ export function attachLiveSocket(
           },
         );
         publish(effects);
+        // An activation's snapshot carries the new scene's state; a clear leaves nothing live.
+        if (readSettings(db).live_scene_id === liveBefore) tellHistory(undoBefore);
         reply(ack);
       } catch (error) {
         logger.error('ws.command_failed', 'A live command failed.', {

@@ -14,6 +14,12 @@ import type { LiveEffect } from './live.js';
 // (another scene activated, Blank TV, the live scene deleted), holds the last 100 inverses, and dies
 // with the process. One history serves every DM browser: undo takes back the most recent command on
 // the live scene, whoever sent it (D-040).
+//
+// Redo (UIX-01, specs/04-live-sync.md §8): each undo that changed something keeps what would undo the
+// undo, on a redo stack beside the history; `redo` applies the most recent one and records its inverse
+// back into the history, so Ctrl+Z undoes it again. Any new undoable command that changes something
+// empties the redo stack, as does everything that empties the history. A command that is not undoable
+// (the camera, the ruler, a ping) leaves both alone: it changes no token.
 
 /**
  * What undoes a command: itself a live token command, applied through the ordinary command path so
@@ -62,9 +68,20 @@ export function inverseOf(command: CommandEnvelope, effects: readonly LiveEffect
   }
 }
 
+/**
+ * What undoes an inverse just applied, from what it changed: the inverse of the command it stands
+ * for, read the same way as `inverseOf` reads a command's effects. Undoing a restore (`token.add` in
+ * its restoring form) is deleting the token again.
+ */
+export function inverseOfInverse(inverse: Inverse, effects: readonly LiveEffect[]): Inverse | undefined {
+  const command = { type: inverse.type, payload: 'payload' in inverse ? inverse.payload : {} } as CommandEnvelope;
+  return inverseOf(command, effects);
+}
+
 export class UndoHistory {
   private scene: string | null = null;
   private readonly inverses: Inverse[] = [];
+  private readonly redos: Inverse[] = [];
 
   constructor(private readonly limit = UNDO_LIMIT) {}
 
@@ -78,20 +95,56 @@ export class UndoHistory {
     return this.scene;
   }
 
-  /** Keeps the inverse of a command applied to live scene `sceneId`, dropping the oldest past the limit. */
-  record(sceneId: string, inverse: Inverse): void {
+  /** How many undone commands `redo` can apply again. */
+  get redoSize(): number {
+    return this.redos.length;
+  }
+
+  /**
+   * Keeps the inverse of a command applied to live scene `sceneId`, dropping the oldest past the limit.
+   * A new command empties the redo stack; the inverse of a redo (`redone`) keeps it.
+   */
+  record(sceneId: string, inverse: Inverse, redone = false): void {
     this.keepOnly(sceneId);
     this.scene = sceneId;
     this.inverses.push(inverse);
     if (this.inverses.length > this.limit) this.inverses.splice(0, this.inverses.length - this.limit);
+    if (!redone) this.redos.length = 0;
   }
 
   /** Takes the most recent inverse, if the history belongs to `liveSceneId`; otherwise it is emptied. */
   pop(liveSceneId: string | null): Inverse | undefined {
     this.keepOnly(liveSceneId);
     const inverse = this.inverses.pop();
-    if (this.inverses.length === 0) this.scene = null;
+    this.settle();
     return inverse;
+  }
+
+  /** Keeps what redoes an undo applied to live scene `sceneId`, bounded like the history. */
+  recordRedo(sceneId: string, redo: Inverse): void {
+    this.keepOnly(sceneId);
+    this.scene = sceneId;
+    this.redos.push(redo);
+    if (this.redos.length > this.limit) this.redos.splice(0, this.redos.length - this.limit);
+  }
+
+  /** Takes the most recent redo, if the history belongs to `liveSceneId`; otherwise it is emptied. */
+  popRedo(liveSceneId: string | null): Inverse | undefined {
+    this.keepOnly(liveSceneId);
+    const redo = this.redos.pop();
+    this.settle();
+    return redo;
+  }
+
+  /** Whether undo and redo would find anything for live scene `liveSceneId` (UIX-01). */
+  stateFor(liveSceneId: string | null): { can_undo: boolean; can_redo: boolean } {
+    const mine = this.scene !== null && this.scene === liveSceneId;
+    return { can_undo: mine && this.inverses.length > 0, can_redo: mine && this.redos.length > 0 };
+  }
+
+  /** Forgets the scene once nothing is held for it. */
+  private settle(): void {
+    if (this.inverses.length === 0 && this.redos.length === 0) this.scene = null;
   }
 
   /** Empties the history unless it belongs to `liveSceneId`. */
@@ -102,5 +155,6 @@ export class UndoHistory {
   clear(): void {
     this.scene = null;
     this.inverses.length = 0;
+    this.redos.length = 0;
   }
 }

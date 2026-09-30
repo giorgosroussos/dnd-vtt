@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { nameButton, selectScene, tree, viewport } from '../canvas-view.js';
+import { nameButton, openSetup, sceneRow, selectScene, selectTokenById, tokenMenu, viewport } from '../canvas-view.js';
 import { openWorkspace } from '../dm.js';
 import { griddedPng } from '../png.js';
 import {
@@ -64,6 +64,7 @@ test('Prepare (Phase 2 exit): a campaign prepared in the browser, calibrated by 
 
   // A map with a drawn grid of 40 px squares: attached, then calibrated by each method in turn.
   await nameButton(page, 'Throne room').click();
+  await openSetup(page);
   await page.getByLabel('Map image: PNG, JPEG or WebP').setInputFiles({
     name: 'throne.png',
     mimeType: 'image/png',
@@ -131,15 +132,15 @@ test('Prepare (Phase 2 exit): a campaign prepared in the browser, calibrated by 
   const [first, second, third] = tokens.map((each) => each.id);
 
   // Revealing numbers them: the first shown keeps the bare name, the second is 2 and the first 1.
-  await page.getByLabel('Selected token').selectOption(first!);
+  await selectTokenById(page, first!);
   await page.getByRole('button', { name: `Reveal token ${goblinName}` }).click();
   await expect(status(page)).toHaveText(`${goblinName} revealed.`);
-  await page.getByLabel('Selected token').selectOption(second!);
+  await selectTokenById(page, second!);
   await page.getByRole('button', { name: `Reveal token ${goblinName}` }).click();
   await expect(status(page)).toHaveText(`${goblinName} 2 revealed.`);
   await expect(page.getByRole('button', { name: `Hide token ${goblinName} 2` })).toBeVisible();
-  // At 1,280 × 720, unscrolled, the token controls take at most one row more than before PRP-04
-  // with a token selected, leaving the canvas's top above 560 px with long labels in the help line (G-022, D-100).
+  // At 1,280 × 720, unscrolled, the canvas's top stays above 560 px with a token selected, its popover on
+  // the map rather than in a row above it (G-022, D-100, UIX-01).
   const canvasTop = await page.evaluate(() => {
     window.scrollTo(0, 0);
     return document.querySelector('main [role="application"]')!.getBoundingClientRect().top;
@@ -157,6 +158,10 @@ test('Prepare (Phase 2 exit): a campaign prepared in the browser, calibrated by 
   await expect
     .poll(async () => (await tokensOf(page, throne)).find((each) => each.id === first))
     .toMatchObject({ x: 4, y: 5 });
+  // Escape lets the dragged token go, so its popover leaves the map free for the next drag (UIX-01).
+  await viewport(page).focus();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.eg-popover')).toHaveCount(0);
   await dragBy(page, goblinName, 1.4, 0.6, true);
   await expect.poll(async () => (await tokensOf(page, throne)).find((each) => each.id === third)!.x).not.toBe(6);
   const free = (await tokensOf(page, throne)).find((each) => each.id === third)!;
@@ -166,14 +171,14 @@ test('Prepare (Phase 2 exit): a campaign prepared in the browser, calibrated by 
   expect(free.hidden).toBe(true);
 
   // A deleted number is never given again: the third shown is 3, not 2.
-  await page.getByLabel('Selected token').selectOption(second!);
-  await page.getByRole('button', { name: `Delete token ${goblinName} 2` }).click();
+  await selectTokenById(page, second!);
+  await tokenMenu(page, `${goblinName} 2`, 'Delete');
   await page
     .getByRole('dialog', { name: `Delete ${goblinName} 2?` })
     .getByRole('button', { name: 'Delete token' })
     .click();
   await expect(status(page)).toHaveText(`${goblinName} 2 deleted.`);
-  await page.getByLabel('Selected token').selectOption(third!);
+  await selectTokenById(page, third!);
   await page.getByRole('button', { name: `Reveal token ${goblinName}` }).click();
   await expect(status(page)).toHaveText(`${goblinName} 3 revealed.`);
   // And one more, left hidden.
@@ -182,7 +187,7 @@ test('Prepare (Phase 2 exit): a campaign prepared in the browser, calibrated by 
   await expect(status(page)).toHaveText(`${goblinName} placed.`);
 
   // The map-less scene: a hero placed by keyboard at the centre of the view.
-  await nameButton(page, 'Open road').click();
+  await sceneRow(page, 'Open road').click();
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Open road');
   await pick(page, heroName);
   await expect(viewport(page)).toBeFocused();
@@ -193,7 +198,7 @@ test('Prepare (Phase 2 exit): a campaign prepared in the browser, calibrated by 
   tokens = await tokensOf(page, throne);
   const roadTokens = await tokensOf(page, road);
   expect(roadTokens).toHaveLength(1);
-  await nameButton(page, 'Throne room').click();
+  await sceneRow(page, 'Throne room').click();
   // What is drawn, in grid units: the screen boxes depend on when the camera was fitted.
   const placedOf = async () => (await drawn(page)).map(({ id, label, hidden, x, y }) => ({ id, label, hidden, x, y }));
   await expect.poll(async () => (await drawn(page)).length).toBe(4);
@@ -210,7 +215,7 @@ test('Prepare (Phase 2 exit): a campaign prepared in the browser, calibrated by 
     [goblinName, true],
   ]);
   expect(((await (await page.request.get(`/api/scenes/${throne}`)).json()) as { grid: object }).grid).toEqual(grid);
-  await expect(tree(page).getByRole('button', { name: 'Open road', exact: true })).toBeVisible();
+  await expect(sceneRow(page, 'Open road')).toBeVisible();
   // The token image is the asset's display version, fetched for this DM session.
   const loaded = await page.evaluate(
     (src) => fetch(src).then((response) => response.status),

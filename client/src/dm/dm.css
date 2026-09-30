@@ -1,10 +1,7 @@
-/* DM view: sign-in screens, the workspace and the scene tree (PRP-01, D-085).
- * Built only from the tokens of ui/tokens.css, so the contrast checks of
- * tokens.test.ts and e2e/tests/keyboard.spec.ts cover it. */
-
-.eg-dm__actions {
-  margin-left: auto;
-}
+/* DM view: sign-in screens, the workspace and its panels (PRP-01, D-085; UIX-01, the 2026-09-30 redesign,
+ * specs/08-ux-journeys.md §11). Built only from the tokens of ui/tokens.css, so the contrast checks of
+ * tokens.test.ts and e2e/tests/keyboard.spec.ts cover it. The side panels keep their width and the map
+ * area takes the rest. */
 
 .eg-signin {
   display: flex;
@@ -13,74 +10,258 @@
   max-width: 28rem;
 }
 
-/* Workspace: the live bar on top; the tree on the left, the scene in the centre and
- * the library on the right (specs/08-ux-journeys.md §1). */
+/* Workspace: the header on top; the scene list, the map area and the right-hand panel below. */
 .eg-workspace {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
+  position: relative;
+}
+
+.eg-workspace > .eg-notice {
+  margin: var(--space-2) var(--space-4) 0;
 }
 
 .eg-workspace__columns {
   flex: 1;
-  display: grid;
-  grid-template-columns: minmax(16rem, 22rem) 1fr minmax(16rem, 22rem);
-  min-height: 0;
-}
-
-.eg-workspace__library {
-  border-left: 1px solid var(--color-border);
-  padding: var(--space-4);
-  overflow-y: auto;
-}
-
-.eg-livebar {
-  padding: var(--space-2) var(--space-6);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.eg-livebar__text {
-  color: var(--color-text-muted);
-}
-
-.eg-livebar__text--live {
-  color: var(--color-text);
-  font-weight: 700;
-}
-
-.eg-livebar__text--live::before {
-  content: '●' / '';
-  color: var(--color-danger);
-  margin-right: var(--space-2);
-}
-
-.eg-livebar__actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
-
-.eg-livebar__text--warning {
-  color: var(--color-accent);
-  font-weight: 700;
+  min-height: 0;
 }
 
 .eg-workspace__sidebar {
-  border-right: 1px solid var(--color-border);
-  padding: var(--space-4);
+  width: var(--sidebar-width);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-3);
+  background: var(--color-panel);
+  border-right: 1px solid var(--color-divider);
   overflow-y: auto;
 }
 
-.eg-workspace__main {
-  display: flex;
-  flex-direction: column;
+/* Header */
+.eg-header {
+  height: var(--header-height);
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(0, 1fr);
+  align-items: center;
   gap: var(--space-4);
-  padding: var(--space-8) var(--space-6);
-  min-width: 0;
-  min-height: 0;
+  padding: 0 var(--space-4);
+  background: var(--color-panel);
+  border-bottom: 1px solid var(--color-divider);
 }
 
+.eg-header__start {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.eg-header__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.eg-header__logo {
+  display: inline-flex;
+  color: var(--color-accent);
+}
+
+.eg-header__wordmark {
+  font-family: var(--font-title);
+  font-weight: 700;
+  font-size: 1.3125rem;
+  letter-spacing: 0.2px;
+}
+
+.eg-header__divider {
+  width: 1px;
+  height: 22px;
+  background: var(--color-border);
+  flex-shrink: 0;
+}
+
+.eg-header__crumbs {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 32px;
+  padding: 0 var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.eg-header__crumbs:hover {
+  background: var(--color-hover);
+}
+
+.eg-header__campaign,
+.eg-header__session {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.eg-header__session {
+  color: var(--color-text);
+}
+
+.eg-header__slash::before {
+  content: '/';
+  color: var(--color-text-faint);
+}
+
+.eg-header__centre {
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+}
+
+.eg-header__end {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.eg-screens__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-connected);
+}
+
+.eg-screens--none {
+  color: var(--color-warning);
+}
+
+.eg-screens--none .eg-screens__dot {
+  background: var(--color-warning);
+}
+
+/* The live indicator in the header's middle (specs/08-ux-journeys.md §2, §11). */
+.eg-live {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  max-width: 44rem;
+  padding: 5px 6px 5px var(--space-3);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  background: var(--color-raised);
+}
+
+.eg-live--on {
+  background: var(--color-live-tint);
+  border-color: var(--color-live-tint-edge);
+}
+
+.eg-live--warning {
+  border-color: var(--color-warning);
+}
+
+.eg-live--warning .eg-live__text {
+  color: var(--color-warning);
+  font-weight: 700;
+}
+
+.eg-live__text {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  color: var(--color-text-muted);
+}
+
+.eg-live__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  font-weight: 700;
+  font-size: var(--font-size-sm);
+  letter-spacing: 1.4px;
+  color: var(--color-live);
+}
+
+.eg-live__badge--idle {
+  color: var(--color-text-caption);
+}
+
+.eg-live__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-live);
+  animation: eg-live-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes eg-live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .eg-live__dot {
+    animation: none;
+  }
+}
+
+.eg-live__scene {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text);
+}
+
+.eg-live__show {
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.eg-live__show:hover {
+  background: var(--color-hover);
+}
+
+/* The session switcher: the Campaign → Session → Scene tree under the breadcrumb (Q-100). */
+.eg-switcher {
+  position: absolute;
+  z-index: 40;
+  top: calc(var(--header-height) + 4px);
+  left: var(--space-4);
+  width: min(30rem, calc(100vw - 2rem));
+  max-height: calc(100% - var(--header-height) - 2rem);
+  overflow-y: auto;
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  background: var(--color-raised);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 55%);
+}
+
+/* The tree (specs/08-ux-journeys.md §1). */
 .eg-tree {
   display: flex;
   flex-direction: column;
@@ -88,6 +269,8 @@
 }
 
 .eg-tree__heading {
+  font-family: var(--font-title);
+  font-weight: 700;
   font-size: var(--font-size-lg);
 }
 
@@ -97,7 +280,7 @@
   padding: 0 0 0 var(--space-4);
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: 2px;
 }
 
 .eg-tree__list--root {
@@ -108,8 +291,8 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-1);
+  gap: var(--space-1);
+  padding: 2px var(--space-1);
   border-radius: var(--radius);
 }
 
@@ -122,8 +305,8 @@
 }
 
 .eg-tree__row--selected {
-  background: var(--color-surface);
-  box-shadow: inset 3px 0 0 var(--color-accent);
+  background: var(--color-selected);
+  box-shadow: inset 0 0 0 1px var(--color-selected-edge);
 }
 
 .eg-tree__name {
@@ -136,6 +319,10 @@
   cursor: pointer;
   text-align: left;
   flex: 1 1 8rem;
+}
+
+.eg-tree__name:hover {
+  background: var(--color-hover);
 }
 
 /* The triangle is decoration: its empty alternative text keeps it out of the
@@ -177,14 +364,662 @@
   font-size: var(--font-size-sm);
 }
 
-/* The confirmation of a deletion: a native modal dialog. */
+/* The scene list (UIX-01). */
+.eg-scenes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+}
+
+.eg-scenes__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 0 var(--space-1);
+}
+
+.eg-scenes__title {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.eg-scenes__session {
+  font-family: var(--font-title);
+  font-weight: 700;
+  font-size: var(--font-size-lg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.eg-scenes__count {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-caption);
+}
+
+.eg-scenes__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.eg-scenes__item {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: var(--space-1);
+  border-radius: 10px;
+}
+
+.eg-scenes__item[draggable='true'] {
+  cursor: grab;
+}
+
+.eg-scenes__item:hover {
+  background: var(--color-hover);
+}
+
+.eg-scenes__item--selected,
+.eg-scenes__item--selected:hover {
+  background: var(--color-selected);
+  box-shadow: inset 0 0 0 1px var(--color-selected-edge);
+}
+
+.eg-scenes__item--drop {
+  box-shadow: inset 0 3px 0 var(--color-focus);
+}
+
+.eg-scenes__select {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: var(--space-1);
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.eg-scenes__thumb {
+  width: 60px;
+  height: 42px;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--color-surface);
+  box-shadow: inset 0 0 0 3px var(--color-raised);
+}
+
+.eg-scenes__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.eg-scenes__text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.eg-scenes__name {
+  font-weight: 500;
+  font-size: var(--font-size-row);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.eg-scenes__item--selected .eg-scenes__name {
+  font-weight: 700;
+}
+
+.eg-scenes__summary {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-caption);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.eg-scenes__live {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--color-live);
+}
+
+.eg-scenes__live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-live);
+}
+
+.eg-scenes__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-radius: var(--radius);
+  background: var(--color-raised);
+}
+
+.eg-scenes__form-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+/* NEXT UP (UIX-01). */
+.eg-next {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-1) 0;
+  border-top: 1px solid var(--color-divider);
+}
+
+.eg-next__heading {
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--color-text-caption);
+}
+
+.eg-next__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.eg-next__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.eg-next__none {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-caption);
+}
+
+/* The map area: the scene's head, the canvas and the shortcut bar (UIX-01). */
+.eg-scene {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--color-canvas);
+}
+
+.eg-scene > .eg-notice,
+.eg-scene > .eg-tokens__failure,
+.eg-scene > .eg-tokens {
+  margin: var(--space-2) var(--space-4) 0;
+}
+
+.eg-scene--empty {
+  gap: var(--space-2);
+  padding: var(--space-8) var(--space-6);
+}
+
+.eg-scene__head {
+  min-height: 52px;
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-divider);
+}
+
+/* The heading and the mode's name share one line: a long scene name is cut short with an ellipsis (its
+   full text stays in the DOM) (G-022, review M4). */
+.eg-scene__title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.eg-scene__name {
+  font-family: var(--font-title);
+  font-weight: 700;
+  font-size: var(--font-size-xl);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.eg-scene__mode {
+  margin: 0;
+  white-space: nowrap;
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--color-live);
+}
+
+.eg-scene__mode--offline {
+  color: var(--color-warning);
+}
+
+.eg-scene__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.eg-tv {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.eg-tv__label {
+  margin-right: var(--space-1);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--color-accent);
+}
+
+.eg-scene__progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-4);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.eg-scene__progress:empty {
+  position: absolute;
+}
+
+.eg-scene__setup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3) var(--space-6);
+  margin: var(--space-2) var(--space-4) 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  background: var(--color-panel);
+}
+
+.eg-scene__map {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2) var(--space-3);
+}
+
+.eg-scene__map .eg-field {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.eg-scene__map .eg-field__input {
+  max-width: 100%;
+}
+
+.eg-scene__hint {
+  flex-basis: 100%;
+  color: var(--color-text-caption);
+  font-size: var(--font-size-sm);
+}
+
+/* Feet per square (LIV-07): a short number field, its label beside it. */
+.eg-scene__feet .eg-field {
+  flex-flow: row wrap;
+  align-items: center;
+  column-gap: var(--space-2);
+}
+
+.eg-scene__feet .eg-field > label {
+  max-width: 4.5rem;
+  line-height: 1.2;
+}
+
+.eg-scene__feet .eg-field__input {
+  width: 4.5rem;
+}
+
+.eg-scene__feet .eg-field__error {
+  flex-basis: 100%;
+}
+
+.eg-scene__body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 0;
+  padding: var(--space-2) var(--space-2) 0;
+}
+
+.eg-scene__canvas {
+  flex: 1;
+  display: flex;
+  position: relative;
+  /* Tall enough for the magnifier over its corner (D-096). */
+  min-height: 15rem;
+  border-radius: var(--radius);
+}
+
+/* Live mode's persistent indicator around the canvas (specs/08-ux-journeys.md §2, Q-024): kept in the
+   redesign, a double outline in the live colour that cannot be taken for a focus ring; dashed while the
+   connection is down (review M3, M4). */
+.eg-scene__canvas--live {
+  outline: 4px double var(--color-live-edge);
+  outline-offset: 0;
+}
+
+.eg-scene__canvas--offline {
+  outline-style: dashed;
+  outline-width: 3px;
+  outline-color: var(--color-warning);
+}
+
+/* The shortcut bar along the bottom edge (UIX-01). */
+.eg-shortcuts {
+  min-height: 30px;
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px var(--space-4);
+  padding: 4px var(--space-4);
+  margin-top: var(--space-2);
+  background: var(--color-bg);
+  border-top: 1px solid var(--color-divider);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-caption);
+}
+
+.eg-shortcuts__item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.eg-shortcuts__note {
+  margin-left: auto;
+}
+
+/* The right-hand panel (UIX-01). */
+.eg-side {
+  width: var(--side-panel-width);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--color-panel);
+  border-left: 1px solid var(--color-divider);
+}
+
+.eg-side__tabs {
+  display: flex;
+  gap: var(--space-1);
+  padding: 10px var(--space-3) 0;
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.eg-side__tab {
+  height: 38px;
+  padding: 0 var(--space-3);
+  border: 0;
+  background: transparent;
+  font-weight: 500;
+  color: var(--color-text-caption);
+  cursor: pointer;
+}
+
+.eg-side__tab[aria-selected='true'] {
+  font-weight: 700;
+  color: var(--color-text);
+  box-shadow: inset 0 -2px 0 var(--color-accent);
+}
+
+.eg-side__panel {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px var(--space-3);
+}
+
+/* "In this scene" (UIX-01). */
+.eg-token-list {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.eg-token-list__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.eg-token-list__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-1) var(--space-1);
+}
+
+.eg-token-list__heading {
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--color-text-caption);
+}
+
+.eg-token-list__rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.eg-token-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  border-radius: var(--radius);
+}
+
+.eg-token-row:hover {
+  background: var(--color-hover);
+}
+
+.eg-token-row--selected,
+.eg-token-row--selected:hover {
+  background: var(--color-selected);
+  box-shadow: inset 0 0 0 1px var(--color-selected-edge);
+}
+
+.eg-token-row__select {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 6px var(--space-1);
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.eg-token-row__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.eg-token-row__name {
+  font-weight: 500;
+  font-size: var(--font-size-row);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.eg-token-row--selected .eg-token-row__name {
+  font-weight: 700;
+}
+
+.eg-token-row__status {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-caption);
+}
+
+.eg-token-row[data-hidden] .eg-token-row__name {
+  font-style: italic;
+  color: var(--color-hidden-text);
+}
+
+.eg-token-row[data-hidden] .eg-token-row__eye {
+  color: var(--color-hidden);
+}
+
+.eg-avatar {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 2px solid var(--color-token-other);
+  background: var(--color-token-other-fill);
+  overflow: hidden;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.eg-avatar--pc {
+  border-color: var(--color-token-pc);
+  background: var(--color-token-pc-fill);
+}
+
+.eg-avatar--monster {
+  border-color: var(--color-token-monster);
+  background: var(--color-token-monster-fill);
+}
+
+.eg-token-row[data-hidden] .eg-avatar {
+  border: 2px dashed var(--color-hidden);
+  color: var(--color-text-muted);
+  background: var(--color-raised);
+}
+
+/* The selected token's popover (UIX-01). */
+.eg-popover {
+  position: absolute;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: 14px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  background: var(--color-raised);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 55%);
+}
+
+.eg-popover__head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.eg-popover__name {
+  font-family: var(--font-title);
+  font-weight: 700;
+  font-size: var(--font-size-lg);
+  overflow-wrap: anywhere;
+}
+
+.eg-popover__seen {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-caption);
+}
+
+.eg-popover__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-accent);
+}
+
+.eg-popover__seen--hidden {
+  color: var(--color-hidden-text);
+}
+
+.eg-popover__seen--hidden .eg-popover__dot {
+  background: var(--color-hidden);
+}
+
+.eg-popover__actions {
+  display: flex;
+  gap: 6px;
+}
+
+.eg-popover__main {
+  flex-grow: 1;
+}
+
+.eg-popover__note {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-caption);
+}
+
+/* The confirmation of a deletion and the other dialogs: native modal dialogs. */
 .eg-dialog {
   max-width: 32rem;
   padding: var(--space-6);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  background: var(--color-raised);
   color: var(--color-text);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 55%);
 }
 
 .eg-dialog::backdrop {
@@ -192,6 +1027,8 @@
 }
 
 .eg-dialog__heading {
+  font-family: var(--font-title);
+  font-weight: 700;
   font-size: var(--font-size-lg);
   margin-bottom: var(--space-4);
 }
@@ -208,17 +1045,19 @@
 
 .eg-dialog__warning {
   color: var(--color-danger);
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .eg-dialog__actions {
   display: flex;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: var(--space-2);
   margin-top: var(--space-6);
 }
 
-/* The asset library (specs/05-assets-and-images.md §1). */
+/* The asset library, the right-hand panel's second tab (specs/05-assets-and-images.md §1), in the visual
+   language of the other panels (UIX-01). */
 .eg-library {
   display: flex;
   flex-direction: column;
@@ -226,16 +1065,29 @@
 }
 
 .eg-library__heading {
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--color-text-caption);
 }
 
 .eg-library__tags {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-1);
+  gap: 6px;
 }
 
-.eg-button[aria-pressed='true'] {
+.eg-library__tags .eg-button {
+  min-height: 26px;
+  padding: 0 10px;
+  border-radius: 13px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.eg-library__tags .eg-button[aria-pressed='true'] {
   background: var(--color-accent);
   border-color: var(--color-accent);
   color: var(--color-on-accent);
@@ -247,14 +1099,20 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: 2px;
 }
 
 .eg-library__item {
   display: grid;
-  grid-template-columns: 3rem 1fr;
-  gap: var(--space-2);
+  grid-template-columns: 40px 1fr;
+  gap: var(--space-1) 10px;
   align-items: center;
+  padding: 6px var(--space-1);
+  border-radius: var(--radius);
+}
+
+.eg-library__item:hover {
+  background: var(--color-hover);
 }
 
 .eg-library__item .eg-tree__actions {
@@ -262,26 +1120,34 @@
 }
 
 .eg-library__thumb {
-  width: 3rem;
-  height: 3rem;
-  object-fit: contain;
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
   background: var(--color-surface);
-  border-radius: var(--radius);
+  border-radius: 50%;
+  border: 2px solid var(--color-border);
 }
 
 .eg-library__text {
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
 .eg-library__name {
-  font-weight: 600;
+  font-weight: 500;
+  font-size: var(--font-size-row);
 }
 
 .eg-library__meta,
 .eg-library__hidden {
-  color: var(--color-text-muted);
-  font-size: var(--font-size-sm);
+  color: var(--color-text-caption);
+  font-size: var(--font-size-xs);
+}
+
+.eg-library__hidden {
+  color: var(--color-hidden-text);
+  font-style: italic;
 }
 
 /* Forms inside dialogs. */
@@ -301,159 +1167,15 @@ textarea.eg-field__input {
   resize: vertical;
 }
 
-/* The selected scene: its setup above its canvas (PRP-02, D-090); the status of the last change
- * beside its name (D-096). */
-.eg-scene {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  min-height: 0;
-}
-
-.eg-scene__head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--space-2) var(--space-6);
-}
-
-/* The heading and the mode's name share one line, so the mode never adds a row: a long scene name
-   is cut short with an ellipsis (its full text stays in the DOM). The status wraps below them when
-   it does not fit beside them, as it did before (G-022, review M4). */
-.eg-scene__title {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-4);
-  min-width: 0;
-  max-width: 100%;
-}
-
-.eg-scene__title > .eg-dm__heading {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.eg-scene__setup {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: var(--space-4) var(--space-8);
-}
-
-.eg-scene__map {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: var(--space-2) var(--space-3);
-}
-
-/* Feet per square (LIV-07): a short number field, saved on Enter and when it loses focus. Its label sits
- * beside it in two short lines, so the setup keeps one row of the height the controls beside it have at
- * 1,280 × 720 (G-022); a refusal takes a line of its own below. */
-.eg-scene__feet .eg-field {
-  flex-flow: row wrap;
-  align-items: center;
-  column-gap: var(--space-2);
-}
-
-.eg-scene__feet .eg-field > label {
-  max-width: 4.5rem;
-  font-size: var(--font-size-sm);
-  line-height: 1.2;
-}
-
-.eg-scene__feet .eg-field__input {
-  width: 4rem;
-}
-
-.eg-scene__feet .eg-field__error {
-  flex-basis: 100%;
-}
-
-.eg-scene__progress {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  color: var(--color-text-muted);
-}
-
-.eg-scene__map .eg-field {
-  min-width: 0;
-  max-width: 100%;
-}
-
-.eg-scene__map .eg-field__input {
-  max-width: 100%;
-}
-
-.eg-scene__hint {
-  flex-basis: 100%;
-  color: var(--color-text-muted);
-  font-size: var(--font-size-sm);
-}
-
-/* While calibrating: the calibration strip above the canvas, and the magnified far corner
- * floating over the canvas's bottom-right corner, where the map's far corner is when it is
- * fitted (PRP-03, D-094). The magnifier lets the pointer through to the map. */
-.eg-scene__body {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  min-height: 0;
-}
-
-.eg-scene__canvas {
-  flex: 1;
-  display: flex;
-  position: relative;
-  /* Tall enough for the magnifier over its corner (D-096). */
-  min-height: 15rem;
-}
-
-/* Live mode's persistent indicator around the canvas (specs/08-ux-journeys.md §2, Q-024): a double
-   outline, so it takes no room from the canvas and cannot be taken for a focus ring, which is a single
-   line; dashed while the connection is down (review M3, M4). */
-.eg-scene__canvas--live {
-  outline: 6px double var(--color-danger);
-  outline-offset: 0;
-  border-radius: var(--radius);
-}
-
-.eg-scene__canvas--offline {
-  outline-style: dashed;
-  outline-width: 3px;
-}
-
-/* The mode's name in the scene's head, on one line: the heading gives way first (G-022). */
-.eg-scene__mode {
-  margin: 0;
-  white-space: nowrap;
-  font-size: var(--font-size-sm);
-}
-
-.eg-scene__mode--live,
-.eg-scene__mode--offline {
-  color: var(--color-danger);
-  font-weight: 700;
-}
-
-.eg-scene__mode--live::before {
-  content: '●' / '';
-  margin-right: var(--space-2);
-}
-
+/* Calibration (PRP-03, D-094): the strip above the canvas and the magnified far corner. */
 .eg-calibration {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  background: var(--color-panel);
 }
 
 .eg-calibration__top {
@@ -503,7 +1225,7 @@ textarea.eg-field__input {
   left: calc(var(--space-1) + 1px);
   right: calc(var(--space-1) + 1px);
   padding: 0 var(--space-1);
-  background: var(--color-surface);
+  background: var(--color-raised);
 }
 
 .eg-magnifier--alone .eg-magnifier__caption {
@@ -532,7 +1254,7 @@ textarea.eg-field__input {
   padding: var(--space-1);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
-  background: var(--color-surface);
+  background: var(--color-raised);
   pointer-events: none;
 }
 
@@ -544,7 +1266,7 @@ textarea.eg-field__input {
   background: var(--color-bg);
 }
 
-/* The token bar above the canvas, and the token picker (PRP-04, D-100). */
+/* Placing a token (PRP-04, D-100), and the token picker. */
 .eg-tokens {
   display: flex;
   flex-wrap: wrap;
@@ -552,14 +1274,17 @@ textarea.eg-field__input {
   gap: var(--space-2);
 }
 
-.eg-tokens__input {
-  max-width: 12rem;
-  padding-block: var(--space-1);
+.eg-tokens__failure {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 .eg-tokens__placing {
   align-self: center;
   color: var(--color-accent);
+  font-weight: 500;
 }
 
 .eg-picker {
@@ -578,17 +1303,6 @@ textarea.eg-field__input {
   gap: var(--space-2);
   max-height: 50vh;
   overflow-y: auto;
-}
-
-/* The live bar's controls, after its status (LIV-03). A small button is taller than the status
-   line, so the bar's own padding shrinks to keep its height, and the canvas's place, unchanged. */
-.eg-livebar {
-  padding-block: var(--space-1);
-  min-height: calc(2.5rem + 1px);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
 }
 
 /* Connect a screen (LIV-03, specs/08-ux-journeys.md §5): the URL large enough to read across a
@@ -646,16 +1360,15 @@ textarea.eg-field__input {
   position: absolute;
 }
 
-/* The live bar keeps one line: a long scene name is cut with an ellipsis, its whole text still read
- * out and shown on hover (REL-01 review U-M4, G-022). */
-.eg-livebar__text {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+/* A narrow window: the side panels give way before the map does. */
+@media (width <= 1100px) {
+  :root {
+    --sidebar-width: 216px;
+    --side-panel-width: 272px;
+  }
 
-.eg-livebar__actions {
-  flex: 0 0 auto;
+  .eg-tv__label,
+  .eg-shortcuts__note {
+    display: none;
+  }
 }

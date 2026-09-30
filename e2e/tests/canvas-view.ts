@@ -3,8 +3,62 @@ import { expect, type Page } from '@playwright/test';
 // Reading the DM view's map canvas in a real browser (PRP-02, PRP-03, D-090, D-094): its camera
 // from the viewport's data attributes, and what its two layers drew from their pixels.
 
-export const tree = (page: Page) => page.getByRole('navigation', { name: 'Campaigns, sessions and scenes' });
+// The Campaign → Session → Scene tree, in the header's session switcher since the redesign (UIX-01).
+export const tree = (page: Page) => page.getByRole('region', { name: 'Campaigns, sessions and scenes' });
 export const nameButton = (page: Page, name: string) => tree(page).getByRole('button', { name, exact: true });
+/** The header's breadcrumb, which opens and closes the switcher. */
+export const breadcrumb = (page: Page) => page.locator('.eg-header__crumbs');
+
+/** Opens the session switcher, if it is not open already. */
+export async function openTree(page: Page): Promise<void> {
+  if (await tree(page).isVisible()) return;
+  await breadcrumb(page).click();
+  await expect(tree(page)).toBeVisible();
+}
+
+/** The current session's scenes, in the left sidebar (UIX-01). */
+export const sceneList = (page: Page) => page.getByRole('navigation', { name: 'Scenes of this session' });
+/** A scene of the current session's list, by its name. */
+export const sceneRow = (page: Page, name: string) =>
+  sceneList(page).locator('.eg-scenes__select', { has: page.locator('.eg-scenes__name', { hasText: name }) });
+
+/** Opens the selected scene's setup: its map, the players' grid, feet per square and calibration (UIX-01). */
+export async function openSetup(page: Page): Promise<void> {
+  const toggle = page.getByRole('button', { name: 'Scene setup' });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+}
+
+/** Shows the right-hand panel's Library tab (UIX-01). */
+export async function openLibrary(page: Page): Promise<void> {
+  await page.getByRole('tab', { name: 'Library' }).click();
+}
+
+/** The "In this scene" list's rows (UIX-01). */
+export const tokenRows = (page: Page) => page.locator('.eg-token-row');
+/** Selects a token by its label in the "In this scene" list. */
+export async function selectTokenRow(page: Page, label: string): Promise<void> {
+  await page.getByRole('tab', { name: 'In this scene' }).click();
+  const exactly = new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
+  await page
+    .locator('.eg-token-row__select', { has: page.locator('.eg-token-row__name', { hasText: exactly }) })
+    .click();
+}
+/** Selects a token by its id in the "In this scene" list. */
+export async function selectTokenById(page: Page, id: string): Promise<void> {
+  await page.getByRole('tab', { name: 'In this scene' }).click();
+  await page.locator(`[data-token="${id}"] .eg-token-row__select`).click();
+}
+/** The label of the token the list marks as selected, or null. */
+export const selectedTokenLabel = (page: Page) => page.locator('.eg-token-row--selected .eg-token-row__name');
+/** The selected token's popover on the map. */
+export const tokenPopover = (page: Page) => page.locator('.eg-popover');
+/** Runs an item of the selected token's popover menu: Duplicate, To front, To back, Delete. */
+export async function tokenMenu(page: Page, label: string, item: string): Promise<void> {
+  await tokenPopover(page)
+    .getByRole('button', { name: `More actions for ${label}` })
+    .click();
+  await tokenPopover(page).getByRole('menuitem', { name: item }).click();
+}
 export const viewport = (page: Page) => page.locator('main [role="application"]');
 
 /**
@@ -31,6 +85,7 @@ export async function onScreen(page: Page, points: [number, number][]): Promise<
 }
 
 export async function selectScene(page: Page, names: { campaign: string; session: string; scene: string }) {
+  await openTree(page);
   await nameButton(page, names.campaign).click();
   await nameButton(page, names.session).click();
   await nameButton(page, names.scene).click();

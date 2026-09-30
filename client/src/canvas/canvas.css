@@ -1,5 +1,7 @@
-/* The map canvas of both views (PRP-02, D-090). Built only from the tokens of
- * ui/tokens.css; the colours Konva draws with are in MapCanvas.tsx. */
+/* The map canvas of both views (PRP-02, D-090; UIX-01). Built only from the tokens of ui/tokens.css; the
+ * colours Konva draws with are in ui/theme.ts. In the DM view the canvas carries its chrome over the map:
+ * the tool rail top left, the grid status bottom left, the zoom bottom right, and a selected token's
+ * popover beside it. */
 
 .eg-canvas {
   display: flex;
@@ -8,45 +10,14 @@
   flex: 1;
 }
 
+.eg-canvas--dm {
+  position: relative;
+}
+
 .eg-canvas--player {
   position: fixed;
   inset: 0;
-  background: var(--color-bg);
-}
-
-.eg-canvas__toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-  padding-bottom: var(--space-2);
-}
-
-.eg-canvas__view {
-  display: flex;
-  gap: var(--space-2);
-}
-
-/* Steer the TV while pressed (LIV-06): an inset ring and a mark in live mode's colour, as the TV frame
- * on the map is, on the ordinary button face, so it never reads as the danger button (review U-M6). */
-.eg-canvas__view button[aria-pressed='true'] {
-  border-color: var(--color-danger);
-  box-shadow: inset 0 0 0 2px var(--color-danger);
-}
-
-.eg-canvas__view button[aria-pressed='true']::before {
-  content: '';
-  display: inline-block;
-  width: 0.5em;
-  height: 0.5em;
-  margin-right: var(--space-1);
-  border-radius: 50%;
-  background: var(--color-danger);
-}
-
-.eg-canvas__help {
-  color: var(--color-text-muted);
-  font-size: var(--font-size-sm);
+  background: var(--color-player-bg);
 }
 
 .eg-canvas__viewport {
@@ -54,8 +25,8 @@
   min-height: 12rem;
   position: relative;
   overflow: hidden;
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
+  background: var(--color-canvas);
+  border: 1px solid var(--color-divider);
   border-radius: var(--radius);
   cursor: grab;
 }
@@ -64,10 +35,15 @@
   cursor: grabbing;
 }
 
-/* Calibration by rectangle: a drag measures instead of panning (PRP-03, D-094). */
+/* Calibration by rectangle, the ruler and placing: a drag measures instead of panning (PRP-03, D-094). */
 .eg-canvas__viewport--measure,
 .eg-canvas__viewport--measure:active {
   cursor: crosshair;
+}
+
+/* Space held: a drag pans whatever the tool (UIX-01). */
+.eg-canvas__viewport--pan {
+  cursor: grab;
 }
 
 /* The Konva stage fills the viewport, which is measured; it must not size it. */
@@ -76,8 +52,107 @@
   inset: 0;
 }
 
-/* The scene's own controls on the toolbar's row (D-100) flow with the view's buttons, so a selected
- * token's actions take the room left on the row before wrapping. */
-.eg-canvas__toolbar > [role='group'] {
-  display: contents;
+/* The floating tool rail (UIX-01). */
+.eg-rail {
+  position: absolute;
+  left: var(--space-3);
+  top: var(--space-3);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-1);
+  border-radius: 14px;
+  background: var(--overlay-panel);
+  border: 1px solid var(--color-divider);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 50%);
+}
+
+.eg-rail__tool {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.eg-rail__tool:hover {
+  background: var(--color-hover);
+  color: var(--color-text);
+}
+
+.eg-rail__tool[aria-pressed='true'] {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+.eg-rail__tool[aria-disabled='true'] {
+  cursor: not-allowed;
+  background: transparent;
+  color: var(--color-text-faint);
+}
+
+.eg-rail__divider {
+  height: 1px;
+  margin: var(--space-1) 6px;
+  background: var(--color-border);
+}
+
+/* Bottom left: the grid and the diagonal rule in use. */
+.eg-canvas__status {
+  position: absolute;
+  left: var(--space-3);
+  bottom: var(--space-3);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 32px;
+  padding: 0 var(--space-3);
+  border-radius: 10px;
+  background: var(--overlay-panel);
+  border: 1px solid var(--color-divider);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.eg-canvas__status-dot::before {
+  content: '·' / '';
+  color: var(--color-text-faint);
+}
+
+/* Bottom right: the DM's own zoom. */
+.eg-canvas__zoom {
+  position: absolute;
+  right: var(--space-3);
+  bottom: var(--space-3);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: var(--space-1);
+  border-radius: var(--radius-lg);
+  background: var(--overlay-panel);
+  border: 1px solid var(--color-divider);
+}
+
+.eg-canvas__zoom-value {
+  width: 44px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.eg-canvas__zoom-divider {
+  width: 1px;
+  height: 20px;
+  margin: 0 2px;
+  background: var(--color-border);
 }

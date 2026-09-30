@@ -8,10 +8,11 @@ import {
   click,
   FakeServer,
   installDialog,
+  openLibrary,
+  type Reply,
   settle,
   submit,
   type,
-  type Reply,
 } from '../ui/testing/fakeServer.js';
 import { render, type Rendered } from '../ui/testing/render.js';
 import { DmView } from './DmView.js';
@@ -255,6 +256,7 @@ describe('Settings', () => {
     expect(server.uploadLimit).toBe(MB);
     expect(document.activeElement).toBe(button(rendered!.container, t('settings.open')));
 
+    await openLibrary(rendered!.container);
     await click(button(rendered!.container, t('library.new')));
     const form = rendered!.container.querySelector('dialog')!;
     const input = field(form, t('assetForm.image'));

@@ -15,12 +15,20 @@ const token = (id: string, z_order: number, fields: Partial<SceneToken> = {}): S
   hidden: false,
   z_order,
   character_id: null,
-  asset: { name: 'Goblin', image_id: 'f'.repeat(64), size: 'medium' },
+  asset: { name: 'Goblin', image_id: 'f'.repeat(64), size: 'medium', category: 'monster' },
   ...fields,
 });
 const snapshot = (tokens: SceneToken[]): DmSnapshot => ({
   role: 'dm',
-  scene: { scene, map: null, tokens, camera: FIT_CAMERA, screen: null, ruler: null },
+  scene: {
+    scene,
+    map: null,
+    tokens,
+    camera: FIT_CAMERA,
+    screen: null,
+    ruler: null,
+    history: { can_undo: false, can_redo: false },
+  },
 });
 let version = 1;
 const event = (type: EventEnvelope['type'], payload: object): EventEnvelope =>
@@ -86,5 +94,17 @@ describe('the ruler in the DM live scene (LIV-07)', () => {
     expect(applyDmEvent(live, event('ruler.shown', { ruler: { ...measurement, feet: undefined } }))).toBe(live);
     expect(applyDmEvent(live, event('ruler.shown', { ruler: { from: measurement.from, feet: 5 } }))).toBe(live);
     expect(applyDmEvent(null, event('ruler.shown', { ruler: measurement }))).toBeNull();
+  });
+});
+
+describe('the undo state (UIX-01, specs/04-live-sync.md §8)', () => {
+  it('follows history.changed, skipping a malformed one', () => {
+    const scene = fromDmSnapshot(snapshot([]));
+    const next = applyDmEvent(scene, event('history.changed', { can_undo: true, can_redo: false }));
+    expect(next?.history).toEqual({ can_undo: true, can_redo: false });
+    expect(applyDmEvent(next, event('history.changed', { can_undo: 'yes' }))?.history).toEqual({
+      can_undo: true,
+      can_redo: false,
+    });
   });
 });

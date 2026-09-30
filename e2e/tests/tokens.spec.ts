@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { nameButton, viewport } from './canvas-view.js';
+import { nameButton, sceneRow, selectedTokenLabel, viewport } from './canvas-view.js';
 import { contrastFailures } from './contrast.js';
 import { openWorkspace } from './dm.js';
 import { create, drawn, newAsset, picker, status, unique } from './prep.js';
@@ -21,11 +21,12 @@ test('tokens are added, chosen, moved and deleted by keyboard alone, with readab
   await create(page, 'New scene', 'Scene name', 'Den');
   await newAsset(page, name, { category: 'monster', size: 'small' }, [120, 120, 40]);
   await nameButton(page, 'Den').click();
-  const add = page.getByRole('button', { name: 'Add token' });
+  const add = page.getByRole('button', { name: 'Add token, T' });
   await expect(add).toBeVisible();
 
-  // Tab reaches Add token from the scene's name in the tree; Enter opens the picker.
-  await nameButton(page, 'Den').focus();
+  // Tab reaches Add token on the tool rail from the scene's row in the scene list; Enter opens the picker
+  // (UIX-01).
+  await sceneRow(page, 'Den').focus();
   for (let presses = 0; presses < 40 && !(await add.evaluate((e) => e === document.activeElement)); presses++) {
     await page.keyboard.press('Tab');
   }
@@ -53,14 +54,15 @@ test('tokens are added, chosen, moved and deleted by keyboard alone, with readab
   await page.keyboard.press('ArrowRight');
   await page.keyboard.press('ArrowDown');
   await expect.poll(async () => (await drawn(page))[0]).toMatchObject({ x: placed!.x + 1, y: placed!.y + 1 });
-  expect(await contrastFailures(page), 'token bar').toEqual([]);
+  expect(await contrastFailures(page), 'token popover').toEqual([]);
   await page.keyboard.press('Escape');
-  await expect(page.getByLabel('Selected token')).toHaveValue('');
+  await expect(selectedTokenLabel(page)).toHaveCount(0);
 
-  // Chosen again from the token bar, then deleted from the map with Delete and the confirmation.
-  await page.getByLabel('Selected token').focus();
-  await page.keyboard.press('ArrowDown');
-  await expect(page.getByLabel('Selected token')).toHaveValue(placed!.id);
+  // Chosen again from the "In this scene" list by keyboard, then deleted from the map with Delete and the
+  // confirmation (UIX-01).
+  await page.locator('.eg-token-row__select').first().focus();
+  await page.keyboard.press('Enter');
+  await expect(selectedTokenLabel(page)).toHaveText(name);
   await viewport(page).focus();
   await page.keyboard.press('Delete');
   const dialog = page.getByRole('dialog', { name: `Delete ${name}?` });

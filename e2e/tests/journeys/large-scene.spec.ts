@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { MAP_HEIGHT, MAP_WIDTH, regionColour, seedLargeScene, TOKEN_COUNT } from '../../fixtures/large-scene.js';
-import { selectScene } from '../canvas-view.js';
+import { sceneRow, selectScene } from '../canvas-view.js';
 import { openWorkspace, seedCampaign } from '../dm.js';
 import { deleteAssets, deleteCampaign, liveBar, player, tvCanvas, tvTokens, unique } from './support.js';
 
@@ -123,19 +123,16 @@ test('the large-scene fixture goes live: the TV draws its 10,000 × 7,000 px map
     }
 
     // The map-less scene goes live: its default extent, no tokens.
-    await dm
-      .getByRole('navigation', { name: 'Campaigns, sessions and scenes' })
-      .getByRole('button', { name: `Map-less scene ${tag}`, exact: true })
-      .click();
+    await sceneRow(dm, `Map-less scene ${tag}`).click();
     await liveBar(dm)
       .getByRole('button', { name: `Go live: Map-less scene ${tag}` })
       .click();
-    await expect(liveBar(dm).getByRole('status')).toHaveText(`Live: Map-less scene ${tag}`);
+    await expect(liveBar(dm).getByRole('status')).toHaveText(`Players see Map-less scene ${tag}`);
     await expect.poll(async () => (await tvTokens(tv)).length).toBe(0);
     await expect(player(tv)).toHaveAttribute('data-scene', 'live');
   } finally {
     await liveBar(dm)
-      .getByRole('button', { name: 'Blank TV' })
+      .getByRole('button', { name: 'Go idle' })
       .click()
       .catch(() => undefined);
     await deleteCampaign(dm, campaignId);

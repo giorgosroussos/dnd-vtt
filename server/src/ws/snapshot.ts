@@ -16,12 +16,15 @@ import { readSettings } from '../db/settings.js';
 import { listTokens } from '../db/tokens.js';
 import type { PlayerCameraState, ScreenRegistry } from '../domain/camera.js';
 import { measurementOf, type RulerState } from '../domain/ruler.js';
+import type { UndoHistory } from '../domain/undo.js';
 
-/** What the snapshots read from the server's memory rather than the database (LIV-06, LIV-07). */
+/** What the snapshots read from the server's memory rather than the database (LIV-06, LIV-07, UIX-01). */
 export interface LiveMemory {
   camera: PlayerCameraState;
   screens: ScreenRegistry;
   ruler: RulerState;
+  /** The undo history, whose state the DM's Undo and Redo buttons show. */
+  history: UndoHistory;
 }
 
 /**
@@ -43,6 +46,8 @@ export function liveMeasurement(db: Database.Database, scene: Scene, memory: Liv
 // reconnecting shows what the others show; only the DM's carries the screen shape the TV frame
 // follows (D-119). Both carry the measurement shown on the TV (LIV-07), so a screen reconnecting, or
 // asking again after a gap, keeps the line the others show; a measurement names no token (D-121).
+// The players' carries the live scene's name, shown on the TV (UIX-01); the DM's alone carries the
+// undo history's state.
 
 export function readSnapshot(db: Database.Database, role: 'dm', memory: LiveMemory): DmSnapshot;
 export function readSnapshot(db: Database.Database, role: 'players', memory: LiveMemory): PlayerSnapshot;
@@ -62,6 +67,7 @@ function readDm(db: Database.Database, memory: LiveMemory): DmSnapshot {
       camera: { ...memory.camera.of(live.scene.id) },
       screen: memory.screens.chosen(),
       ruler: liveMeasurement(db, live.scene, memory),
+      history: memory.history.stateFor(live.scene.id),
     },
   };
 }
@@ -75,6 +81,7 @@ function readPlayers(db: Database.Database, memory: LiveMemory): PlayerSnapshot 
   return {
     role: 'players',
     scene: {
+      name: scene.name,
       map: map && playerMap(map),
       grid: { ...scene.grid },
       tokens: visible.map(toPlayerToken),
@@ -98,6 +105,7 @@ export function toPlayerToken(token: SceneToken, rank: number): PlayerToken {
     image_id: token.asset.image_id,
     z_order: rank,
     label: token.label,
+    category: token.asset.category,
   };
 }
 

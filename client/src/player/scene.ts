@@ -27,7 +27,7 @@ import {
 /** The live scene the player view draws, or null for the idle screen. */
 export type PlayerScene = PlayerLiveScene | null;
 
-const playerToken = ({ id, x, y, size, image_id, z_order, label }: PlayerToken): PlayerToken => ({
+const playerToken = ({ id, x, y, size, image_id, z_order, label, category }: PlayerToken): PlayerToken => ({
   id,
   x,
   y,
@@ -35,6 +35,7 @@ const playerToken = ({ id, x, y, size, image_id, z_order, label }: PlayerToken):
   image_id,
   z_order,
   label,
+  category,
 });
 
 const ranked = (tokens: readonly PlayerToken[]): PlayerToken[] =>
@@ -55,8 +56,9 @@ const measurement = ({ from, to, feet }: Measurement): Measurement => ({
 
 export function fromSnapshot(snapshot: PlayerSnapshot): PlayerScene {
   if (snapshot.scene === null) return null;
-  const { map, grid, tokens, camera, ruler } = snapshot.scene;
+  const { name, map, grid, tokens, camera, ruler } = snapshot.scene;
   return {
+    name,
     map,
     grid,
     tokens: ranked([...tokens].sort((a, b) => a.z_order - b.z_order).map(playerToken)),

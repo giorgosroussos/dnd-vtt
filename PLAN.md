@@ -14,6 +14,7 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
   - `make verify` exit 0; `TRACEABILITY.md` UIX-01 row with the evidence.
 - **Non-goals:** ping, markers and fog (TBL-01 to TBL-03: their rail buttons are present and disabled); rename and stacking on the live scene (`04` §2).
 - **Review:** `Surfaces` include `security` and `data`, so prompt 2 (review) runs after implementation.
+- **Status (2026-09-30):** implemented and verified locally, review done (one low finding, fixed); committed on `uix-redesign`, closes when CI is green. TBL-01 to TBL-03 follow on the same branch.
 
 ## Next
 

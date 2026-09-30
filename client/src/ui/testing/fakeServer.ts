@@ -31,6 +31,7 @@ import {
   type Screen,
   type Session,
 } from '@emberglass/shared';
+import { t } from '../messages.js';
 import { installFakeSockets, type FakeSocket } from './fakeSocket.js';
 
 // Test tooling only, never bundled: a scripted stand-in for the server behind
@@ -147,6 +148,9 @@ export class FakeServer {
   private undoHistory: (CommandEnvelope | { type: 'restore'; token: SceneToken })[] = [];
   /** The live scene the undo history belongs to; a history used with another scene live is emptied. */
   private undoScene: string | null = null;
+  /** What redoes each undo, newest last, emptied by any new undoable command (UIX-01). */
+  private redoHistory: (CommandEnvelope | { type: 'restore'; token: SceneToken })[] = [];
+
   before: Interceptor | undefined;
   private restore: (() => void) | undefined;
 
@@ -209,7 +213,7 @@ export class FakeServer {
       hidden: asset.default_hidden,
       z_order: top + 1,
       character_id: null,
-      asset: { name: asset.name, image_id: asset.image_id, size: asset.size },
+      asset: { name: asset.name, image_id: asset.image_id, size: asset.size, category: asset.category },
       ...fields,
     };
     this.sceneTokens.push(token);
@@ -307,6 +311,12 @@ export class FakeServer {
 
   /** Replaces `fetch`, `XMLHttpRequest` (uploads, D-090) and the live socket (LIV-01) until `uninstall`. */
   install(): this {
+    // What the workspace remembers between visits (UIX-01) never carries from one test to the next.
+    try {
+      window.localStorage?.clear();
+    } catch {
+      // No storage: nothing to clear.
+    }
     const original = globalThis.fetch;
     const fakeSockets = installFakeSockets((socket) => {
       socket.onCommand = (command, ack) => {
@@ -386,8 +396,22 @@ export class FakeServer {
         camera: { ...this.playerCamera },
         screen: this.screen && { ...this.screen },
         ruler: this.measurement(scene),
+        history: this.historyState(),
       },
     };
+  }
+
+  /** Whether undo and redo would find anything on the live scene (UIX-01). */
+  historyState(): { can_undo: boolean; can_redo: boolean } {
+    const mine = this.liveSceneId !== null && this.undoScene === this.liveSceneId;
+    return { can_undo: mine && this.undoHistory.length > 0, can_redo: mine && this.redoHistory.length > 0 };
+  }
+
+  /** Tells the DM room of a new undo state, as the server does after a command, the same scene live (UIX-01). */
+  private tellHistory(before: string, live: string | null): void {
+    if (this.liveSceneId === null || this.liveSceneId !== live) return;
+    const state = this.historyState();
+    if (JSON.stringify(state) !== before) this.deliver('history.changed', state);
   }
 
   private measurement(scene: Scene) {
@@ -409,7 +433,12 @@ export class FakeServer {
   private withAsset(token: SceneToken): SceneToken {
     const asset = this.assets.find((each) => each.id === token.asset_id);
     return structuredClone(
-      asset ? { ...token, asset: { name: asset.name, image_id: asset.image_id, size: asset.size } } : token,
+      asset
+        ? {
+            ...token,
+            asset: { name: asset.name, image_id: asset.image_id, size: asset.size, category: asset.category },
+          }
+        : token,
     );
   }
 
@@ -440,11 +469,14 @@ export class FakeServer {
     const live = this.liveSceneId;
     const before = new Map(this.sceneTokens.map((token) => [token.id, structuredClone(token)]));
     const version = this.dmVersion;
+    const undoBefore = JSON.stringify(this.historyState());
     const ack = this.apply(envelope);
     // As the server does: whoever measured last owns the line, even when it was already shown.
     if ('ok' in ack && envelope.type === 'ruler.update') this.rulerOwner = sender;
-    if (this.liveSceneId !== live) this.undoHistory = [];
-    else if ('ok' in ack && this.dmVersion !== version && envelope.type !== 'undo') {
+    if (this.liveSceneId !== live) {
+      this.undoHistory = [];
+      this.redoHistory = [];
+    } else if ('ok' in ack && this.dmVersion !== version && envelope.type !== 'undo' && envelope.type !== 'redo') {
       const p = envelope.payload;
       const was = before.get(String(p.token_id));
       const added = this.sceneTokens.find((token) => !before.has(token.id));
@@ -465,8 +497,37 @@ export class FakeServer {
         this.undoScene = live;
         this.undoHistory.push(inverse);
         if (this.undoHistory.length > 100) this.undoHistory.shift();
+        this.redoHistory = [];
       }
     }
+    this.tellHistory(undoBefore, live);
+    return ack;
+  }
+
+  /** What undoes an inverse about to be applied, from the state before it (UIX-01). */
+  private inverseOfInverse(
+    inverse: CommandEnvelope | { type: 'restore'; token: SceneToken },
+  ): CommandEnvelope | { type: 'restore'; token: SceneToken } | undefined {
+    if (inverse.type === 'restore') return { type: 'token.delete', payload: { token_id: inverse.token.id } };
+    const token = this.sceneTokens.find((each) => each.id === inverse.payload.token_id);
+    if (!token) return undefined;
+    if (inverse.type === 'token.delete') return { type: 'restore', token: structuredClone(token) };
+    if (inverse.type === 'token.move')
+      return { type: 'token.move', payload: { token_id: token.id, x: token.x, y: token.y } };
+    if (inverse.type === 'token.setVisibility') {
+      return { type: 'token.setVisibility', payload: { token_id: token.id, hidden: token.hidden } };
+    }
+    return undefined;
+  }
+
+  /** Applies again the most recently undone command, its inverse back in the history (UIX-01). */
+  private redo(): CommandAck {
+    if (this.undoScene !== this.liveSceneId) this.redoHistory = [];
+    const redo = this.redoHistory.pop();
+    if (!redo) return { ok: true };
+    const inverse = this.inverseOfInverse(redo);
+    const ack = this.applyInverse(redo);
+    if ('ok' in ack && inverse) this.undoHistory.push(inverse);
     return ack;
   }
 
@@ -477,6 +538,13 @@ export class FakeServer {
     if (this.undoScene !== this.liveSceneId) this.undoHistory = [];
     const inverse = this.undoHistory.pop();
     if (!inverse) return { ok: true };
+    const redo = this.inverseOfInverse(inverse);
+    const ack = this.applyInverse(inverse);
+    if ('ok' in ack && redo) this.redoHistory.push(redo);
+    return ack;
+  }
+
+  private applyInverse(inverse: CommandEnvelope | { type: 'restore'; token: SceneToken }): CommandAck {
     if (inverse.type === 'restore') {
       const asset = this.assets.find((each) => each.id === inverse.token.asset_id);
       if (!asset) return { error: { code: 'reference_not_found', message: 'test' } };
@@ -593,6 +661,8 @@ export class FakeServer {
       }
       case 'undo':
         return this.undo();
+      case 'redo':
+        return this.redo();
       default:
         return refuse('command_unsupported');
     }
@@ -797,6 +867,26 @@ export class FakeServer {
     }
     if (!this.signedIn) return failure(401, 'unauthorized');
     if (path === '/api/connect' && method === 'GET') return json(200, this.connect);
+    // How many player views are connected (UIX-01): the open player sockets.
+    if (path === '/api/screens' && method === 'GET') {
+      return json(200, { count: this.sockets.filter((each) => each.connected && each.view === 'player').length });
+    }
+    // Each scene's token counts, for the scene list (UIX-01).
+    const summaries = /^\/api\/sessions\/([^/]+)\/scenes\/summary$/.exec(path);
+    if (summaries && method === 'GET') {
+      if (!this.sessions.some((each) => each.id === summaries[1])) return failure(404, 'not_found');
+      return json(
+        200,
+        this.scenesOf(summaries[1]!).map((scene) => {
+          const tokens = this.tokensOf(scene.id);
+          return {
+            id: scene.id,
+            tokens: tokens.length + (this.tokens[scene.id] ?? 0),
+            hidden: tokens.filter((each) => each.hidden).length,
+          };
+        }),
+      );
+    }
     if (path === '/api/settings') {
       // PATCH, as the server checks it (REL-01): strict and bounded, all or nothing.
       if (method === 'PATCH') {
@@ -1027,4 +1117,82 @@ export function installDialog(): void {
     if (modal && !modal.contains(this)) return;
     focus.call(this, options);
   };
+}
+
+/** Opens the header's session switcher, which holds the Campaign → Session → Scene tree (UIX-01). */
+export async function openSwitcher(view: HTMLElement): Promise<HTMLElement> {
+  const open = view.querySelector<HTMLElement>('.eg-switcher');
+  if (open) return open;
+  await click(view.querySelector('.eg-header__crumbs'));
+  return view.querySelector<HTMLElement>('.eg-switcher')!;
+}
+
+/** What the header's live indicator says, its LIVE or IDLE badge aside (UIX-01). */
+export function liveText(view: HTMLElement): string {
+  const status = view.querySelector('.eg-live [role="status"]');
+  if (!status) return '';
+  const copy = status.cloneNode(true) as HTMLElement;
+  for (const badge of copy.querySelectorAll('.eg-live__badge')) badge.remove();
+  return copy.textContent.trim();
+}
+
+/** Shows the right-hand panel's Library tab (UIX-01). */
+export async function openLibrary(view: ParentNode): Promise<void> {
+  const tab = [...view.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(
+    (each) => each.textContent === t('side.library'),
+  );
+  if (tab && tab.getAttribute('aria-selected') !== 'true') await click(tab);
+}
+
+/** Opens the selected scene's setup: its map, the players' grid, feet per square and calibration (UIX-01). */
+export async function openSetup(view: ParentNode): Promise<void> {
+  const toggle = [...view.querySelectorAll<HTMLButtonElement>('button[aria-expanded]')].find(
+    (each) => each.textContent === t('sceneSetup.open'),
+  );
+  if (toggle && toggle.getAttribute('aria-expanded') !== 'true') await click(toggle);
+}
+
+/** Selects a scene of the current session in the left sidebar's scene list, by its name (UIX-01). */
+export async function selectScene(view: ParentNode, name: string): Promise<void> {
+  const row = [...view.querySelectorAll<HTMLButtonElement>('.eg-scenes__select')].find(
+    (each) => each.querySelector('.eg-scenes__name')?.textContent === name,
+  );
+  if (!row) throw new Error(`no scene named ${name} in the scene list`);
+  await click(row);
+}
+
+/** Selects a token by its label in the right panel's "In this scene" list (UIX-01). */
+export async function selectTokenRow(view: ParentNode, label: string): Promise<void> {
+  const row = [...view.querySelectorAll<HTMLButtonElement>('.eg-token-row__select')].find(
+    (each) => each.querySelector('.eg-token-row__name')?.textContent === label,
+  );
+  if (!row) throw new Error(`no token labelled ${label} in the list`);
+  await click(row);
+}
+
+/** The id of the token the list marks as selected, or '' when none is (UIX-01). */
+export function selectedTokenId(view: ParentNode): string {
+  return view.querySelector<HTMLElement>('.eg-token-row--selected')?.dataset.token ?? '';
+}
+
+/** The labels the "In this scene" list shows, in its order (UIX-01). */
+export function listedTokens(view: ParentNode): string[] {
+  return [...view.querySelectorAll('.eg-token-row__name')].map((each) => each.textContent ?? '');
+}
+
+/** The selected token's popover beside it on the map, if one is shown (UIX-01). */
+export function popover(view: ParentNode): HTMLElement | null {
+  return view.querySelector<HTMLElement>('.eg-popover');
+}
+
+/** Runs an item of the selected token's "…" menu in its popover: Duplicate, To front, To back, Delete (UIX-01). */
+export async function tokenMenu(view: ParentNode, label: string, item: string): Promise<void> {
+  const box = popover(view);
+  if (!box) throw new Error('no token popover is shown');
+  await click(button(box, t('tokens.moreOf', { label })));
+  const entry = [...box.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(
+    (each) => each.querySelector('span')?.textContent === item,
+  );
+  if (!entry) throw new Error(`no menu item ${item}`);
+  await click(entry);
 }

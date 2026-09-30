@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import {
   API_IMAGE_PATHS,
   FEET_PER_SQUARE_BOUNDS,
@@ -18,6 +18,8 @@ import {
 import { formatDecimal, formatNumber } from '../canvas/calibration.js';
 import {
   MapCanvas,
+  type CanvasHandle,
+  type CanvasRail,
   type CanvasTokenControls,
   type Measure,
   type Placing,
@@ -27,6 +29,7 @@ import {
 import { samePath, type RulerPath } from '../canvas/ruler.js';
 import { Button } from '../ui/Button.js';
 import { Dialog } from '../ui/Dialog.js';
+import { Icon } from '../ui/icons.js';
 import { Notice } from '../ui/Notice.js';
 import { TextField } from '../ui/TextField.js';
 import { errorMessage } from '../ui/errorMessage.js';
@@ -34,6 +37,7 @@ import { t, type MessageKey } from '../ui/messages.js';
 import { useHeldFor } from '../ui/useHeldFor.js';
 import { errorCode, request, upload } from './api.js';
 import { CONNECTION_NOTICE_DELAY_MS } from './LiveBar.js';
+import { SidePanel, type SideTab } from './SidePanel.js';
 import { CalibrationPanel } from './calibration/CalibrationPanel.js';
 import { CornerMagnifier } from './calibration/CornerMagnifier.js';
 import { startDraft, withRect, type Draft } from './calibration/draft.js';
@@ -41,8 +45,10 @@ import { megabytes } from './library/labels.js';
 import type { DmScene } from './live/dmScene.js';
 import type { DmLive } from './live/useDmLive.js';
 import { entityPath } from './tree/paths.js';
-import { DeleteTokenDialog, RenameDialog, TokenBar } from './tokens/TokenBar.js';
+import { DeleteTokenDialog, RenameDialog } from './tokens/TokenBar.js';
+import { TokenList } from './tokens/TokenList.js';
 import { TokenPicker } from './tokens/TokenPicker.js';
+import { TokenPopover } from './tokens/TokenPopover.js';
 import { toCanvasToken, useSceneTokens } from './tokens/useSceneTokens.js';
 
 // The selected scene in the centre of the workspace (PRP-02, specs/08-ux-journeys.md §1, §3,
@@ -61,11 +67,16 @@ import { toCanvasToken, useSceneTokens } from './tokens/useSceneTokens.js';
 // be replaced meanwhile and the canvas keeps its height; replacing a calibrated map asks first,
 // because its calibration goes with it (D-093). A scene without a map offers no calibration.
 //
+// The redesign (UIX-01, specs/08-ux-journeys.md §11, Q-100): the panel is the workspace's centre and its
+// right-hand panel. Above the canvas, the scene's name and, on the live scene, the TV camera controls; the
+// setup behind the Scene setup button; the tool rail, grid status and zoom on the canvas; the shortcut bar
+// below it. The right-hand panel's first tab lists the scene's tokens, its second the library.
+//
 // Tokens (PRP-04, specs/05-assets-and-images.md §3–§5, specs/06-grid-and-measurement.md §4, D-100):
-// Add token opens the picker; the chosen asset is then placed by a click on the map, or by Enter at
-// the centre of the view, and the server numbers it and sets its visibility from the asset. The
-// selected token is moved by dragging or by the arrow keys, and hidden, revealed, renamed,
-// restacked or deleted from the token bar.
+// Add token (the rail, T, or the token list) opens the picker; the chosen asset is then placed by a click
+// on the map, or by Enter at the centre of the view, and the server numbers it and sets its visibility
+// from the asset. The selected token is moved by dragging or by the arrow keys, and hidden, revealed,
+// renamed, duplicated, restacked or deleted from its popover beside it (H hides or reveals it).
 //
 // Live and prep modes (LIV-04, specs/08-ux-journeys.md §2, Q-024): the live scene is shown in live
 // mode, framed by a persistent live indicator, and every other scene in prep mode, where nothing
@@ -78,19 +89,21 @@ import { toCanvasToken, useSceneTokens } from './tokens/useSceneTokens.js';
 // (map, players' grid, calibration) is still saved over REST in live mode (Q-015), and the server
 // pushes it to both rooms as a fresh snapshot (specs/04-live-sync.md §10).
 //
-// Undo (LIV-05, specs/04-live-sync.md §8, specs/08-ux-journeys.md §3, D-040, D-117): in live mode,
-// Ctrl+Z (Cmd+Z on a Mac) anywhere in the DM view sends `undo`; the server applies the most recent
+// Undo and redo (LIV-05, UIX-01, specs/04-live-sync.md §8, specs/08-ux-journeys.md §3, D-040, D-117): in
+// live mode, the rail's Undo and Redo, or Ctrl+Z and Ctrl+Shift+Z or Ctrl+Y (Cmd on a Mac) anywhere in the
+// DM view, send `undo` and `redo`, the rail greying each while the server says it would do nothing; the server applies the most recent
 // inverse, and its events bring this canvas and the TV in step. A text field keeps its own undo and an
 // open dialog takes none; in prep mode, while calibrating and while not connected nothing is sent, and
 // a held or repeated Ctrl+Z waits for the answer to the first. The status line names what the undo's
 // events changed before its acknowledgement (D-111), or says that nothing was left (D-118).
 //
-// The TV camera (LIV-06, specs/04-live-sync.md §9, specs/08-ux-journeys.md §2, Q-080, D-119): in live
+// The TV camera (LIV-06, specs/04-live-sync.md §9, specs/08-ux-journeys.md §2, §11, Q-080, D-119): in live
 // mode the canvas shows the frame of what the TV sees, in the shape of the screen the server says it
-// follows, from the live scene, so it follows another DM browser's steering. Dropping the frame, a key
-// press while steering, or a view button while steering sends `camera.setPlayer`; the frame stays where
-// it was put until the server answers, and a refusal says why above the canvas. The DM's own view does
-// not move. Setting the TV camera is not undoable (specs/04-live-sync.md §2).
+// follows, from the live scene, so it follows another DM browser's steering. Dropping the frame, or one of
+// the TV camera buttons (Send my view, Fit map, TV zoom out and in), sends `camera.setPlayer`; the frame
+// stays where it was put until the server answers, and a refusal says why above the canvas. The DM's own
+// view does not move. Setting the TV camera is not undoable (specs/04-live-sync.md §2). Lock TV camera,
+// kept by the workspace for this DM view only (D-140), refuses the buttons and the frame.
 //
 // The ruler (LIV-07, specs/06-grid-and-measurement.md §5, specs/04-live-sync.md §11, Q-027, Q-086, D-121):
 // the canvas's Ruler measures between square centres by the server-wide diagonal rule and the scene's feet
@@ -98,8 +111,12 @@ import { toCanvasToken, useSceneTokens } from './tokens/useSceneTokens.js';
 // live mode each new measurement sends `ruler.update` and clearing it `ruler.clear`, at most one command
 // in flight and the latest waiting, so a fast drag never queues a command per square; the canvas shows
 // what this view sent until it is answered, and then what the server says the TV shows, another DM
-// browser's measurement included. Turning the ruler off clears the measurement. The ruler, steering the
-// TV, placing and a selected token take the pointer and the keys in turn.
+// browser's measurement included. Turning the ruler off clears the measurement. The ruler, placing and a
+// selected token take the pointer and the keys in turn.
+//
+// Shortcuts (UIX-01, specs/08-ux-journeys.md §11): V selects, M measures, T adds a token, H hides or
+// reveals the selected token, Ctrl+Z undoes and Ctrl+Shift+Z or Ctrl+Y redoes, from anywhere in the DM
+// view but a text field or an open dialog; none acts while typing.
 //
 // The workspace keys this panel by scene: a request still running when another scene is
 // selected ends in a panel that is gone, so its answer changes nothing on screen. One change
@@ -125,7 +142,8 @@ const STALE_UNDO = new Set(['not_found', 'reference_not_found', 'scene_not_live'
 
 /** What an undo changed on the live scene, named as the other token announcements are (review U2). */
 function undoneMessage(before: DmScene | undefined, after: DmScene | undefined): string {
-  if (after === before) return t('scene.nothingToUndo');
+  // Only the tokens say what an undo did: the undo state changes with it (UIX-01).
+  if (after?.tokens === before?.tokens) return t('scene.nothingToUndo');
   const was = new Map((before?.tokens ?? []).map((token) => [token.id, token]));
   const now = new Map((after?.tokens ?? []).map((token) => [token.id, token]));
   for (const [id, token] of was) if (!now.has(id)) return t('scene.undoneRemoved', { label: token.label });
@@ -154,6 +172,17 @@ export function isUndoKey(
   return key === 'z' || (!/^[a-z]$/.test(key) && event.code === 'KeyZ');
 }
 
+/** Ctrl+Shift+Z or Cmd+Shift+Z, or Ctrl+Y: redo (UIX-01), read as `isUndoKey` reads its key. */
+export function isRedoKey(
+  event: Pick<KeyboardEvent, 'key' | 'code' | 'ctrlKey' | 'metaKey' | 'shiftKey' | 'altKey'>,
+): boolean {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey) return false;
+  const key = event.key.toLowerCase();
+  const z = key === 'z' || (!/^[a-z]$/.test(key) && event.code === 'KeyZ');
+  const y = key === 'y' || (!/^[a-z]$/.test(key) && event.code === 'KeyY');
+  return (z && event.shiftKey) || (y && !event.shiftKey);
+}
+
 export function ScenePanel({
   sceneId,
   name,
@@ -161,10 +190,34 @@ export function ScenePanel({
   rulerRule = 'phb',
   onRulerOn,
   live,
+  mainId = 'main',
+  sideTab = 'scene',
+  onSideTab = () => {},
+  library,
+  tvLocked = false,
+  onTvLocked = () => {},
+  setupOpen: setupOpenProp,
+  onSetupOpen,
+  onTokensChanged,
 }: {
   sceneId: string;
   name: string;
   uploadLimit: number;
+  /** The id of the main landmark the skip link goes to. */
+  mainId?: string | undefined;
+  /** The right-hand panel's tab, kept by the workspace across scenes. */
+  sideTab?: SideTab | undefined;
+  onSideTab?: ((tab: SideTab) => void) | undefined;
+  /** The asset library, the right-hand panel's second tab. */
+  library?: ReactNode;
+  /** Lock TV camera, kept by the workspace for this DM view (D-140). */
+  tvLocked?: boolean | undefined;
+  onTvLocked?: ((locked: boolean) => void) | undefined;
+  /** Whether the Scene setup is open, kept by the workspace across scenes; the panel keeps its own without. */
+  setupOpen?: boolean | undefined;
+  onSetupOpen?: ((open: boolean) => void) | undefined;
+  /** Told after a change to the scene's tokens or map, so the scene list's counts and thumbnail are read again. */
+  onTokensChanged?: (() => void) | undefined;
   /** The server-wide diagonal rule the ruler measures by (specs/06-grid-and-measurement.md §5, Q-037). */
   rulerRule?: RulerRule | undefined;
   /** Told when measuring starts, so the workspace reads the rule again: another browser may have changed it (G-036). */
@@ -214,7 +267,7 @@ export function ScenePanel({
   const refocus = useRef<'calibrate' | 'replace' | 'add' | 'canvas' | 'opener'>(undefined);
   // The control that opened a token dialog, where focus returns when it closes unchanged.
   const opener = useRef<HTMLElement | null>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
   const sceneTokens = useSceneTokens(sceneId, isLive);
   // Moves and visibility changes sent in live mode, shown until the server has answered (LIV-04).
   const [pending, setPending] = useState<
@@ -222,15 +275,11 @@ export function ScenePanel({
   >({});
   const pendingSeq = useRef(0);
   const [liveFailure, setLiveFailure] = useState<string>();
-  // Steering the TV with the keys (LIV-06), and the camera sent and not yet answered.
-  const [steering, setSteering] = useState(false);
-  // Steering ends whenever the frame goes: Blank TV, another scene live, or calibration (review U-M3).
-  const steerable = liveScene !== undefined && draft === undefined;
-  const [wasSteerable, setWasSteerable] = useState(steerable);
-  if (steerable !== wasSteerable) {
-    setWasSteerable(steerable);
-    if (!steerable) setSteering(false);
-  }
+  // The TV camera sent and not yet answered (LIV-06), and the canvas the TV camera buttons act through.
+  const canvas = useRef<CanvasHandle>(null);
+  const [ownSetupOpen, setOwnSetupOpen] = useState(false);
+  const setupOpen = setupOpenProp ?? ownSetupOpen;
+  const setSetupOpen = (open: boolean) => (onSetupOpen ? onSetupOpen(open) : setOwnSetupOpen(open));
   const [pendingCamera, setPendingCamera] = useState<{ seq: number; camera: PlayerCamera }>();
   const cameraSeq = useRef(0);
   // The ruler (LIV-07): whether it measures, the measurement kept in this view in prep mode, and in live
@@ -258,15 +307,11 @@ export function ScenePanel({
     toAnnounce.current = undefined;
   }
   const [selectedToken, setSelectedToken] = useState<string>();
-  // Choosing a token gives the arrow keys back to it, and placing one ends steering (review U-M4) and
-  // measuring.
+  // Choosing a token gives the arrow keys back to it and ends measuring.
   const selectToken = (id: string | undefined) => {
     setSelectedToken(id);
-    if (id !== undefined) {
-      setSteering(false);
-      // Ending measuring takes the measurement off, on the TV too (review C-M1).
-      stopMeasuring();
-    }
+    // Ending measuring takes the measurement off, on the TV too (review C-M1).
+    if (id !== undefined) stopMeasuring();
   };
   const [picking, setPicking] = useState(false);
   const [placingAsset, setPlacingAsset] = useState<LibraryAsset>();
@@ -279,11 +324,12 @@ export function ScenePanel({
   useEffect(() => {
     if (refocus.current === 'calibrate') calibrateRef.current?.focus();
     if (refocus.current === 'replace') submitRef.current?.focus();
-    if (refocus.current === 'add') panelRef.current?.querySelector<HTMLButtonElement>('.eg-tokens button')?.focus();
+    if (refocus.current === 'add')
+      panelRef.current?.querySelector<HTMLButtonElement>('[data-tool="add-token"]')?.focus();
     if (refocus.current === 'canvas') panelRef.current?.querySelector<HTMLElement>('[role="application"]')?.focus();
     if (refocus.current === 'opener') {
       if (opener.current?.isConnected) opener.current.focus();
-      else panelRef.current?.querySelector<HTMLButtonElement>('.eg-tokens button')?.focus();
+      else panelRef.current?.querySelector<HTMLButtonElement>('[data-tool="add-token"]')?.focus();
     }
     refocus.current = undefined;
   });
@@ -368,6 +414,8 @@ export function ScenePanel({
       setScene(await request<Scene>('PATCH', entityPath('scene', scene.id), { map_image_id: image.id }));
       setFile(undefined);
       setStatus('attached');
+      // The scene list shows the new map's thumbnail.
+      onTokensChanged?.();
       formRef.current?.reset();
     } catch (error) {
       const code = errorCode(error);
@@ -478,7 +526,6 @@ export function ScenePanel({
     setPicking(false);
     setStatus(undefined);
     setPlacingAsset(asset);
-    setSteering(false);
     stopMeasuring();
     refocus.current = 'canvas';
   }
@@ -573,11 +620,7 @@ export function ScenePanel({
           screen: liveScene.screen,
           // The frame locks at once: a drag while down would reach no TV.
           offline,
-          steering,
-          onSteer: (on) => {
-            setSteering(on);
-            if (on) stopMeasuring();
-          },
+          locked: tvLocked,
           onChange: (camera) => void steerTv(camera),
         }
       : undefined;
@@ -689,7 +732,6 @@ export function ScenePanel({
           if (!on) return stopMeasuring();
           setRulerOn(true);
           onRulerOn?.();
-          setSteering(false);
           setSelectedToken(undefined);
         },
         onMeasure: measureRuler,
@@ -730,20 +772,64 @@ export function ScenePanel({
     announce(undoneMessage(before, live.current()));
   }
 
-  // Ctrl+Z in live mode, wherever focus is in the DM view but a text field or a dialog.
-  const undoKey = useRef<() => void>(undefined);
-  undoKey.current = () => void undoLast();
-  useEffect(() => {
-    if (!isLive) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || !isUndoKey(event) || typesText(event.target)) return;
-      if (document.querySelector('dialog[open]')) return;
+  // Redo (UIX-01): as undo, one at a time, and only on the live scene.
+  const redoing = useRef(false);
+  async function redoLast() {
+    if (draft || redoing.current) return;
+    setLiveFailure(undefined);
+    if (offline || !live) return announce(t('scene.redoOffline'));
+    redoing.current = true;
+    setStatus(undefined);
+    const before = live.current();
+    const outcome = await live.command('redo', {});
+    redoing.current = false;
+    if (!outcome.ok) {
+      setLiveFailure(
+        STALE_UNDO.has(outcome.code)
+          ? t('scene.redoStale')
+          : t('scene.redoFailed', { reason: errorMessage(outcome.code) }),
+      );
+      return;
+    }
+    const after = live.current();
+    announce(after?.tokens === before?.tokens ? t('scene.nothingToRedo') : t('scene.redone'));
+  }
+
+  // The shortcuts, wherever focus is in the DM view but a text field or a dialog (UIX-01). The canvas
+  // handles its own keys first (M on the map among them) and marks them handled.
+  const keys = useRef<(event: KeyboardEvent) => void>(undefined);
+  keys.current = (event: KeyboardEvent) => {
+    if (event.defaultPrevented || typesText(event.target)) return;
+    if (document.querySelector('dialog[open]')) return;
+    if (isRedoKey(event) || isUndoKey(event)) {
+      if (!isLive) return;
       event.preventDefault();
-      if (!event.repeat) undoKey.current?.();
-    };
+      if (event.repeat) return;
+      if (isRedoKey(event)) void redoLast();
+      else void undoLast();
+      return;
+    }
+    if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || event.repeat) return;
+    const key = event.key.toLowerCase();
+    if (key === 'v') {
+      event.preventDefault();
+      selectTool();
+    } else if (key === 'm' && rulerTool) {
+      event.preventDefault();
+      rulerTool.onToggle(!rulerOn);
+    } else if (key === 't' && canAddToken) {
+      event.preventDefault();
+      openPicker();
+    } else if (key === 'h' && selected && tokenControls) {
+      event.preventDefault();
+      toggleHidden(selected);
+    }
+  };
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => keys.current?.(event);
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [isLive]);
+  }, []);
 
   // Moves are announced too, since the canvas says nothing to assistive technology (review).
   const moved = (updated: SceneToken) =>
@@ -773,53 +859,103 @@ export function ScenePanel({
         onDelete: (id) => openDialog(() => setDeleting(tokens?.find((token) => token.id === id))),
       };
 
-  // The token controls, on the canvas toolbar's row (D-100); neither while calibrating, which
-  // takes the row above the canvas, nor before the tokens have arrived.
+  // The token controls: neither while calibrating nor before the tokens have arrived.
   const tokenFailure =
     !isLive && sceneTokens.loadFailure ? t('tokens.loadFailed', { reason: sceneTokens.loadFailure }) : undefined;
-  const tokenBar =
-    draft || !tokens ? undefined : placingAsset ? (
-      <div
-        className="eg-tokens"
-        role="group"
-        aria-label={t('tokens.bar')}
-        onKeyDown={(event) => {
-          if (event.key === 'Escape') {
-            event.preventDefault();
-            cancelPlacing();
+  const canAddToken = !draft && tokens !== undefined && !placingAsset;
+
+  function openPicker() {
+    setStatus(undefined);
+    setPicking(true);
+  }
+
+  // Select (V): leaves the ruler and stops placing (UIX-01).
+  function selectTool() {
+    stopMeasuring();
+    if (placingAsset) setPlacingAsset(undefined);
+  }
+
+  function toggleHidden(token: SceneToken) {
+    void changeToken(token, { hidden: !token.hidden }, (updated) =>
+      t(updated.hidden ? 'tokens.hidden' : 'tokens.revealed', { label: updated.label }),
+    ).then(() => onTokensChanged?.());
+  }
+
+  // Reveal all hidden monsters: one change each, in turn (UIX-01); on the live scene each is its own
+  // `token.setVisibility`, undone one at a time.
+  async function revealAll(hidden: SceneToken[]) {
+    for (const token of hidden) {
+      await changeToken(token, { hidden: false }, (updated) => t('tokens.revealed', { label: updated.label }));
+    }
+    if (hidden.length > 1) announce(t('sceneTokens.revealedAll', { count: hidden.length }));
+    onTokensChanged?.();
+  }
+
+  // Duplicate: a new token of the same asset a square to the right, numbered by the server (UIX-01).
+  async function duplicateToken(token: SceneToken) {
+    const at = { x: token.x + 1, y: token.y };
+    const placed = isLive ? await placeLive(token.asset_id, at) : await sceneTokens.place(token.asset_id, at);
+    if (!placed) return;
+    setSelectedToken(placed.id);
+    announce(t('tokens.placed', { label: placed.label }));
+    onTokensChanged?.();
+  }
+
+  const rail: CanvasRail = {
+    onSelect: selectTool,
+    onAddToken: canAddToken ? openPicker : undefined,
+    history:
+      liveScene && !draft
+        ? {
+            canUndo: liveScene.history.can_undo,
+            canRedo: liveScene.history.can_redo,
+            onUndo: () => void undoLast(),
+            onRedo: () => void redoLast(),
           }
-        }}
-      >
-        <p className="eg-tokens__placing">{t('tokens.placing', { name: placingAsset.name })}</p>
-        <Button size="small" onClick={cancelPlacing}>
-          {t('tokens.cancelPlacing')}
-        </Button>
-      </div>
-    ) : (
-      <TokenBar
-        tokens={tokens}
-        selectedId={selected?.id}
-        onSelect={selectToken}
-        onAdd={() => {
-          setStatus(undefined);
-          setPicking(true);
-        }}
-        onToggleHidden={(token) =>
-          void changeToken(token, { hidden: !token.hidden }, (updated) =>
-            t(updated.hidden ? 'tokens.hidden' : 'tokens.revealed', { label: updated.label }),
-          )
-        }
-        onRename={(token) => openDialog(() => setRenaming(token))}
-        onStack={(token, stack) =>
-          void changeToken(token, { stack }, (updated) =>
-            t(stack === 'front' ? 'tokens.toFront' : 'tokens.toBack', { label: updated.label }),
-          )
-        }
-        onDelete={(token) => openDialog(() => setDeleting(token))}
-        busy={false}
-        live={isLive}
-      />
-    );
+        : undefined,
+  };
+  const gridStatus = scene ? (
+    <>
+      <span>{t('canvas.gridStatus', { feet: formatNumber(scene.grid.feet_per_square) })}</span>
+      <span className="eg-canvas__status-dot" aria-hidden="true" />
+      <span>{t(rulerRule === 'dmg' ? 'canvas.diagonalsDmg' : 'canvas.diagonalsPhb')}</span>
+    </>
+  ) : null;
+  const popover =
+    tokens && !placingAsset
+      ? (anchor: Parameters<NonNullable<Parameters<typeof MapCanvas>[0]['popover']>>[0]) =>
+          selected ? (
+            <TokenPopover
+              token={selected}
+              anchor={anchor}
+              live={isLive}
+              onToggleHidden={() => toggleHidden(selected)}
+              onRename={() => openDialog(() => setRenaming(selected))}
+              onDuplicate={() => void duplicateToken(selected)}
+              onStack={(stack) =>
+                void changeToken(selected, { stack }, (updated) =>
+                  t(stack === 'front' ? 'tokens.toFront' : 'tokens.toBack', { label: updated.label }),
+                )
+              }
+              onDelete={() => openDialog(() => setDeleting(selected))}
+            />
+          ) : null
+      : undefined;
+  const tokenList = tokens ? (
+    <TokenList
+      tokens={tokens}
+      selectedId={selected?.id}
+      onSelect={(token) => {
+        selectToken(token.id);
+        canvas.current?.centreOn(token.id);
+      }}
+      onToggleHidden={toggleHidden}
+      onRevealAll={(hidden) => void revealAll(hidden)}
+      onAdd={canAddToken ? openPicker : undefined}
+    />
+  ) : tokenFailure ? null : (
+    <p className="eg-dm__status">{t('tokens.loading')}</p>
+  );
 
   const percent = Math.round((progress ?? 0) * 100);
   const measure: Measure | undefined =
@@ -832,14 +968,170 @@ export function ScenePanel({
       : undefined;
   const loading = <p className="eg-dm__status">{t('workspace.loadingScene')}</p>;
 
-  return (
-    <div ref={panelRef} className="eg-scene" data-mode={isLive ? 'live' : 'prep'}>
-      <div className="eg-scene__head">
-        <div className="eg-scene__title">
-          <h1 className="eg-dm__heading">{name}</h1>
-          {isLive ? (
-            <p className={`eg-scene__mode eg-scene__mode--${offline ? 'offline' : 'live'}`}>{t(modeLabel)}</p>
+  const setupId = `${gridId}-setup`;
+  const setup =
+    scene && !draft && setupOpen ? (
+      <div id={setupId} className="eg-scene__setup" role="region" aria-label={t('sceneSetup.label')}>
+        <form ref={formRef} className="eg-scene__map" onSubmit={(event) => void attach(event)} noValidate>
+          <TextField
+            type="file"
+            accept={ACCEPT}
+            label={scene.map_image_id ? t('sceneMap.replaceImage') : t('sceneMap.image')}
+            error={fileError}
+            aria-disabled={busy || undefined}
+            onClick={(event) => {
+              if (busy) event.preventDefault();
+            }}
+            onChange={(event) => chooseFile(event.target.files?.[0])}
+          />
+          <Button
+            ref={submitRef}
+            type="submit"
+            size="small"
+            aria-disabled={busy || undefined}
+            aria-describedby={scene.map_image_id ? hintId : undefined}
+          >
+            {scene.map_image_id ? t('sceneMap.replace') : t('sceneMap.attach')}
+          </Button>
+          {scene.map_image_id ? (
+            <p id={hintId} className="eg-scene__hint">
+              {t('sceneMap.replaceHint')}
+            </p>
           ) : null}
+        </form>
+        <div className="eg-check">
+          <input
+            id={gridId}
+            type="checkbox"
+            checked={savingGrid ?? scene.grid.visible}
+            aria-disabled={busy || undefined}
+            onClick={(event) => {
+              if (busy) event.preventDefault();
+            }}
+            onChange={(event) => void setGridVisible(event.target.checked)}
+          />
+          <label htmlFor={gridId}>{t('sceneGrid.visible')}</label>
+        </div>
+        <form className="eg-scene__feet" onSubmit={(event) => void saveFeet(event)} noValidate>
+          <TextField
+            type="number"
+            inputMode="decimal"
+            step="any"
+            min={FEET_PER_SQUARE_BOUNDS.min}
+            max={FEET_PER_SQUARE_BOUNDS.max}
+            label={t('sceneGrid.feet')}
+            value={feetText ?? String(scene.grid.feet_per_square)}
+            error={feetError}
+            aria-busy={savingFeet || undefined}
+            onChange={(event) => {
+              setFeetText(event.target.value);
+              setFeetError(undefined);
+            }}
+            onBlur={() => void saveFeet(undefined, true)}
+          />
+        </form>
+        {map ? (
+          <Button
+            ref={calibrateRef}
+            size="small"
+            aria-disabled={busy || undefined}
+            onClick={() => startCalibration(map)}
+          >
+            {t('calibration.open')}
+          </Button>
+        ) : null}
+      </div>
+    ) : null;
+
+  const tvControls =
+    liveScene && !draft ? (
+      <div className="eg-tv" role="group" aria-label={t('tvCamera.label')}>
+        <span className="eg-tv__label" aria-hidden="true">
+          {t('tvCamera.heading')}
+        </span>
+        <button
+          type="button"
+          className="eg-button eg-button--small"
+          aria-label={t('tvCamera.sendView')}
+          aria-disabled={tvLocked || undefined}
+          onClick={() => canvas.current?.sendView()}
+        >
+          {t('tvCamera.sendViewShort')}
+        </button>
+        <button
+          type="button"
+          className="eg-button eg-button--small"
+          aria-label={t('canvas.tvFit')}
+          aria-disabled={tvLocked || undefined}
+          onClick={() => canvas.current?.tvFit()}
+        >
+          {t('canvas.fit')}
+        </button>
+        <button
+          type="button"
+          className="eg-icon-button eg-icon-button--bordered"
+          aria-label={t('canvas.tvZoomOut')}
+          aria-disabled={tvLocked || undefined}
+          onClick={() => canvas.current?.tvZoom('out')}
+        >
+          <Icon name="minus" size={14} strokeWidth={2} />
+        </button>
+        <button
+          type="button"
+          className="eg-icon-button eg-icon-button--bordered"
+          aria-label={t('canvas.tvZoomIn')}
+          aria-disabled={tvLocked || undefined}
+          onClick={() => canvas.current?.tvZoom('in')}
+        >
+          <Icon name="plus" size={14} strokeWidth={2} />
+        </button>
+        <button
+          type="button"
+          className="eg-icon-button eg-icon-button--bordered"
+          aria-label={t('tvCamera.lock')}
+          aria-pressed={tvLocked}
+          onClick={() => {
+            onTvLocked(!tvLocked);
+            announce(t(tvLocked ? 'tvCamera.unlocked' : 'tvCamera.locked'));
+          }}
+        >
+          <Icon name={tvLocked ? 'lock' : 'unlock'} size={14} strokeWidth={2} />
+        </button>
+      </div>
+    ) : null;
+
+  return (
+    <>
+      <main
+        id={mainId}
+        tabIndex={-1}
+        ref={panelRef}
+        className="eg-scene"
+        data-view="dm"
+        data-mode={isLive ? 'live' : 'prep'}
+      >
+        <div className="eg-scene__head">
+          <div className="eg-scene__title">
+            <h1 className="eg-scene__name">{name}</h1>
+            {isLive ? (
+              <p className={`eg-scene__mode eg-scene__mode--${offline ? 'offline' : 'live'}`}>{t(modeLabel)}</p>
+            ) : null}
+          </div>
+          <div className="eg-scene__tools">
+            {tvControls}
+            {scene && !draft ? (
+              <button
+                type="button"
+                className="eg-button eg-button--small"
+                aria-expanded={setupOpen}
+                aria-controls={setupOpen ? setupId : undefined}
+                onClick={() => setSetupOpen(!setupOpen)}
+              >
+                <Icon name="setup" size={14} />
+                {t('sceneSetup.open')}
+              </button>
+            ) : null}
+          </div>
         </div>
         {/* One status region, always mounted, so a message is announced when it appears: after a
           map upload, and after a save that closes the calibration panel (D-096). */}
@@ -857,191 +1149,174 @@ export function ScenePanel({
             <span key={status.n}>{status.message}</span>
           ) : null}
         </div>
-      </div>
-      {failure ? <Notice>{failure}</Notice> : null}
-      {liveFailure ? <Notice>{liveFailure}</Notice> : null}
-      {!isLive && sceneTokens.failure ? <Notice>{sceneTokens.failure}</Notice> : null}
-      {mapFailedFor !== undefined && mapFailedFor === mapId ? <Notice>{t('sceneMap.loadFailed')}</Notice> : null}
-      {scene ? (
-        <>
-          {/* While calibrating, the calibration panel takes the setup's place (D-094). */}
-          {draft ? null : (
-            <div className="eg-scene__setup">
-              <form ref={formRef} className="eg-scene__map" onSubmit={(event) => void attach(event)} noValidate>
-                <TextField
-                  type="file"
-                  accept={ACCEPT}
-                  label={scene.map_image_id ? t('sceneMap.replaceImage') : t('sceneMap.image')}
-                  error={fileError}
-                  aria-disabled={busy || undefined}
-                  onClick={(event) => {
-                    if (busy) event.preventDefault();
-                  }}
-                  onChange={(event) => chooseFile(event.target.files?.[0])}
-                />
-                <Button
-                  ref={submitRef}
-                  type="submit"
-                  aria-disabled={busy || undefined}
-                  aria-describedby={scene.map_image_id ? hintId : undefined}
-                >
-                  {scene.map_image_id ? t('sceneMap.replace') : t('sceneMap.attach')}
+        {failure ? <Notice>{failure}</Notice> : null}
+        {liveFailure ? <Notice>{liveFailure}</Notice> : null}
+        {!isLive && sceneTokens.failure ? <Notice>{sceneTokens.failure}</Notice> : null}
+        {mapFailedFor !== undefined && mapFailedFor === mapId ? <Notice>{t('sceneMap.loadFailed')}</Notice> : null}
+        {scene ? (
+          <>
+            {setup}
+            {tokenFailure ? (
+              <div className="eg-tokens__failure">
+                <Notice>{tokenFailure}</Notice>
+                <Button size="small" onClick={sceneTokens.retry}>
+                  {t('tokens.retry')}
                 </Button>
-                {scene.map_image_id ? (
-                  <p id={hintId} className="eg-scene__hint">
-                    {t('sceneMap.replaceHint')}
-                  </p>
+              </div>
+            ) : null}
+            {placingAsset ? (
+              <div
+                className="eg-tokens"
+                role="group"
+                aria-label={t('tokens.bar')}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    event.preventDefault();
+                    cancelPlacing();
+                  }
+                }}
+              >
+                <p className="eg-tokens__placing">{t('tokens.placing', { name: placingAsset.name })}</p>
+                <Button size="small" onClick={cancelPlacing}>
+                  {t('tokens.cancelPlacing')}
+                </Button>
+              </div>
+            ) : null}
+            {map !== undefined ? (
+              <div className="eg-scene__body">
+                {map && draft ? (
+                  <CalibrationPanel
+                    map={map}
+                    draft={draft}
+                    onChange={(change) => setDraft((current) => current && change(current))}
+                    onSave={() => void saveCalibration()}
+                    onCancel={cancelCalibration}
+                    saving={savingCalibration}
+                  />
                 ) : null}
-              </form>
-              <div className="eg-check">
-                <input
-                  id={gridId}
-                  type="checkbox"
-                  checked={savingGrid ?? scene.grid.visible}
-                  aria-disabled={busy || undefined}
-                  onClick={(event) => {
-                    if (busy) event.preventDefault();
-                  }}
-                  onChange={(event) => void setGridVisible(event.target.checked)}
-                />
-                <label htmlFor={gridId}>{t('sceneGrid.visible')}</label>
+                <div className={frameClass}>
+                  <MapCanvas
+                    ref={canvas}
+                    grid={draft ? { ...scene.grid, ...draft.calibration } : scene.grid}
+                    map={map}
+                    mode="dm"
+                    label={t(!isLive ? 'canvas.label' : shownOffline ? 'canvas.labelOffline' : 'canvas.labelLive', {
+                      name,
+                    })}
+                    onMapError={() => setMapFailedFor(mapId ?? undefined)}
+                    measure={measure}
+                    rail={draft ? undefined : rail}
+                    status={gridStatus}
+                    popover={draft ? undefined : popover}
+                    tokens={tokens?.map(toCanvasToken) ?? []}
+                    tokenControls={tokenControls}
+                    placing={placing}
+                    tvFrame={tvFrame}
+                    ruler={{ shown: shownRuler, tool: rulerTool }}
+                  />
+                  {map && draft ? <CornerMagnifier map={map} calibration={draft.calibration} /> : null}
+                </div>
               </div>
-              <form className="eg-scene__feet" onSubmit={(event) => void saveFeet(event)} noValidate>
-                <TextField
-                  type="number"
-                  inputMode="decimal"
-                  step="any"
-                  min={FEET_PER_SQUARE_BOUNDS.min}
-                  max={FEET_PER_SQUARE_BOUNDS.max}
-                  label={t('sceneGrid.feet')}
-                  value={feetText ?? String(scene.grid.feet_per_square)}
-                  error={feetError}
-                  aria-busy={savingFeet || undefined}
-                  onChange={(event) => {
-                    setFeetText(event.target.value);
-                    setFeetError(undefined);
-                  }}
-                  onBlur={() => void saveFeet(undefined, true)}
-                />
-              </form>
-              {map ? (
-                <Button ref={calibrateRef} aria-disabled={busy || undefined} onClick={() => startCalibration(map)}>
-                  {t('calibration.open')}
-                </Button>
-              ) : null}
-            </div>
-          )}
-          {tokenFailure ? (
-            <div className="eg-tokens__failure">
-              <Notice>{tokenFailure}</Notice>
-              <Button size="small" onClick={sceneTokens.retry}>
-                {t('tokens.retry')}
-              </Button>
-            </div>
-          ) : null}
-          {map !== undefined ? (
-            <div className="eg-scene__body">
-              {map && draft ? (
-                <CalibrationPanel
-                  map={map}
-                  draft={draft}
-                  onChange={(change) => setDraft((current) => current && change(current))}
-                  onSave={() => void saveCalibration()}
-                  onCancel={cancelCalibration}
-                  saving={savingCalibration}
-                />
-              ) : null}
-              <div className={frameClass}>
-                <MapCanvas
-                  grid={draft ? { ...scene.grid, ...draft.calibration } : scene.grid}
-                  map={map}
-                  mode="dm"
-                  label={t(!isLive ? 'canvas.label' : shownOffline ? 'canvas.labelOffline' : 'canvas.labelLive', {
-                    name,
-                  })}
-                  onMapError={() => setMapFailedFor(mapId ?? undefined)}
-                  measure={measure}
-                  toolbar={tokenBar}
-                  tokens={tokens?.map(toCanvasToken) ?? []}
-                  tokenControls={tokenControls}
-                  placing={placing}
-                  tvFrame={tvFrame}
-                  ruler={{ shown: shownRuler, tool: rulerTool }}
-                />
-                {map && draft ? <CornerMagnifier map={map} calibration={draft.calibration} /> : null}
-              </div>
-            </div>
-          ) : failure ? null : (
-            loading
-          )}
-          {picking ? (
-            <TokenPicker
-              onPick={pick}
-              onClose={() => {
-                setPicking(false);
-                refocus.current = 'add';
-              }}
-            />
-          ) : null}
-          {renaming ? (
-            <RenameDialog
-              token={renaming}
-              onSave={async (label) => {
-                const result = await sceneTokens.change(renaming.id, { label }, { inline: true });
-                if (result.ok) announce(t('tokens.renamed', { label: result.token.label }));
-                return result.ok ? undefined : 'message' in result ? result.message : undefined;
-              }}
-              onClose={() => {
-                setRenaming(undefined);
-                refocus.current = 'opener';
-              }}
-            />
-          ) : null}
-          {deleting ? (
-            <DeleteTokenDialog
-              token={deleting}
-              onConfirm={() => void deleteToken(deleting)}
-              onClose={() => {
-                setDeleting(undefined);
-                refocus.current = 'opener';
-              }}
-            />
-          ) : null}
-          {confirmReplace ? (
-            <Dialog
-              heading={t('sceneMap.replaceCalibrated.heading')}
-              onClose={() => {
-                setConfirmReplace(false);
-                refocus.current = 'replace';
-              }}
-            >
-              <p className="eg-dialog__body">{t('sceneMap.replaceCalibrated.body')}</p>
-              <div className="eg-dialog__actions">
-                <Button
-                  variant="primary"
-                  onClick={() => {
-                    setConfirmReplace(false);
-                    refocus.current = 'replace';
-                    if (file) void send(file);
-                  }}
-                >
-                  {t('sceneMap.replaceCalibrated.confirm')}
-                </Button>
-                <Button
-                  onClick={() => {
-                    setConfirmReplace(false);
-                    refocus.current = 'replace';
-                  }}
-                >
-                  {t('sceneMap.replaceCalibrated.cancel')}
-                </Button>
-              </div>
-            </Dialog>
-          ) : null}
-        </>
-      ) : failure ? null : (
-        loading
-      )}
+            ) : failure ? null : (
+              loading
+            )}
+            <ShortcutBar live={isLive} />
+            {picking ? (
+              <TokenPicker
+                onPick={pick}
+                onClose={() => {
+                  setPicking(false);
+                  refocus.current = 'add';
+                }}
+              />
+            ) : null}
+            {renaming ? (
+              <RenameDialog
+                token={renaming}
+                onSave={async (label) => {
+                  const result = await sceneTokens.change(renaming.id, { label }, { inline: true });
+                  if (result.ok) {
+                    announce(t('tokens.renamed', { label: result.token.label }));
+                    onTokensChanged?.();
+                  }
+                  return result.ok ? undefined : 'message' in result ? result.message : undefined;
+                }}
+                onClose={() => {
+                  setRenaming(undefined);
+                  refocus.current = 'opener';
+                }}
+              />
+            ) : null}
+            {deleting ? (
+              <DeleteTokenDialog
+                token={deleting}
+                onConfirm={() => void deleteToken(deleting)}
+                onClose={() => {
+                  setDeleting(undefined);
+                  refocus.current = 'opener';
+                }}
+              />
+            ) : null}
+            {confirmReplace ? (
+              <Dialog
+                heading={t('sceneMap.replaceCalibrated.heading')}
+                onClose={() => {
+                  setConfirmReplace(false);
+                  refocus.current = 'replace';
+                }}
+              >
+                <p className="eg-dialog__body">{t('sceneMap.replaceCalibrated.body')}</p>
+                <div className="eg-dialog__actions">
+                  <Button
+                    variant="primary"
+                    onClick={() => {
+                      setConfirmReplace(false);
+                      refocus.current = 'replace';
+                      if (file) void send(file);
+                    }}
+                  >
+                    {t('sceneMap.replaceCalibrated.confirm')}
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      setConfirmReplace(false);
+                      refocus.current = 'replace';
+                    }}
+                  >
+                    {t('sceneMap.replaceCalibrated.cancel')}
+                  </Button>
+                </div>
+              </Dialog>
+            ) : null}
+          </>
+        ) : failure ? null : (
+          loading
+        )}
+      </main>
+      <SidePanel tab={sideTab} onTab={onSideTab} scene={tokenList} library={library} />
+    </>
+  );
+}
+
+/** The shortcut bar along the bottom of the map area (UIX-01, specs/08-ux-journeys.md §11). */
+function ShortcutBar({ live }: { live: boolean }) {
+  const keys: [MessageKey, MessageKey][] = [
+    ['shortcuts.keyV', 'shortcuts.select'],
+    ['shortcuts.keyM', 'shortcuts.ruler'],
+    ['shortcuts.keyP', 'shortcuts.ping'],
+    ['shortcuts.keyH', 'shortcuts.hide'],
+    ['shortcuts.keyUndo', 'shortcuts.undo'],
+    ['shortcuts.keySpace', 'shortcuts.pan'],
+  ];
+  return (
+    <div className="eg-shortcuts" aria-label={t('shortcuts.label')} role="note">
+      {keys.map(([key, action]) => (
+        <span key={key} className="eg-shortcuts__item">
+          <kbd>{t(key)}</kbd>
+          {t(action)}
+        </span>
+      ))}
+      <span className="eg-shortcuts__note">{t(live ? 'shortcuts.noteLive' : 'shortcuts.notePrep')}</span>
     </div>
   );
 }

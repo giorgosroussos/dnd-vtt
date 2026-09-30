@@ -59,12 +59,14 @@ class Server {
       image_id: 'b'.repeat(64),
       z_order: rank,
       label: token.label,
+      category: 'monster',
     };
   }
   snapshot(): PlayerSnapshot {
     return {
       role: 'players',
       scene: {
+        name: 'Crypt',
         map: MAP,
         grid: GRID,
         tokens: this.visible().map((token) => this.player(token)),
@@ -166,7 +168,16 @@ describe('the players’ events applied to the drawn state', () => {
       scene,
       server.event('token.added', { token: { ...token, notes: 'secret', asset_id: id(9) }, relabelled: [] }),
     );
-    expect(Object.keys(next!.tokens[0]!).sort()).toEqual(['id', 'image_id', 'label', 'size', 'x', 'y', 'z_order']);
+    expect(Object.keys(next!.tokens[0]!).sort()).toEqual([
+      'category',
+      'id',
+      'image_id',
+      'label',
+      'size',
+      'x',
+      'y',
+      'z_order',
+    ]);
   });
 
   it('orders a snapshot by stacking order whatever order its tokens arrived in', () => {
@@ -222,7 +233,7 @@ describe('the player camera (LIV-06, specs/04-live-sync.md §9)', () => {
   const steered = { centre_x: 0.25, centre_y: 0.75, width: 0.5, height: 0.25 };
   const base = (camera = FIT_CAMERA): PlayerSnapshot => ({
     role: 'players',
-    scene: { map: MAP, grid: GRID, tokens: [], camera, ruler: null },
+    scene: { name: 'Crypt', map: MAP, grid: GRID, tokens: [], camera, ruler: null },
   });
 
   it('keeps the camera a snapshot carries, and fits the map when it carries none', () => {
@@ -249,7 +260,7 @@ describe('the ruler (LIV-07, specs/04-live-sync.md §11)', () => {
   const measurement = { from: { column: 1, row: 2 }, to: { column: 3, row: 5 }, feet: 15 };
   const base = (ruler: typeof measurement | null = null): PlayerSnapshot => ({
     role: 'players',
-    scene: { map: MAP, grid: GRID, tokens: [], camera: FIT_CAMERA, ruler },
+    scene: { name: 'Crypt', map: MAP, grid: GRID, tokens: [], camera: FIT_CAMERA, ruler },
   });
 
   it('keeps the measurement a snapshot carries, or none', () => {

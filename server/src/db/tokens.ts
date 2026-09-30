@@ -1,11 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
-import { nextLabel, numberingPeers, type SceneToken, type TokenSize, type TokenStack } from '@emberglass/shared';
+import {
+  nextLabel,
+  numberingPeers,
+  type AssetCategory,
+  type SceneToken,
+  type TokenSize,
+  type TokenStack,
+} from '@emberglass/shared';
 
 // Tokens of a scene in SQLite (PRP-04, specs/03-domain-model.md §1, §2, §4,
 // specs/05-assets-and-images.md §2–§5, specs/04-live-sync.md §2, D-019, Q-063, Q-091). Every
 // read and write names its columns. A token holds only its own state (position, visibility,
-// label, stacking order); its name, image and size are its asset's and are read by joining it.
+// label, stacking order); its name, image, size and category are its asset's and are read by joining it.
 // Positions are decimal grid units and are stored exactly as sent. Every write names the scope it
 // is for, checked inside the transaction that would change the token: preparation (REST) is refused
 // on the live scene, whose tokens change only by the live commands, and a live command is refused
@@ -13,7 +20,7 @@ import { nextLabel, numberingPeers, type SceneToken, type TokenSize, type TokenS
 
 const COLUMNS = `token.id, token.scene_id, token.asset_id, token.label, token.x, token.y, token.hidden,
   token.z_order, token.character_id, asset.name AS asset_name, asset.image_id AS asset_image_id,
-  asset.size AS asset_size`;
+  asset.size AS asset_size, asset.category AS asset_category`;
 const FROM = 'FROM token JOIN asset ON asset.id = token.asset_id';
 
 interface Row {
@@ -29,6 +36,7 @@ interface Row {
   asset_name: string;
   asset_image_id: string;
   asset_size: TokenSize;
+  asset_category: AssetCategory;
 }
 
 const toToken = (row: Row): SceneToken => ({
@@ -41,7 +49,7 @@ const toToken = (row: Row): SceneToken => ({
   hidden: row.hidden === 1,
   z_order: row.z_order,
   character_id: row.character_id,
-  asset: { name: row.asset_name, image_id: row.asset_image_id, size: row.asset_size },
+  asset: { name: row.asset_name, image_id: row.asset_image_id, size: row.asset_size, category: row.asset_category },
 });
 
 /** Whether players have seen the token (Q-096); kept out of SceneToken, which clients receive. */

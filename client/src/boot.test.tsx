@@ -83,7 +83,7 @@ describe('the player view before its code', () => {
       void boot(element, '/', () => chunk.promise);
     });
     expect(element.querySelector('main')!.dataset.boot).toBe('loading');
-    expect(element.textContent).toBe(t('app.name'));
+    expect(element.textContent).toBe(t('app.name') + t('idle.line'));
     expect(element.querySelector('.eg-idle')).not.toBeNull();
     await act(async () => {
       chunk.reject(new TypeError('Failed to fetch dynamically imported module'));
@@ -91,7 +91,7 @@ describe('the player view before its code', () => {
     });
     await flush();
     expect(element.querySelector('main')!.dataset.boot).toBe('failed');
-    expect(element.textContent).toBe(t('app.name'));
+    expect(element.textContent).toBe(t('app.name') + t('idle.line'));
     expect(element.querySelectorAll('button, a, input, [tabindex]')).toHaveLength(0);
   });
 

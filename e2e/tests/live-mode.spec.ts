@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { selectScene, viewport } from './canvas-view.js';
+import { openSetup, selectScene, selectTokenRow, tokenMenu, tokenPopover, viewport } from './canvas-view.js';
 import { openWorkspace, seedCampaign } from './dm.js';
 import { solidPng } from './png.js';
 import { commandFromPage } from './socket.js';
@@ -8,13 +8,12 @@ import { commandFromPage } from './socket.js';
 // §2, specs/04-live-sync.md §2, §3, §4, §10, Q-024, Q-025, D-109). Go live in a DM context makes a
 // player context draw the scene; moving, hiding, revealing and deleting a token in live mode change
 // what the player context draws, and a hidden token never reaches it; a setup edit reaches it as a
-// snapshot; Blank TV returns it to the idle screen.
+// snapshot; Go idle returns it to the idle screen.
 
 const player = (page: Page) => page.locator('main[data-view="player"]');
 const tvCanvas = (page: Page) => page.locator('main[data-view="player"] .eg-canvas--player');
-const panel = (page: Page) => page.locator('main .eg-scene');
+const panel = (page: Page) => page.locator('main.eg-scene');
 const liveBar = (page: Page) => page.getByRole('region', { name: 'Live scene' });
-const tokenBar = (page: Page) => page.getByRole('group', { name: 'Tokens' });
 
 interface Drawn {
   id: string;
@@ -28,7 +27,7 @@ async function tvTokens(page: Page): Promise<Drawn[]> {
   return raw ? (JSON.parse(raw) as Drawn[]) : [];
 }
 
-test('the DM runs a scene from the DM view: Go live, move, hide, reveal, delete, a setup edit and Blank TV reach the TV', async ({
+test('the DM runs a scene from the DM view: Go live, move, hide, reveal, delete, a setup edit and Go idle reach the TV', async ({
   browser,
 }) => {
   const dmContext = await browser.newContext();
@@ -103,12 +102,12 @@ test('the DM runs a scene from the DM view: Go live, move, hide, reveal, delete,
     await expect(panel(dm)).toHaveAttribute('data-mode', 'live');
     await expect(dm.locator('.eg-scene__canvas--live')).toBeVisible();
     await expect(panel(dm).getByText('Live on the TV')).toBeVisible();
-    await expect(liveBar(dm).getByRole('status')).toHaveText(`Live: ${names.scene}`);
+    await expect(liveBar(dm).getByRole('status')).toHaveText(`Players see ${names.scene}`);
     await expect(player(tv)).toHaveAttribute('data-scene', 'live');
     await expect.poll(async () => (await tvTokens(tv)).map((each) => each.label)).toEqual([knightToken.label]);
 
     // Move the knight with the keyboard: one square right, on the TV too.
-    await tokenBar(dm).getByLabel('Selected token').selectOption({ label: knightToken.label });
+    await selectTokenRow(dm, knightToken.label);
     // Live mode keeps the canvas where prep mode has it at 1,280 × 720 with a token selected (G-022).
     const canvasTop = await viewport(dm).evaluate((element) => element.getBoundingClientRect().top);
     expect(canvasTop).toBeLessThanOrEqual(560);
@@ -117,7 +116,7 @@ test('the DM runs a scene from the DM view: Go live, move, hide, reveal, delete,
     await expect.poll(async () => (await tvTokens(tv)).find((each) => each.id === knightToken.id)?.x).toBe(3);
 
     // Hide the knight: gone from the TV.
-    await tokenBar(dm)
+    await tokenPopover(dm)
       .getByRole('button', { name: `Hide token ${knightToken.label}` })
       .click();
     await expect.poll(async () => (await tvTokens(tv)).length).toBe(0);
@@ -128,25 +127,22 @@ test('the DM runs a scene from the DM view: Go live, move, hide, reveal, delete,
     expect(requested.some((path) => path.includes(shade.image_id))).toBe(false);
 
     // Reveal the shade: drawn on the TV with its label.
-    await tokenBar(dm)
-      .getByLabel('Selected token')
-      .selectOption({ label: `${shadeToken.label} (hidden)` });
-    await tokenBar(dm)
+    await selectTokenRow(dm, shadeToken.label);
+    await tokenPopover(dm)
       .getByRole('button', { name: `Reveal token ${shadeToken.label}` })
       .click();
     await expect.poll(async () => (await tvTokens(tv)).map((each) => each.id)).toEqual([shadeToken.id]);
 
     // Delete it, after the confirmation: gone from the TV, the hidden knight still not drawn.
     const shadeLabel = (await tvTokens(tv))[0]!.label;
-    await tokenBar(dm)
-      .getByRole('button', { name: `Delete token ${shadeLabel}` })
-      .click();
+    await tokenMenu(dm, shadeLabel, 'Delete');
     await dm.getByRole('dialog').getByRole('button', { name: 'Delete token', exact: true }).click();
     await expect.poll(async () => (await tvTokens(tv)).length).toBe(0);
     await expect(tvCanvas(tv)).toBeVisible();
 
     // A setup edit in live mode reaches the TV as a snapshot (04 §10): the grid hidden for players.
     const snapshotsBefore = Number(await player(tv).getAttribute('data-snapshots'));
+    await openSetup(dm);
     await panel(dm).getByLabel('Players see the grid').uncheck();
     // At least one more snapshot (a slow runner may also have asked for one after a gap), and the TV
     // no longer draws the grid.
@@ -164,10 +160,10 @@ test('the DM runs a scene from the DM view: Go live, move, hide, reveal, delete,
     expect(tokens.map((each) => each.id)).toEqual([knightToken.id]);
     expect(tokens[0]).toMatchObject({ hidden: true, x: 3 });
 
-    // Blank TV: the idle screen, and the canvas back in prep mode.
-    await liveBar(dm).getByRole('button', { name: 'Blank TV' }).click();
+    // Go idle: the idle screen, and the canvas back in prep mode.
+    await liveBar(dm).getByRole('button', { name: 'Go idle' }).click();
     await expect(player(tv)).toHaveAttribute('data-scene', 'idle');
-    await expect(player(tv)).toHaveText('Emberglass');
+    await expect(player(tv)).toHaveText(/^Emberglass\s*The table is set\. Waiting for the Dungeon Master\.$/);
     await expect(panel(dm)).toHaveAttribute('data-mode', 'prep');
     await expect(liveBar(dm).getByRole('status')).toHaveText('Nothing is live. The TV shows the idle screen.');
   } finally {
@@ -199,10 +195,9 @@ test('deleting the live scene from the DM view blanks the TV (03 §7, Q-031)', a
       .getByRole('button', { name: `Go live: ${names.scene}` })
       .click();
     await expect(player(tv)).toHaveAttribute('data-scene', 'live');
-    await dm
-      .locator(`[data-item="${scene.id}"]`)
-      .getByRole('button', { name: `Delete ${names.scene}` })
-      .click();
+    // Deleted from its menu in the scene list (UIX-01).
+    await dm.getByRole('button', { name: `More actions for ${names.scene}` }).click();
+    await dm.getByRole('menuitem', { name: 'Delete' }).click();
     await dm.getByRole('dialog').getByRole('button', { name: 'Delete', exact: true }).click();
     await expect(player(tv)).toHaveAttribute('data-scene', 'idle');
     await expect(liveBar(dm).getByRole('status')).toHaveText('Nothing is live. The TV shows the idle screen.');

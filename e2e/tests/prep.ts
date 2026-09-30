@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { cameraOf, nameButton, onScreen, tree, viewport } from './canvas-view.js';
+import { cameraOf, nameButton, onScreen, openTree, tree, viewport } from './canvas-view.js';
 import { solidPng } from './png.js';
 
 // Preparing in the DM view against the real server (PRP-04, D-100): the helpers the token specs and
@@ -30,6 +30,7 @@ let seeds = 0;
 export const unique = () => `${Date.now()}-${seeds++}`;
 
 export async function create(page: Page, open: string, label: string, name: string) {
+  await openTree(page);
   await tree(page).getByRole('button', { name: open }).last().click();
   await tree(page).getByLabel(label).fill(name);
   await tree(page).getByRole('button', { name: 'Create' }).click();
@@ -85,7 +86,7 @@ export const status = (page: Page) => page.locator('main [role="status"]');
 
 /** Add token, then the picker: search for the asset and choose it. */
 export async function pick(page: Page, name: string) {
-  await page.getByRole('button', { name: 'Add token' }).click();
+  await page.getByRole('button', { name: 'Add token, T' }).click();
   await picker(page).getByLabel('Search names and tags').fill(name);
   await expect(picker(page).locator('.eg-library__name')).toHaveText([name]);
   await picker(page)

@@ -32,6 +32,10 @@ interface Props {
   onSelectScene: (scene: Scene) => void;
   onScenesRemoved: (ids: string[]) => void;
   onSceneRenamed: (scene: Scene) => void;
+  /** The header's session switcher (UIX-01): each session offers Open, which makes it the current one. */
+  onOpenSession?: ((session: Session) => void) | undefined;
+  /** The current session, marked in the tree. */
+  currentSessionId?: string | undefined;
 }
 
 const nameOf = (item: Campaign | Session | Scene): string => ('title' in item ? item.title : item.name);
@@ -43,7 +47,14 @@ function moved(ids: readonly string[], id: string, target: string): string[] {
   return next;
 }
 
-export function SceneTree({ selectedSceneId, onSelectScene, onScenesRemoved, onSceneRenamed }: Props) {
+export function SceneTree({
+  selectedSceneId,
+  onSelectScene,
+  onScenesRemoved,
+  onSceneRenamed,
+  onOpenSession,
+  currentSessionId,
+}: Props) {
   const root = useRef<HTMLDivElement>(null);
   const [campaigns, setCampaigns] = useState<Campaign[]>();
   const [sessions, setSessions] = useState<Record<string, Session[]>>({});
@@ -310,6 +321,18 @@ export function SceneTree({ selectedSceneId, onSelectScene, onScenesRemoved, onS
               {name}
             </button>
             <span className="eg-tree__actions">
+              {kind === 'session' && onOpenSession ? (
+                <Button
+                  size="small"
+                  variant={item.id === currentSessionId ? 'primary' : 'secondary'}
+                  data-action="open"
+                  aria-label={t('tree.openOf', { name })}
+                  aria-current={item.id === currentSessionId ? 'true' : undefined}
+                  onClick={() => onOpenSession(item as Session)}
+                >
+                  {t('tree.open')}
+                </Button>
+              ) : null}
               {orderable ? (
                 <>
                   <Button

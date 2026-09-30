@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { API_PATHS, type AuthState, type SetupState } from '@emberglass/shared';
 import { Button } from '../ui/Button.js';
+import { Icon } from '../ui/icons.js';
 import { Notice } from '../ui/Notice.js';
 import { SkipLink } from '../ui/SkipLink.js';
 import { errorMessage } from '../ui/errorMessage.js';
@@ -83,18 +84,22 @@ export function DmView() {
   return (
     <div className="eg-dm">
       <SkipLink targetId={MAIN_ID} label={t('dm.skipToMain')} />
-      <header className="eg-dm__banner">
-        <span className="eg-dm__product">{t('app.name')}</span>
-        <span className="eg-dm__role">{t('dm.role')}</span>
-        {screen.kind === 'workspace' ? (
-          <span className="eg-dm__actions">
-            <Button onClick={() => void signOut()}>{t('dm.signOut')}</Button>
+      {screen.kind === 'workspace' ? null : (
+        <header className="eg-dm__banner">
+          <span className="eg-dm__logo" aria-hidden="true">
+            <Icon name="logo" size={22} />
           </span>
-        ) : null}
-      </header>
-      {screen.kind === 'workspace' && signOutFailure ? <Notice>{signOutFailure}</Notice> : null}
+          <span className="eg-dm__product">{t('app.name')}</span>
+          <span className="eg-dm__role">{t('dm.role')}</span>
+        </header>
+      )}
       {screen.kind === 'workspace' ? (
-        <Workspace mainId={MAIN_ID} onSignedOut={signedOutElsewhere} />
+        <Workspace
+          mainId={MAIN_ID}
+          onSignedOut={signedOutElsewhere}
+          onSignOut={() => void signOut()}
+          signOutFailure={signOutFailure}
+        />
       ) : (
         <main id={MAIN_ID} tabIndex={-1} className="eg-dm__main" data-view="dm">
           {screen.kind === 'loading' ? <p className="eg-dm__status">{t('dm.loading')}</p> : null}

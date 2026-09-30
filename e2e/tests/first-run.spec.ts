@@ -13,7 +13,8 @@ test('the DM sets the PIN on the server PC, signs out and signs in again', async
   await page.getByLabel('The same PIN again').fill(E2E_PIN);
   await page.getByRole('button', { name: 'Set PIN' }).click();
 
-  const tree = page.getByRole('navigation', { name: 'Campaigns, sessions and scenes' });
+  // The workspace: its scene list, with no session open yet (UIX-01).
+  const tree = page.getByRole('navigation', { name: 'Scenes of this session' });
   await expect(tree).toBeVisible();
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('No scene selected');
   // The session is the browser's until the server restarts.
@@ -26,7 +27,9 @@ test('the DM sets the PIN on the server PC, signs out and signs in again', async
   await expect(other.getByRole('heading', { level: 1 })).toHaveText('Enter the DM PIN');
   await other.close();
 
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  // Sign out is in the Settings dialog since the redesign (UIX-01).
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Sign out' }).click();
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Enter the DM PIN');
   await page.reload();
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Enter the DM PIN');

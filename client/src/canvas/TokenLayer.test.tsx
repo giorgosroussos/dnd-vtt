@@ -9,7 +9,7 @@ import { settle } from '../ui/testing/fakeServer.js';
 import { render, type Rendered } from '../ui/testing/render.js';
 import { CELL_PX } from './geometry.js';
 import { MapCanvas, type CanvasTokenControls, type Placing } from './MapCanvas.js';
-import { HIDDEN_OPACITY, HIDDEN_UNDERLAY_OPACITY } from './TokenLayer.js';
+import { CATEGORY_COLOURS, HIDDEN_OPACITY, HIDDEN_UNDERLAY_OPACITY, initialsOf, TOKEN_COLOURS } from './TokenLayer.js';
 import type { CanvasToken } from './tokens.js';
 
 // Tokens on the map canvas (PRP-04, specs/05-assets-and-images.md §2, specs/06-grid-and-measurement.md
@@ -46,6 +46,7 @@ const token = (fields: Partial<CanvasToken> & { id: string }): CanvasToken => ({
   z_order: 0,
   size: 'medium',
   image_id: 'a'.repeat(64),
+  category: 'monster',
   ...fields,
 });
 const GOBLIN = token({ id: 'g1', label: 'Goblin 1', x: 2, y: 3 });
@@ -377,5 +378,74 @@ describe('placing a token (specs/05-assets-and-images.md §5)', () => {
       measure: { rect: undefined, onDraw: vi.fn() },
     });
     expect(groupOf(measuring.stage, 'g1')!.draggable()).toBe(false);
+  });
+});
+
+describe('the redesign’s token visuals (UIX-01, specs/08-ux-journeys.md §11)', () => {
+  const ring = (stage: Konva.Stage, id: string) => groupOf(stage, id)!.findOne<Konva.Circle>('.token-ring')!;
+  const labelText = (stage: Konva.Stage, id: string) =>
+    groupOf(stage, id)!.findOne<Konva.Label>('.token-label')!.findOne<Konva.Text>('Text')!;
+
+  it('draws each token as a circle ringed by its category: player characters gold, monsters red, others a neutral', async () => {
+    const pc = token({ id: 'p1', label: 'Deadeye', category: 'pc' });
+    const npc = token({ id: 'n1', label: 'Innkeeper', x: 3, category: 'npc' });
+    const object = token({ id: 'o1', label: 'Chest', x: 5, category: 'object' });
+    const { stage } = await draw({ grid: GRID, map: MAP, mode: 'dm', tokens: [GOBLIN, pc, npc, object] });
+    expect(ring(stage, 'g1').stroke()).toBe(CATEGORY_COLOURS.monster.ring);
+    expect(ring(stage, 'p1').stroke()).toBe(CATEGORY_COLOURS.pc.ring);
+    expect(ring(stage, 'n1').stroke()).toBe(CATEGORY_COLOURS.npc.ring);
+    expect(ring(stage, 'o1').stroke()).toBe(CATEGORY_COLOURS.object.ring);
+    expect(CATEGORY_COLOURS.npc.ring).not.toBe(CATEGORY_COLOURS.pc.ring);
+    expect(CATEGORY_COLOURS.npc.ring).not.toBe(CATEGORY_COLOURS.monster.ring);
+    // A circle inside the footprint's square, its radius short of half the square.
+    expect(ring(stage, 'g1').radius()).toBeLessThan(25);
+    expect(ring(stage, 'g1').dash() ?? []).toEqual([]);
+  });
+
+  it('never lets a hidden token pass for a visible one: dashed blue ring, crossed-eye badge, italic blue label', async () => {
+    const { stage } = await draw({ grid: GRID, map: MAP, mode: 'dm', tokens: [GOBLIN, HIDDEN] });
+    expect(ring(stage, 'g2').stroke()).toBe(TOKEN_COLOURS.hidden);
+    expect(ring(stage, 'g2').dash().length).toBeGreaterThan(0);
+    expect(groupOf(stage, 'g2')!.findOne<Konva.Group>('.token-hidden-marker')!.findOne('Path')).toBeDefined();
+    expect(labelText(stage, 'g2').fontStyle()).toContain('italic');
+    expect(labelText(stage, 'g2').fill()).toBe(TOKEN_COLOURS.hiddenText);
+    expect(labelText(stage, 'g1').fontStyle()).not.toContain('italic');
+    expect(labelText(stage, 'g1').fill()).toBe(TOKEN_COLOURS.text);
+  });
+
+  it('shows the label’s initials while the image is on its way, and draws the label on a dark pill', async () => {
+    images.held.add(imageFileUrl(GOBLIN.image_id, 'display'));
+    const { stage } = await draw({ grid: GRID, map: MAP, mode: 'dm', tokens: [GOBLIN] });
+    expect(groupOf(stage, 'g1')!.findOne<Konva.Text>('.token-initials')!.text()).toBe('G1');
+    expect(groupOf(stage, 'g1')!.findOne<Konva.Label>('.token-label')!.findOne('Tag')).toBeDefined();
+  });
+
+  it('marks the selected token with a dark and an ember ring', async () => {
+    const { stage } = await draw({
+      grid: GRID,
+      map: MAP,
+      mode: 'dm',
+      tokens: [GOBLIN],
+      tokenControls: controls({ selectedId: 'g1' }),
+    });
+    expect(groupOf(stage, 'g1')!.findOne<Konva.Circle>('.token-selected')!.stroke()).toBe(TOKEN_COLOURS.accent);
+    expect(groupOf(stage, 'g1')!.findOne('.token-selected-halo')).toBeDefined();
+  });
+
+  it('draws labels larger on the TV by the scale it is given', async () => {
+    const { stage } = await draw({ grid: GRID, map: MAP, mode: 'player', tokens: [GOBLIN], labelScale: 2.5 });
+    const label = groupOf(stage, 'g1')!.findOne<Konva.Label>('.token-label')!;
+    expect(label.scaleX()).toBeCloseTo(2.5 / stage.scaleX(), 9);
+  });
+});
+
+describe('initials (UIX-01)', () => {
+  it('takes a numbered label’s first letter and number, two words’ first letters, or a word’s first two letters', () => {
+    expect(initialsOf('Bandit 1')).toBe('B1');
+    expect(initialsOf('Hill giant')).toBe('HG');
+    expect(initialsOf('Deadeye')).toBe('DE');
+    expect(initialsOf('Λύκος 12')).toBe('Λ12');
+    expect(initialsOf('όφις')).toBe('ΌΦ');
+    expect(initialsOf('Deadeye 1790780094125')).toBe('D1');
   });
 });

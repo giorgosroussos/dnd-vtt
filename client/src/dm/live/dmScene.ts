@@ -5,6 +5,7 @@ import type {
   DmSnapshot,
   DmTokenEventPayload,
   EventEnvelope,
+  HistoryChangedPayload,
   RulerShownPayload,
   SceneToken,
   TokenRemovedPayload,
@@ -19,7 +20,8 @@ import type {
 // lists them, so a live canvas draws what a fresh snapshot would. `camera.player` (LIV-06) replaces the
 // player camera and the screen shape the TV frame follows, so the frame follows another DM browser.
 // `ruler.shown` and `ruler.cleared` (LIV-07) replace and remove the measurement the TV shows, so the DM
-// sees what the TV sees, another DM browser's measurement included.
+// sees what the TV sees, another DM browser's measurement included. `history.changed` (UIX-01) replaces
+// whether undo and redo would change anything, which greys the rail's Undo and Redo.
 
 /** The live scene, or null while nothing is live. */
 export type DmScene = DmLiveScene | null;
@@ -66,6 +68,11 @@ export function applyDmEvent(scene: DmScene, event: EventEnvelope): DmScene {
     }
     case 'ruler.cleared':
       return { ...scene, ruler: null };
+    case 'history.changed': {
+      const { can_undo, can_redo } = event.payload as unknown as Partial<HistoryChangedPayload>;
+      if (typeof can_undo !== 'boolean' || typeof can_redo !== 'boolean') return scene;
+      return { ...scene, history: { can_undo, can_redo } };
+    }
     default:
       return scene;
   }

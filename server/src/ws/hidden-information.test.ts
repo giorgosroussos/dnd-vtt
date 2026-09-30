@@ -57,7 +57,9 @@ async function record(hidden: boolean): Promise<Recording> {
     lurker = await live.asset('Lurker', { category: 'monster', default_hidden: true, notes: 'Waits in the dark' });
     secrets.push(lurker.id, lurker.image_id, 'Lurker', 'Waits in the dark');
   }
-  secrets.push(goblin.id, kobold.id, sceneA.id, sceneB.id, sceneA.session_id, 'The crypt', 'The bridge');
+  // The live scene's name is shown on the TV (UIX-01, specs/04-live-sync.md §4), so it is no secret; the
+  // gate checks below that it reaches players only as a snapshot's `name`.
+  secrets.push(goblin.id, kobold.id, sceneA.id, sceneB.id, sceneA.session_id);
 
   // Preparation over REST; hidden tokens interleaved with the visible ones in the stacking order.
   const secret = async (sceneId: string, assetId: string, x: number, y: number): Promise<SceneToken | undefined> => {
@@ -315,6 +317,21 @@ describe('what a player view receives across a live session (specs/10-testing-ac
 
     const text = JSON.stringify(withHidden.steps);
     for (const secret of withHidden.secrets) expect(text, secret).not.toContain(secret);
+    // Scene names reach players only in a snapshot's `name` (UIX-01), and only while that scene is live:
+    // none before the step that activates it, none while another scene is live.
+    for (const name of ['The crypt', 'The bridge']) {
+      expect(text.replaceAll(/"name":"[^"]*"/g, ''), name).not.toContain(name);
+    }
+    const at = (step: string) => withHidden.steps.findIndex((each) => each.step === step);
+    const during = (from: string, to?: string) =>
+      JSON.stringify(withHidden.steps.slice(at(from), to === undefined ? undefined : at(to)));
+    expect(JSON.stringify(withHidden.steps.slice(0, at('activate A')))).not.toMatch(/The crypt|The bridge/);
+    expect(JSON.stringify(withHidden.steps[at('activate A')])).toContain('The crypt');
+    expect(during('activate A', 'activate B')).not.toContain('The bridge');
+    expect(JSON.stringify(withHidden.steps[at('activate B')])).toContain('The bridge');
+    expect(during('activate B', 'deactivate')).not.toContain('The crypt');
+    expect(during('deactivate', 'activate A again')).not.toMatch(/The crypt|The bridge/);
+    expect(during('activate A again')).not.toContain('The bridge');
     for (const forbidden of ['"hidden"', '"notes"', '"asset', '"scene_id"', '"session_id"', 'thumbnail', 'original']) {
       expect(text, forbidden).not.toContain(forbidden);
     }
