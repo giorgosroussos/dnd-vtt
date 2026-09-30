@@ -162,6 +162,7 @@ Affected specs: …
 - D-143 — TBL-02: how condition markers are stored, changed and drawn — implementation
 - D-144 — TBL-03: how fog regions are stored, filtered, projected and drawn — implementation
 - D-145 — Where the table tools depart from the 2026-09-30 design, and why — implementation
+- D-146 — Animations run a few times and stop: the idle glow, the live dot, the bloodied ring — implementation
 
 ## D-001 (2026-09-23) — Repository documentation regime
 Type: implementation
@@ -1188,3 +1189,10 @@ Decision: Added where the boards draw nothing: a revealed fog region stays on th
 Why: The design is a non-authoritative input (D-003, D-139); where it is silent a flow still needs a place, and each tool has to work from the keyboard and never by colour alone (specs/08-ux-journeys.md §6).
 Alternatives: Hiding revealed regions from the DM's map (rejected: the DM could not find one to fog it again but through the list); a pointer-only fog tool (rejected: no keyboard path).
 Affected specs: `08` §11, `04` §12, `04` §13
+
+## D-146 (2026-10-01) — Animations run a few times and stop: the idle glow, the live dot, the bloodied ring
+Type: implementation
+Decision: The idle screen's ember glow breathes three times (15 s) and then holds still; the header's LIVE dot pulses five times and then stays lit; the TV's bloodied ring pulses three times from when the marker is drawn and then stays lit. No stylesheet runs an animation for ever, which a test in client/src/ui/tokens.test.ts checks.
+Why: Owner's choice on 2026-10-01 after PR #26's Windows WebKit e2e job ran its journeys about three times slower than before the redesign: Playwright's Windows WebKit paints without accelerated compositing, so an endless animation repaints the page every frame, and the idle TV page stays open through the Prepare journey. An idle TV left on for hours repainting a large gradient costs the TV too. The cause could not be reproduced locally (WebKit lacks its system libraries here); the CI run on this change is the test of it.
+Alternatives: Running the matrix browsers with reduced motion in the e2e suite (rejected: tests the functions and hides the animation's cost); installing WebKit's libraries locally to measure first (not taken: the owner chose to fix and read CI).
+Affected specs: `08` §4, `08` §11

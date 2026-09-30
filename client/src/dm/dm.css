@@ -205,7 +205,8 @@
   height: 8px;
   border-radius: 50%;
   background: var(--color-live);
-  animation: eg-live-pulse 1.8s ease-in-out infinite;
+  /* A few pulses as the scene goes live, then lit and still (D-146). */
+  animation: eg-live-pulse 1.8s ease-in-out 5;
 }
 
 @keyframes eg-live-pulse {

@@ -14,12 +14,12 @@ const player = (page: Page) => page.locator('main[data-view="player"]');
 const tvCanvas = (page: Page) => page.locator('main[data-view="player"] .eg-canvas--player');
 
 async function capture(page: Page, name: string) {
-  // Once the fades have run; the idle screen's glow breathes for ever.
+  // Once the fades have run; the idle glow's breaths and the live dot's pulses are not waited for.
   await page.evaluate(() =>
     Promise.all(
       document
         .getAnimations()
-        .filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
+        .filter((animation) => !['eg-ember', 'eg-live-pulse'].includes((animation as CSSAnimation).animationName))
         .map((animation) => animation.finished),
     ),
   );

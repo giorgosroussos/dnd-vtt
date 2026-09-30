@@ -65,8 +65,10 @@ const BADGE_MARKERS: readonly TokenMarker[] = ['bloodied', 'unconscious', 'dead'
 const BADGE_ANGLES = [(-3 * Math.PI) / 4, Math.PI, (3 * Math.PI) / 4];
 const BLOOD_DROP = 'M12 3c3.5 5 6 8.2 6 11.2a6 6 0 0 1-12 0C6 11.2 8.5 8 12 3z';
 const CROSS = 'M7 7l10 10M17 7L7 17';
-// The bloodied ring's pulse on the TV: its opacity from 1 down and back over a cycle.
+// The bloodied ring's pulse on the TV: its opacity from 1 down and back over a cycle, a few times from when
+// the marker is drawn, then still (D-146): an endless animation would redraw the tokens every frame.
 export const BLOODIED_PULSE_MS = 1_600;
+export const BLOODIED_PULSES = 3;
 const reducedMotion = () =>
   typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 // The crossed eye of the hidden badge, on a 24-unit grid.
@@ -158,7 +160,13 @@ function BloodiedRing({ radius, width, pulse }: { radius: number; width: number;
     const layer = node?.getLayer();
     if (!pulse || !node || !layer || reducedMotion()) return;
     const animation = new Konva.Animation((frame) => {
-      const phase = ((frame?.time ?? 0) % BLOODIED_PULSE_MS) / BLOODIED_PULSE_MS;
+      const time = frame?.time ?? 0;
+      if (time >= BLOODIED_PULSES * BLOODIED_PULSE_MS) {
+        node.opacity(1);
+        animation.stop();
+        return;
+      }
+      const phase = (time % BLOODIED_PULSE_MS) / BLOODIED_PULSE_MS;
       node.opacity(0.35 + 0.65 * (0.5 + 0.5 * Math.cos(phase * 2 * Math.PI)));
     }, layer);
     animation.start();
