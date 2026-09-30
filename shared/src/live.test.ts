@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { Value } from 'typebox/value';
 import {
+  TOKEN_MARKERS,
   COMMAND_TYPES,
   CommandEnvelopeSchema,
   DmSnapshotSchema,
@@ -89,11 +90,20 @@ describe('snapshot payloads (specs/04-live-sync.md §4, LIV-01)', () => {
     z_order: 0,
     label: 'Goblin 1',
     category: 'monster',
+    markers: ['bloodied', 'concentrating'],
   };
 
-  it('gives a player token exactly the rendering fields: id, position, size, image, stacking order, label and category', () => {
+  it('refuses markers a token cannot carry: an unknown one, one twice, or more than there are (TBL-02)', () => {
+    for (const markers of [['poisoned'], ['dead', 'dead'], ['BLOODIED'], [...TOKEN_MARKERS, 'dead']]) {
+      expect(Value.Check(PlayerTokenSchema, { ...token, markers }), JSON.stringify(markers)).toBe(false);
+    }
+    expect(Value.Check(PlayerTokenSchema, { ...token, markers: [] })).toBe(true);
+    expect(Value.Check(PlayerTokenSchema, { ...token, markers: [...TOKEN_MARKERS] })).toBe(true);
+  });
+
+  it('gives a player token exactly the rendering fields: id, position, size, image, stacking order, label, category and markers', () => {
     expect(Object.keys(PlayerTokenSchema.properties).sort()).toEqual(
-      ['category', 'id', 'image_id', 'label', 'size', 'x', 'y', 'z_order'].sort(),
+      ['category', 'id', 'image_id', 'label', 'markers', 'size', 'x', 'y', 'z_order'].sort(),
     );
     expect(Value.Check(PlayerTokenSchema, token)).toBe(true);
   });
@@ -157,7 +167,7 @@ describe('live command and event payloads (specs/04-live-sync.md §2, §3, §4, 
   };
   const id = '00000000-0000-4000-8000-000000000001';
 
-  it('defines a payload for every command of specs/04-live-sync.md §2, redo (UIX-01) and ping (TBL-01) the last', () => {
+  it('defines a payload for every command of specs/04-live-sync.md §2, redo (UIX-01), ping (TBL-01) and token.setMarkers (TBL-02) the last', () => {
     expect(Object.keys(LIVE_COMMAND_PAYLOAD_SCHEMAS).sort()).toEqual([...COMMAND_TYPES].sort());
     expect(Object.keys(LIVE_COMMAND_PAYLOAD_SCHEMAS).sort()).toEqual(
       [
@@ -170,6 +180,7 @@ describe('live command and event payloads (specs/04-live-sync.md §2, §3, §4, 
         'token.delete',
         'token.move',
         'token.setVisibility',
+        'token.setMarkers',
         'undo',
         'redo',
         'ping',

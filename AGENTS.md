@@ -37,7 +37,7 @@ The MVP is done when the DM can prepare a session in advance and run it on a TV 
 - **LAN only, offline.** The running app sends nothing outside the LAN: no telemetry, update check or CDN; every asset is bundled (`02` §6, `10` §6).
 - **Identifiers and positions.** UUIDs for every entity except Image, which is its sha256; token positions in decimal grid units; grid values in original-image dimensions (`03` §3, `03` §4, `06` §2).
 - **Deletion rules.** Cascades as specified with confirmation, assets in use are never deleted, deletions are permanent, unreferenced images are removed, deleting the live scene blanks the TV (`03` §7).
-- **Preparation and play stay apart.** Changes to a scene that is not live reach no other client; live setup edits go out as a fresh snapshot; live token commands are exactly add, move, visibility and delete (`02` §4, `04` §2, `04` §10).
+- **Preparation and play stay apart.** Changes to a scene that is not live reach no other client; live setup edits go out as a fresh snapshot; live token commands are exactly add, move, visibility, markers and delete (`02` §4, `04` §2, `04` §10, Q-099).
 - **Uploads.** PNG, JPEG and WebP only, judged by content, under the configurable limit; a rejection stores nothing (`05` §6).
 - **Name and licence.** No "D&D" or "Dungeons & Dragons" in the product, UI or package names; AGPL-3.0 (`01` §8, `09` §8).
 - **Tests are honest.** Integration tests use a real SQLite file, never a mock; the hidden-information suite and the offline run are release gates; a test is never weakened to pass (`10` §2, `10` §3, `14` §3).

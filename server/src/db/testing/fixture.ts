@@ -187,7 +187,12 @@ export function readEntities(db: Database.Database): Entities {
       grid: grid(row, 'grid_'),
     })) as Scene[],
     // Whether players have seen a token is the server's own too (Q-096).
-    token: all('token').map((row) => ({ ...without(row, 'shown'), hidden: row.hidden === 1 })) as Token[],
+    // Markers (migration 0004, TBL-02) read as the array they are; a database before it carries none.
+    token: all('token').map((row) => ({
+      ...without(row, 'shown'),
+      hidden: row.hidden === 1,
+      markers: row.markers === undefined ? [] : (JSON.parse(row.markers as string) as unknown),
+    })) as Token[],
     settings: all('settings').map((row) => without(row, 'pin_hash')) as Settings[],
   };
 }

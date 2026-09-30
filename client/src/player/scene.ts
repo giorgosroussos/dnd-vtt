@@ -27,7 +27,7 @@ import {
 /** The live scene the player view draws, or null for the idle screen. */
 export type PlayerScene = PlayerLiveScene | null;
 
-const playerToken = ({ id, x, y, size, image_id, z_order, label, category }: PlayerToken): PlayerToken => ({
+const playerToken = ({ id, x, y, size, image_id, z_order, label, category, markers }: PlayerToken): PlayerToken => ({
   id,
   x,
   y,
@@ -36,6 +36,8 @@ const playerToken = ({ id, x, y, size, image_id, z_order, label, category }: Pla
   z_order,
   label,
   category,
+  // Absent from a malformed event: drawn with none.
+  markers: Array.isArray(markers) ? [...markers] : [],
 });
 
 const ranked = (tokens: readonly PlayerToken[]): PlayerToken[] =>

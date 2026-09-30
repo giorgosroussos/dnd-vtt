@@ -216,6 +216,8 @@ describe('migration 0001 on a fresh database', () => {
         'character_id TEXT NULL',
         // Migration 0003 (Q-096, D-137).
         'shown INTEGER NOT NULL DEFAULT 0',
+        // Migration 0004 (TBL-02, Q-099).
+        "markers TEXT NOT NULL DEFAULT '[]'",
       ],
       settings: [
         'id TEXT NOT NULL',
@@ -905,5 +907,10 @@ describe('migrations on the generated fixture database (specs/14-agent-playbook.
       .all() as { hidden: 0 | 1; bare: 0 | 1; shown: 0 | 1 }[];
     expect(shown.length).toBeGreaterThan(0);
     for (const row of shown) expect(row.shown, JSON.stringify(row)).toBe(row.hidden === 0 || row.bare === 0 ? 1 : 0);
+    // Migration 0004 gives every existing token no markers (TBL-02), and refuses anything but a JSON array.
+    expect(db.prepare('SELECT DISTINCT markers FROM token').pluck().all()).toEqual(['[]']);
+    for (const markers of ['bloodied', '{"dead":true}', '[']) {
+      expect(() => db.prepare('UPDATE token SET markers = ?').run(markers), markers).toThrow(/CHECK constraint failed/);
+    }
   });
 });

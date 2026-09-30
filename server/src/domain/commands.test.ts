@@ -173,6 +173,7 @@ describe('the process command validator', () => {
     'token.move',
     'token.setVisibility',
     'token.delete',
+    'token.setMarkers',
     'scene.activate',
     'scene.deactivate',
     'camera.setPlayer',

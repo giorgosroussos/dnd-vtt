@@ -24,7 +24,7 @@ const CAMPAIGN_COLUMNS = 'id, name, description, rules_version';
 const SESSION_COLUMNS = 'id, campaign_id, title, "order", date';
 const SCENE_COLUMNS = `id, session_id, name, "order", map_image_id, grid_type, grid_size, grid_offset_x,
   grid_offset_y, grid_visible, grid_feet_per_square, grid_columns, grid_rows`;
-const TOKEN_COLUMNS = 'id, scene_id, asset_id, label, x, y, hidden, z_order, character_id';
+const TOKEN_COLUMNS = 'id, scene_id, asset_id, label, x, y, hidden, z_order, markers, character_id';
 
 interface SceneRow {
   id: string;
@@ -51,6 +51,7 @@ interface TokenRow {
   y: number;
   hidden: 0 | 1;
   z_order: number;
+  markers: string;
   character_id: null;
 }
 
@@ -456,7 +457,7 @@ export function duplicateScene(db: Database.Database, id: string, name: string):
     const tokens = db
       .prepare(`SELECT ${TOKEN_COLUMNS} FROM token WHERE scene_id = ? ORDER BY z_order, id`)
       .all(id) as TokenRow[];
-    const insert = db.prepare(`INSERT INTO token (${TOKEN_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const insert = db.prepare(`INSERT INTO token (${TOKEN_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     for (const token of tokens) {
       insert.run(
         randomUUID(),
@@ -467,6 +468,7 @@ export function duplicateScene(db: Database.Database, id: string, name: string):
         token.y,
         token.hidden,
         token.z_order,
+        token.markers,
         token.character_id,
       );
     }

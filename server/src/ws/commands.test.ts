@@ -285,6 +285,7 @@ describe('token commands and what each room receives (specs/04-live-sync.md §2,
         z_order: 2,
         label: 'Goblin 3',
         category: w.goblin.category,
+        markers: [],
       },
       relabelled: [],
     });
@@ -321,6 +322,7 @@ describe('token commands and what each room receives (specs/04-live-sync.md §2,
       z_order: 0,
       label: 'Goblin 1',
       category: w.goblin.category,
+      markers: [],
     });
 
     await acknowledged(dm, 'token.move', { token_id: w.hidden.id, x: 4, y: 4 });
@@ -635,6 +637,7 @@ describe('player commands (specs/10-testing-acceptance.md §3, specs/07-security
     const valid: Record<string, unknown> = {
       'token.add': { scene_id: w.sceneA.id, asset_id: w.goblin.id, x: 1, y: 1 },
       'token.move': { token_id: w.goblins[0]!.id, x: 9, y: 9 },
+      'token.setMarkers': { token_id: w.goblins[0]!.id, markers: ['bloodied'] },
       'token.delete': { token_id: w.goblins[0]!.id },
       'token.setVisibility': { token_id: w.hidden.id, hidden: false },
       'scene.activate': { scene_id: w.sceneB.id },

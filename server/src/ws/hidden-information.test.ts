@@ -15,7 +15,7 @@ import { applyPlayerEvent, startLive, type LiveHarness, type PlayerState } from 
 // a hidden token's included (LIV-05), activating another scene, reconnecting, since LIV-04 editing the
 // live scene's setup and assets over REST and deleting the live scene, since LIV-06 steering the
 // TV camera and screens reporting their viewports, and since LIV-07 measuring with the ruler on the live
-// scene, and on a scene that is not live, which reaches players not at all, and since TBL-01 pinging both. It asserts that no hidden
+// scene, and on a scene that is not live, which reaches players not at all, since TBL-01 pinging both, and since TBL-02 marking a hidden token and a visible one. It asserts that no hidden
 // token's id, asset, image or name appears, and that the count of hidden tokens cannot be learnt
 // either: the whole recording is identical, byte for byte once identifiers are numbered by first
 // appearance, to the recording of the same session without any of the hidden-only steps
@@ -219,6 +219,18 @@ async function record(hidden: boolean): Promise<Recording> {
   await step('undo the add of a visible goblin', undo);
   await step('undo the add of a hidden lurker', undo, true);
   await step('undo with nothing left to undo', undo);
+  // Condition markers (TBL-02, specs/04-live-sync.md §4): a hidden token's reach players not at all, nor
+  // their undo; a visible token's reach them as a change of it.
+  await step(
+    'mark the hidden boss dead',
+    () => send('token.setMarkers', { token_id: boss!.id, markers: ['dead'] }),
+    true,
+  );
+  await step('mark the visible goblin bloodied', () =>
+    send('token.setMarkers', { token_id: firstGoblin.id, markers: ['bloodied'] }),
+  );
+  await step('undo the mark of the goblin', undo);
+  await step('undo the mark of the hidden boss', undo, true);
   await step('activate B', () => send('scene.activate', { scene_id: sceneB.id }));
   await step('a second screen reports its viewport and the DM steers the TV on B', async () => {
     const second = await live.connect();
@@ -366,6 +378,10 @@ describe('what a player view receives across a live session (specs/10-testing-ac
     expect(eventsOf('the DM measures on a scene that is not live')).toEqual(['scene.snapshot']);
     expect(eventsOf('the DM clears the measurement')).toEqual(['ruler.cleared', 'scene.snapshot']);
     expect(eventsOf('the DM pings the live scene')).toEqual(['ping', 'scene.snapshot']);
+    expect(eventsOf('mark the hidden boss dead')).toEqual(['scene.snapshot']);
+    expect(eventsOf('mark the visible goblin bloodied')).toEqual(['token.updated', 'scene.snapshot']);
+    expect(eventsOf('undo the mark of the goblin')).toEqual(['token.updated', 'scene.snapshot']);
+    expect(eventsOf('undo the mark of the hidden boss')).toEqual(['scene.snapshot']);
     expect(eventsOf('the DM pings a scene that is not live')).toEqual(['scene.snapshot']);
     expect(eventsOf('a second DM browser measures and disconnects')).toEqual([
       'ruler.shown',

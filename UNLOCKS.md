@@ -36,3 +36,5 @@ Never edit or remove a line here. The point of the file is that it cannot be tid
 - unlock 2026-09-30T13:03:51Z path="specs/04-live-sync.md" by="Giorgos Roussos" reason="UIX-01: redo, the DM room's screens count and undo state, and the scene's name and token category for players (Q-100, brief [input], D-139)"
 - unlock 2026-09-30T14:22:22Z path="specs/02-architecture.md" by="Giorgos Roussos" reason="UIX-01: the count of connected player views and the scenes' token summary over REST, for the redesigned header and scene list (Q-100, D-140)"
 - unlock 2026-09-30T15:01:35Z path="specs/04-live-sync.md" by="Giorgos Roussos" reason="TBL-01: the ping command and event, stored nowhere, both rooms (Q-099, D-139)"
+- unlock 2026-09-30T17:01:33Z path="specs/03-domain-model.md" by="Giorgos Roussos" reason="TBL-02: condition markers stored on the token, set by the undoable live command token.setMarkers and drawn on both views (Q-099, D-139)"
+- unlock 2026-09-30T17:01:33Z path="specs/04-live-sync.md" by="Giorgos Roussos" reason="TBL-02: condition markers stored on the token, set by the undoable live command token.setMarkers and drawn on both views (Q-099, D-139)"

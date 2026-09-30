@@ -159,6 +159,7 @@ Affected specs: …
 - D-140 — UIX-01 as built: redo, the undo state and the screens count, the scene's name and category for players, and the redesigned workspace's behaviour — implementation
 - D-141 — Where UIX-01 departs from the 2026-09-30 design, and why — implementation
 - D-142 — TBL-01: how a ping is sent, drawn and let go — implementation
+- D-143 — TBL-02: how condition markers are stored, changed and drawn — implementation
 
 ## D-001 (2026-09-23) — Repository documentation regime
 Type: implementation
@@ -1164,3 +1165,10 @@ Decision: `ping {scene_id, x, y}` names the live scene and a point in grid units
 Why: specs/04-live-sync.md §12 (Q-099) asks for a point in grid units, stored nowhere, shown for about two seconds; a ping is transient, so each view expires it itself and no snapshot or history needs to carry it. On a scene that is not live a ping would show on no TV (as with the ruler, Q-086).
 Alternatives: Holding pings in the server's memory and sending them in snapshots (rejected: §12 says a later view never sees one); a server-side expiry event (rejected: an extra event per ping for no gain); a throttle per socket (not taken: the DM is trusted and the ruler has none).
 Affected specs: `04` §2, `04` §3, `04` §12, `08` §11
+
+## D-143 (2026-09-30) — TBL-02: how condition markers are stored, changed and drawn
+Type: implementation
+Decision: Migration 0004 adds token.markers, TEXT NOT NULL DEFAULT '[]' with a CHECK that it is a JSON array; the server writes it in the order bloodied, unconscious, dead, concentrating whatever order it is sent in, and duplication and the undo of a deletion carry it. The contract gives Token and the players' token a `markers` array of distinct names (at most four); prep sets it over REST with the token's PATCH, the live scene with `token.setMarkers {token_id, markers}` naming the whole set after the change: a set equal to the current one tells nobody; undo puts back the set before and redo the set after; players hear of a visible token's change as token.updated and of a hidden one's not at all, and a token revealed arrives with its markers. The popover's CONDITION chips are toggle buttons (aria-pressed, a check mark kept out of the name), live and in preparation alike, and the token list's status line names the markers. Drawn on both views: Bloodied a red ring outside the token, pulsing on the TV (still under reduced motion), and a blood-drop badge; Concentrating a dotted purple ring further out; Unconscious the image desaturated by a saturation blend and a 'z' badge; Dead desaturated and darkened, an ✕ badge and the label struck through. Badges sit down the token's left side, the hidden badge alone on its right.
+Why: specs/01-product-scope.md §9 and specs/04-live-sync.md §2 as amended (Q-099); the brief draws Bloodied and Concentrating and suggests Unconscious and Dead, each with a shape or a badge so no marker is told by colour alone (WCAG 1.4.1). One command carrying the whole set keeps undo a single inverse and makes a repeated click idempotent.
+Alternatives: A command per marker to add or remove (rejected: two inverses to reason about and a racing pair of DM browsers could leave a set neither chose); a separate marker table (rejected: four fixed names on a token need no relation); a skull for Dead (not taken: an ✕ reads at badge size on a TV).
+Affected specs: `03` §1, `04` §2, `04` §3, `04` §4, `04` §8, `08` §11

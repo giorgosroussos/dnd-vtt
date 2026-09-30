@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Konva from 'konva';
 import { Circle, Group, Image as KonvaImage, Label, Layer, Path, Rect, Tag, Text } from 'react-konva';
-import { imageFileUrl, type AssetCategory } from '@emberglass/shared';
+import { imageFileUrl, type AssetCategory, type TokenMarker } from '@emberglass/shared';
 import { CANVAS_FONT, THEME } from '../ui/theme.js';
 import {
   dropPosition,
@@ -25,6 +25,12 @@ import {
 // unless Alt is held. The player mode draws only visible tokens, never a hidden one, and listens to
 // nothing; what reaches a player view is filtered on the server (LIV-02). Labels and badges keep their
 // size on screen at every zoom, scaled up by `labelScale` on the TV to be read across a room.
+//
+// Condition markers (TBL-02, specs/08-ux-journeys.md §11, the 2026-09-30 brief), on both views, each a shape
+// or a badge and never a colour alone: Bloodied a red ring outside the token, pulsing on the TV, and a
+// blood-drop badge; Concentrating a dotted purple ring further out; Unconscious the token desaturated and a
+// "z" badge; Dead the token desaturated and darkened, an ✕ badge and the label struck through. The badges
+// sit down the token's left side, the hidden badge alone on its right.
 
 export const TOKEN_COLOURS = {
   hidden: THEME.hidden,
@@ -54,6 +60,15 @@ const LABEL_PADDING = 3;
 // Ring and badge sizes, in screen pixels.
 const RING_PX = 2;
 const BADGE_PX = 7.5;
+// The markers' badges, in the order they sit down the token's left side, and their paths on a 24-unit grid.
+const BADGE_MARKERS: readonly TokenMarker[] = ['bloodied', 'unconscious', 'dead'];
+const BADGE_ANGLES = [(-3 * Math.PI) / 4, Math.PI, (3 * Math.PI) / 4];
+const BLOOD_DROP = 'M12 3c3.5 5 6 8.2 6 11.2a6 6 0 0 1-12 0C6 11.2 8.5 8 12 3z';
+const CROSS = 'M7 7l10 10M17 7L7 17';
+// The bloodied ring's pulse on the TV: its opacity from 1 down and back over a cycle.
+export const BLOODIED_PULSE_MS = 1_600;
+const reducedMotion = () =>
+  typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 // The crossed eye of the hidden badge, on a 24-unit grid.
 const EYE_OFF =
   'M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3 3.8M6.6 6.6C3.7 8.4 2 12 2 12s3.5 7 10 7a9.6 9.6 0 0 0 5.4-1.6';
@@ -135,6 +150,69 @@ export interface TokenControls {
   onMove: (id: string, at: Point) => void;
 }
 
+/** The bloodied ring: still in the DM view, pulsing on the TV unless reduced motion is asked for. */
+function BloodiedRing({ radius, width, pulse }: { radius: number; width: number; pulse: boolean }) {
+  const ring = useRef<Konva.Circle>(null);
+  useEffect(() => {
+    const node = ring.current;
+    const layer = node?.getLayer();
+    if (!pulse || !node || !layer || reducedMotion()) return;
+    const animation = new Konva.Animation((frame) => {
+      const phase = ((frame?.time ?? 0) % BLOODIED_PULSE_MS) / BLOODIED_PULSE_MS;
+      node.opacity(0.35 + 0.65 * (0.5 + 0.5 * Math.cos(phase * 2 * Math.PI)));
+    }, layer);
+    animation.start();
+    return () => {
+      animation.stop();
+    };
+  }, [pulse]);
+  return (
+    <Circle
+      ref={ring}
+      name="token-marker-bloodied-ring"
+      radius={radius}
+      stroke={THEME.bloodied}
+      strokeWidth={width}
+      strokeScaleEnabled={false}
+      listening={false}
+    />
+  );
+}
+
+/** A marker's badge: a dark disc with its sign, the same size on screen at every zoom. */
+function MarkerBadge({ marker }: { marker: TokenMarker }) {
+  const colour = marker === 'bloodied' ? THEME.bloodied : TOKEN_COLOURS.text;
+  return (
+    <>
+      <Circle radius={BADGE_PX} fill={TOKEN_COLOURS.halo} stroke={colour} strokeWidth={1.5} />
+      {marker === 'unconscious' ? (
+        <Text
+          text="z"
+          width={BADGE_PX * 2}
+          height={BADGE_PX * 2}
+          x={-BADGE_PX}
+          y={-BADGE_PX - 0.5}
+          align="center"
+          verticalAlign="middle"
+          fill={colour}
+          fontFamily={CANVAS_FONT}
+          fontStyle="bold"
+          fontSize={11}
+        />
+      ) : (
+        <Path
+          data={marker === 'bloodied' ? BLOOD_DROP : CROSS}
+          x={-5}
+          y={-5}
+          scaleX={10 / 24}
+          scaleY={10 / 24}
+          {...(marker === 'bloodied' ? { fill: colour } : { stroke: colour, strokeWidth: 3.5, lineCap: 'round' })}
+        />
+      )}
+    </>
+  );
+}
+
 export function TokenLayer({
   tokens,
   frame,
@@ -182,6 +260,12 @@ export function TokenLayer({
           context.arc(centre, centre, radius, 0, Math.PI * 2, false);
         };
         const initialsPx = Math.max(radius * 0.8, 1);
+        const markers = token.markers ?? [];
+        const has = (marker: TokenMarker) => markers.includes(marker);
+        const dead = has('dead');
+        // Rings outside the token and badges keep their size on screen, larger on the TV.
+        const ringScale = mode === 'player' ? labelScale * 0.6 : 1;
+        const badges = BADGE_MARKERS.filter(has);
         return (
           <Group
             key={token.id}
@@ -257,8 +341,51 @@ export function TokenLayer({
                     />
                   </>
                 )}
+                {has('unconscious') || dead ? (
+                  // Desaturated: a grey of no saturation, blended in by saturation, takes the colour out.
+                  <Rect
+                    name="token-marker-desaturated"
+                    width={side}
+                    height={side}
+                    fill="#808080"
+                    globalCompositeOperation="saturation"
+                    listening={false}
+                  />
+                ) : null}
+                {dead ? (
+                  <Rect
+                    name="token-marker-dead-shade"
+                    width={side}
+                    height={side}
+                    fill={TOKEN_COLOURS.halo}
+                    opacity={0.45}
+                  />
+                ) : null}
               </Group>
             </Group>
+            {has('bloodied') ? (
+              <Group x={centre} y={centre} listening={false}>
+                <BloodiedRing
+                  radius={radius + 3 * inverse * ringScale}
+                  width={2.5 * ringScale}
+                  pulse={mode === 'player'}
+                />
+              </Group>
+            ) : null}
+            {has('concentrating') ? (
+              <Circle
+                name="token-marker-concentrating"
+                x={centre}
+                y={centre}
+                radius={radius + 7 * inverse * ringScale}
+                stroke={THEME.concentrating}
+                strokeWidth={2 * ringScale}
+                dash={[0.5, 4 * ringScale]}
+                lineCap="round"
+                strokeScaleEnabled={false}
+                listening={false}
+              />
+            ) : null}
             <Circle
               name={hidden ? 'token-ring token-hidden-outline' : 'token-ring'}
               x={centre}
@@ -294,6 +421,19 @@ export function TokenLayer({
                 />
               </Group>
             ) : null}
+            {badges.map((marker, index) => (
+              <Group
+                key={marker}
+                name={`token-marker token-marker-${marker}`}
+                x={centre + Math.cos(BADGE_ANGLES[index]!) * radius}
+                y={centre + Math.sin(BADGE_ANGLES[index]!) * radius}
+                scaleX={onScreen}
+                scaleY={onScreen}
+                listening={false}
+              >
+                <MarkerBadge marker={marker} />
+              </Group>
+            ))}
             <Label
               name="token-label"
               x={centre}
@@ -312,6 +452,7 @@ export function TokenLayer({
                 fontStyle={labelStyle(hidden)}
                 fontSize={LABEL_FONT_PX}
                 padding={LABEL_PADDING}
+                {...(dead ? { textDecoration: 'line-through' } : {})}
               />
             </Label>
           </Group>

@@ -9,6 +9,7 @@ import { settle } from '../ui/testing/fakeServer.js';
 import { render, type Rendered } from '../ui/testing/render.js';
 import { CELL_PX } from './geometry.js';
 import { MapCanvas, type CanvasTokenControls, type Placing } from './MapCanvas.js';
+import { THEME } from '../ui/theme.js';
 import { CATEGORY_COLOURS, HIDDEN_OPACITY, HIDDEN_UNDERLAY_OPACITY, initialsOf, TOKEN_COLOURS } from './TokenLayer.js';
 import type { CanvasToken } from './tokens.js';
 
@@ -436,6 +437,79 @@ describe('the redesign’s token visuals (UIX-01, specs/08-ux-journeys.md §11)'
     const { stage } = await draw({ grid: GRID, map: MAP, mode: 'player', tokens: [GOBLIN], labelScale: 2.5 });
     const label = groupOf(stage, 'g1')!.findOne<Konva.Label>('.token-label')!;
     expect(label.scaleX()).toBeCloseTo(2.5 / stage.scaleX(), 9);
+  });
+});
+
+describe('condition markers (TBL-02, specs/08-ux-journeys.md §11)', () => {
+  const marked = (markers: CanvasToken['markers'], fields: Partial<CanvasToken> = {}) =>
+    token({ id: 'm1', label: 'Goblin 1', x: 2, y: 3, markers, ...fields });
+  const labelText = (stage: Konva.Stage) =>
+    groupOf(stage, 'm1')!.findOne<Konva.Label>('.token-label')!.findOne<Konva.Text>('Text')!;
+
+  it('draws none on a token without markers', async () => {
+    const { stage } = await draw({ grid: GRID, map: MAP, mode: 'dm', tokens: [marked(undefined), GIANT] });
+    for (const name of [
+      '.token-marker',
+      '.token-marker-bloodied-ring',
+      '.token-marker-concentrating',
+      '.token-marker-desaturated',
+    ]) {
+      expect(stage.find(name), name).toHaveLength(0);
+    }
+    expect(labelText(stage).textDecoration()).toBe('');
+  });
+
+  it('gives every marker a shape or a badge, never a colour alone', async () => {
+    const { stage } = await draw({
+      grid: GRID,
+      map: MAP,
+      mode: 'dm',
+      tokens: [marked(['bloodied', 'unconscious', 'dead', 'concentrating'])],
+    });
+    const group = groupOf(stage, 'm1')!;
+    const ring = group.findOne<Konva.Circle>('.token-ring')!;
+    // Bloodied: a red ring outside the token and a blood-drop badge.
+    const bloodied = group.findOne<Konva.Circle>('.token-marker-bloodied-ring')!;
+    expect(bloodied.stroke()).toBe(THEME.bloodied);
+    expect(bloodied.radius()).toBeGreaterThan(ring.radius());
+    expect(group.findOne<Konva.Group>('.token-marker-bloodied')!.findOne('Path')).toBeDefined();
+    // Concentrating: a dotted purple ring further out still.
+    const concentrating = group.findOne<Konva.Circle>('.token-marker-concentrating')!;
+    expect(concentrating.stroke()).toBe(THEME.concentrating);
+    expect(concentrating.dash().length).toBe(2);
+    expect(concentrating.radius()).toBeGreaterThan(bloodied.radius());
+    // Unconscious: the token desaturated and a "z" badge.
+    expect(group.findOne<Konva.Rect>('.token-marker-desaturated')!.globalCompositeOperation()).toBe('saturation');
+    expect(group.findOne<Konva.Group>('.token-marker-unconscious')!.findOne<Konva.Text>('Text')!.text()).toBe('z');
+    // Dead: darkened too, an ✕ badge and the label struck through.
+    expect(group.findOne('.token-marker-dead-shade')).toBeDefined();
+    expect(group.findOne<Konva.Group>('.token-marker-dead')!.findOne('Path')).toBeDefined();
+    expect(labelText(stage).textDecoration()).toBe('line-through');
+    // Three badges, each in its own place down the left side.
+    const badges = group.find('.token-marker').map((badge) => badge.position());
+    expect(badges).toHaveLength(3);
+    expect(new Set(badges.map(({ x, y }) => `${x},${y}`)).size).toBe(3);
+    for (const { x } of badges) expect(x).toBeLessThan(ring.x());
+  });
+
+  it('desaturates an unconscious token without darkening it or striking its label', async () => {
+    const { stage } = await draw({ grid: GRID, map: MAP, mode: 'dm', tokens: [marked(['unconscious'])] });
+    expect(stage.find('.token-marker-desaturated')).toHaveLength(1);
+    expect(stage.find('.token-marker-dead-shade')).toHaveLength(0);
+    expect(labelText(stage).textDecoration()).toBe('');
+  });
+
+  it('draws them on the TV too, larger by the label scale', async () => {
+    const { stage } = await draw({
+      grid: GRID,
+      map: MAP,
+      mode: 'player',
+      tokens: [marked(['bloodied'])],
+      labelScale: 2.5,
+    });
+    const badge = groupOf(stage, 'm1')!.findOne<Konva.Group>('.token-marker-bloodied')!;
+    expect(badge.scaleX()).toBeCloseTo(2.5 / stage.scaleX(), 9);
+    expect(groupOf(stage, 'm1')!.findOne('.token-marker-bloodied-ring')).toBeDefined();
   });
 });
 

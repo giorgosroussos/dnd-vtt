@@ -64,6 +64,7 @@ export const COMMAND_TYPES = [
   'token.move',
   'token.delete',
   'token.setVisibility',
+  'token.setMarkers',
   'scene.activate',
   'scene.deactivate',
   'camera.setPlayer',
@@ -156,6 +157,8 @@ export const PlayerTokenSchema = Type.Object(
     // What the token's ring is coloured by on the TV (UIX-01, specs/08-ux-journeys.md §11): what players
     // already see of a visible token, never anything of a hidden one.
     category: SceneTokenSchema.properties.asset.properties.category,
+    // The condition markers drawn on it (TBL-02), of a visible token only.
+    markers: TokenSchema.properties.markers,
   },
   strict,
 );
@@ -293,6 +296,12 @@ export const TokenAddPayloadSchema = Type.Object(
 export const TokenMovePayloadSchema = Type.Object({ token_id: UuidSchema, x: Coordinate, y: Coordinate }, strict);
 export const TokenSetVisibilityPayloadSchema = Type.Object({ token_id: UuidSchema, hidden: Type.Boolean() }, strict);
 export const TokenDeletePayloadSchema = Type.Object({ token_id: UuidSchema }, strict);
+// `token.setMarkers` (TBL-02, specs/04-live-sync.md §2): the whole set a token carries after it, stored in
+// the order of TOKEN_MARKERS whatever order it is sent in.
+export const TokenSetMarkersPayloadSchema = Type.Object(
+  { token_id: UuidSchema, markers: TokenSchema.properties.markers },
+  strict,
+);
 export const SceneActivatePayloadSchema = Type.Object({ scene_id: UuidSchema }, strict);
 export const SceneDeactivatePayloadSchema = Type.Object({}, strict);
 export const UndoPayloadSchema = Type.Object({}, strict);
@@ -313,6 +322,7 @@ export const LIVE_COMMAND_PAYLOAD_SCHEMAS = {
   'token.move': TokenMovePayloadSchema,
   'token.setVisibility': TokenSetVisibilityPayloadSchema,
   'token.delete': TokenDeletePayloadSchema,
+  'token.setMarkers': TokenSetMarkersPayloadSchema,
   'scene.activate': SceneActivatePayloadSchema,
   'scene.deactivate': SceneDeactivatePayloadSchema,
   'camera.setPlayer': CameraSetPlayerPayloadSchema,
@@ -327,6 +337,7 @@ export type TokenAddPayload = Static<typeof TokenAddPayloadSchema>;
 export type TokenMovePayload = Static<typeof TokenMovePayloadSchema>;
 export type TokenSetVisibilityPayload = Static<typeof TokenSetVisibilityPayloadSchema>;
 export type TokenDeletePayload = Static<typeof TokenDeletePayloadSchema>;
+export type TokenSetMarkersPayload = Static<typeof TokenSetMarkersPayloadSchema>;
 export type SceneActivatePayload = Static<typeof SceneActivatePayloadSchema>;
 export type SceneDeactivatePayload = Static<typeof SceneDeactivatePayloadSchema>;
 export type UndoPayload = Static<typeof UndoPayloadSchema>;

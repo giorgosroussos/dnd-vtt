@@ -1,8 +1,16 @@
-import type { SceneToken } from '@emberglass/shared';
+import { TOKEN_MARKERS, type SceneToken, type TokenMarker } from '@emberglass/shared';
 import type { TokenAnchor } from '../../canvas/MapCanvas.js';
 import { Icon } from '../../ui/icons.js';
 import { Menu } from '../../ui/Menu.js';
-import { t } from '../../ui/messages.js';
+import { t, type MessageKey } from '../../ui/messages.js';
+
+/** Each condition marker's name, as its chip and the token list say it (TBL-02). */
+export const MARKER_NAMES: Record<TokenMarker, MessageKey> = {
+  bloodied: 'tokens.markerBloodied',
+  unconscious: 'tokens.markerUnconscious',
+  dead: 'tokens.markerDead',
+  concentrating: 'tokens.markerConcentrating',
+};
 
 const WIDTH = 236;
 const GAP = 14;
@@ -12,7 +20,7 @@ function placement(anchor: TokenAnchor): { left: number; top: number; side: 'lef
   const right = anchor.left + anchor.side + GAP;
   const fitsRight = right + WIDTH <= anchor.viewport.width - 8;
   const left = fitsRight ? right : Math.max(8, anchor.left - GAP - WIDTH);
-  const top = Math.min(Math.max(8, anchor.top + anchor.side / 2 - 70), Math.max(8, anchor.viewport.height - 200));
+  const top = Math.min(Math.max(8, anchor.top + anchor.side / 2 - 70), Math.max(8, anchor.viewport.height - 290));
   return { left, top, side: fitsRight ? 'right' : 'left' };
 }
 
@@ -21,6 +29,7 @@ function placement(anchor: TokenAnchor): { left: number; top: number; side: 'lef
 // stacking order. On the live scene Rename and the stacking order stay in the list but refuse, saying why:
 // they are edited only on scenes that are not live (Q-014), and the brief keeps them prep-only (D-139). It
 // takes no focus when it appears, so the arrow keys keep moving the token on the map; Tab reaches it.
+// Below, the four condition markers as toggle chips (TBL-02), on the live scene as in preparation.
 export function TokenPopover({
   token,
   anchor,
@@ -30,6 +39,7 @@ export function TokenPopover({
   onDuplicate,
   onStack,
   onDelete,
+  onToggleMarker,
 }: {
   token: SceneToken;
   anchor: TokenAnchor;
@@ -39,6 +49,7 @@ export function TokenPopover({
   onDuplicate: () => void;
   onStack: (stack: 'front' | 'back') => void;
   onDelete: () => void;
+  onToggleMarker: (marker: TokenMarker) => void;
 }) {
   const { left, top, side } = placement(anchor);
   const prepOnly = live ? t('tokens.prepOnly') : undefined;
@@ -90,6 +101,27 @@ export function TokenPopover({
             { label: t('tokens.delete'), danger: true, onSelect: onDelete },
           ]}
         />
+      </div>
+      <div className="eg-popover__conditions" role="group" aria-labelledby={`${token.id}-conditions`}>
+        <h3 id={`${token.id}-conditions`} className="eg-popover__label">
+          {t('tokens.conditions')}
+        </h3>
+        <div className="eg-popover__chips">
+          {TOKEN_MARKERS.map((marker) => {
+            const on = token.markers.includes(marker);
+            return (
+              <button
+                key={marker}
+                type="button"
+                className={`eg-chip eg-chip--${marker}`}
+                aria-pressed={on}
+                onClick={() => onToggleMarker(marker)}
+              >
+                {t(MARKER_NAMES[marker])}
+              </button>
+            );
+          })}
+        </div>
       </div>
       {live ? <p className="eg-popover__note">{t('tokens.prepOnlyNote')}</p> : null}
     </section>

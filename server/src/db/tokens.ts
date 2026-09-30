@@ -3,8 +3,10 @@ import type Database from 'better-sqlite3';
 import {
   nextLabel,
   numberingPeers,
+  TOKEN_MARKERS,
   type AssetCategory,
   type SceneToken,
+  type TokenMarker,
   type TokenSize,
   type TokenStack,
 } from '@emberglass/shared';
@@ -12,14 +14,15 @@ import {
 // Tokens of a scene in SQLite (PRP-04, specs/03-domain-model.md §1, §2, §4,
 // specs/05-assets-and-images.md §2–§5, specs/04-live-sync.md §2, D-019, Q-063, Q-091). Every
 // read and write names its columns. A token holds only its own state (position, visibility,
-// label, stacking order); its name, image, size and category are its asset's and are read by joining it.
+// label, stacking order, condition markers); its name, image, size and category are its asset's and are
+// read by joining it. Markers are stored as a JSON array in the order of TOKEN_MARKERS (TBL-02).
 // Positions are decimal grid units and are stored exactly as sent. Every write names the scope it
 // is for, checked inside the transaction that would change the token: preparation (REST) is refused
 // on the live scene, whose tokens change only by the live commands, and a live command is refused
 // on any scene that is not live (LIV-02, specs/04-live-sync.md §2, D-100).
 
 const COLUMNS = `token.id, token.scene_id, token.asset_id, token.label, token.x, token.y, token.hidden,
-  token.z_order, token.character_id, asset.name AS asset_name, asset.image_id AS asset_image_id,
+  token.z_order, token.markers, token.character_id, asset.name AS asset_name, asset.image_id AS asset_image_id,
   asset.size AS asset_size, asset.category AS asset_category`;
 const FROM = 'FROM token JOIN asset ON asset.id = token.asset_id';
 
@@ -32,12 +35,17 @@ interface Row {
   y: number;
   hidden: 0 | 1;
   z_order: number;
+  markers: string;
   character_id: null;
   asset_name: string;
   asset_image_id: string;
   asset_size: TokenSize;
   asset_category: AssetCategory;
 }
+
+/** The markers given, each once, in the order of TOKEN_MARKERS; anything else is dropped. */
+export const markersOf = (markers: readonly unknown[]): TokenMarker[] =>
+  TOKEN_MARKERS.filter((marker) => markers.includes(marker));
 
 const toToken = (row: Row): SceneToken => ({
   id: row.id,
@@ -48,6 +56,7 @@ const toToken = (row: Row): SceneToken => ({
   y: row.y,
   hidden: row.hidden === 1,
   z_order: row.z_order,
+  markers: markersOf(JSON.parse(row.markers) as unknown[]),
   character_id: row.character_id,
   asset: { name: row.asset_name, image_id: row.asset_image_id, size: row.asset_size, category: row.asset_category },
 });
@@ -188,9 +197,9 @@ export type TokenChangeOutcome =
   | { outcome: 'not_live' };
 
 /**
- * Moves, hides or reveals, relabels or restacks a token; in preparation, of a scene that is not
- * live, and by a live command (only a move or a visibility change, specs/04-live-sync.md §2), of the
- * live scene. `stack`
+ * Moves, hides or reveals, relabels, restacks or marks a token; in preparation, of a scene that is
+ * not live, and by a live command (only a move, a visibility change or the markers,
+ * specs/04-live-sync.md §2), of the live scene. `stack`
  * puts it above (`front`) or below (`back`) every other token of the scene, unless it already is.
  * Revealing a token that still carries its asset's bare name numbers it (Q-092), unless the same
  * change gives it a label or players have seen it before (Q-096); hiding one keeps its label.
@@ -198,7 +207,14 @@ export type TokenChangeOutcome =
 export function updateToken(
   db: Database.Database,
   id: string,
-  fields: { x?: number; y?: number; hidden?: boolean; label?: string; stack?: TokenStack },
+  fields: {
+    x?: number;
+    y?: number;
+    hidden?: boolean;
+    label?: string;
+    stack?: TokenStack;
+    markers?: readonly TokenMarker[];
+  },
   scope: TokenScope = 'prep',
 ): TokenChangeOutcome {
   return db.transaction((): TokenChangeOutcome => {
@@ -218,12 +234,13 @@ export function updateToken(
         z = fields.stack === 'front' ? others + 1 : others - 1;
       }
     }
-    db.prepare('UPDATE token SET x = ?, y = ?, hidden = ?, label = ?, z_order = ? WHERE id = ?').run(
+    db.prepare('UPDATE token SET x = ?, y = ?, hidden = ?, label = ?, z_order = ?, markers = ? WHERE id = ?').run(
       fields.x ?? before.x,
       fields.y ?? before.y,
       (fields.hidden ?? before.hidden) ? 1 : 0,
       fields.label ?? before.label,
       z,
+      JSON.stringify(markersOf(fields.markers ?? before.markers)),
       id,
     );
     const revealed = before.hidden && fields.hidden === false;
@@ -273,7 +290,7 @@ export type TokenRestoreOutcome =
 
 /**
  * Puts a deleted token back exactly as it was: its id, label, position, visibility, stacking
- * order and whether players had seen it (`shown`, Q-096; by default, whether it was visible) (LIV-05, undo of `token.delete`, specs/04-live-sync.md §8, D-117). No number is issued, and
+ * order, markers and whether players had seen it (`shown`, Q-096; by default, whether it was visible) (LIV-05, undo of `token.delete`, specs/04-live-sync.md §8, D-117). No number is issued, and
  * none is taken back: its label is the one it had, or the asset's current name if it carried the
  * asset's bare name and the asset was renamed since. Refused when its scene is gone or not in `scope`,
  * or its asset was deleted meanwhile. Each deletion's inverse is taken once, so its id is free; were
@@ -298,8 +315,8 @@ export function restoreToken(
     // numbering would then take for a label the DM typed (Q-094, LIV-05 review C2).
     const label = token.label === token.asset.name ? name : token.label;
     db.prepare(
-      `INSERT INTO token (id, scene_id, asset_id, label, x, y, hidden, z_order, character_id, shown)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO token (id, scene_id, asset_id, label, x, y, hidden, z_order, markers, character_id, shown)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       token.id,
       token.scene_id,
@@ -309,6 +326,7 @@ export function restoreToken(
       token.y,
       token.hidden ? 1 : 0,
       token.z_order,
+      JSON.stringify(markersOf(token.markers)),
       token.character_id,
       shown ? 1 : 0,
     );

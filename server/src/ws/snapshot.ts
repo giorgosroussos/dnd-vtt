@@ -106,6 +106,7 @@ export function toPlayerToken(token: SceneToken, rank: number): PlayerToken {
     z_order: rank,
     label: token.label,
     category: token.asset.category,
+    markers: [...token.markers],
   };
 }
 

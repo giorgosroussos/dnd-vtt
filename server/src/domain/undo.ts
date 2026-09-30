@@ -3,13 +3,14 @@ import type {
   SceneToken,
   TokenDeletePayload,
   TokenMovePayload,
+  TokenSetMarkersPayload,
   TokenSetVisibilityPayload,
 } from '@emberglass/shared';
 import type { LiveEffect } from './live.js';
 
 // The DM's undo history (LIV-05; specs/04-live-sync.md §8, Q-005, Q-050, D-040, D-117). The server
 // keeps, in memory only, the inverse of every undoable command applied to the live scene: `token.add`,
-// `token.move`, `token.setVisibility` and `token.delete`. Setup edits over REST are not commands and
+// `token.move`, `token.setVisibility`, `token.setMarkers` (TBL-02) and `token.delete`. Setup edits over REST are not commands and
 // never enter it (Q-050). It belongs to one live scene and is emptied whenever the live scene changes
 // (another scene activated, Blank TV, the live scene deleted), holds the last 100 inverses, and dies
 // with the process. One history serves every DM browser: undo takes back the most recent command on
@@ -30,6 +31,7 @@ import type { LiveEffect } from './live.js';
 export type Inverse =
   | { type: 'token.move'; payload: TokenMovePayload }
   | { type: 'token.setVisibility'; payload: TokenSetVisibilityPayload }
+  | { type: 'token.setMarkers'; payload: TokenSetMarkersPayload }
   | { type: 'token.delete'; payload: TokenDeletePayload }
   | { type: 'token.add'; restore: SceneToken; shown: boolean };
 
@@ -58,6 +60,11 @@ export function inverseOf(command: CommandEnvelope, effects: readonly LiveEffect
     case 'token.setVisibility':
       return effect.type === 'token.updated'
         ? { type: 'token.setVisibility', payload: { token_id: effect.token.id, hidden: effect.before.hidden } }
+        : undefined;
+    case 'token.setMarkers':
+      // The markers it carried before: a set that changed nothing never gets here, as it has no effect.
+      return effect.type === 'token.updated'
+        ? { type: 'token.setMarkers', payload: { token_id: effect.token.id, markers: [...effect.before.markers] } }
         : undefined;
     case 'token.delete':
       return effect.type === 'token.removed'

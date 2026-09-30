@@ -17,6 +17,9 @@ export const IMAGE_MIME_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as con
 export const ASSET_CATEGORIES = ['pc', 'npc', 'monster', 'object'] as const;
 export const TOKEN_SIZES = ['tiny', 'small', 'medium', 'large', 'huge', 'gargantuan'] as const;
 export const RULER_RULES = ['phb', 'dmg'] as const;
+// The condition markers a token may carry (TBL-02, specs/03-domain-model.md §1, Q-099), in the order
+// they are stored and drawn.
+export const TOKEN_MARKERS = ['bloodied', 'unconscious', 'dead', 'concentrating'] as const;
 // Prepared for later phases: one value each in the MVP (specs/03-domain-model.md §8).
 export const GRID_TYPES = ['square'] as const;
 export const RULES_VERSION = '5e-2014';
@@ -142,6 +145,8 @@ export const TokenSchema = Type.Object(
     y: Type.Number(),
     hidden: Type.Boolean(),
     z_order: Type.Integer(),
+    // Each marker at most once, in the order of TOKEN_MARKERS (TBL-02).
+    markers: Type.Array(Type.Enum(TOKEN_MARKERS), { uniqueItems: true, maxItems: TOKEN_MARKERS.length }),
     // Always empty in the MVP; Phase 2 links characters through it.
     character_id: Type.Null(),
   },
@@ -174,5 +179,6 @@ export type Token = Static<typeof TokenSchema>;
 export type Settings = Static<typeof SettingsSchema>;
 export type AssetCategory = (typeof ASSET_CATEGORIES)[number];
 export type TokenSize = (typeof TOKEN_SIZES)[number];
+export type TokenMarker = (typeof TOKEN_MARKERS)[number];
 export type RulerRule = (typeof RULER_RULES)[number];
 export type ImageMime = (typeof IMAGE_MIME_TYPES)[number];

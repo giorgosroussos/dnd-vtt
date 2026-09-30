@@ -14,6 +14,7 @@ const token = (id: string, z_order: number, fields: Partial<SceneToken> = {}): S
   y: 0,
   hidden: false,
   z_order,
+  markers: [],
   character_id: null,
   asset: { name: 'Goblin', image_id: 'f'.repeat(64), size: 'medium', category: 'monster' },
   ...fields,

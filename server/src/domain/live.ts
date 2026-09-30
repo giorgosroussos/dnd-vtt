@@ -12,6 +12,7 @@ import {
   type TokenAddPayload,
   type TokenDeletePayload,
   type TokenMovePayload,
+  type TokenSetMarkersPayload,
   type TokenSetVisibilityPayload,
 } from '@emberglass/shared';
 import { readSettings, setLiveScene } from '../db/settings.js';
@@ -53,6 +54,9 @@ export type LiveEffect =
 
 export type LiveResult = LiveEffect[] | ErrorEnvelope;
 
+const sameMarkers = (a: readonly string[], b: readonly string[]) =>
+  a.length === b.length && a.every((marker, index) => marker === b[index]);
+
 const tokenNotFound = (): ErrorEnvelope => errorEnvelope('not_found', 'No such token.');
 const notLive = (): ErrorEnvelope => errorEnvelope('scene_not_live', 'The scene is not live.');
 
@@ -79,6 +83,13 @@ export function applyLiveCommand(db: Database.Database, command: CommandEnvelope
       const result = updateToken(db, token_id, { hidden }, 'live');
       // Hiding a hidden token or revealing a visible one changes nothing, so nobody is told.
       if (result.outcome === 'updated' && result.before.hidden === hidden) return [];
+      return changed(result);
+    }
+    case 'token.setMarkers': {
+      // TBL-02: the whole set after the change; the same set as before changes nothing, so nobody is told.
+      const { token_id, markers } = command.payload as TokenSetMarkersPayload;
+      const result = updateToken(db, token_id, { markers }, 'live');
+      if (result.outcome === 'updated' && sameMarkers(result.before.markers, result.token.markers)) return [];
       return changed(result);
     }
     case 'token.delete': {

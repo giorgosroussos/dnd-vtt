@@ -60,6 +60,7 @@ class Server {
       z_order: rank,
       label: token.label,
       category: 'monster',
+      markers: [],
     };
   }
   snapshot(): PlayerSnapshot {
@@ -173,11 +174,26 @@ describe('the players’ events applied to the drawn state', () => {
       'id',
       'image_id',
       'label',
+      'markers',
       'size',
       'x',
       'y',
       'z_order',
     ]);
+  });
+
+  it('keeps a token’s markers from each event, a copy of them, and draws none when an event carries none (TBL-02)', () => {
+    const server = new Server([]);
+    const scene = fromSnapshot(server.snapshot());
+    server.stack.push({ id: id(1), label: 'Goblin', x: 0, y: 0, hidden: false });
+    const sent = { ...server.player(server.find(1)), markers: ['bloodied' as const] };
+    let next = applyPlayerEvent(scene, server.event('token.added', { token: sent, relabelled: [] }));
+    expect(next!.tokens[0]!.markers).toEqual(['bloodied']);
+    expect(next!.tokens[0]!.markers).not.toBe(sent.markers);
+    const without: Partial<typeof sent> = { ...sent };
+    delete without.markers;
+    next = applyPlayerEvent(next, server.event('token.updated', { token: without }));
+    expect(next!.tokens[0]!.markers).toEqual([]);
   });
 
   it('orders a snapshot by stacking order whatever order its tokens arrived in', () => {

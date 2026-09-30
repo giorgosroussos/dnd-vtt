@@ -1157,6 +1157,7 @@ export function MapCanvas({
             id: token.id,
             label: token.label,
             ...(dm ? { hidden: token.hidden } : {}),
+            markers: token.markers ?? [],
             x: token.x,
             y: token.y,
             left: camera.x + at.x * camera.scale,

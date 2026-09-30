@@ -22,6 +22,7 @@ const token = (fields: Partial<SceneToken> = {}): SceneToken => ({
   y: 3,
   hidden: true,
   z_order: 4,
+  markers: [],
   character_id: null,
   asset: { name: 'Lurker', image_id: 'a'.repeat(64), size: 'medium', category: 'monster' },
   ...fields,

@@ -72,6 +72,7 @@ export {
   TokenMovePayloadSchema,
   TokenRemovedPayloadSchema,
   TokenSetVisibilityPayloadSchema,
+  TokenSetMarkersPayloadSchema,
   type DmEvent,
   type DmTokenEventPayload,
   type PlayerEvent,
@@ -89,6 +90,7 @@ export {
   type TokenMovePayload,
   type TokenRemovedPayload,
   type TokenSetVisibilityPayload,
+  type TokenSetMarkersPayload,
   MeasurementSchema,
   RulerClearPayloadSchema,
   RulerClearedPayloadSchema,
@@ -127,6 +129,7 @@ export {
   SessionSchema,
   SettingsSchema,
   Sha256Schema,
+  TOKEN_MARKERS,
   TOKEN_SIZES,
   TokenSchema,
   UuidSchema,
@@ -144,6 +147,7 @@ export {
   type Session,
   type Settings,
   type Token,
+  type TokenMarker,
   type TokenSize,
 } from './entities.js';
 export {

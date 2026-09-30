@@ -8,6 +8,7 @@ import {
   SettingsUpdateSchema,
   rulerFeet,
   TokenCreateBodySchema,
+  TOKEN_MARKERS,
   TokenUpdateBodySchema,
   type CommandAck,
   type CommandEnvelope,
@@ -212,6 +213,7 @@ export class FakeServer {
       y: 0,
       hidden: asset.default_hidden,
       z_order: top + 1,
+      markers: [],
       character_id: null,
       asset: { name: asset.name, image_id: asset.image_id, size: asset.size, category: asset.category },
       ...fields,
@@ -276,6 +278,8 @@ export class FakeServer {
     const revealed =
       token.hidden && fields.hidden === false && fields.label === undefined && token.label === token.asset.name;
     Object.assign(token, fields, typeof fields.label === 'string' ? { label: fields.label.trim() } : {});
+    // Stored in the fixed order, as the server stores them (TBL-02).
+    if (fields.markers) token.markers = TOKEN_MARKERS.filter((marker) => fields.markers!.includes(marker));
     const renamed = revealed ? this.numberAs(token) : undefined;
     if (stack) {
       const others = this.tokensOf(token.scene_id)
@@ -489,9 +493,11 @@ export class FakeServer {
             ? { type: 'token.move' as const, payload: { token_id: was.id, x: was.x, y: was.y } }
             : envelope.type === 'token.setVisibility' && was
               ? { type: 'token.setVisibility' as const, payload: { token_id: was.id, hidden: was.hidden } }
-              : envelope.type === 'token.delete' && was
-                ? { type: 'restore' as const, token: was }
-                : undefined;
+              : envelope.type === 'token.setMarkers' && was
+                ? { type: 'token.setMarkers' as const, payload: { token_id: was.id, markers: [...was.markers] } }
+                : envelope.type === 'token.delete' && was
+                  ? { type: 'restore' as const, token: was }
+                  : undefined;
       if (inverse && live !== null) {
         if (this.undoScene !== live) this.undoHistory = [];
         this.undoScene = live;
@@ -516,6 +522,9 @@ export class FakeServer {
       return { type: 'token.move', payload: { token_id: token.id, x: token.x, y: token.y } };
     if (inverse.type === 'token.setVisibility') {
       return { type: 'token.setVisibility', payload: { token_id: token.id, hidden: token.hidden } };
+    }
+    if (inverse.type === 'token.setMarkers') {
+      return { type: 'token.setMarkers', payload: { token_id: token.id, markers: [...token.markers] } };
     }
     return undefined;
   }
@@ -627,6 +636,16 @@ export class FakeServer {
           token: this.withAsset(token),
           relabelled: renamed ? [this.withAsset(renamed)] : [],
         });
+        return { ok: true };
+      }
+      case 'token.setMarkers': {
+        const token = liveToken();
+        if (token === undefined) return refuse('not_found');
+        if (token === 'not_live') return refuse('scene_not_live');
+        const markers = TOKEN_MARKERS.filter((marker) => (p.markers as string[]).includes(marker));
+        if (JSON.stringify(markers) === JSON.stringify(token.markers)) return { ok: true };
+        token.markers = markers;
+        this.deliver('token.updated', { token: this.withAsset(token), relabelled: [] });
         return { ok: true };
       }
       case 'token.delete': {

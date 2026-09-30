@@ -1011,6 +1011,76 @@
   color: var(--color-text-caption);
 }
 
+/* The condition chips (TBL-02): a toggle each, pressed shown by a mark and a filled chip, not colour alone. */
+.eg-popover__conditions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-divider);
+}
+
+.eg-popover__label {
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-caption);
+}
+
+.eg-popover__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.eg-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 2px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.eg-chip:hover {
+  background: var(--color-hover);
+  color: var(--color-text);
+}
+
+.eg-chip:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.eg-chip[aria-pressed='true'] {
+  border-color: var(--color-text-muted);
+  background: var(--color-selected);
+  color: var(--color-text);
+  font-weight: 700;
+}
+
+.eg-chip[aria-pressed='true']::before {
+  /* A mark for the eye only: the empty alternative keeps it out of the chip's name, which aria-pressed says. */
+  content: '✓' / '';
+}
+
+.eg-chip--bloodied[aria-pressed='true'] {
+  border-color: var(--color-bloodied);
+  color: var(--color-bloodied-text);
+}
+
+.eg-chip--concentrating[aria-pressed='true'] {
+  border-color: var(--color-concentrating);
+  border-style: dotted;
+}
+
 /* The confirmation of a deletion and the other dialogs: native modal dialogs. */
 .eg-dialog {
   max-width: 32rem;

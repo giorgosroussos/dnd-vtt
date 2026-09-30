@@ -18,6 +18,7 @@ Commands flow from a DM socket to the server; the server MUST reject any command
 | `token.move` | set a token's position | yes |
 | `token.delete` | remove a token from the live scene | yes |
 | `token.setVisibility` | hide or reveal a token | yes |
+| `token.setMarkers` | set the condition markers a token carries (`03` §1) | yes |
 | `scene.activate` | make a scene the live scene | no |
 | `scene.deactivate` | clear the live scene; the player view goes idle | no |
 | `camera.setPlayer` | set the player camera | no |
@@ -26,7 +27,7 @@ Commands flow from a DM socket to the server; the server MUST reject any command
 | `undo` | apply the most recent inverse command | — |
 | `redo` | apply again the most recently undone command | — |
 
-- The token commands on the live scene MUST be exactly `token.add`, `token.move`, `token.setVisibility` and `token.delete`; label and stacking order are edited only on scenes that are not live. [input, Q-014]
+- The token commands on the live scene MUST be exactly `token.add`, `token.move`, `token.setVisibility`, `token.setMarkers` and `token.delete`; label and stacking order are edited only on scenes that are not live. [input, Q-014, Q-099]
 - Clearing the live scene MUST be possible at any time with `scene.deactivate`. [Q-025]
 - Conflicting commands MUST resolve last-write-wins. [input]
 - Several DM sockets MAY be connected at once, each receiving every `dm` event. [Q-008, recommendation accepted]
@@ -39,7 +40,7 @@ Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-02
 | --- | --- | --- |
 | `scene.snapshot` | full scene, all tokens | visible tokens only, player fields only |
 | `token.added` | on add | on add of a visible token, and on reveal |
-| `token.updated` | on move, visibility change | on move of a visible token |
+| `token.updated` | on move, visibility or markers change | on move or markers change of a visible token |
 | `token.removed` | on delete | on delete of a visible token, and on hide |
 | `scene.cleared` | on deactivate | on deactivate |
 | `camera.player` | on change | on change |
@@ -53,7 +54,7 @@ Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-02
 - Filtering MUST happen on the server before emitting, never in the player client. [input]
 - Revealing a token MUST reach players as `token.added`, and hiding it as `token.removed`. [input]
 - A player client MUST NOT receive anything from which the existence of a hidden token can be learnt: no hidden token, no hidden token's ID, asset or image, no count. [input]
-- A player-room token MUST carry only what rendering needs: ID, position, size, image reference, stacking order, label and its asset's category, which colours its ring; asset notes and defaults are never sent. [Q-047, Q-032, Q-100]
+- A player-room token MUST carry only what rendering needs: ID, position, size, image reference, stacking order, label, its asset's category, which colours its ring, and its condition markers; asset notes and defaults are never sent, and a hidden token's markers never reach players. [Q-047, Q-032, Q-100, Q-099]
 - The players' snapshot MUST carry the live scene's name, shown on the TV (`08` §11); the undo state MUST NOT reach players, nor the count of connected player views, which the DM view reads over REST (`02` §5). [input, Q-100]
 - The grid overlay MUST NOT be drawn on the player view when the scene's grid is set hidden for players (`06` §2). [input]
 
@@ -76,7 +77,7 @@ Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-02
 
 ## 8. Undo
 
-- The server MUST keep the inverse of every undoable DM command on the live scene: move, add, delete, visibility. [input]
+- The server MUST keep the inverse of every undoable DM command on the live scene: move, add, delete, visibility, markers. [input, Q-099]
 - Ctrl+Z in the DM view MUST cause the most recent inverse command to be applied as an ordinary command, so synchronisation does not change. [input]
 - Ctrl+Z sends `undo`; the server applies the inverse from its history through the ordinary command path. [D-040]
 - The undo history MUST be held in memory only, cleared when another scene is activated or the server restarts, and bounded to the last 100 commands. [Q-005]

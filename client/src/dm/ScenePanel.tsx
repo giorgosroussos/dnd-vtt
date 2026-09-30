@@ -13,6 +13,7 @@ import {
   type Scene,
   type SceneGridUpdate,
   type SceneToken,
+  type TokenMarker,
   type TokenUpdateBody,
 } from '@emberglass/shared';
 import { formatDecimal, formatNumber } from '../canvas/calibration.js';
@@ -49,7 +50,7 @@ import { entityPath } from './tree/paths.js';
 import { DeleteTokenDialog, RenameDialog } from './tokens/TokenBar.js';
 import { TokenList } from './tokens/TokenList.js';
 import { TokenPicker } from './tokens/TokenPicker.js';
-import { TokenPopover } from './tokens/TokenPopover.js';
+import { MARKER_NAMES, TokenPopover } from './tokens/TokenPopover.js';
 import { toCanvasToken, useSceneTokens } from './tokens/useSceneTokens.js';
 
 // The selected scene in the centre of the workspace (PRP-02, specs/08-ux-journeys.md §1, §3,
@@ -270,9 +271,12 @@ export function ScenePanel({
   const opener = useRef<HTMLElement | null>(null);
   const panelRef = useRef<HTMLElement>(null);
   const sceneTokens = useSceneTokens(sceneId, isLive);
-  // Moves and visibility changes sent in live mode, shown until the server has answered (LIV-04).
+  // Moves, visibility and marker changes sent in live mode, shown until the server has answered (LIV-04).
   const [pending, setPending] = useState<
-    Record<string, { seq: number; fields: { x?: number; y?: number; hidden?: boolean } }>
+    Record<
+      string,
+      { seq: number; fields: { x?: number; y?: number; hidden?: boolean; markers?: SceneToken['markers'] } }
+    >
   >({});
   const pendingSeq = useRef(0);
   const [liveFailure, setLiveFailure] = useState<string>();
@@ -587,17 +591,19 @@ export function ScenePanel({
     if (result.ok) announce(done(result.token));
   }
 
-  // A live move or visibility change shows at once and is dropped when answered: by then its events
-  // have brought the live scene in step (D-111), or the refusal leaves the token where it was.
+  // A live move, visibility or marker change shows at once and is dropped when answered: by then its
+  // events have brought the live scene in step (D-111), or the refusal leaves the token as it was.
   async function changeLive(token: SceneToken, body: TokenUpdateBody, done: (updated: SceneToken) => string) {
     const seq = ++pendingSeq.current;
-    const { x, y, hidden } = body;
+    const { x, y, hidden, markers } = body;
     const moving = x !== undefined && y !== undefined;
-    const shown = moving ? { x, y } : hidden !== undefined ? { hidden } : {};
+    const shown = moving ? { x, y } : markers !== undefined ? { markers } : hidden !== undefined ? { hidden } : {};
     setPending((current) => ({ ...current, [token.id]: { seq, fields: { ...current[token.id]?.fields, ...shown } } }));
     const ok = moving
       ? await command('token.move', { token_id: token.id, x, y })
-      : await command('token.setVisibility', { token_id: token.id, hidden });
+      : markers !== undefined
+        ? await command('token.setMarkers', { token_id: token.id, markers })
+        : await command('token.setVisibility', { token_id: token.id, hidden });
     setPending((current) =>
       current[token.id]?.seq === seq
         ? Object.fromEntries(Object.entries(current).filter(([id]) => id !== token.id))
@@ -915,6 +921,16 @@ export function ScenePanel({
     ).then(() => onTokensChanged?.());
   }
 
+  // A condition marker on or off (TBL-02): the whole set is sent, in live mode as `token.setMarkers`.
+  function toggleMarker(token: SceneToken, marker: TokenMarker) {
+    const on = !token.markers.includes(marker);
+    const markers = on ? [...token.markers, marker] : token.markers.filter((each) => each !== marker);
+    const name = t(MARKER_NAMES[marker]);
+    void changeToken(token, { markers }, (updated) =>
+      t(on ? 'tokens.markerOn' : 'tokens.markerOff', { label: updated.label, marker: name }),
+    );
+  }
+
   // Reveal all hidden monsters: one change each, in turn (UIX-01); on the live scene each is its own
   // `token.setVisibility`, undone one at a time.
   async function revealAll(hidden: SceneToken[]) {
@@ -972,6 +988,7 @@ export function ScenePanel({
                 )
               }
               onDelete={() => openDialog(() => setDeleting(selected))}
+              onToggleMarker={(marker) => toggleMarker(selected, marker)}
             />
           ) : null
       : undefined;

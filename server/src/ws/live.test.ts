@@ -344,6 +344,7 @@ describe('snapshots for each role (specs/04-live-sync.md §3, §4, §5)', () => 
         z_order: 0,
         label: 'Goblin 1',
         category: live.goblin.category,
+        markers: [],
       },
       {
         id: live.visible[1]!.id,
@@ -354,6 +355,7 @@ describe('snapshots for each role (specs/04-live-sync.md §3, §4, §5)', () => 
         z_order: 1,
         label: 'Goblin 2',
         category: live.goblin.category,
+        markers: [],
       },
     ]);
     for (const token of tokens)

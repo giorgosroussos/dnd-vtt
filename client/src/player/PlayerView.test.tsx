@@ -50,6 +50,7 @@ const token = (n: number, label: string, z_order: number, x = n): PlayerToken =>
   z_order,
   label,
   category: 'monster',
+  markers: [],
 });
 
 const snapshot = (tokens: PlayerToken[], grid: Grid = GRID): PlayerSnapshot => ({
