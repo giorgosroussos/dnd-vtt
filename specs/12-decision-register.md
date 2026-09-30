@@ -70,7 +70,8 @@ Each bullet below is an owner decision: stated in the requirements (`[input]`) o
 - Campaign export/import is Phase 2 (`01` §4). [Q-013, recommendation accepted]
 - Live token commands are add, move, visibility and delete (`04` §2). [input, Q-014, recommendation accepted]
 - The live scene's setup can be edited while live and is pushed as a snapshot (`04` §10). [Q-015, recommendation accepted]
-- No area-of-effect templates or ping in the MVP (`01` §6). [Q-016, recommendation accepted]
+- No area-of-effect templates (`01` §6). [Q-099, recommendation accepted]
+- Ping, four condition markers and manual fog regions are built after the MVP's features, before the release (`01` §9). [Q-099, recommendation accepted]
 - Installed from source with Node; nothing published to a registry (`09` §1). [Q-017, recommendation accepted]
 - Windows and Linux verified; macOS best-effort (`09` §3). [Q-018, recommendation accepted]
 - Player view accepted on evergreen browsers and the owner's LG TV built-in browser (`10` §4). [Q-019, recommendation accepted]
@@ -104,10 +105,10 @@ Each bullet below is an owner decision: stated in the requirements (`[input]`) o
 
 ## 5. Product identity and UX
 
-- One DM workspace: scene tree left, canvas centre, library right, live bar on top (`08` §1). [Q-023]
+- One DM workspace: a header naming what the TV shows, the session's scenes left, canvas centre, tokens and library right, the tree behind the session switcher (`08` §1). [Q-023, Q-100]
 - One canvas with an unmistakable live mode and a prep mode that never reaches the TV (`08` §2). [Q-024]
 - Independent DM and player cameras; the DM steers the player camera through a frame (`04` §9). [input]
-- The player view shows a dark idle screen with the product name when nothing is live (`08` §4). [Q-025]
+- The player view shows a dark idle screen with the product name and a waiting line when nothing is live (`08` §4). [Q-025, Q-100]
 - The QR code and short URL open the player view, in the console and a "Connect a screen" panel; never the DM view (`08` §5). [Q-026]
 - Ruler measurements on the live scene are shown on the TV (`04` §11). [Q-027]
 - English UI with a single message catalogue (`08` §6). [Q-028]

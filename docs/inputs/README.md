@@ -6,6 +6,8 @@ Raw material the specification pack was written from, received 2026-09-23. Files
 | --- | --- | --- | --- |
 | `requirements/D&D VTT — MVP Spec.pdf` | 2026-09-23 | requirements | authoritative |
 | `transcripts/2026-09-23-owner-statements.md` | 2026-09-23 | transcripts | authoritative |
+| `requirements/2026-09-30-ui-redesign-brief.md` | 2026-09-30 | requirements | authoritative |
+| `Design.html` | 2026-09-30 | mockup | non-authoritative |
 
 ## What each authority level means
 
@@ -15,7 +17,16 @@ Raw material the specification pack was written from, received 2026-09-23. Files
 
 ## Non-authoritative inputs and their conflicts
 
-No non-authoritative input was received.
+`Design.html` (2026-09-30) is a self-contained bundle of three boards: the live DM view at 1440 × 900, and the player view live and idle at 1920 × 1080. It gives the look: palette, typography, layout, token and frame visuals. Behaviour comes from the specifications and from the brief that came with it; the bundle is never cited as the provenance of a normative statement. Where the boards and the specifications differ on behaviour, the specifications win and the difference is recorded in `DECISIONS.md` as a deviation from the design (D-139 and the UIX-01 and TBL-01 to TBL-03 decisions after it). Examples: the boards show "Diagonals 5/10", while the default stays the PHB rule (`06` §5); the boards draw no persistent live indicator around the canvas, which `08` §2 keeps.
+
+## The 2026-09-30 brief
+
+The brief is an owner statement and restates the redesign's requirements. It conflicts with the specification pack in two places, each raised as a card and answered by the owner on 2026-09-30:
+
+- its Part B (ping, condition markers, manual fog of war) was Future or nice-to-have: ping under Q-016, fog and conditions under Phase 2 (`01` §4, §6). This is Q-099, answered: build all three after the MVP's features and before REL-03 (`01` §9).
+- its DM view layout, "Go idle" and the idle screen's line differ from `08` §1, §2 and §4. This is Q-100, answered: the brief wins.
+
+The brief cites a spec section "Μετά το MVP: ping, δείκτες, fog of war" that is not in the pack. Its summary of the three features is what was specified: the work packages of `13` §10 carry it into the domain, live-sync and security specifications as each is built.
 
 The single input is written in Greek. It states product intent, scope and roadmap, and it also fixes the stack (Node single process, React with react-konva or PixiJS, Socket.io, SQLite, sharp), the deployment model (local server on the DM's PC, LAN-only clients) and the budget posture (free, self-hosted); statements restating any of these are `[input]`. Where the input offers an alternative ("react-konva or PixiJS"), the choice is left open and is recorded as a decision.
 

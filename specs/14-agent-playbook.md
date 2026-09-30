@@ -34,7 +34,7 @@ The agent MUST: [D-005]
 The agent MUST NOT: [D-005]
 
 - change product scope or locked decisions;
-- introduce player devices, character sheets, rules automation, remote play, map creation, fog of war or any other excluded capability;
+- introduce player devices, character sheets, rules automation, remote play, map creation, automatic fog or lighting, or any other excluded capability;
 - trust a client-supplied role or visibility claim;
 - weaken a test merely to make CI pass;
 - edit unrelated user code or reformat the repository broadly;

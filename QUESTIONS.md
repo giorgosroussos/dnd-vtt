@@ -38,7 +38,7 @@ Every card opens `Blocking` and is answered before the specification proceeds. `
 - Q-013 — Campaign export/import: MVP or Phase 2 — scope — Resolved
 - Q-014 — Token operations available on the live scene — scope — Resolved
 - Q-015 — Editing the live scene's setup while it is live — scope — Resolved
-- Q-016 — Table tools beyond the ruler — scope — Resolved
+- Q-016 — Table tools beyond the ruler — scope — Resolved — superseded by Q-099
 - Q-017 — How a DM installs and starts the MVP — scope — Resolved
 - Q-018 — Operating systems the server supports — scope — Resolved
 - Q-019 — Browsers the player view is accepted on — scope — Resolved
@@ -121,6 +121,8 @@ Every card opens `Blocking` and is answered before the specification proceeds. `
 - Q-096 — A lone token hidden and revealed again comes back numbered — ux — Resolved
 - Q-097 — PIN guessing from many LAN addresses — security — Resolved
 - Q-098 — PIN guessing kept just under the server-wide budget — security — Resolved
+- Q-099 — Ping, condition markers and manual fog after the MVP — scope — Resolved
+- Q-100 — The redesigned DM view and idle screen against 08 — ux — Resolved
 
 ## Blocking
 
@@ -317,6 +319,7 @@ None.
 - Recommendation: A, because the input lists the MVP explicitly and adding tools the owner did not name is scope growth.
 - Blocks: specification
 - Answer: A (2026-09-23; recommendation accepted)
+- Superseded by: Q-099
 
 ### Q-017 — How a DM installs and starts the MVP
 - Surface: scope
@@ -1242,3 +1245,26 @@ None.
 - Recommendation: A, because it closes the steady trickle with the same mechanism, loopback exemption and logging as Q-097's pause, is one sentence in the README, and costs a DM at a home table nothing.
 - Blocks: specification
 - Answer: A (2026-09-29; recommendation accepted)
+
+### Q-099 — Ping, condition markers and manual fog after the MVP
+- Surface: scope
+- Source: `requirements/2026-09-30-ui-redesign-brief.md` Part B, «Post-MVP features shown in the design»: ping, four condition markers (Bloodied, Unconscious, Dead, Concentrating) and manual fog regions. The pack has ping as a nice-to-have that MUST NOT be built in the MVP (`01` §6, Q-016) and fog of war and «HP and conditions on tokens» as Phase 2 (`01` §4, [input]); AGENTS.md lists fog and ping among the red lines. The MVP's work packages are done but REL-03, the owner's TV run.
+- Question: Are ping, four condition markers and manual fog regions built now, after the MVP's features and before REL-03, and do area-of-effect templates stay out?
+- Options:
+  - A) Build all three now, before REL-03, as the brief describes; area-of-effect templates stay a nice-to-have → effect on scope: a ninth entity (Region), a `markers` field on Token, new live commands and events, and a changed player-visibility rule; the TV acceptance run then checks them.
+  - B) Only the re-skin now; the three features wait until after the release → effect on scope: the pack stays as it is and the brief's Part B becomes a later card.
+  - C) Ping only, which stores nothing → effect on scope: one transient command and event; fog and conditions stay Phase 2.
+- Recommendation: A, because the owner asked for all three and the REL-03 run should check what ships.
+- Blocks: specification
+- Answer: A (2026-09-30; recommendation accepted)
+
+### Q-100 — The redesigned DM view and idle screen against 08
+- Surface: ux
+- Source: `requirements/2026-09-30-ui-redesign-brief.md` Part A and `Design.html`: a header with the campaign / session breadcrumb and a LIVE pill with Go idle; a left sidebar listing the current session's scenes; a tabbed right panel; the idle line «The table is set. Waiting for the Dungeon Master.». `08` §1 [Q-023] puts the Campaign → Session → Scene tree in the left sidebar and a live bar on top; §2 [Q-024, Q-025] names the action Blank TV; §4 [Q-025] shows the product name only when nothing is live.
+- Question: Where the 2026-09-30 brief's DM view layout, Go idle and idle screen differ from `08` §1, §2 and §4, which wins?
+- Options:
+  - A) The brief: the session's scenes in the left sidebar, the tree behind the breadcrumb's session switcher, the LIVE pill in the header, Go idle, and the idle screen's line → effect on ux: `08` §1, §2 and §4 are re-worded; every flow keeps a place (campaign and session management in the switcher).
+  - B) `08` as it stands: the tree stays in the sidebar, a live bar on top, Blank TV, the name alone → effect on ux: the re-skin keeps the old layout in the new palette and departs from the boards.
+- Recommendation: A, because the brief is the owner's latest statement and its layout keeps every flow reachable.
+- Blocks: specification
+- Answer: A (2026-09-30; recommendation accepted)
