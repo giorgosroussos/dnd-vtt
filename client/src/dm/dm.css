@@ -1137,6 +1137,154 @@
   border-style: dotted;
 }
 
+/* A condition's icon in its chip and in the More… list (TBL-05): its own shape, never colour alone. */
+.eg-condition-icon {
+  flex-shrink: 0;
+}
+
+/* Exhaustion's level beside its chip, 1 to 6 (TBL-05). */
+.eg-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.eg-stepper__step {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.eg-stepper__step:hover {
+  background: var(--color-hover);
+  color: var(--color-text);
+}
+
+.eg-stepper__step:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.eg-stepper__step[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.eg-stepper__value {
+  min-width: 1.2em;
+  font-weight: 700;
+  text-align: center;
+}
+
+/* More…: the other conditions, searched, in a list below the chips (TBL-05). */
+.eg-more-conditions {
+  position: relative;
+  display: inline-flex;
+}
+
+.eg-chip--more {
+  border-style: dashed;
+}
+
+.eg-more-conditions__box {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 4px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 200px;
+  padding: 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-raised);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 55%);
+}
+
+.eg-more-conditions__search {
+  min-height: 28px;
+  padding: 2px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-canvas, transparent);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--font-size-sm);
+}
+
+.eg-more-conditions__search:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 1px;
+}
+
+.eg-more-conditions__list {
+  display: flex;
+  flex-direction: column;
+  max-height: 220px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.eg-more-conditions__option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.eg-more-conditions__option:hover,
+.eg-more-conditions__option[data-active] {
+  background: var(--color-hover);
+  color: var(--color-text);
+}
+
+.eg-more-conditions__option[aria-selected='true'] {
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.eg-more-conditions__option[aria-selected='true']::after {
+  /* A mark for the eye only, as on a pressed chip. */
+  content: '✓' / '';
+  margin-left: auto;
+}
+
+.eg-more-conditions__empty {
+  padding: 4px 8px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-caption);
+}
+
+/* About & credits (TBL-05). */
+.eg-about p {
+  margin: 0 0 var(--space-3);
+  line-height: 1.5;
+}
+
+.eg-about__heading {
+  margin: var(--space-3) 0 var(--space-2);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-caption);
+}
+
 /* The confirmation of a deletion and the other dialogs: native modal dialogs. */
 .eg-dialog {
   max-width: 32rem;

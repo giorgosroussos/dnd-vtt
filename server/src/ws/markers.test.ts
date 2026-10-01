@@ -1,10 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { DmSnapshot, ErrorEnvelope, PlayerSnapshot, Scene, SceneToken } from '@emberglass/shared';
+import {
+  CONDITION_IDS,
+  type DmSnapshot,
+  type ErrorEnvelope,
+  type PlayerSnapshot,
+  type Scene,
+  type SceneToken,
+  type TokenMarker,
+} from '@emberglass/shared';
 import { startLive, type Client, type LiveHarness } from './testing/harness.js';
 
-// TBL-02 over a real port and real Socket.io clients, against a real SQLite file (specs/03-domain-model.md
-// §1, specs/04-live-sync.md §2, §3, §4, §8, Q-099): `token.setMarkers` sets the whole set of condition
-// markers a token of the live scene carries, stored in a fixed order; both rooms hear of a visible token's,
+// TBL-02 and TBL-05 over a real port and real Socket.io clients, against a real SQLite file
+// (specs/03-domain-model.md §1, specs/04-live-sync.md §2, §3, §4, §8, Q-099, Q-103, D-157): `token.setMarkers`
+// sets the whole set of condition markers a token of the live scene carries, stored in the order applied; both rooms hear of a visible token's,
 // the DM's alone of a hidden one's; undo puts back the set before and redo the set after; a token revealed
 // reaches players with its markers, and every snapshot carries them.
 
@@ -39,18 +47,21 @@ async function liveScene(): Promise<Live> {
   return { scene, other, goblin, lurker, dm, tv };
 }
 
-const mark = (client: Client, token: SceneToken, markers: string[]) =>
+// Markers by id; Exhaustion at level 2 unless given as an object.
+const m = (...ids: string[]): TokenMarker[] => ids.map((id) => (id === 'exhaustion' ? { id, level: 2 } : { id }));
+const mark = (client: Client, token: SceneToken, markers: unknown[]) =>
   h.command(client, 'token.setMarkers', { token_id: token.id, markers });
 const code = (ack: unknown) => (ack as ErrorEnvelope).error.code;
 const types = (events: { type: string }[]) => events.map((event) => event.type);
-const markersOf = (event: { payload: unknown }) => (event.payload as { token: { markers: string[] } }).token.markers;
+const markersOf = (event: { payload: unknown }) =>
+  (event.payload as { token: { markers: TokenMarker[] } }).token.markers;
 const stored = (id: string) => h.data.db.prepare('SELECT markers FROM token WHERE id = ?').pluck().get(id);
 
 describe('token.setMarkers (specs/04-live-sync.md §2, §3, §4)', () => {
-  it('sets a visible token’s markers for both rooms, stored and sent in the fixed order', async () => {
+  it('sets a visible token’s markers for both rooms, stored and sent in the order applied', async () => {
     const { goblin, dm, tv } = await liveScene();
     const versions = [h.versions.dm.current(), h.versions.players.current()];
-    expect(await mark(dm, goblin, ['concentrating', 'bloodied'])).toEqual({ ok: true });
+    expect(await mark(dm, goblin, m('concentrating', 'bloodied'))).toEqual({ ok: true });
     const [dmEvents, tvEvents] = [await dm.settle(), await tv.settle()];
     // The DM's room also hears that undo now has something to take back (UIX-01).
     expect(dmEvents.map((event) => [event.type, event.version])).toEqual([
@@ -58,11 +69,11 @@ describe('token.setMarkers (specs/04-live-sync.md §2, §3, §4)', () => {
       ['history.changed', versions[0]! + 2],
     ]);
     expect(tvEvents.map((event) => [event.type, event.version])).toEqual([['token.updated', versions[1]! + 1]]);
-    expect(markersOf(dmEvents[0]!)).toEqual(['bloodied', 'concentrating']);
-    expect(markersOf(tvEvents[0]!)).toEqual(['bloodied', 'concentrating']);
-    expect(stored(goblin.id)).toBe('["bloodied","concentrating"]');
+    expect(markersOf(dmEvents[0]!)).toEqual(m('concentrating', 'bloodied'));
+    expect(markersOf(tvEvents[0]!)).toEqual(m('concentrating', 'bloodied'));
+    expect(stored(goblin.id)).toBe('[{"id":"concentrating"},{"id":"bloodied"}]');
     // The same set again changes nothing and tells nobody.
-    expect(await mark(dm, goblin, ['bloodied', 'concentrating'])).toEqual({ ok: true });
+    expect(await mark(dm, goblin, m('concentrating', 'bloodied'))).toEqual({ ok: true });
     expect(await dm.settle()).toEqual([]);
     expect(await tv.settle()).toEqual([]);
     // An empty set takes them all off.
@@ -73,29 +84,39 @@ describe('token.setMarkers (specs/04-live-sync.md §2, §3, §4)', () => {
   it('tells players nothing of a hidden token’s markers, and reveals it with them', async () => {
     const { lurker, dm, tv } = await liveScene();
     const players = h.versions.players.current();
-    expect(await mark(dm, lurker, ['dead'])).toEqual({ ok: true });
-    expect(markersOf((await dm.settle())[0]!)).toEqual(['dead']);
+    expect(await mark(dm, lurker, m('dead', 'exhaustion'))).toEqual({ ok: true });
+    expect(markersOf((await dm.settle())[0]!)).toEqual(m('dead', 'exhaustion'));
+    expect(await mark(dm, lurker, [{ id: 'dead' }, { id: 'exhaustion', level: 5 }])).toEqual({ ok: true });
+    await dm.settle();
     expect(await tv.settle()).toEqual([]);
     expect(h.versions.players.current()).toBe(players);
     expect(await h.command(dm, 'token.setVisibility', { token_id: lurker.id, hidden: false })).toEqual({ ok: true });
     const revealed = await tv.settle();
     expect(types(revealed)).toEqual(['token.added']);
-    expect(markersOf(revealed[0]!)).toEqual(['dead']);
+    expect(markersOf(revealed[0]!)).toEqual([{ id: 'dead' }, { id: 'exhaustion', level: 5 }]);
   });
 
   it('refuses a token that is not on the live scene, an unknown one, and markers it cannot carry', async () => {
     const { other, goblin, dm, tv } = await liveScene();
     const elsewhere = await h.place(other.id, (await h.asset('Kobold')).id, 0, 0);
-    expect(code(await mark(dm, elsewhere, ['bloodied']))).toBe('scene_not_live');
+    expect(code(await mark(dm, elsewhere, m('bloodied')))).toBe('scene_not_live');
     expect(code(await mark(dm, { ...goblin, id: '00000000-0000-4000-8000-00000000ffff' }, []))).toBe('not_found');
     for (const markers of [
       ['poisoned'],
-      ['dead', 'dead'],
-      ['bloodied', 'dead', 'unconscious', 'concentrating', 'dead'],
+      [{ id: 'hasted' }],
+      m('dead', 'dead'),
+      [
+        { id: 'exhaustion', level: 1 },
+        { id: 'exhaustion', level: 2 },
+      ],
+      [{ id: 'exhaustion' }],
+      [{ id: 'exhaustion', level: 7 }],
+      [{ id: 'prone', level: 1 }],
+      [...m(...CONDITION_IDS), { id: 'dead' }],
     ]) {
       expect(code(await mark(dm, goblin, markers)), JSON.stringify(markers)).toBe('validation_failed');
     }
-    expect(code(await mark(tv, goblin, ['dead']))).toBe('forbidden');
+    expect(code(await mark(tv, goblin, m('dead')))).toBe('forbidden');
     expect(await dm.settle()).toEqual([]);
     expect(await tv.settle()).toEqual([]);
     expect(stored(goblin.id)).toBe('[]');
@@ -103,22 +124,22 @@ describe('token.setMarkers (specs/04-live-sync.md §2, §3, §4)', () => {
 
   it('is undone to the set before and redone to the set after, each reaching players as a change', async () => {
     const { goblin, dm, tv } = await liveScene();
-    await mark(dm, goblin, ['bloodied']);
-    await mark(dm, goblin, ['bloodied', 'unconscious']);
+    await mark(dm, goblin, m('bloodied'));
+    await mark(dm, goblin, m('bloodied', 'unconscious'));
     await dm.settle();
     await tv.settle();
     expect(await h.command(dm, 'undo', {})).toEqual({ ok: true });
     let events = await tv.settle();
     expect(types(events)).toEqual(['token.updated']);
-    expect(markersOf(events[0]!)).toEqual(['bloodied']);
+    expect(markersOf(events[0]!)).toEqual(m('bloodied'));
     expect(await h.command(dm, 'undo', {})).toEqual({ ok: true });
     expect(markersOf((await tv.settle())[0]!)).toEqual([]);
     expect(await h.command(dm, 'redo', {})).toEqual({ ok: true });
     events = await tv.settle();
-    expect(markersOf(events[0]!)).toEqual(['bloodied']);
-    expect(stored(goblin.id)).toBe('["bloodied"]');
+    expect(markersOf(events[0]!)).toEqual(m('bloodied'));
+    expect(stored(goblin.id)).toBe('[{"id":"bloodied"}]');
     // A new marker change empties the redo stack.
-    await mark(dm, goblin, ['concentrating']);
+    await mark(dm, goblin, m('concentrating'));
     await tv.settle();
     expect(await h.command(dm, 'redo', {})).toEqual({ ok: true });
     expect(await tv.settle()).toEqual([]);
@@ -126,28 +147,51 @@ describe('token.setMarkers (specs/04-live-sync.md §2, §3, §4)', () => {
 
   it('puts a deleted token back with its markers on undo', async () => {
     const { goblin, dm, tv } = await liveScene();
-    await mark(dm, goblin, ['unconscious']);
+    await mark(dm, goblin, m('unconscious', 'exhaustion'));
     await h.command(dm, 'token.delete', { token_id: goblin.id });
     await dm.settle();
     await tv.settle();
     expect(await h.command(dm, 'undo', {})).toEqual({ ok: true });
     const events = await tv.settle();
     expect(types(events)).toEqual(['token.added']);
-    expect(markersOf(events[0]!)).toEqual(['unconscious']);
+    expect(markersOf(events[0]!)).toEqual(m('unconscious', 'exhaustion'));
   });
 
   it('gives every snapshot the markers, a hidden token’s to the DM only', async () => {
     const { goblin, lurker, dm } = await liveScene();
-    await mark(dm, goblin, ['bloodied']);
-    await mark(dm, lurker, ['concentrating']);
+    await mark(dm, goblin, m('bloodied', 'exhaustion'));
+    await mark(dm, lurker, m('concentrating'));
     const tv = await h.connect();
     const tokens = (tv.first.payload as PlayerSnapshot).scene!.tokens;
-    expect(tokens.map((token) => [token.id, token.markers])).toEqual([[goblin.id, ['bloodied']]]);
+    expect(tokens.map((token) => [token.id, token.markers])).toEqual([[goblin.id, m('bloodied', 'exhaustion')]]);
     const laptop = await h.connect({ cookie: h.cookie });
     const dmTokens = (laptop.first.payload as DmSnapshot).scene!.tokens;
     expect(Object.fromEntries(dmTokens.map((token) => [token.id, token.markers]))).toEqual({
-      [goblin.id]: ['bloodied'],
-      [lurker.id]: ['concentrating'],
+      [goblin.id]: m('bloodied', 'exhaustion'),
+      [lurker.id]: m('concentrating'),
     });
+  });
+
+  it('sets each of the eighteen in turn on the TV, undoes and redoes them all, and gives them to a reconnecting TV', async () => {
+    const { goblin, dm, tv } = await liveScene();
+    const applied: TokenMarker[] = [];
+    for (const marker of m(...CONDITION_IDS)) {
+      applied.push(marker);
+      expect(await mark(dm, goblin, applied), marker.id).toEqual({ ok: true });
+      expect(markersOf((await tv.settle())[0]!), marker.id).toEqual(applied);
+    }
+    await dm.settle();
+    // A TV that connects now gets all eighteen in its snapshot, in the order applied.
+    const late = await h.connect();
+    expect((late.first.payload as PlayerSnapshot).scene!.tokens[0]!.markers).toEqual(applied);
+    for (let left = CONDITION_IDS.length - 1; left >= 0; left--) {
+      expect(await h.command(dm, 'undo', {})).toEqual({ ok: true });
+      expect(markersOf((await tv.settle())[0]!)).toEqual(applied.slice(0, left));
+    }
+    for (let count = 1; count <= CONDITION_IDS.length; count++) {
+      expect(await h.command(dm, 'redo', {})).toEqual({ ok: true });
+      expect(markersOf((await tv.settle())[0]!)).toEqual(applied.slice(0, count));
+    }
+    expect(JSON.parse(stored(goblin.id) as string)).toEqual(applied);
   });
 });

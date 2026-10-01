@@ -8,6 +8,7 @@ import {
   TokenCreateBodySchema,
   TokenChangeSchema,
   TokenUpdateBodySchema,
+  repeatsCondition,
   type IdParams,
   type TokenCreateBody,
   type TokenUpdateBody,
@@ -29,6 +30,12 @@ const notFound = (): ApiFailure => new ApiFailure(404, 'not_found', 'No such res
 // live commands' refusal and never answers a preparation write).
 const live = (): ApiFailure =>
   new ApiFailure(409, 'scene_live', "The live scene's tokens change only by live commands.");
+
+// A condition named twice, Exhaustion at two levels among them, which the schema alone lets through (TBL-05).
+const repeated = (): ApiFailure =>
+  new ApiFailure(400, 'validation_failed', 'The body does not match its schema.', {
+    details: [{ path: '/markers', message: 'must name each condition at most once' }],
+  });
 
 const params = { params: IdParamsSchema };
 
@@ -58,6 +65,7 @@ export function registerTokens(app: FastifyInstance, db: Database.Database): voi
     { schema: { ...params, body: TokenUpdateBodySchema, response: { 200: TokenChangeSchema } } },
     (request) => {
       const { label, ...fields } = request.body;
+      if (fields.markers && repeatsCondition(fields.markers)) throw repeated();
       const result = updateToken(db, request.params.id, {
         ...fields,
         ...(label === undefined ? {} : { label: label.trim() }),

@@ -221,17 +221,27 @@ async function record(hidden: boolean): Promise<Recording> {
   await step('undo the add of a visible goblin', undo);
   await step('undo the add of a hidden lurker', undo, true);
   await step('undo with nothing left to undo', undo);
-  // Condition markers (TBL-02, specs/04-live-sync.md §4): a hidden token's reach players not at all, nor
-  // their undo; a visible token's reach them as a change of it.
+  // Condition markers (TBL-02, TBL-05, specs/04-live-sync.md §4): a hidden token's reach players not at all,
+  // nor their undo, whichever condition; a visible token's reach them as a change of it.
   await step(
     'mark the hidden boss dead',
-    () => send('token.setMarkers', { token_id: boss!.id, markers: ['dead'] }),
+    () => send('token.setMarkers', { token_id: boss!.id, markers: [{ id: 'dead' }] }),
+    true,
+  );
+  await step(
+    'mark the hidden boss invisible and exhausted',
+    () =>
+      send('token.setMarkers', {
+        token_id: boss!.id,
+        markers: [{ id: 'dead' }, { id: 'invisible' }, { id: 'exhaustion', level: 4 }],
+      }),
     true,
   );
   await step('mark the visible goblin bloodied', () =>
-    send('token.setMarkers', { token_id: firstGoblin.id, markers: ['bloodied'] }),
+    send('token.setMarkers', { token_id: firstGoblin.id, markers: [{ id: 'bloodied' }] }),
   );
   await step('undo the mark of the goblin', undo);
+  await step('undo the second mark of the hidden boss', undo, true);
   await step('undo the mark of the hidden boss', undo, true);
   await step('activate B', () => send('scene.activate', { scene_id: sceneB.id }));
   await step('a second screen reports its viewport and the DM steers the TV on B', async () => {

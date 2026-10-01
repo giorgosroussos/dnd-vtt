@@ -142,6 +142,27 @@ export {
   type FogStroke,
   type FogWriteBody,
 } from './fog.js';
+export {
+  CONDITIONS,
+  CONDITION_IDS,
+  EXHAUSTION,
+  EXHAUSTION_LEVELS,
+  MAX_BADGES,
+  MAX_MARKERS,
+  MarkerSchema,
+  MarkersSchema,
+  badgeOrder,
+  badgesOf,
+  conditionOf,
+  hasMarker,
+  markerLevel,
+  normaliseMarkers,
+  repeatsCondition,
+  sameMarkers,
+  type Condition,
+  type ConditionIcon,
+  type TokenMarker,
+} from './conditions.js';
 export { isMeasurement, rulerFeet, rulerSquares, type RulerSquare } from './ruler.js';
 export {
   ASSET_CATEGORIES,
@@ -164,7 +185,6 @@ export {
   SessionSchema,
   SettingsSchema,
   Sha256Schema,
-  TOKEN_MARKERS,
   TOKEN_SIZES,
   TokenSchema,
   UuidSchema,
@@ -182,7 +202,6 @@ export {
   type Session,
   type Settings,
   type Token,
-  type TokenMarker,
   type TokenSize,
 } from './entities.js';
 export {

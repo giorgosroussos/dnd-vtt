@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import {
   nextLabel,
+  normaliseMarkers,
   numberingPeers,
-  TOKEN_MARKERS,
   type AssetCategory,
   type SceneToken,
   type TokenMarker,
@@ -17,7 +17,8 @@ import { refusal, type TokenScope } from './scope.js';
 // specs/05-assets-and-images.md §2–§5, specs/04-live-sync.md §2, D-019, Q-063, Q-091). Every
 // read and write names its columns. A token holds only its own state (position, visibility,
 // label, stacking order, condition markers); its name, image, size and category are its asset's and are
-// read by joining it. Markers are stored as a JSON array in the order of TOKEN_MARKERS (TBL-02).
+// read by joining it. Markers are stored as a JSON array of objects, each condition once, in the order the DM
+// applied them (TBL-05, D-157).
 // Positions are decimal grid units and are stored exactly as sent. Every write names the scope it
 // is for, checked inside the transaction that would change the token: preparation (REST) is refused
 // on the live scene, whose tokens change only by the live commands, and a live command is refused
@@ -50,9 +51,8 @@ interface Row {
   asset_category: AssetCategory;
 }
 
-/** The markers given, each once, in the order of TOKEN_MARKERS; anything else is dropped. */
-export const markersOf = (markers: readonly unknown[]): TokenMarker[] =>
-  TOKEN_MARKERS.filter((marker) => markers.includes(marker));
+/** The markers given, each condition once, in the order given; anything else is dropped (D-157). */
+export const markersOf = (markers: readonly unknown[]): TokenMarker[] => normaliseMarkers(markers);
 
 const toToken = (row: Row): SceneToken => ({
   id: row.id,

@@ -299,14 +299,14 @@ Goal: both views in the 2026-09-30 redesign, and the three table tools the owner
 `TBL-01` Ping
 
 - A ping on the live scene, in grid units, shown on every view and stored nowhere (`01` §9, `04` §2, `04` §3).
-- Surfaces: security, scope, ux
+- Surfaces: security, scope, external, ux
 - Touches red line: yes
 - Contract change: yes
 
 `TBL-02` Condition markers
 
 - Bloodied, Unconscious, Dead and Concentrating on a token, stored with it, set by a live command that undo covers and shown on every view (`01` §9, `03` §1, `04` §2, `04` §8).
-- Surfaces: data, security, scope, ux
+- Surfaces: data, security, scope, external, ux
 - Touches red line: yes
 - Contract change: yes
 
@@ -322,6 +322,13 @@ Goal: both views in the 2026-09-30 redesign, and the three table tools the owner
 
 - The fog regions replaced by one painted fog per scene: a round brush and an eraser, the radius on a slider, Fog all and Clear all, in preparation and on the live scene, each stroke one undoable step; the region table dropped (`01` §9, `03` §1, `03` §7, `04` §2, `04` §8, `04` §13).
 - Tokens under the fog filtered for players on the server, in snapshots, events, numbering and image files; the fog drawn by the player client as a mask (`04` §4, `07` §5, `10` §3).
+- Surfaces: data, security, scope, external, ux
+- Touches red line: yes
+- Contract change: yes
+
+`TBL-05` Eighteen condition markers
+
+- The four markers widened to eighteen, stored as objects in the order applied, Exhaustion with its level; the stored markers migrated; the list, its rule text and its icons a bundled data file; pinned chips, a searchable list and Exhaustion's stepper in the popover; badges with their icons, at most three then "+N", on both views; About & credits (`01` §8, `01` §9, `03` §1, `04` §2, `04` §4, `08` §11).
 - Surfaces: data, security, scope, external, ux
 - Touches red line: yes
 - Contract change: yes

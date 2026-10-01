@@ -80,7 +80,8 @@ The DM view MUST provide, in the palette and typography of the redesign (`01` §
 The table tools (`01` §9) MUST add to it: [input, Q-099]
 
 - Ping (P) on the live scene: a click, or Enter at the centre of the view, shows two expanding rings with a glowing centre at that point on every view for about two seconds (`04` §12);
-- the popover's condition chips, Bloodied, Unconscious, Dead and Concentrating, each a toggle, each marker drawn on both views with a shape or a badge, never by colour alone (`03` §1);
+- the popover's condition chips, Bloodied, Unconscious, Dead, Concentrating, Prone and Poisoned, each a toggle, then a chip for each other condition the token carries, and More… opening a searchable alphabetical list of the others; Exhaustion's chip with a stepper from 1 to 6; each chip's hover text its rule text; each marker drawn on both views as a badge with an icon of its own, never by colour alone, at most three then "+N", Dead first, then Unconscious, Bloodied and the rest as applied; Dead greying the token and striking its label, Invisible drawing it semi-transparent on both views (`03` §1); [Q-103]
+- About & credits in the header, crediting the condition icons and the SRD 5.1 text; [Q-103]
 - the fog brush (F): a round brush that paints fog by a drag and an eraser that reveals it (E switches them), its radius on a slider from a quarter square to five ([ and ] step it), Fog all and Clear all, each asked first, and Enter painting at the centre of the view; the fog shown to the DM as a blue hatch, and to players as an opaque mask with a soft edge; in the right panel how many tokens under the fog players cannot see (`04` §13). [Q-101]
 
 The player view MUST show the live scene with a subtle vignette, labels sized to be read from 2–3 m, and the scene's name at the bottom left, fading after a few seconds; changes between idle and live, and between scenes, fade. [input, Q-100]

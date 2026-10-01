@@ -16,7 +16,7 @@ import {
   type FogMask,
   type FogStroke,
   type FogWriteBody,
-  TOKEN_MARKERS,
+  normaliseMarkers,
   TokenUpdateBodySchema,
   type CommandAck,
   type CommandEnvelope,
@@ -318,8 +318,8 @@ export class FakeServer {
     const revealed =
       token.hidden && fields.hidden === false && fields.label === undefined && token.label === token.asset.name;
     Object.assign(token, fields, typeof fields.label === 'string' ? { label: fields.label.trim() } : {});
-    // Stored in the fixed order, as the server stores them (TBL-02).
-    if (fields.markers) token.markers = TOKEN_MARKERS.filter((marker) => fields.markers!.includes(marker));
+    // Each condition once, in the order sent, as the server stores them (TBL-05).
+    if (fields.markers) token.markers = normaliseMarkers(fields.markers);
     const renamed = revealed ? this.numberAs(token) : undefined;
     if (stack) {
       const others = this.tokensOf(token.scene_id)
@@ -694,7 +694,7 @@ export class FakeServer {
         const token = liveToken();
         if (token === undefined) return refuse('not_found');
         if (token === 'not_live') return refuse('scene_not_live');
-        const markers = TOKEN_MARKERS.filter((marker) => (p.markers as string[]).includes(marker));
+        const markers = normaliseMarkers(p.markers as unknown[]);
         if (JSON.stringify(markers) === JSON.stringify(token.markers)) return { ok: true };
         token.markers = markers;
         this.deliver('token.updated', { token: this.withAsset(token), relabelled: [] });

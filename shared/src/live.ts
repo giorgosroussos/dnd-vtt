@@ -304,8 +304,8 @@ export const TokenAddPayloadSchema = Type.Object(
 export const TokenMovePayloadSchema = Type.Object({ token_id: UuidSchema, x: Coordinate, y: Coordinate }, strict);
 export const TokenSetVisibilityPayloadSchema = Type.Object({ token_id: UuidSchema, hidden: Type.Boolean() }, strict);
 export const TokenDeletePayloadSchema = Type.Object({ token_id: UuidSchema }, strict);
-// `token.setMarkers` (TBL-02, specs/04-live-sync.md §2): the whole set a token carries after it, stored in
-// the order of TOKEN_MARKERS whatever order it is sent in.
+// `token.setMarkers` (TBL-02, TBL-05, specs/04-live-sync.md §2): the whole set a token carries after it, each
+// condition once, stored in the order sent, which is the order the DM applied them (D-157).
 export const TokenSetMarkersPayloadSchema = Type.Object(
   { token_id: UuidSchema, markers: TokenSchema.properties.markers },
   strict,

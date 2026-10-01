@@ -125,6 +125,7 @@ Every card opens `Blocking` and is answered before the specification proceeds. `
 - Q-100 — The redesigned DM view and idle screen against 08 — ux — Resolved
 - Q-101 — Painted fog in place of fog regions — scope — Resolved
 - Q-102 — The token popover while the DM drags a token — ux — Resolved
+- Q-103 — Eighteen condition markers with their rule text — scope — Resolved
 
 ## Blocking
 
@@ -1291,5 +1292,16 @@ None.
   - A) Opened by a click on the token (a press released within about 4 px), by choosing its row in the list, or by placing or duplicating it; a press that moves past the threshold is a drag, which closes the popover at once and leaves it closed after the drop with the token still selected; Escape, a click on empty map and the start of a pan close it too → effect on ux: the popover no longer follows the selection; a click on the selected token reopens it.
   - B) Keep it open while the token is selected, moved out of the way during a drag and back after → effect on ux: the popover still covers the map at the drop.
 - Recommendation: A, because it is what the owner described and it keeps the map free while a token moves.
+- Blocks: specification
+- Answer: A (2026-10-01; recommendation accepted)
+
+### Q-103 — Eighteen condition markers with their rule text
+- Surface: scope
+- Source: The owner, in chat on 2026-10-01: «Replace the current fixed set of 4 chips with a pinned set plus a searchable dropdown»: pinned Bloodied, Unconscious, Dead, Concentrating, Prone, Poisoned; in a «More…» list Blinded, Charmed, Deafened, Exhaustion (levels 1–6), Frightened, Grappled, Incapacitated, Invisible, Paralyzed, Petrified, Restrained, Stunned; markers as objects (`{ id, level }`), migrated; the list in a JSON data file with SRD rule text shown on hover; a distinct icon each from game-icons.net (CC BY 3.0) with an attribution line; at most 3 badges then «+N»; Dead greyed out, Invisible semi-transparent but still seen by players; no implied conditions applied. Asked whether this overrides the register, the owner chose «Approve as written», and an About & credits dialog in the DM view. `12` and `01` §9 allow four markers (Q-099), `01` §4 keeps every other condition Phase 2, and `01` §8 lets SRD 5.1 content in from Phase 2 only.
+- Question: Do tokens carry the eighteen markers the owner listed, with their SRD 5.1 rule text and bundled icons, before the release?
+- Options:
+  - A) As the owner wrote it: eighteen markers, six pinned and twelve behind a searchable More… list, stored as objects with Exhaustion's level 1–6, the four stored markers migrated; the conditions' SRD 5.1 text (CC BY 4.0) and game-icons.net icons (CC BY 3.0) bundled, credited in an About & credits dialog; no implied condition applied; custom markers and durations left out → effect on scope: the marker set, its storage and contract widen; SRD content enters before Phase 2, for these rule texts only; still no rules in code.
+  - B) Keep the four markers until Phase 2 → effect on scope: no change; the request becomes a Phase 2 item.
+- Recommendation: A, because the owner asked for it in detail and approved overriding the register.
 - Blocks: specification
 - Answer: A (2026-10-01; recommendation accepted)
