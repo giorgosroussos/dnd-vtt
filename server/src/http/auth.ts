@@ -149,6 +149,12 @@ const lockedOut = (retryAfterMs: number): ApiFailure =>
   new ApiFailure(429, 'locked_out', 'PIN entry from this address is locked for a while.', {
     headers: { 'retry-after': String(Math.ceil(retryAfterMs / 1000)) },
   });
+// The server-wide pause (Q-097, Q-098): its own code, so that the DM view can say that other devices'
+// guesses caused it and that the server PC still signs in (G-042).
+const pinPaused = (retryAfterMs: number): ApiFailure =>
+  new ApiFailure(429, 'pin_paused', 'PIN entry is paused for every address but the server machine.', {
+    headers: { 'retry-after': String(Math.ceil(retryAfterMs / 1000)) },
+  });
 const pinIncorrect = (): ApiFailure => new ApiFailure(401, 'pin_incorrect', 'The PIN is not correct.', { quiet: true });
 const pinNotSet = (): ApiFailure => new ApiFailure(409, 'pin_not_set', 'No PIN is set yet.');
 const pinAlreadySet = (): ApiFailure => new ApiFailure(409, 'pin_already_set', 'A PIN is already set.');
@@ -180,7 +186,9 @@ export function registerAuth(
   const checkPin = async (request: FastifyRequest, pin: string, stored: string): Promise<void> => {
     const address = clientAddress(request);
     const attempt = lockout.begin(address);
-    if (!attempt.allowed) throw lockedOut(attempt.retryAfterMs);
+    if (!attempt.allowed) {
+      throw attempt.reason === 'paused' ? pinPaused(attempt.retryAfterMs) : lockedOut(attempt.retryAfterMs);
+    }
     // A pause stays whether or not this PIN is right (the wrong ones that spent the budget came first), so it is logged now:
     // an address's own lockout is lifted by a right PIN and is logged only with a wrong one (review C-M1).
     if (attempt.paused !== null) {

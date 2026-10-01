@@ -16,6 +16,7 @@ import {
 } from '../ui/testing/fakeServer.js';
 import { render, type Rendered } from '../ui/testing/render.js';
 import { DmView } from './DmView.js';
+import { pinRefusalText, serverPcAddress, waitText } from './SignIn.js';
 
 // The DM view's screens (PRP-01, specs/07-security-and-access.md §1, §2, §6,
 // specs/08-ux-journeys.md §1, D-085), against a scripted server behind fetch.
@@ -139,6 +140,40 @@ describe('PIN entry and sign-out (specs/07-security-and-access.md §2, §6)', ()
     // In minutes once that reads better (REL-01 review U-L6).
     expect(view.querySelector('[role="alert"]')!.textContent).toBe(t('signIn.lockedOutMinutes', { minutes: 8 }));
     expect(view.querySelector('nav')).toBeNull();
+  });
+
+  it('names a long wait in hours (G-042)', async () => {
+    server.lockedFor = 640 * 60;
+    const view = await open();
+    await type(inputs(view)[0], '4826');
+    await submit(view.querySelector('form'));
+    expect(view.querySelector('[role="alert"]')!.textContent).toBe(t('signIn.lockedOutHours', { hours: 11 }));
+  });
+
+  it('says a server-wide pause is not necessarily this device’s doing and names the server PC (G-042)', async () => {
+    server.pausedFor = 1_200;
+    const view = await open();
+    await type(inputs(view)[0], '4826');
+    await submit(view.querySelector('form'));
+    const alert = view.querySelector('[role="alert"]')!.textContent;
+    expect(alert).toBe(t('signIn.paused', { address: serverPcAddress(), wait: t('wait.minutes', { count: 20 }) }));
+    expect(alert).toContain('server PC');
+    expect(alert).toContain('localhost');
+    expect(alert).toContain('20 minutes');
+    expect(view.querySelector('nav')).toBeNull();
+  });
+
+  it('addresses the server PC by localhost and the port the browser used', () => {
+    expect(serverPcAddress({ port: '3000' })).toBe('http://localhost:3000/dm');
+    expect(serverPcAddress({ port: '' })).toBe('http://localhost/dm');
+  });
+
+  it('gives waits in seconds, minutes, then hours past two hours', () => {
+    expect(waitText(119)).toBe('119 seconds');
+    expect(waitText(120)).toBe('2 minutes');
+    expect(waitText(7_200)).toBe('120 minutes');
+    expect(waitText(7_201)).toBe('3 hours');
+    expect(pinRefusalText('pin_paused', undefined)).toBe(t('error.code.pin_paused'));
   });
 
   it('names a short wait in seconds', async () => {

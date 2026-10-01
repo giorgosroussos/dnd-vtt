@@ -5,7 +5,7 @@ import { Notice } from '../ui/Notice.js';
 import { TextField } from '../ui/TextField.js';
 import { errorMessage } from '../ui/errorMessage.js';
 import { t } from '../ui/messages.js';
-import { ApiError, errorCode, request } from './api.js';
+import { ApiError, errorCode, request, type ClientErrorCode } from './api.js';
 
 // First-run setup and PIN entry (specs/07-security-and-access.md §1, §2, §6,
 // D-076, D-085). The PIN lives only in the form's state until it is sent; it is
@@ -13,11 +13,47 @@ import { ApiError, errorCode, request } from './api.js';
 
 const PIN = new RegExp(PIN_PATTERN);
 
-/** How long PIN entry is refused, in minutes once that reads better than seconds (REL-01 review U-L6). */
+const MINUTES_FROM_S = 120;
+const HOURS_FROM_S = 2 * 60 * 60;
+
+/**
+ * How long PIN entry is refused, in minutes once that reads better than seconds (REL-01 review U-L6),
+ * and in hours past two hours, where a doubled wait would read as hundreds of minutes (G-042).
+ */
 export function lockedOutText(seconds: number): string {
-  return seconds >= 120
+  if (seconds > HOURS_FROM_S) return t('signIn.lockedOutHours', { hours: Math.ceil(seconds / 3600) });
+  return seconds >= MINUTES_FROM_S
     ? t('signIn.lockedOutMinutes', { minutes: Math.ceil(seconds / 60) })
     : t('signIn.lockedOut', { seconds });
+}
+
+/** A wait as a phrase, by the same steps as `lockedOutText`. */
+export function waitText(seconds: number): string {
+  if (seconds > HOURS_FROM_S) return t('wait.hours', { count: Math.ceil(seconds / 3600) });
+  return seconds >= MINUTES_FROM_S
+    ? t('wait.minutes', { count: Math.ceil(seconds / 60) })
+    : t('wait.seconds', { count: seconds });
+}
+
+/**
+ * The DM view on the server PC, where PIN entry is never paused: by `localhost`, since the pause spares
+ * the loopback address and not the PC's LAN address (specs/07-security-and-access.md §6, README).
+ */
+export function serverPcAddress(location: Pick<Location, 'port'> = window.location): string {
+  return `http://localhost${location.port ? `:${location.port}` : ''}/dm`;
+}
+
+/**
+ * What a refused PIN entry or PIN change says: a lockout with its wait, or the server-wide pause with the
+ * server PC's address and the wait, which other devices' guesses may have caused (G-042); otherwise the
+ * code's own message.
+ */
+export function pinRefusalText(code: ClientErrorCode, wait: number | undefined): string {
+  if (wait !== undefined && code === 'locked_out') return lockedOutText(wait);
+  if (wait !== undefined && code === 'pin_paused') {
+    return t('signIn.paused', { address: serverPcAddress(), wait: waitText(wait) });
+  }
+  return errorMessage(code);
 }
 
 // Browsers may fill the field from a password manager; numeric keypad on laptops with one.
@@ -109,7 +145,7 @@ export function PinEntry({ onDone, notice }: { onDone: () => void; notice?: stri
       const code = errorCode(error);
       if (code === 'pin_incorrect') return setFieldError(errorMessage(code));
       const wait = error instanceof ApiError ? error.retryAfter : undefined;
-      setFailure(code === 'locked_out' && wait !== undefined ? lockedOutText(wait) : errorMessage(code));
+      setFailure(pinRefusalText(code, wait));
     }
   }
 

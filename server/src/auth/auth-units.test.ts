@@ -69,7 +69,7 @@ describe('lockout (specs/07-security-and-access.md §6)', () => {
       counted: aFailure,
     });
     time = 30_000;
-    expect(lockout.begin('a')).toEqual({ allowed: false, retryAfterMs: 30_000 });
+    expect(lockout.begin('a')).toEqual({ allowed: false, retryAfterMs: 30_000, reason: 'locked' });
     time = 60_000;
     expect(lockout.begin('a')).toEqual({
       allowed: true,
@@ -114,7 +114,7 @@ describe('lockout (specs/07-security-and-access.md §6)', () => {
       addresses: ['10.0.0.0', '10.0.0.1', '10.0.0.2', '10.0.0.3', '10.0.0.4'],
     });
     time = 1_000;
-    expect(lockout.begin('10.0.0.99')).toEqual({ allowed: false, retryAfterMs: 599_000 });
+    expect(lockout.begin('10.0.0.99')).toEqual({ allowed: false, retryAfterMs: 599_000, reason: 'paused' });
     expect(lockout.begin('127.0.0.1')).toMatchObject({ allowed: true, paused: null });
     expect(lockout.begin('::1')).toMatchObject({ allowed: true, paused: null });
     time = 600_000;
@@ -163,7 +163,7 @@ describe('lockout (specs/07-security-and-access.md §6)', () => {
     expect(starts.slice(DAILY_FAILURES_PER_PAUSE).every((start) => !start.allowed)).toBe(true);
     // The 100th failure came in the sixth burst, at 50 minutes; the pause runs 10 minutes from there.
     clock.time = 5 * GLOBAL_WINDOW_MS + 1_000;
-    expect(lockout.begin('10.200.0.1')).toEqual({ allowed: false, retryAfterMs: 600_000 - 1_000 });
+    expect(lockout.begin('10.200.0.1')).toEqual({ allowed: false, retryAfterMs: 600_000 - 1_000, reason: 'paused' });
     expect(lockout.begin('127.0.0.1')).toMatchObject({ allowed: true, paused: null });
     clock.time = 6 * GLOBAL_WINDOW_MS;
     expect(lockout.begin('10.200.0.1')).toMatchObject({ allowed: true, paused: null });
@@ -282,12 +282,17 @@ describe('lockout (specs/07-security-and-access.md §6)', () => {
     ] as const) {
       time = at * 1000;
       fiveFrom('10.5.0.1');
-      expect(lockout.begin('10.5.0.1')).toEqual({ allowed: false, retryAfterMs: locked * 1000 });
+      expect(lockout.begin('10.5.0.1')).toEqual({ allowed: false, retryAfterMs: locked * 1000, reason: 'locked' });
     }
     // Ten failures in the window from it; ten more from others open a 600 s pause.
     for (let n = 0; n < 10; n++) lockout.begin(`10.5.1.${n}`);
-    expect(lockout.begin('10.5.2.1')).toEqual({ allowed: false, retryAfterMs: 600_000 });
-    expect(lockout.begin('10.5.0.1')).toEqual({ allowed: false, retryAfterMs: 960_000 });
+    expect(lockout.begin('10.5.2.1')).toEqual({ allowed: false, retryAfterMs: 600_000, reason: 'paused' });
+    // Locked for longer than the pause: the wait is the lock's, and the reason the pause, since the server PC
+    // is the way in either way and the pause is what other devices' guesses caused (G-042).
+    expect(lockout.begin('10.5.0.1')).toEqual({ allowed: false, retryAfterMs: 960_000, reason: 'paused' });
+    // After the pause, the address's own lock remains.
+    time += 600_000;
+    expect(lockout.begin('10.5.0.1')).toEqual({ allowed: false, retryAfterMs: 360_000, reason: 'locked' });
   });
 
   it('forgives a whole IPv6 /64 when a correct PIN comes from any address of it', () => {

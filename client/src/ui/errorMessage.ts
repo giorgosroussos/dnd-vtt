@@ -18,6 +18,7 @@ export const ERROR_MESSAGES: Readonly<Record<ErrorCode | 'network', MessageKey>>
   forbidden: 'error.code.forbidden',
   pin_incorrect: 'error.code.pin_incorrect',
   locked_out: 'error.code.locked_out',
+  pin_paused: 'error.code.pin_paused',
   pin_not_set: 'error.code.pin_not_set',
   pin_already_set: 'error.code.pin_already_set',
   reference_not_found: 'error.code.reference_not_found',

@@ -100,6 +100,8 @@ export class FakeServer {
   signedIn = true;
   pin = '4826';
   lockedFor: number | undefined;
+  /** Seconds left of a server-wide PIN pause, answered as `pin_paused` (G-042). */
+  pausedFor: number | undefined;
   campaigns: Campaign[] = [];
   sessions: Session[] = [];
   scenes: Scene[] = [];
@@ -994,6 +996,7 @@ export class FakeServer {
         this.signedIn = false;
         return json(204);
       }
+      if (this.pausedFor !== undefined) return failure(429, 'pin_paused', { 'retry-after': String(this.pausedFor) });
       if (this.lockedFor !== undefined) return failure(429, 'locked_out', { 'retry-after': String(this.lockedFor) });
       if (b.pin !== this.pin) return failure(401, 'pin_incorrect');
       this.signedIn = true;
@@ -1040,6 +1043,7 @@ export class FakeServer {
     }
     if (path === '/api/settings/pin' && method === 'PUT') {
       if (!Value.Check(PinChangeBodySchema, b)) return failure(400, 'validation_failed');
+      if (this.pausedFor !== undefined) return failure(429, 'pin_paused', { 'retry-after': String(this.pausedFor) });
       if (this.lockedFor !== undefined) return failure(429, 'locked_out', { 'retry-after': String(this.lockedFor) });
       if (b.current_pin !== this.pin) return failure(401, 'pin_incorrect');
       this.pin = String(b.new_pin);

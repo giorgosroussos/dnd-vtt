@@ -390,12 +390,20 @@ describe('guessing protection (specs/07-security-and-access.md §6)', () => {
     for (let attempt = 0; attempt < 5; attempt++)
       expectFailure(await enter(WRONG, remoteAddress), 401, 'pin_incorrect');
   };
-  const expectLocked = async (seconds: number, remoteAddress = LAN): Promise<void> => {
+  const expectRefused = async (
+    code: 'locked_out' | 'pin_paused',
+    seconds: number,
+    remoteAddress: string,
+  ): Promise<void> => {
     const response = await enter(PIN, remoteAddress);
-    expectFailure(response, 429, 'locked_out');
+    expectFailure(response, 429, code);
     expect(response.headers['retry-after']).toBe(String(seconds));
     expect(setCookies(response)).toEqual([]);
   };
+  /** The address's own lockout. */
+  const expectLocked = (seconds: number, remoteAddress = LAN) => expectRefused('locked_out', seconds, remoteAddress);
+  /** The server-wide pause, with its own code (G-042). */
+  const expectPaused = (seconds: number, remoteAddress = LAN) => expectRefused('pin_paused', seconds, remoteAddress);
 
   it('locks one address for 1 minute after 5 failures, even for the right PIN, and leaves another address alone', async () => {
     await failFiveTimes();
@@ -419,9 +427,9 @@ describe('guessing protection (specs/07-security-and-access.md §6)', () => {
     }
     expect(expected).toBe(480);
     // The fourth run is the 20th failure within 10 minutes: the server-wide pause (600 s) outlasts
-    // the address's own 480 s, and the answer names the longer wait (Q-097).
+    // the address's own 480 s, and the answer names the longer wait (Q-097) and the pause (G-042).
     await failFiveTimes();
-    await expectLocked(600);
+    await expectPaused(600);
   });
 
   it('forgives earlier failures once the right PIN is entered', async () => {
@@ -466,11 +474,11 @@ describe('guessing protection (specs/07-security-and-access.md §6)', () => {
   it('pauses PIN entry from every address but the server PC after 20 failures across addresses, and logs the pause', async () => {
     const addresses = await failAcrossAddresses();
     // A fresh address, the right PIN: refused for 10 minutes, with nothing counted or hashed.
-    await expectLocked(600, '192.168.1.99');
+    await expectPaused(600, '192.168.1.99');
     const fromServerPc = await enter(PIN, '127.0.0.1');
     expect(fromServerPc.statusCode, fromServerPc.body).toBe(200);
     clock += 600_000 - 1_000;
-    await expectLocked(1, '192.168.1.99');
+    await expectPaused(1, '192.168.1.99');
     clock += 1_000;
     expect((await enter(PIN, '192.168.1.99')).statusCode).toBe(200);
 
@@ -488,7 +496,7 @@ describe('guessing protection (specs/07-security-and-access.md §6)', () => {
   it('logs a pause that a correct PIN opened, since the pause stays (review C-M1)', async () => {
     for (let n = 0; n < 19; n++) expectFailure(await enter(WRONG, `192.168.9.${n % 5}`), 401, 'pin_incorrect');
     expect((await enter(PIN, '192.168.9.50')).statusCode).toBe(200);
-    await expectLocked(600, '192.168.9.60');
+    await expectPaused(600, '192.168.9.60');
     const paused = readFileSync(logFilePath(data.dataDir), 'utf8')
       .trim()
       .split('\n')
@@ -518,7 +526,7 @@ describe('guessing protection (specs/07-security-and-access.md §6)', () => {
     await failAcrossAddresses();
     clock += 600_000;
     await failAcrossAddresses('192.168.8.');
-    await expectLocked(1_200, '192.168.1.99');
+    await expectPaused(1_200, '192.168.1.99');
   });
 
   it('pauses a trickle of 19 failures every 10 minutes from changing addresses at the 100th in a day, and logs it (Q-098)', async () => {
@@ -532,7 +540,7 @@ describe('guessing protection (specs/07-security-and-access.md §6)', () => {
     }
     // The 100th came in the sixth burst, 50 minutes in: every address but the server PC waits 10 minutes.
     expect(clock - started).toBe(3_000_000);
-    await expectLocked(600, '10.20.99.1');
+    await expectPaused(600, '10.20.99.1');
     expect((await enter(PIN, '127.0.0.1')).statusCode).toBe(200);
     clock += 600_000;
     expect((await enter(PIN, '10.20.99.1')).statusCode).toBe(200);
@@ -572,13 +580,22 @@ describe('guessing protection (specs/07-security-and-access.md §6)', () => {
       if (n > 0 && n % 19 === 0) clock += 600_000;
       expectFailure(await enter(WRONG, `10.21.${Math.floor(n / 19)}.${n % 19}`), 401, 'pin_incorrect');
     }
-    await expectLocked(1_200, '10.21.99.1');
+    await expectPaused(1_200, '10.21.99.1');
+  });
+
+  it('refuses a PIN change during a pause with the pause’s code, and keeps the PIN (G-042)', async () => {
+    const cookie = await signInFrom(OTHER_LAN);
+    await failAcrossAddresses();
+    const response = await changePin(cookie, PIN, NEW_PIN, OTHER_LAN);
+    expectFailure(response, 429, 'pin_paused');
+    expect(response.headers['retry-after']).toBe('600');
+    expect(await verifyPin(PIN, readPinHash(data.db)!)).toBe(true);
   });
 
   it('keeps a DM session already open working during a pause', async () => {
     const cookie = await signInFrom(OTHER_LAN);
     await failAcrossAddresses();
-    await expectLocked(600, OTHER_LAN);
+    await expectPaused(600, OTHER_LAN);
     expect((await settings(cookie, OTHER_LAN)).statusCode).toBe(200);
   });
 

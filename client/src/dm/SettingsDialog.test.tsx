@@ -2,6 +2,7 @@
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { t } from '../ui/messages.js';
+import { serverPcAddress } from './SignIn.js';
 import { installCanvas2d, installImageLoading, installResizeObserver } from '../ui/testing/canvas2d.js';
 import {
   button,
@@ -321,5 +322,19 @@ describe('Change the PIN (specs/07-security-and-access.md §1)', () => {
     );
     expect(server.pin).toBe('4826');
     expect([...pinForm(dialog).querySelectorAll('input')].map((input) => input.value)).toEqual(['', '', '']);
+  });
+
+  it('says a server-wide pause with the server PC’s address and the wait in hours past two hours (G-042)', async () => {
+    const dialog = await openDialog();
+    server.pausedFor = 640 * 60;
+    await fill(dialog, '4826', '591837');
+    const alert = pinForm(dialog).querySelector('[role="alert"]')!.textContent;
+    expect(alert).toBe(
+      t('settings.pinFailed', {
+        reason: t('signIn.paused', { address: serverPcAddress(), wait: t('wait.hours', { count: 11 }) }),
+      }),
+    );
+    expect(alert).toContain('11 hours');
+    expect(server.pin).toBe('4826');
   });
 });

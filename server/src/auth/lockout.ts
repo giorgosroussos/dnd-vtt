@@ -44,7 +44,12 @@ export type AttemptStart =
       /** The failure this attempt counted, to hand back to `succeeded` if the PIN is right. */
       counted: CountedFailure;
     }
-  | { allowed: false; retryAfterMs: number };
+  | {
+      allowed: false;
+      retryAfterMs: number;
+      /** Why: the server-wide pause, whenever one is in force for this address, else the address's own lockout. */
+      reason: 'paused' | 'locked';
+    };
 
 export interface Lockout {
   /**
@@ -101,7 +106,13 @@ export function createLockout(now: () => number = Date.now): Lockout {
       const lockedFor = entry && time < entry.lockedUntil ? entry.lockedUntil - time : 0;
       const pausedFor = counted && time < pausedUntil ? pausedUntil - time : 0;
       // Refused without counting; the answer names the longer wait.
-      if (lockedFor > 0 || pausedFor > 0) return { allowed: false, retryAfterMs: Math.max(lockedFor, pausedFor) };
+      if (lockedFor > 0 || pausedFor > 0) {
+        return {
+          allowed: false,
+          retryAfterMs: Math.max(lockedFor, pausedFor),
+          reason: pausedFor > 0 ? 'paused' : 'locked',
+        };
+      }
       if (!entry) {
         if (entries.size >= MAX_TRACKED_ADDRESSES) entries.delete(entries.keys().next().value!);
         entry = { failures: 0, lockouts: 0, lockedUntil: 0 };

@@ -7,7 +7,18 @@ import { useEffect, useId, useRef, type ReactNode } from 'react';
 // itself while the dialog is still open, since the page behind is inert until
 // then (REL-01 review U-H1). An owner that wants focus elsewhere moves it in an
 // effect, which runs after this.
-export function Dialog({ heading, onClose, children }: { heading: string; onClose: () => void; children: ReactNode }) {
+export function Dialog({
+  heading,
+  onClose,
+  className,
+  children,
+}: {
+  heading: string;
+  onClose: () => void;
+  /** Added to `eg-dialog`, for a dialog laid out its own way. */
+  className?: string | undefined;
+  children: ReactNode;
+}) {
   const dialog = useRef<HTMLDialogElement>(null);
   const headingId = useId();
 
@@ -24,7 +35,7 @@ export function Dialog({ heading, onClose, children }: { heading: string; onClos
   return (
     <dialog
       ref={dialog}
-      className="eg-dialog"
+      className={className ? `eg-dialog ${className}` : 'eg-dialog'}
       aria-labelledby={headingId}
       onCancel={(event) => {
         event.preventDefault();
