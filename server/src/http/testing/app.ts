@@ -1,10 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import type { ScryptParams } from '../../auth/pin-hash.js';
-import { openDatabase } from '../../db/database.js';
+import { DATABASE_FILE, openDatabase } from '../../db/database.js';
 import { migrateDataDirectory } from '../../db/migrate.js';
 import type { Logger } from '../../log/logger.js';
 import { MIGRATIONS_DIR } from '../../paths.js';
@@ -34,6 +34,21 @@ export interface TestData {
   remove(): void;
 }
 
+// The database every test data directory starts from: migrated once per test process by the real migrations,
+// then copied, as `src/db/schema.test.ts` does. Migrating each directory afresh costs a committed transaction
+// per migration, about 0.3 s a directory here and far more on the Windows runner, where hundreds of them in
+// parallel ran setup hooks past their limit (TBL-06, PR #31). The copy is still a real SQLite file at the
+// latest version, which `migrateDataDirectory` checks again below and finds nothing to apply.
+let template: string | undefined;
+function migratedTemplate(): string {
+  if (template !== undefined) return template;
+  const root = mkdtempSync(path.join(os.tmpdir(), 'emberglass-template-'));
+  migrateDataDirectory(path.join(root, 'data'), MIGRATIONS_DIR);
+  process.once('exit', () => rmSync(root, { recursive: true, force: true }));
+  template = path.join(root, 'data', DATABASE_FILE);
+  return template;
+}
+
 export function createTestData(prefix = 'emberglass-app-'): TestData {
   const root = mkdtempSync(path.join(os.tmpdir(), prefix));
   const dataDir = path.join(root, 'data');
@@ -41,6 +56,8 @@ export function createTestData(prefix = 'emberglass-app-'): TestData {
   mkdirSync(path.join(dist, 'assets'), { recursive: true });
   writeFileSync(path.join(dist, 'index.html'), INDEX);
   writeFileSync(path.join(dist, 'assets', 'app.js'), 'export {};');
+  mkdirSync(dataDir);
+  copyFileSync(migratedTemplate(), path.join(dataDir, DATABASE_FILE));
   migrateDataDirectory(dataDir, MIGRATIONS_DIR);
   const opened: Database.Database[] = [];
   const reopen = (): Database.Database => {

@@ -179,6 +179,7 @@ Affected specs: …
 - D-160 — TBL-06: an initiative tracker, one encounter per scene stored in SQLite, with a DM panel and a TV strip — adr
 - D-161 — TBL-06: how the encounter is stored, decided, projected for players and shown — implementation
 - D-162 — TBL-06: review fixes (the turn passed on removal, no Next named for an unseen turn, focus and strip markup) — implementation
+- D-163 — TBL-06: test data directories start from a copy of a database migrated once per test process — implementation
 
 ## D-001 (2026-09-23) — Repository documentation regime
 Type: implementation
@@ -1329,3 +1330,10 @@ Decision: Refines D-161 after the security and isolation review (prompt 2), whic
 Why: The owner's rule passes over an empty Enemies entry that never had a member (Q-106), whatever moved the turn there; and what players receive must follow from what they see (`04` §4), which an unseen turn's Next did not.
 Alternatives: Keeping the turn's index after a removal (rejected: it could land on an entry that must be passed over); an expected-turn guard on Next and Previous (rejected for now: no other live command carries one, and Previous undoes a double press); undoing `enemies_seen` with the reveal (rejected: the flag records the encounter's history, not a token's state).
 Affected specs: `04` §4, `04` §14, `08` §12
+
+## D-163 (2026-10-01) — TBL-06: test data directories start from a copy of a database migrated once per test process
+Type: implementation
+Decision: `createTestData` (`server/src/http/testing/app.ts`) migrates one template database per test process with the real migrations and copies it into each test's data directory, then runs `migrateDataDirectory` on the copy, which finds nothing to apply; as `src/db/schema.test.ts` already does for its own fixture. Locally the server suite drops from 165 s to 111 s with the same 773 tests.
+Why: On PR #31 `test · windows` failed three times on setup hooks and tests timing out at 60 s in files TBL-06 does not touch (ruler, camera, live, tokens, assets), the job taking 12 and 16.5 minutes against 8 on `main`. Each test data directory was migrated afresh, one committed transaction per migration, about 0.3 s a directory here and far more on the Windows runner; migration 0008 and TBL-06's new live tests added to every one of hundreds of such setups. Removing the cost at its cause is what the CI flake rule asks, not a longer timeout.
+Alternatives: Raising the hook and test timeouts (rejected: hides the cost); fewer Vitest workers on Windows (rejected: slower everywhere for the same work); sharing one harness across the encounter tests alone (rejected: removes a fraction of the cost and weakens isolation).
+Affected specs: `10` §2
