@@ -325,6 +325,9 @@ export function ScenePanel({
     toAnnounce.current = undefined;
   }
   const [selectedToken, setSelectedToken] = useState<string>();
+  // Whether the selected token's popover is open: a click on the token, a choice in the list or a token
+  // just placed opens it; a drag of the token or a pan closes it, and the token stays selected (D-156).
+  const [popoverOpen, setPopoverOpen] = useState(false);
   // Choosing a token gives the arrow keys back to it and ends measuring.
   const selectToken = (id: string | undefined) => {
     setSelectedToken(id);
@@ -581,6 +584,7 @@ export function ScenePanel({
     refocus.current = 'canvas';
     if (!token) return;
     setSelectedToken(token.id);
+    setPopoverOpen(true);
     announce(t('tokens.placed', { label: token.label }));
   }
 
@@ -957,6 +961,11 @@ export function ScenePanel({
         selectedId: selectedToken,
         onSelect: selectToken,
         onDeselect: () => setSelectedToken(undefined),
+        onOpenPopover: (id) => {
+          selectToken(id);
+          setPopoverOpen(true);
+        },
+        onClosePopover: () => setPopoverOpen(false),
         onMove: (id, at) => {
           const token = tokens?.find((each) => each.id === id);
           if (token) void changeToken(token, at, moved);
@@ -1016,6 +1025,7 @@ export function ScenePanel({
     const placed = isLive ? await placeLive(token.asset_id, at) : await sceneTokens.place(token.asset_id, at);
     if (!placed) return;
     setSelectedToken(placed.id);
+    setPopoverOpen(true);
     announce(t('tokens.placed', { label: placed.label }));
     onTokensChanged?.();
   }
@@ -1041,7 +1051,7 @@ export function ScenePanel({
     </>
   ) : null;
   const popover =
-    tokens && !placingAsset
+    tokens && !placingAsset && popoverOpen
       ? (anchor: Parameters<NonNullable<Parameters<typeof MapCanvas>[0]['popover']>>[0]) =>
           selected ? (
             <TokenPopover
@@ -1067,6 +1077,7 @@ export function ScenePanel({
       selectedId={selected?.id}
       onSelect={(token) => {
         selectToken(token.id);
+        setPopoverOpen(true);
         canvas.current?.centreOn(token.id);
       }}
       onToggleHidden={toggleHidden}

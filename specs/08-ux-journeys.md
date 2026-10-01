@@ -72,6 +72,7 @@ The DM view MUST provide, in the palette and typography of the redesign (`01` §
 - on the canvas a tool rail (Select V, Ruler M, Ping P, Fog brush F, Add token T, Undo, Redo), the grid and diagonal rule in use bottom left, the DM's zoom bottom right, and a shortcut bar below;
 - the frame of what the TV shows in the accent colour, the map outside it dimmed (§2);
 - a popover on the selected token with its name and visibility, Hide or Reveal (H), Rename, and a menu with Delete, Duplicate and stacking;
+- the popover opened by a click on the token, by its row in the right panel, or by placing or duplicating it; a press that moves about 4 px is a drag, which closes the popover, leaving it closed after the drop with the token still selected, and Escape, a click on empty map and the start of a pan close it too; [Q-102]
 - in the right panel the live scene's tokens grouped by category, each with its visibility toggle; a row selects and centres its token;
 - tokens drawn as circles ringed by category, a hidden one with a dashed ring, a lighter fill, a crossed-eye badge and an italic label, so it is never taken for a visible one (§9);
 - no shortcut acting while a text field has focus.

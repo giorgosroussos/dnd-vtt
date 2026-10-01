@@ -301,6 +301,55 @@ describe('changing tokens (specs/04-live-sync.md §2, D-100)', () => {
     expect(stage().findOne<Konva.Group>(`#token-${placed.id}`)!.x()).toBe(15 + 6 * 50);
   });
 
+  it('closes the popover when the token is dragged or the view panned, keeps the token selected, and a click opens it again (D-156)', async () => {
+    const placed = server.addToken(scene.id, goblin, { x: 1, y: 1 });
+    const view = await open();
+    const group = () => stage().findOne<Konva.Group>(`#token-${placed.id}`)!;
+    const fire = (type: string, x: number, y: number) =>
+      act(() => {
+        group().fire(type, { target: group(), evt: new MouseEvent(type, { clientX: x, clientY: y }) }, true);
+      });
+    // A click without movement selects the token and opens its popover.
+    fire('pointerdown', 200, 200);
+    fire('pointerup', 201, 200);
+    await settle();
+    expect(selectedTokenId(view)).toBe(placed.id);
+    expect(popover(view)).not.toBeNull();
+    // A press on the open token that becomes a drag closes it at once, and the drop leaves it closed.
+    fire('pointerdown', 200, 200);
+    act(() => {
+      group().fire('dragstart', { target: group(), evt: new MouseEvent('mousedown') });
+    });
+    await settle();
+    expect(popover(view)).toBeNull();
+    act(() => {
+      group().position({ x: 15 + 4 * 50, y: 125 + 3 * 50 });
+      group().fire('dragend', { target: group(), evt: new MouseEvent('mouseup') });
+    });
+    await settle();
+    expect(selectedTokenId(view)).toBe(placed.id);
+    expect(popover(view)).toBeNull();
+    // Clicking the token again opens it.
+    fire('pointerdown', 300, 300);
+    fire('pointerup', 300, 300);
+    await settle();
+    expect(popover(view)).not.toBeNull();
+    // A pan closes it too, and it stays closed after.
+    act(() => {
+      stage().fire('dragstart', { target: stage(), evt: new MouseEvent('mousedown') });
+      stage().fire('dragend', { target: stage(), evt: new MouseEvent('mouseup') });
+    });
+    await settle();
+    expect(popover(view)).toBeNull();
+    expect(selectedTokenId(view)).toBe(placed.id);
+    // Choosing the token in the list opens it, and Escape closes it with the selection.
+    await selectTokenRow(view, placed.label);
+    expect(popover(view)).not.toBeNull();
+    press(viewport(view), 'Escape');
+    await settle();
+    expect(popover(view)).toBeNull();
+  });
+
   it("shows why the live scene's tokens are refused and draws what the server has", async () => {
     server.addToken(scene.id, goblin, { x: 1, y: 1 });
     server.liveSceneId = scene.id;

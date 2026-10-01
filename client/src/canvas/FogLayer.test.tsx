@@ -201,6 +201,8 @@ describe('the fog brush (specs/04-live-sync.md §13)', () => {
         onSelect: vi.fn(),
         onDeselect: vi.fn(),
         onMove: vi.fn(),
+        onOpenPopover: vi.fn(),
+        onClosePopover: vi.fn(),
         onDelete: vi.fn(),
       },
       fog: { fog, tool },

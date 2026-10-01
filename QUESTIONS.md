@@ -124,6 +124,7 @@ Every card opens `Blocking` and is answered before the specification proceeds. `
 - Q-099 — Ping, condition markers and manual fog after the MVP — scope — Resolved
 - Q-100 — The redesigned DM view and idle screen against 08 — ux — Resolved
 - Q-101 — Painted fog in place of fog regions — scope — Resolved
+- Q-102 — The token popover while the DM drags a token — ux — Resolved
 
 ## Blocking
 
@@ -1281,3 +1282,14 @@ None.
 - Recommendation: A, with preset brush sizes (half, one and three squares) cycled by [ and ], and the stored fogged regions converted into the mask, because one mask is the simplest model that answers the request and converting keeps what the DM already drew.
 - Blocks: specification
 - Answer: A, with the brush radius on a slider from a quarter square to five in steps of a quarter, and the stored regions dropped rather than converted (2026-10-01)
+
+### Q-102 — The token popover while the DM drags a token
+- Surface: ux
+- Source: The owner, in chat on 2026-10-01: «selecting a token opens the details popover. If the DM then grabs the token to move it, the popover stays open, blocks the map and gets in the way of free movement.» and «Distinguish a click from a drag with a small movement threshold (about 4 px) … After the drop, the token stays selected but the popover stays closed. Clicking the token again reopens it … Also close the popover on Escape, on a click on empty map, and when panning starts (Space + drag).» `08` §11 shows a popover on the selected token whenever one is selected (UIX-01, D-140).
+- Question: When is the selected token's popover open: whenever a token is selected, or only after a click on it, closing on a drag of the token or a pan?
+- Options:
+  - A) Opened by a click on the token (a press released within about 4 px), by choosing its row in the list, or by placing or duplicating it; a press that moves past the threshold is a drag, which closes the popover at once and leaves it closed after the drop with the token still selected; Escape, a click on empty map and the start of a pan close it too → effect on ux: the popover no longer follows the selection; a click on the selected token reopens it.
+  - B) Keep it open while the token is selected, moved out of the way during a drag and back after → effect on ux: the popover still covers the map at the drop.
+- Recommendation: A, because it is what the owner described and it keeps the map free while a token moves.
+- Blocks: specification
+- Answer: A (2026-10-01; recommendation accepted)

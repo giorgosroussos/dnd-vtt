@@ -53,3 +53,4 @@ Never edit or remove a line here. The point of the file is that it cannot be tid
 - unlock 2026-10-01T09:58:42Z path="specs/10-testing-acceptance.md" by="Giorgos Roussos" reason="Q-101 answered by the owner 2026-10-01: painted fog replaces fog regions (D-154)"
 - unlock 2026-10-01T09:58:42Z path="specs/11-traceability.md" by="Giorgos Roussos" reason="Q-101 answered by the owner 2026-10-01: painted fog replaces fog regions (D-154)"
 - unlock 2026-10-01T09:58:42Z path="specs/13-implementation-plan.md" by="Giorgos Roussos" reason="Q-101 answered by the owner 2026-10-01: painted fog replaces fog regions (D-154)"
+- unlock 2026-10-01T12:13:57Z path="specs/08-ux-journeys.md" by="Giorgos Roussos" reason="Q-102 answered by the owner 2026-10-01: the token popover opens on a click and closes on a drag or a pan (D-156)"

@@ -5,7 +5,9 @@ import { imageFileUrl, type AssetCategory, type TokenMarker } from '@emberglass/
 import { CANVAS_FONT, THEME } from '../ui/theme.js';
 import {
   dropPosition,
+  DRAG_THRESHOLD_PX,
   footprint,
+  movedPast,
   stacked,
   toGrid,
   toWorld,
@@ -21,8 +23,9 @@ import {
 // coloured by category (player character gold, monster red, anything else a neutral) and the label below
 // it on a dark pill, as the TV shows it too (Q-032). In the DM mode a hidden token can never be taken for a
 // visible one: a dashed blue ring, the circle at 60% opacity over a dark disc, a crossed-eye badge and an
-// italic blue label. A token is selected by a click and moved by dragging it, snapping as it is dropped
-// unless Alt is held. The player mode draws only visible tokens, never a hidden one, and listens to
+// italic blue label. A token is selected when pressed and moved by dragging it, snapping as it is dropped
+// unless Alt is held. A press released within DRAG_THRESHOLD_PX of where it went down is a click and opens
+// the token's popover; past it the press is a drag, which closes the popover (D-156). The player mode draws only visible tokens, never a hidden one, and listens to
 // nothing; what reaches a player view is filtered on the server (LIV-02). Labels and badges keep their
 // size on screen at every zoom, scaled up by `labelScale` on the TV to be read across a room.
 //
@@ -150,6 +153,10 @@ export interface TokenControls {
   onSelect: (id: string) => void;
   /** A token dropped at a new position, in grid units, snapped unless Alt was held. */
   onMove: (id: string, at: Point) => void;
+  /** A token clicked without dragging: its popover opens. */
+  onOpenPopover: (id: string) => void;
+  /** A token dragged, or another token pressed: the popover closes and stays closed after the drop. */
+  onClosePopover: () => void;
 }
 
 /** The bloodied ring: still in the DM view, pulsing on the TV unless reduced motion is asked for. */
@@ -244,6 +251,8 @@ export function TokenLayer({
   const fontsLoaded = useFontsLoaded();
   const inverse = 1 / scale;
   const onScreen = inverse * labelScale;
+  // Where the press on a token went down, in screen pixels, to tell a click from a drag on release.
+  const pressed = useRef<{ id: string; at: Point }>(undefined);
 
   function dropped(token: CanvasToken, event: Konva.KonvaEventObject<DragEvent>) {
     const node = event.target;
@@ -282,11 +291,26 @@ export function TokenLayer({
             x={at.x}
             y={at.y}
             draggable={controls !== undefined}
+            dragDistance={DRAG_THRESHOLD_PX}
             onPointerDown={(event) => {
               event.cancelBubble = true;
+              pressed.current = { id: token.id, at: { x: event.evt.clientX, y: event.evt.clientY } };
+              // Pressing another token never carries the open popover over to it: only a click opens one.
+              if (controls && controls.selectedId !== token.id) controls.onClosePopover();
               controls?.onSelect(token.id);
             }}
-            onDragStart={() => controls?.onSelect(token.id)}
+            onPointerUp={(event) => {
+              const press = pressed.current;
+              pressed.current = undefined;
+              if (!controls || press?.id !== token.id) return;
+              if (!movedPast(press.at, { x: event.evt.clientX, y: event.evt.clientY }))
+                controls.onOpenPopover(token.id);
+            }}
+            onDragStart={() => {
+              pressed.current = undefined;
+              controls?.onClosePopover();
+              controls?.onSelect(token.id);
+            }}
             onDragEnd={(event) => dropped(token, event)}
           >
             {selected ? (

@@ -172,6 +172,7 @@ Affected specs: …
 - D-153 — REL-03 review fixes: a pause's refusal that keeps Settings on a laptop screen, a rail that shows it scrolls, a seed command that hides the PIN, and the tests the review found missing — implementation
 - D-154 — TBL-04: painted fog replaces fog regions, the region table dropped — adr
 - D-155 — TBL-04: how the painted fog is stored, painted, filtered, projected and drawn — implementation
+- D-156 — The token popover opens on a click and closes on a drag or a pan (Q-102) — spec-amendment
 
 ## D-001 (2026-09-23) — Repository documentation regime
 Type: implementation
@@ -1271,3 +1272,10 @@ Decision: Supersedes D-144, and the fog parts of D-145 (the revealed region's do
 Why: D-154 and Q-101 as answered by the owner. Run-length rows keep a typical painted map to a few KB, a filled map to one run a row, and a point test to a binary search; a capsule per segment is the exact shape of a round brush moved along a line; one rule in shared code is still what the server filters by and the DM view counts by, so the hidden-information gate stays meaningful.
 Alternatives: A bitmap per scene (rejected: its size follows the map, not the fog, and a 2000-square map would be megabytes); storing strokes and replaying them (rejected in D-154); sending only the cells a stroke changed (rejected: a whole mask keeps every view exact without ordering rules, and stays small); a canvas raster drawn at one pixel per cell and scaled (rejected: a large map's canvas would be too big); erasing with the same stroke leaving no slivers (not possible when the points differ; the DM erases with a wider brush).
 Affected specs: `03` §1, `03` §7, `04` §2, `04` §3, `04` §4, `04` §8, `04` §13, `07` §5, `08` §11, `10` §3
+
+## D-156 (2026-10-01) — The token popover opens on a click and closes on a drag or a pan (Q-102)
+Type: spec-amendment
+Decision: Q-102, answered A by the owner: the selected token's popover is open only after a click on the token, a choice of its row in the list, or its placement or duplication; it no longer follows the selection. A press on a token that the pointer leaves by 4 px or more on either axis (the larger of the two distances, as Konva's `dragDistance` measures it) is a drag: no drag starts below it, and the drag's start closes the popover, which stays closed after the drop while the token stays selected; a release within it is a click and opens the popover. Pressing another token closes the open popover before selecting it, so a popover never carries over to the token pressed. A pan, whether by Space and a drag or by dragging the empty map, closes it at its start, and it stays closed when the pan ends; Escape and a click on empty map still let the token go and the popover with it. `08` §11's popover bullet is amended to say so. The threshold is `DRAG_THRESHOLD_PX` and `movedPast` in `client/src/canvas/tokens.ts`; the open state is the scene panel's, beside the selection.
+Why: The owner reported that the popover blocks the map while a token is dragged and specified the behaviour; 4 px is the owner's figure and the usual click slop for a mouse or a pen, small enough that a deliberate drag is never read as a click.
+Alternatives: Hiding the popover during the drag and showing it again at the drop (rejected: the owner wants it closed after the drop); a time threshold instead of a distance (rejected: a slow click is still a click); judging the distance by Euclidean length (rejected: Konva starts a drag by the larger axis distance, and the two rules must agree so that a press never both drags and opens).
+Affected specs: `08` §11

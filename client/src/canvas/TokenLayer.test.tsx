@@ -93,6 +93,8 @@ function controls(fields: Partial<CanvasTokenControls> = {}): CanvasTokenControl
     onDeselect: vi.fn(),
     onMove: vi.fn(),
     onDelete: vi.fn(),
+    onOpenPopover: vi.fn(),
+    onClosePopover: vi.fn(),
     ...fields,
   };
 }
@@ -212,6 +214,60 @@ describe('moving tokens in the DM mode (specs/06-grid-and-measurement.md §4, D-
       group.fire('pointerdown', { target: group, evt: new MouseEvent('pointerdown') }, true);
     });
     expect(onSelect).toHaveBeenCalledWith('g1');
+  });
+
+  // The click-vs-drag threshold (D-156): a press released within 4 px opens the popover, one that moves
+  // past it is a drag, which closes the popover and never opens it.
+  describe('a click opens the popover, a drag closes it', () => {
+    const press = (stage: Konva.Stage, id: string, type: 'pointerdown' | 'pointerup', x: number, y: number) => {
+      const group = groupOf(stage, id)!;
+      act(() => {
+        group.fire(type, { target: group, evt: new MouseEvent(type, { clientX: x, clientY: y }) }, true);
+      });
+    };
+
+    it('starts no drag before the pointer has moved 4 px', async () => {
+      const { stage } = await draw({ grid: GRID, map: MAP, mode: 'dm', tokens: [GOBLIN], tokenControls: controls() });
+      expect(groupOf(stage, 'g1')!.dragDistance()).toBe(4);
+    });
+
+    it('opens the popover on a release within 3 px of the press, on either axis', async () => {
+      const tokenControls = controls();
+      const { stage } = await draw({ grid: GRID, map: MAP, mode: 'dm', tokens: [GOBLIN], tokenControls });
+      press(stage, 'g1', 'pointerdown', 100, 100);
+      press(stage, 'g1', 'pointerup', 103, 97);
+      expect(tokenControls.onSelect).toHaveBeenCalledWith('g1');
+      expect(tokenControls.onOpenPopover).toHaveBeenCalledWith('g1');
+    });
+
+    it('does not open the popover on a release 4 px or more from the press', async () => {
+      const tokenControls = controls();
+      const { stage } = await draw({ grid: GRID, map: MAP, mode: 'dm', tokens: [GOBLIN], tokenControls });
+      press(stage, 'g1', 'pointerdown', 100, 100);
+      press(stage, 'g1', 'pointerup', 100, 104);
+      expect(tokenControls.onOpenPopover).not.toHaveBeenCalled();
+    });
+
+    it('closes the popover when a drag starts, keeps the token selected and opens nothing on the drop', async () => {
+      const tokenControls = controls({ selectedId: 'g1' });
+      const { stage } = await draw({ grid: GRID, map: MAP, mode: 'dm', tokens: [GOBLIN], tokenControls });
+      press(stage, 'g1', 'pointerdown', 100, 100);
+      dragTo(stage, 'g1', 15 + 4 * 50, 125 + 3 * 50);
+      press(stage, 'g1', 'pointerup', 100, 101);
+      expect(tokenControls.onClosePopover).toHaveBeenCalled();
+      expect(tokenControls.onSelect).toHaveBeenLastCalledWith('g1');
+      expect(tokenControls.onDeselect).not.toHaveBeenCalled();
+      expect(tokenControls.onOpenPopover).not.toHaveBeenCalled();
+    });
+
+    it('closes the popover when another token is pressed, and keeps it when the selected one is', async () => {
+      const tokenControls = controls({ selectedId: 'g1' });
+      const { stage } = await draw({ grid: GRID, map: MAP, mode: 'dm', tokens: [GOBLIN, HIDDEN], tokenControls });
+      press(stage, 'g1', 'pointerdown', 100, 100);
+      expect(tokenControls.onClosePopover).not.toHaveBeenCalled();
+      press(stage, 'g2', 'pointerdown', 300, 100);
+      expect(tokenControls.onClosePopover).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('snaps a dropped token to whole squares, and places it where it snapped at once', async () => {

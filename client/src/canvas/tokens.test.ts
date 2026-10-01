@@ -6,6 +6,7 @@ import {
   dropPosition,
   footprint,
   gridFrame,
+  movedPast,
   nudge,
   placePosition,
   snapStep,
@@ -127,5 +128,16 @@ describe('keeping a placement on the map (review)', () => {
       x: 37,
       y: 0,
     });
+  });
+});
+
+describe('telling a click on a token from a drag (D-156)', () => {
+  it('counts a move under 4 px on both axes as a click, and 4 px or more on either as a drag', () => {
+    const from = { x: 50, y: 50 };
+    expect(movedPast(from, from)).toBe(false);
+    expect(movedPast(from, { x: 53, y: 47 })).toBe(false);
+    expect(movedPast(from, { x: 53.9, y: 53.9 })).toBe(false);
+    expect(movedPast(from, { x: 54, y: 50 })).toBe(true);
+    expect(movedPast(from, { x: 50, y: 46 })).toBe(true);
   });
 });

@@ -98,7 +98,8 @@ import './canvas.css';
 //
 // The DM mode's chrome (UIX-01): a floating tool rail (Select, Ruler, Ping, Fog regions, Add token,
 // Undo, Redo), the grid and diagonal rule bottom left, and the DM's own zoom bottom right. Space held
-// down makes a drag pan the view, whatever the tool. A selected token's popover is placed beside it.
+// down makes a drag pan the view, whatever the tool. A selected token's popover is placed beside it while
+// it is open: a click on the token opens it, and a drag of the token or a pan closes it (D-156).
 //
 // The ruler (LIV-07, specs/06-grid-and-measurement.md §5, specs/04-live-sync.md §11, Q-027, Q-048): both
 // modes draw the measurement they are given, a line between two square centres and its distance beside
@@ -1040,8 +1041,14 @@ export function MapCanvas({
     if (at && frame && pingTool) pingTool.onPing(toGrid(frame, at));
   }
 
+  // A pan, by Space or by dragging the empty map, closes the selected token's popover, and it stays closed
+  // when the pan ends (D-156). A token or the TV frame being dragged bubbles up here too, and is not a pan.
+  function onPanStart(event: Konva.KonvaEventObject<DragEvent>) {
+    if (event.target === event.target.getStage()) tokenControls?.onClosePopover();
+  }
+
   const panHandlers = { onWheel, onDragMove: onDrag, onDragEnd: onDrag };
-  const handlers = !dm
+  const toolHandlers = !dm
     ? {}
     : panning
       ? panHandlers
@@ -1065,6 +1072,7 @@ export function MapCanvas({
                   onMouseLeave: () => moveBrush(undefined),
                 }
               : { onWheel, onDragMove: onDrag, onDragEnd: onDrag, onClick: onStageClick };
+  const handlers = dm ? { ...toolHandlers, onDragStart: onPanStart } : toolHandlers;
 
   const centre = { x: viewport.width / 2, y: viewport.height / 2 };
   const stage = (
