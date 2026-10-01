@@ -2,6 +2,7 @@ import {
   FIT_CAMERA,
   isFogMask,
   isMeasurement,
+  isPlayerEncounter,
   type EventEnvelope,
   type Measurement,
   type PlayerCameraPayload,
@@ -12,6 +13,7 @@ import {
   type PlayerTokenUpdatedPayload,
   type FogMask,
   type FogUpdatedPayload,
+  type PlayerEncounterPayload,
   type RulerShownPayload,
   type TokenRemovedPayload,
 } from '@emberglass/shared';
@@ -26,7 +28,8 @@ import {
 // §9); a snapshot brings the current one, fitted to the map after an activation. `ruler.shown` and
 // `ruler.cleared` (LIV-07, §11) replace and remove the measurement drawn; a snapshot brings the one
 // shown, if any. `fog.updated` (TBL-04) replaces the painted fog drawn over the map; a snapshot brings
-// it. Only the player fields are kept, whatever an event carried.
+// it. `encounter.updated` (TBL-06) replaces the initiative strip; a snapshot brings it. Only the player fields
+// are kept, whatever an event carried.
 
 /** The live scene the player view draws, or null for the idle screen. */
 export type PlayerScene = PlayerLiveScene | null;
@@ -66,7 +69,7 @@ const masked = (fog: unknown): FogMask | undefined =>
 
 export function fromSnapshot(snapshot: PlayerSnapshot): PlayerScene {
   if (snapshot.scene === null) return null;
-  const { name, map, grid, tokens, camera, ruler, fog } = snapshot.scene;
+  const { name, map, grid, tokens, camera, ruler, fog, encounter } = snapshot.scene;
   return {
     name,
     map,
@@ -76,6 +79,7 @@ export function fromSnapshot(snapshot: PlayerSnapshot): PlayerScene {
     ruler: ruler ? measurement(ruler) : null,
     // A snapshot whose fog is malformed is drawn fogged nowhere rather than not at all.
     fog: masked(fog) ?? [],
+    encounter: isPlayerEncounter(encounter) ? structuredClone(encounter) : null,
   };
 }
 
@@ -120,6 +124,12 @@ export function applyPlayerEvent(scene: PlayerScene, event: EventEnvelope): Play
       const fog = masked((event.payload as unknown as Partial<FogUpdatedPayload>).fog);
       // A malformed event is skipped: the fog stays as it was rather than lifting.
       return fog ? { ...scene, fog } : scene;
+    }
+    case 'encounter.updated': {
+      const { encounter } = event.payload as unknown as Partial<PlayerEncounterPayload>;
+      // A malformed event is skipped: the strip stays as it was.
+      if (encounter !== null && !isPlayerEncounter(encounter)) return scene;
+      return { ...scene, encounter: encounter === null ? null : structuredClone(encounter) };
     }
     default:
       return scene;

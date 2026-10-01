@@ -15,7 +15,7 @@ import { applyPlayerEvent, startLive, type LiveHarness, type PlayerState } from 
 // a hidden token's included (LIV-05), activating another scene, reconnecting, since LIV-04 editing the
 // live scene's setup and assets over REST and deleting the live scene, since LIV-06 steering the
 // TV camera and screens reporting their viewports, and since LIV-07 measuring with the ruler on the live
-// scene, and on a scene that is not live, which reaches players not at all, since TBL-01 pinging both, since TBL-02 marking a hidden token and a visible one, and since TBL-04 fog
+// scene, and on a scene that is not live, which reaches players not at all, since TBL-01 pinging both, since TBL-02 marking a hidden token and a visible one, since TBL-06 an encounter run with hidden enemies about, and since TBL-04 fog
 // painted, erased, painted again, undone and redone, and the whole map fogged and cleared, with tokens
 // placed, revealed, moved and deleted under it. It asserts that no hidden
 // token's id, asset, image or name appears, and that the count of hidden tokens cannot be learnt
@@ -354,6 +354,64 @@ async function record(hidden: boolean): Promise<Recording> {
     await send('fog.fill', { scene_id: sceneA.id, fogged: false });
   });
   await step('paint the vault once more', () => fog(vault));
+  // The initiative tracker (TBL-06, specs/04-live-sync.md §4, §14): players see the round, the player
+  // characters they see and one Enemies entry, whose turn it is and which is next; never a number, a member
+  // or a count. A hidden enemy added, moved, marked Dead or deleted mid-combat changes nothing they receive,
+  // and the Enemies entry takes or skips its turn by what they can see alone.
+  const wren = await live.asset('Wren', { category: 'pc', default_hidden: false });
+  const ghoul = await live.asset('Ghoul', { category: 'monster', default_hidden: true });
+  secrets.push(wren.id, ghoul.id);
+  let wrenToken = '';
+  let ghoulToken = '';
+  await step('place a player character and a hidden ghoul', async () => {
+    wrenToken = tokenOf(await send('token.add', { scene_id: sceneA.id, asset_id: wren.id, x: 2, y: 7 })).id;
+    ghoulToken = tokenOf(await send('token.add', { scene_id: sceneA.id, asset_id: ghoul.id, x: 5, y: 7 })).id;
+    shownFrom.push({ id: ghoulToken, step: 'reveal the ghoul mid-fight' });
+  });
+  const encounterEntries = () =>
+    JSON.parse(
+      live.data.db.prepare('SELECT entries FROM encounter WHERE scene_id = ?').pluck().get(sceneA.id) as string,
+    ) as { id: string; kind: string; token_id?: string }[];
+  await step('start combat', () => send('encounter.start', { scene_id: sceneA.id }));
+  await step('set Wren’s initiative', () =>
+    send('encounter.setInitiative', {
+      scene_id: sceneA.id,
+      entry_id: encounterEntries().find((entry) => entry.token_id === wrenToken)!.id,
+      initiative: 17,
+    }),
+  );
+  await step(
+    'add a hidden lurker mid-fight',
+    async () =>
+      secrets.push(tokenOf(await send('token.add', { scene_id: sceneA.id, asset_id: lurker!.id, x: 6, y: 8 })).id),
+    true,
+  );
+  await step('pass several turns', async () => {
+    for (let turn = 0; turn < 4; turn += 1) await send('encounter.next', { scene_id: sceneA.id });
+  });
+  await step('undo a turn', undo);
+  await step(
+    'mark the hidden lurker dead and move it',
+    async () => {
+      await send('token.setMarkers', { token_id: secrets.at(-1)!, markers: [{ id: 'dead' }] });
+      await send('token.move', { token_id: secrets.at(-1)!, x: 7, y: 8 });
+    },
+    true,
+  );
+  await step('reveal the ghoul mid-fight', () => send('token.setVisibility', { token_id: ghoulToken, hidden: false }));
+  await step('pass a turn with the ghoul up', () => send('encounter.next', { scene_id: sceneA.id }));
+  await step('mark the ghoul dead and pass turns until the Enemies', async () => {
+    await send('token.setMarkers', { token_id: ghoulToken, markers: [{ id: 'dead' }] });
+    for (let turn = 0; turn < 3; turn += 1) await send('encounter.next', { scene_id: sceneA.id });
+  });
+  await step('hide Wren', () => send('token.setVisibility', { token_id: wrenToken, hidden: true }));
+  await step('reveal Wren', () => send('token.setVisibility', { token_id: wrenToken, hidden: false }));
+  await step('delete the hidden lurker', () => send('token.delete', { token_id: secrets.at(-1)! }), true);
+  await step('end combat', () => send('encounter.end', { scene_id: sceneA.id }));
+  await step('undo the end of combat and end it again', async () => {
+    await undo();
+    await send('encounter.end', { scene_id: sceneA.id });
+  });
   // Setup edits and asset changes over REST while A is live (LIV-04, specs/04-live-sync.md §10): a
   // visible change reaches players as a snapshot; one that touches only hidden tokens reaches them
   // not at all, so the recording stays that of the session without them.
@@ -481,6 +539,18 @@ describe('what a player view receives across a live session (specs/10-testing-ac
       'scene.snapshot',
     ]);
     expect(JSON.stringify(withHidden.steps.find((each) => each.step === 'reconnected'))).toContain('"ruler":{"from"');
+    // The encounter's steps (TBL-06): what changes the strip reaches players, a hidden enemy nothing.
+    expect(eventsOf('start combat')).toEqual(['encounter.updated', 'scene.snapshot']);
+    expect(eventsOf('add a hidden lurker mid-fight')).toEqual(['scene.snapshot']);
+    expect(eventsOf('mark the hidden lurker dead and move it')).toEqual(['scene.snapshot']);
+    expect(eventsOf('delete the hidden lurker')).toEqual(['scene.snapshot']);
+    expect(eventsOf('reveal the ghoul mid-fight')[0]).toBe('token.added');
+    expect(eventsOf('hide Wren')).toEqual(['token.removed', 'encounter.updated', 'scene.snapshot']);
+    expect(eventsOf('end combat')).toEqual(['encounter.updated', 'scene.snapshot']);
+    const combat = during('start combat', 'end combat');
+    for (const forbidden of ['"initiative"', 'enemies_seen', '"members"', 'Lurker']) {
+      expect(combat, forbidden).not.toContain(forbidden);
+    }
 
     // The count: the same session without a single hidden-only step looks the same to players,
     // messages, versions and images alike.

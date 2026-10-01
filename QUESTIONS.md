@@ -126,6 +126,9 @@ Every card opens `Blocking` and is answered before the specification proceeds. `
 - Q-101 — Painted fog in place of fog regions — scope — Resolved
 - Q-102 — The token popover while the DM drags a token — ux — Resolved
 - Q-103 — Eighteen condition markers with their rule text — scope — Resolved
+- Q-104 — An initiative tracker before the release — scope — Resolved
+- Q-105 — Where an encounter is kept — data — Resolved
+- Q-106 — An empty Enemies entry on Next — ux — Resolved
 
 ## Blocking
 
@@ -1303,5 +1306,39 @@ None.
   - A) As the owner wrote it: eighteen markers, six pinned and twelve behind a searchable More… list, stored as objects with Exhaustion's level 1–6, the four stored markers migrated; the conditions' SRD 5.1 text (CC BY 4.0) and game-icons.net icons (CC BY 3.0) bundled, credited in an About & credits dialog; no implied condition applied; custom markers and durations left out → effect on scope: the marker set, its storage and contract widen; SRD content enters before Phase 2, for these rule texts only; still no rules in code.
   - B) Keep the four markers until Phase 2 → effect on scope: no change; the request becomes a Phase 2 item.
 - Recommendation: A, because the owner asked for it in detail and approved overriding the register.
+- Blocks: specification
+- Answer: A (2026-10-01; recommendation accepted)
+
+### Q-104 — An initiative tracker before the release
+- Surface: scope
+- Source: The owner, in chat on 2026-10-01: «Initiative tracker (DM side + TV strip) … Do not add any dice rolling. The table rolls physical dice, and the app only records the order.»; one entry per player character plus «one DM entry» labelled «Enemies» whose members (visible monster and npc tokens not marked Dead) are «computed live, never stored»; eight server commands `encounter.start`, `.end`, `.reorder`, `.setInitiative`, `.next`, `.previous`, `.addEntry`, `.removeEntry`, «each one … undoable, synced, and included in the snapshot on reconnect»; an Initiative panel in the DM view and «a slim strip along the top edge» of the TV that must «never reveal how many enemies there are or which ones»; «Not in this task: Dice, HP tracking, condition durations, per-monster initiative.» Asked whether this overrides the register, the owner chose «Approve as written». `01` §4 lists an initiative tracker in Phase 2, which MUST NOT be implemented in the MVP, and `11` marks it Future.
+- Question: Is the initiative tracker the owner described built before the release, overriding its Phase 2 placement?
+- Options:
+  - A) As the owner wrote it: one encounter per scene with one entry per player character and one Enemies entry for the DM, ordered by the initiative numbers the table rolled or by dragging, turns and rounds advanced by the DM, eight undoable live commands, an Initiative panel in the DM view and a strip along the top of the TV that names no enemy; no dice, hit points, condition durations or per-monster entries → effect on scope: the live command set, the snapshots and both views widen; initiative leaves Phase 2; still no rules in code and no dice.
+  - B) Keep the initiative tracker in Phase 2 → effect on scope: no change; the request becomes a Phase 2 item.
+- Recommendation: A, because the owner asked for it in detail and approved overriding the register.
+- Blocks: specification
+- Answer: A (2026-10-01; recommendation accepted)
+
+### Q-105 — Where an encounter is kept
+- Surface: data
+- Source: The owner's request of 2026-10-01 for Q-104 gives «One `Encounter` per scene» with `scene_id`, `active`, `round`, `current_index` and `entries`, and asks that End combat be confirmed «because it can't be undone across sessions». `03` §1 and `12` fix the entities stored in SQLite; the camera, ruler and undo history live in memory only (`04` §8, §9, §11).
+- Question: Is a scene's encounter stored in SQLite, or kept in the server's memory like the camera and the ruler?
+- Options:
+  - A) In SQLite, one row per scene in a new `encounter` table added by an additive migration, deleted with its scene → effect on data: a ninth entity; combat survives a server restart and a switch to another scene and back.
+  - B) In memory only, one per scene → effect on data: no new entity or migration; combat survives a scene switch but not a restart.
+- Recommendation: A, because the owner's request gives the encounter a scene and a lifetime beyond the live session, and the migration is additive.
+- Blocks: specification
+- Answer: A (2026-10-01; recommendation accepted)
+
+### Q-106 — An empty Enemies entry on Next
+- Surface: ux
+- Source: The owner's request of 2026-10-01 for Q-104 says both «The DM entry is skipped automatically when it has no members» and «When no enemies are left at the start of the DM turn, show a prompt: "No enemies left. End combat?" with End combat / Continue»; an empty DM turn that is always skipped never starts, so the prompt could never show.
+- Question: When Next reaches the Enemies entry and it has no members, is it skipped, or does the DM's turn start with the prompt?
+- Options:
+  - A) It stops there with the prompt when this encounter has had at least one enemy, Continue moving on to the next entry; while no enemy has yet been seen (an ambush still hidden) it is skipped silently → effect on ux: the prompt shows once the enemies are all dead or gone; an encounter started before the monsters are revealed runs through the players' turns alone.
+  - B) Always skipped, and the prompt shown whenever it was skipped → effect on ux: the prompt also shows before any enemy is revealed.
+  - C) Always a stop with the prompt → effect on ux: the DM answers the prompt every round until an enemy appears.
+- Recommendation: A, because it keeps both of the owner's sentences: the prompt when the enemies are gone, the skip while none has appeared.
 - Blocks: specification
 - Answer: A (2026-10-01; recommendation accepted)

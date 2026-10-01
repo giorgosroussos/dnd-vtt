@@ -13,6 +13,11 @@ import {
   fogExtent,
   FogWriteBodySchema,
   sameFog,
+  changeOf,
+  turnView,
+  withoutEntry,
+  type Encounter,
+  type EncounterChange,
   type FogMask,
   type FogStroke,
   type FogWriteBody,
@@ -95,7 +100,10 @@ const CALIBRATION_KEYS = ['size', 'offset_x', 'offset_y', 'columns', 'rows'] as 
 let counter = 0;
 /** What the history holds: a command, a deleted token put back, or the fog as it was (LIV-05, TBL-04). */
 type Undoable =
-  CommandEnvelope | { type: 'restore'; token: SceneToken } | { type: 'restoreFog'; sceneId: string; fog: FogMask };
+  | CommandEnvelope
+  | { type: 'restore'; token: SceneToken; encounter?: Encounter }
+  | { type: 'restoreFog'; sceneId: string; fog: FogMask }
+  | { type: 'restoreEncounter'; sceneId: string; encounter: Encounter | null };
 
 const uuid = (): string => `00000000-0000-4000-8000-${String(++counter).padStart(12, '0')}`;
 
@@ -126,6 +134,8 @@ export class FakeServer {
   sceneTokens: SceneToken[] = [];
   /** The painted fog of each scene that has any (TBL-04). */
   fogs: Record<string, FogMask> = {};
+  /** The encounter of each scene that had one (TBL-06). */
+  encounters: Record<string, Encounter> = {};
   /** The highest number issued per scene and asset, as `scene.token_numbers` (Q-091). */
   private issued: Record<string, number> = {};
   /** What GET /api/connect answers (LIV-03): two addresses and a code of the first. */
@@ -442,8 +452,22 @@ export class FakeServer {
         ruler: this.measurement(scene),
         history: this.historyState(),
         fog: structuredClone(this.fogOf(scene.id)),
+        encounter: structuredClone(this.encounters[scene.id] ?? null),
       },
     };
+  }
+
+  /** Writes the scene's encounter and tells the DM room, as the server does (TBL-06). */
+  private storeEncounter(sceneId: string, encounter: Encounter | null): void {
+    if (encounter === null) delete this.encounters[sceneId];
+    else this.encounters[sceneId] = structuredClone(encounter);
+    this.deliver('encounter.updated', { encounter: structuredClone(encounter) });
+  }
+
+  /** Another DM browser changed the live scene's encounter. */
+  encounterElsewhere(encounter: Encounter | null): void {
+    if (this.liveSceneId === null) throw new Error('Nothing is live.');
+    this.storeEncounter(this.liveSceneId, encounter);
   }
 
   /** Whether undo and redo would find anything on the live scene (UIX-01). */
@@ -514,6 +538,7 @@ export class FakeServer {
     const live = this.liveSceneId;
     const before = new Map(this.sceneTokens.map((token) => [token.id, structuredClone(token)]));
     const fogBefore = live === null ? undefined : this.fogOf(live);
+    const encounterBefore = live === null ? null : structuredClone(this.encounters[live] ?? null);
     const version = this.dmVersion;
     const undoBefore = JSON.stringify(this.historyState());
     const ack = this.apply(envelope);
@@ -532,8 +557,13 @@ export class FakeServer {
         (envelope.type === 'fog.paint' || envelope.type === 'fog.fill') && live !== null && fogBefore
           ? { type: 'restoreFog', sceneId: live, fog: fogBefore }
           : undefined;
+      const encounterInverse: Undoable | undefined =
+        envelope.type.startsWith('encounter.') && live !== null
+          ? { type: 'restoreEncounter', sceneId: live, encounter: encounterBefore }
+          : undefined;
       const inverse =
-        envelope.type === 'token.add' && added
+        encounterInverse ??
+        (envelope.type === 'token.add' && added
           ? { type: 'token.delete' as const, payload: { token_id: added.id } }
           : envelope.type === 'token.move' && was && moved
             ? { type: 'token.move' as const, payload: { token_id: was.id, x: was.x, y: was.y } }
@@ -542,8 +572,8 @@ export class FakeServer {
               : envelope.type === 'token.setMarkers' && was
                 ? { type: 'token.setMarkers' as const, payload: { token_id: was.id, markers: [...was.markers] } }
                 : envelope.type === 'token.delete' && was
-                  ? { type: 'restore' as const, token: was }
-                  : fogInverse;
+                  ? { type: 'restore' as const, token: was, ...(encounterBefore ? { encounter: encounterBefore } : {}) }
+                  : fogInverse);
       if (inverse && live !== null) {
         if (this.undoScene !== live) this.undoHistory = [];
         this.undoScene = live;
@@ -561,6 +591,13 @@ export class FakeServer {
     if (inverse.type === 'restore') return { type: 'token.delete', payload: { token_id: inverse.token.id } };
     if (inverse.type === 'restoreFog')
       return { type: 'restoreFog', sceneId: inverse.sceneId, fog: this.fogOf(inverse.sceneId) };
+    if (inverse.type === 'restoreEncounter') {
+      return {
+        type: 'restoreEncounter',
+        sceneId: inverse.sceneId,
+        encounter: structuredClone(this.encounters[inverse.sceneId] ?? null),
+      };
+    }
     const token = this.sceneTokens.find((each) => each.id === inverse.payload.token_id);
     if (!token) return undefined;
     if (inverse.type === 'token.delete') return { type: 'restore', token: structuredClone(token) };
@@ -600,6 +637,11 @@ export class FakeServer {
   }
 
   private applyInverse(inverse: Undoable): CommandAck {
+    if (inverse.type === 'restoreEncounter') {
+      if (inverse.sceneId !== this.liveSceneId) return { error: { code: 'scene_not_live', message: 'test' } };
+      this.storeEncounter(inverse.sceneId, inverse.encounter);
+      return { ok: true };
+    }
     if (inverse.type === 'restoreFog') {
       if (inverse.sceneId !== this.liveSceneId) return { error: { code: 'scene_not_live', message: 'test' } };
       this.fogs[inverse.sceneId] = structuredClone(inverse.fog);
@@ -613,6 +655,7 @@ export class FakeServer {
       const token = { ...structuredClone(inverse.token), label };
       this.sceneTokens.push(token);
       this.deliver('token.added', { token: this.withAsset(token), relabelled: [] });
+      if (inverse.encounter) this.storeEncounter(token.scene_id, inverse.encounter);
       return { ok: true };
     }
     const token = this.sceneTokens.find((each) => each.id === inverse.payload.token_id);
@@ -718,6 +761,21 @@ export class FakeServer {
         if (token === 'not_live') return refuse('scene_not_live');
         this.sceneTokens = this.sceneTokens.filter((each) => each !== token);
         this.deliver('token.removed', { id: token.id });
+        // Its initiative entry goes with it (TBL-06).
+        const encounter = this.encounters[token.scene_id];
+        const at = encounter?.entries.findIndex((entry) => entry.kind === 'pc' && entry.token_id === token.id) ?? -1;
+        if (encounter && at !== -1)
+          this.storeEncounter(
+            token.scene_id,
+            withoutEntry(
+              encounter,
+              at,
+              turnView(
+                this.tokensOf(token.scene_id).map((each) => this.withAsset(each)),
+                this.fogOf(token.scene_id),
+              ),
+            ),
+          );
         return { ok: true };
       }
       case 'camera.setPlayer': {
@@ -745,6 +803,30 @@ export class FakeServer {
       case 'ping': {
         if (this.liveSceneId === null || p.scene_id !== this.liveSceneId) return refuse('scene_not_live');
         this.deliver('ping', { x: Number(p.x), y: Number(p.y) });
+        return { ok: true };
+      }
+      case 'encounter.start':
+      case 'encounter.end':
+      case 'encounter.reorder':
+      case 'encounter.setInitiative':
+      case 'encounter.next':
+      case 'encounter.previous':
+      case 'encounter.addEntry':
+      case 'encounter.removeEntry': {
+        // The rules the server applies (shared/src/encounter.ts), on the live scene only.
+        const sceneId = this.liveSceneId;
+        if (sceneId === null || p.scene_id !== sceneId) return refuse('scene_not_live');
+        const name = type.slice('encounter.'.length) as EncounterChange['type'];
+        const change = { ...p, type: name } as unknown as EncounterChange;
+        const decision = changeOf(this.encounters[sceneId] ?? null, change, {
+          sceneId,
+          tokens: this.tokensOf(sceneId).map((token) => this.withAsset(token)),
+          fog: this.fogOf(sceneId),
+          newId: uuid,
+        });
+        if (decision === undefined) return { ok: true };
+        if ('refused' in decision) return refuse(decision.refused.code);
+        this.storeEncounter(sceneId, decision.encounter);
         return { ok: true };
       }
       case 'undo':

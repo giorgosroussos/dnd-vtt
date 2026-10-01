@@ -4,6 +4,7 @@ import type { CanvasToken } from '../canvas/tokens.js';
 import { Icon } from '../ui/icons.js';
 import { IdleScreen } from '../ui/IdleScreen.js';
 import { CURSOR_IDLE_MS, useIdleCursor } from '../ui/useIdleCursor.js';
+import { InitiativeStrip } from './InitiativeStrip.js';
 import { usePlayerLive } from './usePlayerLive.js';
 
 export { CURSOR_IDLE_MS };
@@ -78,6 +79,7 @@ export function PlayerView() {
               </span>
               <span className="eg-player__plate-name">{scene.name}</span>
             </p>
+            <InitiativeStrip encounter={scene.encounter} tokens={scene.tokens} />
           </>
         ) : (
           <IdleScreen />

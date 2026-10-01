@@ -5,6 +5,7 @@ import { readSettings } from '../db/settings.js';
 import { listTokens } from '../db/tokens.js';
 import type { LiveEffect } from '../domain/live.js';
 import { readScene } from '../db/campaigns.js';
+import { readEncounter } from '../db/encounters.js';
 import { liveMeasurement, readSnapshot, toPlayerToken, type LiveMemory } from './snapshot.js';
 
 // The role-filtered projection of the live commands' effects (LIV-02; specs/04-live-sync.md §3,
@@ -22,6 +23,9 @@ import { liveMeasurement, readSnapshot, toPlayerToken, type LiveMemory } from '.
 // command never changes. A move into the fog reaches players as `token.removed`, a move out of it as
 // `token.added`. A change to the painted fog reaches both rooms as the whole mask (`fog.updated`), which
 // names no token; the tokens it covered or showed follow as their own effects.
+//
+// The encounter (TBL-06, specs/04-live-sync.md §4, §14): the DM's room hears every change to it; what players
+// see of it is a projection of what they already see, sent when it changes (ws/live.ts).
 
 /** An event before it takes its room's version. */
 export type Unversioned<E> = E extends { type: infer T; payload: infer P }
@@ -105,6 +109,10 @@ export function project(db: Database.Database, effect: LiveEffect, memory: LiveM
       };
     case 'token.vanished':
       return { players: { type: 'token.removed', payload: { id: effect.token.id } } };
+    case 'encounter.changed':
+      // The DM's room hears the whole encounter as it is stored now (TBL-06). Players hear their projection
+      // only when it changed, whatever command changed it: compared around each command in ws/live.ts.
+      return { dm: { type: 'encounter.updated', payload: { encounter: readEncounter(db, effect.sceneId) } } };
   }
 }
 

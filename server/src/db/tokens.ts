@@ -8,8 +8,10 @@ import {
   type SceneToken,
   type TokenMarker,
   type TokenSize,
+  type Encounter,
   type TokenStack,
 } from '@emberglass/shared';
+import { dropEntriesOf } from './encounters.js';
 import { sightOf } from './fog.js';
 import { refusal, type TokenScope } from './scope.js';
 
@@ -280,12 +282,16 @@ export function updateToken(
 }
 
 export type TokenDeleteOutcome =
-  | { outcome: 'deleted'; token: SceneToken; shown: boolean }
+  // `encounter`: the scene's encounter before and after the token's entry went, when it had one (TBL-06).
+  | { outcome: 'deleted'; token: SceneToken; shown: boolean; encounter?: { before: Encounter; encounter: Encounter } }
   | { outcome: 'not_found' }
   | { outcome: 'live' }
   | { outcome: 'not_live' };
 
-/** Deletes a token, answering what it was; its number is not issued again (Q-063). */
+/**
+ * Deletes a token, answering what it was; its number is not issued again (Q-063). Its initiative entry goes
+ * with it, in the same transaction, whatever the scope (TBL-06, specs/03-domain-model.md §7).
+ */
 export function deleteToken(db: Database.Database, id: string, scope: TokenScope = 'prep'): TokenDeleteOutcome {
   return db.transaction((): TokenDeleteOutcome => {
     const token = readToken(db, id);
@@ -295,7 +301,10 @@ export function deleteToken(db: Database.Database, id: string, scope: TokenScope
     // Whether players had seen it, for an undo that puts it back (Q-096); never sent to a client.
     const shown = shownOf(db, id);
     db.prepare('DELETE FROM token WHERE id = ?').run(id);
-    return { outcome: 'deleted', token, shown };
+    const encounter = dropEntriesOf(db, token.scene_id, id);
+    return encounter === undefined
+      ? { outcome: 'deleted', token, shown }
+      : { outcome: 'deleted', token, shown, encounter };
   })();
 }
 

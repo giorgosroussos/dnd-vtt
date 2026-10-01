@@ -555,6 +555,144 @@ main[data-cursor='hidden'] * {
   }
 }
 
+/*
+ * The initiative strip along the TV's top edge while combat runs (TBL-06, specs/08-ux-journeys.md §12): read
+ * from 2–3 m, about a tenth of the screen tall, fading in and out as scenes do.
+ */
+.eg-player__initiative {
+  position: fixed;
+  top: 1.4vh;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: clamp(6px, 0.7vw, 14px);
+  max-width: 94vw;
+  padding: clamp(5px, 0.8vh, 12px) clamp(10px, 1vw, 18px);
+  border-radius: 14px;
+  background: rgb(10 8 6 / 78%);
+  color: var(--color-player-text);
+  pointer-events: none;
+  animation: eg-fade-in 400ms ease-out;
+}
+
+.eg-player__initiative--leaving {
+  animation: eg-fade-out 400ms ease-in forwards;
+}
+
+@keyframes eg-fade-out {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
+.eg-player__initiative-cards {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: clamp(6px, 0.7vw, 14px);
+}
+
+.eg-player__initiative-round {
+  flex: none;
+  padding-right: clamp(6px, 0.6vw, 12px);
+  border-right: 1px solid rgb(245 236 224 / 25%);
+  font-family: var(--font-title);
+  font-weight: 700;
+  font-size: clamp(16px, 2.4vh, 36px);
+  color: var(--color-accent);
+  white-space: nowrap;
+}
+
+.eg-player__initiative-card {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: clamp(5px, 0.5vw, 10px);
+  padding: clamp(3px, 0.45vh, 7px) clamp(8px, 0.7vw, 14px) clamp(3px, 0.45vh, 7px) clamp(3px, 0.45vh, 7px);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  opacity: 0.82;
+}
+
+.eg-player__initiative-card--current {
+  border-color: var(--color-accent);
+  background: rgb(232 145 58 / 22%);
+  box-shadow: 0 0 18px rgb(232 145 58 / 45%);
+  opacity: 1;
+}
+
+.eg-player__initiative-card--next {
+  border-color: rgb(245 236 224 / 35%);
+  border-style: dashed;
+  opacity: 1;
+}
+
+.eg-player__initiative-portrait {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: clamp(32px, 5.2vh, 78px);
+  height: clamp(32px, 5.2vh, 78px);
+  overflow: hidden;
+  border: 2px solid var(--color-token-pc);
+  border-radius: 50%;
+  background: var(--color-token-pc-fill);
+  font-weight: 700;
+  font-size: clamp(12px, 1.8vh, 26px);
+}
+
+.eg-player__initiative-card--enemies .eg-player__initiative-portrait {
+  border-color: var(--color-token-monster);
+  background: var(--color-token-monster-fill);
+  color: var(--color-player-text);
+}
+
+.eg-player__initiative-portrait img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.eg-player__initiative-name {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-title);
+  font-weight: 700;
+  font-size: clamp(15px, 2.3vh, 34px);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.eg-player__initiative-tag {
+  position: absolute;
+  bottom: clamp(-12px, -1.1vh, -7px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0 clamp(5px, 0.5vw, 9px);
+  border-radius: 999px;
+  background: var(--color-accent);
+  color: var(--color-player-bg);
+  font-weight: 700;
+  font-size: clamp(10px, 1.35vh, 20px);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.eg-player__initiative-tag--next {
+  background: var(--color-player-text);
+}
+
 /* The idle screen: the wordmark over a slow ember glow (specs/08-ux-journeys.md §4, §11). */
 .eg-idle {
   position: relative;
@@ -634,8 +772,14 @@ main[data-cursor='hidden'] * {
 
 @media (prefers-reduced-motion: reduce) {
   .eg-idle__glow,
-  .eg-player__fade {
+  .eg-player__fade,
+  .eg-player__initiative {
     animation: none;
+  }
+
+  .eg-player__initiative--leaving {
+    animation: none;
+    opacity: 0;
   }
 }
 

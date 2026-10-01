@@ -4,7 +4,7 @@ Each bullet below is an owner decision: stated in the requirements (`[input]`) o
 
 ## 1. Data
 
-- Eight entities in SQLite: Image, Asset, AssetTag, Campaign, Session, Scene, Token, Settings (`03` §1). [input]
+- Nine entities in SQLite: Image, Asset, AssetTag, Campaign, Session, Scene, Token, Encounter, Settings (`03` §1). [input, Q-105, recommendation accepted]
 - UUIDs for every entity except Image, which is identified by the sha256 of its original; duplicate uploads reuse the stored image (`03` §3). [input]
 - Token positions are decimal grid units; recalibration or a new map resolution never moves a token (`03` §4). [input]
 - Grid size and offsets are stored in original-image dimensions (`06` §2). [input]
@@ -73,6 +73,8 @@ Each bullet below is an owner decision: stated in the requirements (`[input]`) o
 - No area-of-effect templates (`01` §6). [Q-099, recommendation accepted]
 - Ping, four condition markers and manual fog regions are built after the MVP's features, before the release (`01` §9). [Q-099, recommendation accepted]
 - The condition markers are eighteen, with their SRD 5.1 rule text and bundled icons credited in the DM view, none applying another (`01` §9). [Q-103, recommendation accepted]
+- An initiative tracker, one encounter per scene with an entry per player character and one Enemies entry, its order recorded from physical dice, is built before the release; players see no enemy in it; dice, hit points and per-monster initiative stay Phase 2 (`01` §9, `04` §14). [Q-104, recommendation accepted]
+- An empty Enemies entry takes its turn, with an offer to end combat, once the encounter has had an enemy, and is passed over before (`04` §14). [Q-106, recommendation accepted]
 - Installed from source with Node; nothing published to a registry (`09` §1). [Q-017, recommendation accepted]
 - Windows and Linux verified; macOS best-effort (`09` §3). [Q-018, recommendation accepted]
 - Player view accepted on evergreen browsers and the owner's LG TV built-in browser (`10` §4). [Q-019, recommendation accepted]

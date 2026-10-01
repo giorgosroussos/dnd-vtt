@@ -66,6 +66,9 @@ export const CATEGORY_COLOURS: Record<AssetCategory, { ring: string; fill: strin
 };
 
 export const HIDDEN_OPACITY = 0.6;
+/** The turn's rings (TBL-06): the glow of the current player character's, and a member's on the Enemies turn. */
+export const TURN_GLOW_OPACITY = 0.35;
+export const TURN_MEMBER_OPACITY = 0.6;
 export const HIDDEN_UNDERLAY_OPACITY = 0.6;
 // The circle's radius as a share of half the footprint's side: a gap to the grid lines, as in the design.
 const CIRCLE_SHARE = 0.89;
@@ -364,6 +367,45 @@ export function TokenLayer({
             }}
             onDragEnd={(event) => dropped(token, event)}
           >
+            {token.turn === 'current' ? (
+              // The turn's player character (TBL-06): a wide ember ring with a soft glow, outside every other.
+              <>
+                <Circle
+                  name="token-turn-glow"
+                  x={centre}
+                  y={centre}
+                  radius={radius + 10 * inverse}
+                  stroke={TOKEN_COLOURS.accent}
+                  strokeWidth={8}
+                  opacity={TURN_GLOW_OPACITY}
+                  strokeScaleEnabled={false}
+                  listening={false}
+                />
+                <Circle
+                  name="token-turn"
+                  x={centre}
+                  y={centre}
+                  radius={radius + 10 * inverse}
+                  stroke={TOKEN_COLOURS.accent}
+                  strokeWidth={3}
+                  strokeScaleEnabled={false}
+                  listening={false}
+                />
+              </>
+            ) : token.turn === 'member' ? (
+              // A member of the Enemies entry on its turn: a thin, faint ring of the same colour.
+              <Circle
+                name="token-turn-member"
+                x={centre}
+                y={centre}
+                radius={radius + 10 * inverse}
+                stroke={TOKEN_COLOURS.accent}
+                strokeWidth={1.5}
+                opacity={TURN_MEMBER_OPACITY}
+                strokeScaleEnabled={false}
+                listening={false}
+              />
+            ) : null}
             {selected ? (
               // The selection: a dark ring then an ember one around the token (UIX-01).
               <>

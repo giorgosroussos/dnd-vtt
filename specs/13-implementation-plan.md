@@ -333,6 +333,13 @@ Goal: both views in the 2026-09-30 redesign, and the three table tools the owner
 - Touches red line: yes
 - Contract change: yes
 
+`TBL-06` Initiative tracker
+
+- One encounter per scene stored in its own table, an entry per player character and one Enemies entry whose members are computed from the visible, living monster and npc tokens; eight undoable encounter commands on the live scene, sorting by the numbers the table rolled, dragging, turns and rounds; the Initiative tab in the DM view, the turn's tokens ringed on the map; a strip along the top of the TV naming no enemy (`01` §9, `03` §1, `03` §7, `04` §2, `04` §4, `04` §8, `04` §14, `08` §12, `10` §3).
+- Surfaces: data, security, scope, external, ux
+- Touches red line: yes
+- Contract change: yes
+
 ### Exit criteria
 
 The hidden-information suite of `10` §3 passes with painted fog in its script; the run journey of `10` §5 passes in the new layout; screenshots of the three redesigned screens are compared with the design's boards.

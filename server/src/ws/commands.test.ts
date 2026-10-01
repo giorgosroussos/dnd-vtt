@@ -634,6 +634,13 @@ describe('player commands (specs/10-testing-acceptance.md §3, specs/07-security
     const { dm, tv } = await liveA(w);
     // The TV of the DM's own laptop, which carries the DM cookie but asks to be a player (D-105).
     const laptopTv = await h.connect({ cookie: h.cookie }, { ...PLAYER_VIEW_AUTH });
+    // A running encounter, so that every encounter command would change something (TBL-06).
+    await acknowledged(dm, 'encounter.start', { scene_id: w.sceneA.id });
+    for (const client of [dm, tv, laptopTv]) await client.settle();
+    const entries = JSON.parse(
+      h.data.db.prepare('SELECT entries FROM encounter WHERE scene_id = ?').pluck().get(w.sceneA.id) as string,
+    ) as { id: string }[];
+    const dmEntry = entries.at(-1)!.id;
     const valid: Record<string, unknown> = {
       'token.add': { scene_id: w.sceneA.id, asset_id: w.goblin.id, x: 1, y: 1 },
       'token.move': { token_id: w.goblins[0]!.id, x: 9, y: 9 },
@@ -648,6 +655,14 @@ describe('player commands (specs/10-testing-acceptance.md §3, specs/07-security
       'ruler.update': { scene_id: w.sceneA.id, from: { column: 1, row: 1 }, to: { column: 4, row: 3 } },
       'ruler.clear': { scene_id: w.sceneA.id },
       ping: { scene_id: w.sceneA.id, x: 2.5, y: 1.5 },
+      'encounter.start': { scene_id: w.sceneA.id },
+      'encounter.end': { scene_id: w.sceneA.id },
+      'encounter.reorder': { scene_id: w.sceneA.id, entry_ids: entries.map((entry) => entry.id).reverse() },
+      'encounter.setInitiative': { scene_id: w.sceneA.id, entry_id: dmEntry, initiative: 14 },
+      'encounter.next': { scene_id: w.sceneA.id },
+      'encounter.previous': { scene_id: w.sceneA.id },
+      'encounter.addEntry': { scene_id: w.sceneA.id, token_id: w.goblins[0]!.id },
+      'encounter.removeEntry': { scene_id: w.sceneA.id, entry_id: dmEntry },
       undo: {},
       redo: {},
     };

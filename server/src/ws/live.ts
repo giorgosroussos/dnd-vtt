@@ -7,6 +7,7 @@ import {
   errorEnvelope,
   PLAYER_VIEW_AUTH,
   ROOMS,
+  samePlayerEncounter,
   SOCKET_CHANNELS,
   SOCKET_PATH,
   SOCKET_REFUSALS,
@@ -36,7 +37,7 @@ import { createLineLimiter, type LineLimiterOptions } from '../log/limiter.js';
 import type { Logger } from '../log/logger.js';
 import { project } from './projection.js';
 import { compileSchema, formatAjvErrors } from '../validation.js';
-import { readSnapshot, type LiveMemory } from './snapshot.js';
+import { livePlayerEncounter, readSnapshot, type LiveMemory } from './snapshot.js';
 
 // The WebSocket of the live scene (LIV-01; specs/04-live-sync.md §1, §2, §5, §6,
 // specs/07-security-and-access.md §2, §3, §7, §8; D-064, D-104).
@@ -318,6 +319,21 @@ export function attachLiveSocket(
     broadcast('dm', { type: 'history.changed', payload: { ...now } });
   };
 
+  // What players see of the live scene's encounter (TBL-06), or undefined while nothing is live.
+  const playersEncounter = () => {
+    const live = readSettings(db).live_scene_id;
+    return live === null ? undefined : { live, encounter: livePlayerEncounter(db, live) };
+  };
+  // Players are told their projection of the encounter when it differs from `before`, with the same scene
+  // live: whatever command changed it, a token's reveal, move or Dead as much as an encounter command, and
+  // never when it did not, so nothing they receive depends on a token they cannot see (specs/04-live-sync.md §14).
+  const tellEncounter = (before: ReturnType<typeof playersEncounter>): void => {
+    const now = playersEncounter();
+    if (now === undefined || before === undefined || now.live !== before.live) return;
+    if (samePlayerEncounter(before.encounter, now.encounter)) return;
+    broadcast('players', { type: 'encounter.updated', payload: { encounter: now.encounter } });
+  };
+
   const publish = (effects: readonly LiveEffect[]): void => {
     for (const effect of effects) {
       const events = project(db, effect, memory);
@@ -427,6 +443,7 @@ export function attachLiveSocket(
         let effects: readonly LiveEffect[] = [];
         const liveBefore = readSettings(db).live_scene_id;
         const undoBefore = undoState();
+        const encounterBefore = playersEncounter();
         const ack = dispatchCommand(
           typeof args[0] === 'function' ? undefined : args[0],
           commands.validate,
@@ -438,7 +455,10 @@ export function attachLiveSocket(
         );
         publish(effects);
         // An activation's snapshot carries the new scene's state; a clear leaves nothing live.
-        if (readSettings(db).live_scene_id === liveBefore) tellHistory(undoBefore);
+        if (readSettings(db).live_scene_id === liveBefore) {
+          tellEncounter(encounterBefore);
+          tellHistory(undoBefore);
+        }
         reply(ack);
       } catch (error) {
         logger.error('ws.command_failed', 'A live command failed.', {

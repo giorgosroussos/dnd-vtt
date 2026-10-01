@@ -30,6 +30,7 @@ const snapshot = (tokens: SceneToken[]): DmSnapshot => ({
     ruler: null,
     history: { can_undo: false, can_redo: false },
     fog: [],
+    encounter: null,
   },
 });
 let version = 1;

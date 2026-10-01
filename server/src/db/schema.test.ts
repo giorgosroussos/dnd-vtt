@@ -17,6 +17,7 @@ import {
   SceneSchema,
   SessionSchema,
   SettingsSchema,
+  EncounterSchema,
   TokenSchema,
 } from '@emberglass/shared';
 import { MIGRATIONS_DIR } from '../paths.js';
@@ -99,6 +100,7 @@ const TABLE_OF: Record<string, SchemaTable> = {
   Session: 'session',
   Scene: 'scene',
   Token: 'token',
+  Encounter: 'encounter',
   Settings: 'settings',
 };
 
@@ -122,7 +124,7 @@ const columns = (
 const columnNames = (table: string): string[] => columns(table).map((c) => c.name);
 
 describe('migration 0001 on a fresh database', () => {
-  it('creates exactly the eight entities of specs/03-domain-model.md §1', () => {
+  it('creates exactly the nine entities of specs/03-domain-model.md §1', () => {
     migrated();
     const tables = db
       .prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
@@ -237,6 +239,16 @@ describe('migration 0001 on a fresh database', () => {
         // Migration 0004 (TBL-02, Q-099).
         "markers TEXT NOT NULL DEFAULT '[]'",
       ],
+      // Migration 0008 (TBL-06, D-160).
+      encounter: [
+        'id TEXT NOT NULL',
+        'scene_id TEXT NOT NULL',
+        'active INTEGER NOT NULL',
+        'round INTEGER NOT NULL',
+        'current_index INTEGER NOT NULL',
+        'enemies_seen INTEGER NOT NULL',
+        'entries TEXT NOT NULL',
+      ],
       settings: [
         'id TEXT NOT NULL',
         'live_scene_id TEXT NULL',
@@ -268,6 +280,7 @@ describe('migration 0001 on a fresh database', () => {
     expect(keys).toEqual([
       'asset.image_id -> image.id on delete RESTRICT',
       'asset_tag.asset_id -> asset.id on delete CASCADE',
+      'encounter.scene_id -> scene.id on delete CASCADE',
       'scene.map_image_id -> image.id on delete RESTRICT',
       'scene.session_id -> session.id on delete CASCADE',
       'session.campaign_id -> campaign.id on delete CASCADE',
@@ -816,6 +829,7 @@ const CONTRACT: Record<SchemaTable, TSchema & { properties: Record<string, unkno
   session: SessionSchema,
   scene: SceneSchema,
   token: TokenSchema,
+  encounter: EncounterSchema,
   settings: SettingsSchema,
 };
 
@@ -967,6 +981,47 @@ describe('migrations on the generated fixture database (specs/14-agent-playbook.
       { id: 'unconscious' },
     ]);
     expect(markers(second)).toEqual([{ id: 'concentrating' }]);
+  });
+
+  it('adds the encounter table at migration 0008, empty, deleted with its scene, refusing bad rows (D-160)', () => {
+    createFixtureDatabase(dataDir);
+    migrateDataDirectory(dataDir, MIGRATIONS_DIR, new Date(), 7);
+    db = openDatabase(dataDir);
+    expect(db.prepare("SELECT count(*) FROM sqlite_schema WHERE name = 'encounter'").pluck().get()).toBe(0);
+    db.close();
+
+    const result = migrateDataDirectory(dataDir, MIGRATIONS_DIR);
+
+    expect(result).toMatchObject({ from: 7, to: LATEST });
+    expect(result.backup).not.toBeNull();
+    db = openDatabase(dataDir);
+    expect(db.prepare('SELECT count(*) FROM encounter').pluck().get()).toBe(0);
+    const scene = db.prepare('SELECT id FROM scene LIMIT 1').pluck().get() as string;
+    const insert = db.prepare(
+      `INSERT INTO encounter (id, scene_id, active, round, current_index, enemies_seen, entries)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    );
+    insert.run(fixtureUuid(9001), scene, 1, 1, 0, 0, '[]');
+    // One encounter per scene (specs/04-live-sync.md §14).
+    expect(() => insert.run(fixtureUuid(9002), scene, 1, 1, 0, 0, '[]')).toThrow(/UNIQUE constraint failed/);
+    for (const [active, round, index, seen, entries] of [
+      [2, 1, 0, 0, '[]'],
+      [1, 0, 0, 0, '[]'],
+      [1, 1, -1, 0, '[]'],
+      [1, 1, 0, 2, '[]'],
+      [1, 1, 0, 0, '{}'],
+      [1, 1, 0, 0, '['],
+    ] as const) {
+      db.prepare('DELETE FROM encounter').run();
+      expect(() => insert.run(fixtureUuid(9003), scene, active, round, index, seen, entries)).toThrow(
+        /CHECK constraint failed/,
+      );
+    }
+    insert.run(fixtureUuid(9004), scene, 1, 1, 0, 0, '[]');
+    db.pragma('foreign_keys = ON');
+    db.prepare('UPDATE settings SET live_scene_id = NULL').run();
+    db.prepare('DELETE FROM scene WHERE id = ?').run(scene);
+    expect(db.prepare('SELECT count(*) FROM encounter').pluck().get()).toBe(0);
   });
 
   it('migrates the fixture to the latest version, keeping every row and every reference', () => {

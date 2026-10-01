@@ -28,6 +28,9 @@ import {
   MeasurementSchema,
   RulerClearedPayloadSchema,
   RulerShownPayloadSchema,
+  PlayerEncounterPayloadSchema,
+  DmEncounterPayloadSchema,
+  PlayerEncounterSchema,
 } from './index.js';
 
 // The first column of the table in one section of specs/04-live-sync.md, split
@@ -142,6 +145,7 @@ describe('snapshot payloads (specs/04-live-sync.md §4, LIV-01)', () => {
   it('gives players no scene id, the name the TV shows (UIX-01), the painted fog (TBL-04), and only the display version of the map', () => {
     expect(Object.keys(PlayerLiveSceneSchema.properties).sort()).toEqual([
       'camera',
+      'encounter',
       'fog',
       'grid',
       'map',
@@ -149,6 +153,12 @@ describe('snapshot payloads (specs/04-live-sync.md §4, LIV-01)', () => {
       'ruler',
       'tokens',
     ]);
+    // The players' encounter is the round, the entries they may see and whose turn it is: no number, no
+    // member, no count, no scene (TBL-06, specs/04-live-sync.md §4).
+    expect(Object.keys(PlayerEncounterSchema.properties).sort()).toEqual(['current', 'entries', 'next', 'round']);
+    for (const entry of PlayerEncounterSchema.properties.entries.items.anyOf) {
+      expect(Object.keys(entry.properties).every((key) => ['id', 'kind', 'token_id'].includes(key))).toBe(true);
+    }
     // A measurement is two squares and a distance: no scene, no token (LIV-07).
     expect(Object.keys(MeasurementSchema.properties).sort()).toEqual(['feet', 'from', 'to']);
     // The players' camera is the rectangle alone: no screen of another viewer (D-119).
@@ -208,6 +218,14 @@ describe('live command and event payloads (specs/04-live-sync.md §2, §3, §4, 
         'undo',
         'redo',
         'ping',
+        'encounter.start',
+        'encounter.end',
+        'encounter.reorder',
+        'encounter.setInitiative',
+        'encounter.next',
+        'encounter.previous',
+        'encounter.addEntry',
+        'encounter.removeEntry',
       ].sort(),
     );
     for (const type of Object.keys(LIVE_COMMAND_PAYLOAD_SCHEMAS)) expect(COMMAND_TYPES).toContain(type);
@@ -225,6 +243,8 @@ describe('live command and event payloads (specs/04-live-sync.md §2, §3, §4, 
       ScreenSchema,
       RulerShownPayloadSchema,
       RulerClearedPayloadSchema,
+      DmEncounterPayloadSchema,
+      PlayerEncounterPayloadSchema,
     ] as object[]) {
       for (const object of objects(schema)) expect(object).toHaveProperty('additionalProperties', false);
     }

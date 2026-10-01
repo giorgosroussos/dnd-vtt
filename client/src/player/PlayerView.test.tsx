@@ -55,7 +55,7 @@ const token = (n: number, label: string, z_order: number, x = n): PlayerToken =>
 
 const snapshot = (tokens: PlayerToken[], grid: Grid = GRID): PlayerSnapshot => ({
   role: 'players',
-  scene: { name: 'Crypt', map: MAP, grid, tokens, camera: FIT_CAMERA, ruler: null, fog: [] },
+  scene: { name: 'Crypt', map: MAP, grid, tokens, camera: FIT_CAMERA, ruler: null, fog: [], encounter: null },
 });
 
 let fake: ReturnType<typeof installFakeSockets>;
@@ -220,6 +220,7 @@ describe('what the player view draws (specs/08-ux-journeys.md §4)', () => {
         history: { can_undo: false, can_redo: false },
         ruler: null,
         fog: [],
+        encounter: null,
       },
     };
     act(() => fake.sockets[0]!.deliver({ type: 'scene.snapshot', version: 2, payload: dm }));
@@ -337,6 +338,7 @@ describe('ordering and replacement', () => {
             camera: FIT_CAMERA,
             ruler: null,
             fog: [],
+            encounter: null,
           },
         },
         5,
@@ -490,5 +492,79 @@ describe('pings on the TV (TBL-01, specs/04-live-sync.md §12)', () => {
     await deliver('scene.snapshot', 5, snapshot([]));
     expect(drawnPings()).toEqual([]);
     expect(stage().findOne('.ping-layer')).toBeUndefined();
+  });
+});
+
+describe('the initiative strip (TBL-06, specs/08-ux-journeys.md §12)', () => {
+  const pc = (n: number, label: string, z: number): PlayerToken => ({ ...token(n, label, z), category: 'pc' });
+  const strip = () => main().querySelector<HTMLElement>('.eg-player__initiative');
+  const cards = () =>
+    [...main().querySelectorAll<HTMLElement>('.eg-player__initiative-card')].map((card) => [
+      card.querySelector('.eg-player__initiative-name')!.textContent,
+      card.classList.contains('eg-player__initiative-card--current')
+        ? 'now'
+        : card.classList.contains('eg-player__initiative-card--next')
+          ? 'next'
+          : '',
+    ]);
+  const encounter = (current: number, next: number | null, round = 1) => ({
+    round,
+    entries: [
+      { id: id(101), kind: 'pc', token_id: id(1) },
+      { id: id(199), kind: 'dm' },
+      { id: id(102), kind: 'pc', token_id: id(2) },
+    ],
+    current,
+    next,
+  });
+
+  it('shows the order, the turn, the next and the round while combat runs, and fades away when it ends', async () => {
+    const tokens = [pc(1, 'Tamsin', 0), pc(2, 'Wren', 1), token(3, 'Goblin', 2)];
+    await open(snapshot(tokens));
+    expect(strip()).toBeNull();
+    await deliver('encounter.updated', 2, { encounter: encounter(0, 1) });
+    expect(cards()).toEqual([
+      ['Tamsin', 'now'],
+      [t('initiative.enemies'), 'next'],
+      ['Wren', ''],
+    ]);
+    expect(strip()!.textContent).toContain(t('initiative.tvRound', { round: 1 }));
+    // Portraits are the display version players may fetch of tokens they see.
+    expect(strip()!.querySelector('img')!.getAttribute('src')).toBe(imageFileUrl(IMAGE, 'display'));
+    // The Enemies card names no monster and gives no count.
+    expect(strip()!.textContent).not.toContain('Goblin');
+    expect(strip()!.querySelectorAll('[data-kind="dm"]')).toHaveLength(1);
+    // Nothing on the strip takes focus: the TV has no controls.
+    expect(strip()!.querySelectorAll(FOCUSABLE)).toHaveLength(0);
+    await deliver('encounter.updated', 3, { encounter: encounter(2, 0, 3) });
+    expect(cards()).toEqual([
+      ['Tamsin', 'next'],
+      [t('initiative.enemies'), ''],
+      ['Wren', 'now'],
+    ]);
+    expect(strip()!.textContent).toContain(t('initiative.tvRound', { round: 3 }));
+    vi.useFakeTimers();
+    await act(async () => {
+      fake.sockets[0]!.deliver({ type: 'encounter.updated', version: 4, payload: { encounter: null } });
+      await Promise.resolve();
+    });
+    expect(strip()!.dataset.initiative).toBe('leaving');
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+      await Promise.resolve();
+    });
+    expect(strip()).toBeNull();
+  });
+
+  it('comes back with a reconnecting TV’s snapshot, and skips a malformed event', async () => {
+    const tokens = [pc(1, 'Tamsin', 0), pc(2, 'Wren', 1)];
+    await open({ ...snapshot(tokens), scene: { ...snapshot(tokens).scene!, encounter: encounter(1, 2) as never } });
+    expect(cards()).toEqual([
+      ['Tamsin', ''],
+      [t('initiative.enemies'), 'now'],
+      ['Wren', 'next'],
+    ]);
+    await deliver('encounter.updated', 2, { encounter: { round: 0, entries: 'many' } });
+    expect(cards()).toHaveLength(3);
   });
 });
