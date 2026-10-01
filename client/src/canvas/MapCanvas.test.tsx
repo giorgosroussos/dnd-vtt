@@ -689,7 +689,15 @@ describe('the ruler (LIV-07, specs/06-grid-and-measurement.md §5, specs/04-live
       map: MAP,
       mode: 'dm',
       tokens: [token],
-      tokenControls: { selectedId: undefined, onSelect, onMove: vi.fn(), onDeselect: vi.fn(), onDelete: vi.fn() },
+      tokenControls: {
+        selectedId: undefined,
+        onSelect,
+        onMove: vi.fn(),
+        onDeselect: vi.fn(),
+        onDelete: vi.fn(),
+        onOpenPopover: vi.fn(),
+        onClosePopover: vi.fn(),
+      },
       ruler: { shown: null, tool: { on: true, onToggle: vi.fn(), onMeasure: vi.fn(), onClear: vi.fn() } },
     });
     expect(stage.find('.token').every((node) => !node.draggable())).toBe(true);

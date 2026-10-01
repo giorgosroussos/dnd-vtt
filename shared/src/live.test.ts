@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { Value } from 'typebox/value';
 import {
-  TOKEN_MARKERS,
+  CONDITION_IDS,
   COMMAND_TYPES,
   CommandEnvelopeSchema,
   DmSnapshotSchema,
@@ -90,15 +90,28 @@ describe('snapshot payloads (specs/04-live-sync.md §4, LIV-01)', () => {
     z_order: 0,
     label: 'Goblin 1',
     category: 'monster',
-    markers: ['bloodied', 'concentrating'],
+    markers: [{ id: 'bloodied' }, { id: 'exhaustion', level: 2 }, { id: 'concentrating' }],
   };
 
-  it('refuses markers a token cannot carry: an unknown one, one twice, or more than there are (TBL-02)', () => {
-    for (const markers of [['poisoned'], ['dead', 'dead'], ['BLOODIED'], [...TOKEN_MARKERS, 'dead']]) {
+  it('refuses markers a token cannot carry: an unknown one, one twice, a bare name, a level out of place, or more than there are (TBL-05)', () => {
+    const all = CONDITION_IDS.map((id) => (id === 'exhaustion' ? { id, level: 1 } : { id }));
+    for (const markers of [
+      [{ id: 'hasted' }],
+      [{ id: 'dead' }, { id: 'dead' }],
+      [{ id: 'BLOODIED' }],
+      ['bloodied'],
+      [{ id: 'exhaustion' }],
+      [{ id: 'exhaustion', level: 0 }],
+      [{ id: 'exhaustion', level: 7 }],
+      [{ id: 'exhaustion', level: 2.5 }],
+      [{ id: 'prone', level: 1 }],
+      [{ id: 'prone', note: 'x' }],
+      [...all, { id: 'dead' }],
+    ]) {
       expect(Value.Check(PlayerTokenSchema, { ...token, markers }), JSON.stringify(markers)).toBe(false);
     }
     expect(Value.Check(PlayerTokenSchema, { ...token, markers: [] })).toBe(true);
-    expect(Value.Check(PlayerTokenSchema, { ...token, markers: [...TOKEN_MARKERS] })).toBe(true);
+    expect(Value.Check(PlayerTokenSchema, { ...token, markers: all })).toBe(true);
   });
 
   it('gives a player token exactly the rendering fields: id, position, size, image, stacking order, label, category and markers', () => {

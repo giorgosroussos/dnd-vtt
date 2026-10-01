@@ -1,5 +1,7 @@
 import type Database from 'better-sqlite3';
 import {
+  repeatsCondition,
+  sameMarkers,
   errorEnvelope,
   type CameraSetPlayerPayload,
   type CommandEnvelope,
@@ -70,9 +72,6 @@ export type LiveEffect =
 
 export type LiveResult = LiveEffect[] | ErrorEnvelope;
 
-const sameMarkers = (a: readonly string[], b: readonly string[]) =>
-  a.length === b.length && a.every((marker, index) => marker === b[index]);
-
 const tokenNotFound = (): ErrorEnvelope => errorEnvelope('not_found', 'No such token.');
 
 /**
@@ -128,6 +127,12 @@ export function applyLiveCommand(db: Database.Database, command: CommandEnvelope
     case 'token.setMarkers': {
       // TBL-02: the whole set after the change; the same set as before changes nothing, so nobody is told.
       const { token_id, markers } = command.payload as TokenSetMarkersPayload;
+      // Each condition once: Exhaustion at two levels passes the schema's uniqueItems, and is refused here.
+      if (repeatsCondition(markers)) {
+        return errorEnvelope('validation_failed', 'The payload does not match its schema.', [
+          { path: '/markers', message: 'must name each condition at most once' },
+        ]);
+      }
       const result = updateToken(db, token_id, { markers }, 'live');
       if (result.outcome === 'updated' && sameMarkers(result.before.markers, result.token.markers)) return [];
       return changed(result);

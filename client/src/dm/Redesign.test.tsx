@@ -16,6 +16,7 @@ import {
   selectScene,
   selectTokenRow,
   settle,
+  type,
 } from '../ui/testing/fakeServer.js';
 import { render, type Rendered } from '../ui/testing/render.js';
 import { isRedoKey } from './ScenePanel.js';
@@ -83,6 +84,20 @@ const menuItem = (view: HTMLElement, text: string) =>
   );
 
 describe('the header (specs/08-ux-journeys.md §11)', () => {
+  it('opens About & credits, crediting the icons’ authors and the SRD 5.1, and closes it back to its button (TBL-05)', async () => {
+    const view = await open();
+    const about = button(view, t('about.open'))!;
+    await click(about);
+    const dialog = document.querySelector<HTMLDialogElement>('dialog[open]')!;
+    expect(dialog.querySelector('h2')!.textContent).toBe(t('about.title'));
+    expect(dialog.textContent).toContain(t('about.icons', { authors: 'Delapouite, Lorc, Sbed, Skoll' }));
+    expect(dialog.textContent).toContain(t('about.srd'));
+    expect(dialog.querySelector('a')).toBeNull();
+    await click(button(dialog, t('about.close')));
+    expect(document.querySelector('dialog[open]')).toBeNull();
+    expect(document.activeElement).toBe(about);
+  });
+
   it('names the campaign and the session in the breadcrumb, whose switcher opens and closes on Escape', async () => {
     const view = await open();
     expect(view.querySelector('.eg-header__crumbs')!.textContent).toBe(t('header.chooseSession'));
@@ -255,7 +270,7 @@ describe('“In this scene” (specs/08-ux-journeys.md §11)', () => {
   });
 });
 
-describe('condition markers in the popover (TBL-02, specs/08-ux-journeys.md §11)', () => {
+describe('condition markers in the popover (TBL-02, TBL-05, specs/08-ux-journeys.md §11)', () => {
   const chip = (view: HTMLElement, name: string) =>
     [...popover(view)!.querySelectorAll<HTMLButtonElement>('.eg-chip')].find((each) => each.textContent === name)!;
   const status = (view: HTMLElement, label: string) =>
@@ -263,43 +278,145 @@ describe('condition markers in the popover (TBL-02, specs/08-ux-journeys.md §11
       .find((row) => row.querySelector('.eg-token-row__name')?.textContent === label)!
       .querySelector('.eg-token-row__status')!.textContent;
 
-  it('toggles each marker on the live scene with token.setMarkers, the whole set each time', async () => {
+  const PINNED = ['Bloodied', 'Unconscious', 'Dead', 'Concentrating', 'Prone', 'Poisoned'];
+  const more = (view: HTMLElement) => button(popover(view)!, t('tokens.moreConditions'))!;
+  const search = (view: HTMLElement) =>
+    popover(view)!.querySelector<HTMLInputElement>(`input[aria-label="${t('tokens.searchConditions')}"]`);
+  const options = (view: HTMLElement) =>
+    [...popover(view)!.querySelectorAll<HTMLElement>('[role="option"]')].map((each) => each.textContent);
+
+  it('toggles each marker on the live scene with token.setMarkers, the whole set each time, in the order applied', async () => {
     server.liveSceneId = tavern.id;
     const view = await open();
     await selectTokenRow(view, 'Hero');
     const group = popover(view)!.querySelector('[role="group"]')!;
     expect(document.getElementById(group.getAttribute('aria-labelledby')!)!.textContent).toBe(t('tokens.conditions'));
     expect([...group.querySelectorAll('.eg-chip')].map((each) => each.textContent)).toEqual([
-      t('tokens.markerBloodied'),
-      t('tokens.markerUnconscious'),
-      t('tokens.markerDead'),
-      t('tokens.markerConcentrating'),
+      ...PINNED,
+      t('tokens.more'),
     ]);
-    for (const each of group.querySelectorAll('.eg-chip')) expect(each.getAttribute('aria-pressed')).toBe('false');
+    for (const each of group.querySelectorAll('.eg-chip[aria-pressed]')) {
+      expect(each.getAttribute('aria-pressed')).toBe('false');
+      // Each chip has its own icon, and its rule text on hover.
+      expect(each.querySelector('svg path')!.getAttribute('d')).toMatch(/^M/);
+      expect(each.getAttribute('title')!.length).toBeGreaterThan(20);
+    }
     const hero = server.sceneTokens.find((each) => each.label === 'Hero')!;
-    await click(chip(view, t('tokens.markerConcentrating')));
+    await click(chip(view, 'Concentrating'));
     expect(commands().at(-1)).toEqual({
       type: 'token.setMarkers',
-      payload: { token_id: hero.id, markers: ['concentrating'] },
+      payload: { token_id: hero.id, markers: [{ id: 'concentrating' }] },
     });
-    await click(chip(view, t('tokens.markerBloodied')));
-    expect(commands().at(-1)).toMatchObject({ payload: { markers: ['concentrating', 'bloodied'] } });
-    expect(chip(view, t('tokens.markerBloodied')).getAttribute('aria-pressed')).toBe('true');
+    await click(chip(view, 'Bloodied'));
+    expect(commands().at(-1)).toMatchObject({ payload: { markers: [{ id: 'concentrating' }, { id: 'bloodied' }] } });
+    expect(chip(view, 'Bloodied').getAttribute('aria-pressed')).toBe('true');
     expect(status(view, 'Hero')).toBe(
       t('sceneTokens.withMarkers', {
         status: t('asset.category.pc'),
-        markers: [t('tokens.markerBloodied'), t('tokens.markerConcentrating')].join(t('sceneTokens.markerSeparator')),
+        markers: ['Concentrating', 'Bloodied'].join(t('sceneTokens.markerSeparator')),
       }),
     );
     expect(view.querySelector('[role="status"].eg-scene__progress')!.textContent).toBe(
-      t('tokens.markerOn', { label: 'Hero', marker: t('tokens.markerBloodied') }),
+      t('tokens.markerOn', { label: 'Hero', marker: 'Bloodied' }),
     );
     // Off again, and undone like any live change.
-    await click(chip(view, t('tokens.markerConcentrating')));
-    expect(commands().at(-1)).toMatchObject({ payload: { markers: ['bloodied'] } });
-    expect(chip(view, t('tokens.markerConcentrating')).getAttribute('aria-pressed')).toBe('false');
+    await click(chip(view, 'Concentrating'));
+    expect(commands().at(-1)).toMatchObject({ payload: { markers: [{ id: 'bloodied' }] } });
+    expect(chip(view, 'Concentrating').getAttribute('aria-pressed')).toBe('false');
     await click(button(view, t('canvas.undo')));
-    expect(server.sceneTokens.find((each) => each.id === hero.id)!.markers).toEqual(['bloodied', 'concentrating']);
+    expect(server.sceneTokens.find((each) => each.id === hero.id)!.markers).toEqual([
+      { id: 'concentrating' },
+      { id: 'bloodied' },
+    ]);
+  });
+
+  it('names the implied conditions in the hover text and applies none of them', async () => {
+    server.liveSceneId = tavern.id;
+    const view = await open();
+    await selectTokenRow(view, 'Hero');
+    expect(chip(view, 'Unconscious').getAttribute('title')).toContain(
+      t('conditions.implies', { conditions: 'Incapacitated, Prone' }),
+    );
+    await click(chip(view, 'Unconscious'));
+    expect(commands().at(-1)).toMatchObject({ payload: { markers: [{ id: 'unconscious' }] } });
+    expect(chip(view, 'Prone').getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('adds a condition from More…, searched and listed alphabetically, then shows it as a chip that takes it off', async () => {
+    server.liveSceneId = tavern.id;
+    const view = await open();
+    await selectTokenRow(view, 'Hero');
+    await click(more(view));
+    expect(more(view).getAttribute('aria-expanded')).toBe('true');
+    expect(document.activeElement).toBe(search(view));
+    expect(options(view)).toEqual([
+      'Blinded',
+      'Charmed',
+      'Deafened',
+      'Exhaustion',
+      'Frightened',
+      'Grappled',
+      'Incapacitated',
+      'Invisible',
+      'Paralyzed',
+      'Petrified',
+      'Restrained',
+      'Stunned',
+    ]);
+    await type(search(view), 'par');
+    expect(options(view)).toEqual(['Paralyzed']);
+    // Typing in the search never reaches the map's shortcuts.
+    act(() => {
+      search(view)!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    });
+    await settle();
+    expect(search(view)).toBeNull();
+    const hero = server.sceneTokens.find((each) => each.label === 'Hero')!;
+    expect(commands().at(-1)).toEqual({
+      type: 'token.setMarkers',
+      payload: { token_id: hero.id, markers: [{ id: 'paralyzed' }] },
+    });
+    // Shown after the pinned chips, pressed, so the DM takes it off without the list.
+    expect(chip(view, 'Paralyzed').getAttribute('aria-pressed')).toBe('true');
+    await click(chip(view, 'Paralyzed'));
+    expect(commands().at(-1)).toMatchObject({ payload: { markers: [] } });
+    expect(chip(view, 'Paralyzed')).toBeUndefined();
+    // Escape closes the list and gives focus back to More… without letting the token go.
+    await click(more(view));
+    act(() => {
+      search(view)!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    });
+    await settle();
+    expect(search(view)).toBeNull();
+    expect(document.activeElement).toBe(more(view));
+    expect(popover(view)).not.toBeNull();
+  });
+
+  it('steps exhaustion from 1 to 6 and takes it off at 0', async () => {
+    server.liveSceneId = tavern.id;
+    const view = await open();
+    await selectTokenRow(view, 'Hero');
+    await click(more(view));
+    await type(search(view), 'exh');
+    await click(popover(view)!.querySelector('[role="option"]'));
+    expect(commands().at(-1)).toMatchObject({ payload: { markers: [{ id: 'exhaustion', level: 1 }] } });
+    const raise = () => button(popover(view)!, t('tokens.exhaustionRaise', { label: 'Hero' }))!;
+    const lower = () => button(popover(view)!, t('tokens.exhaustionLower', { label: 'Hero' }))!;
+    for (let level = 2; level <= 6; level++) {
+      await click(raise());
+      expect(commands().at(-1)).toMatchObject({ payload: { markers: [{ id: 'exhaustion', level }] } });
+    }
+    expect(popover(view)!.querySelector('.eg-stepper')!.getAttribute('aria-label')).toBe(
+      t('tokens.exhaustionLevel', { level: 6 }),
+    );
+    const sent = commands().length;
+    await click(raise());
+    expect(commands()).toHaveLength(sent);
+    for (let level = 5; level >= 1; level--) await click(lower());
+    expect(commands().at(-1)).toMatchObject({ payload: { markers: [{ id: 'exhaustion', level: 1 }] } });
+    await click(lower());
+    expect(commands().at(-1)).toMatchObject({ payload: { markers: [] } });
+    expect(popover(view)!.querySelector('.eg-stepper')).toBeNull();
   });
 
   it('sets them over REST on a scene that is not live', async () => {
@@ -307,10 +424,10 @@ describe('condition markers in the popover (TBL-02, specs/08-ux-journeys.md §11
     await openSession(view);
     await selectScene(view, 'Tavern');
     await selectTokenRow(view, 'Bandit');
-    await click(chip(view, t('tokens.markerDead')));
+    await click(chip(view, 'Dead'));
     expect(server.writes().at(-1)).toMatch(/^PATCH \/api\/tokens\//);
-    expect(server.sceneTokens.find((each) => each.label === 'Bandit')!.markers).toEqual(['dead']);
-    expect(chip(view, t('tokens.markerDead')).getAttribute('aria-pressed')).toBe('true');
+    expect(server.sceneTokens.find((each) => each.label === 'Bandit')!.markers).toEqual([{ id: 'dead' }]);
+    expect(chip(view, 'Dead').getAttribute('aria-pressed')).toBe('true');
     expect(commands()).toEqual([]);
   });
 });

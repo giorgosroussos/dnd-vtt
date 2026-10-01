@@ -1,7 +1,16 @@
 import { expect, test } from '@playwright/test';
-import { nameButton, sceneRow, selectedTokenLabel, viewport } from './canvas-view.js';
+import {
+  nameButton,
+  onScreen,
+  sceneRow,
+  selectScene,
+  selectedTokenLabel,
+  tokenPopover,
+  viewport,
+} from './canvas-view.js';
 import { contrastFailures } from './contrast.js';
-import { openWorkspace } from './dm.js';
+import { openWorkspace, seedCampaign } from './dm.js';
+import { solidPng } from './png.js';
 import { create, drawn, newAsset, picker, status, unique } from './prep.js';
 
 // Tokens in preparation against the real server (PRP-04, specs/05-assets-and-images.md §2–§5,
@@ -76,4 +85,84 @@ test('tokens are added, chosen, moved and deleted by keyboard alone, with readab
   await page.keyboard.press('Enter');
   await expect(status(page)).toHaveText(`${name} deleted.`);
   await expect.poll(async () => (await drawn(page)).length).toBe(0);
+});
+
+// D-156: a press on a token released within 4 px is a click and opens its popover; one that moves past that
+// is a drag, which closes the popover and leaves the token selected, with real pointer events.
+test('a click on a token opens its popover and a drag closes it, keeping the token selected', async ({ page }) => {
+  await openWorkspace(page);
+  const id = unique();
+  const names = { campaign: `Popover drag ${id}`, session: 'Drag night', scene: 'Ford' };
+  const campaignId = await seedCampaign(page, names.campaign, [names.session]);
+  const [session] = (await (await page.request.get(`/api/campaigns/${campaignId}/sessions`)).json()) as {
+    id: string;
+  }[];
+  const post = async <T>(url: string, data: unknown, binary = false): Promise<T> =>
+    (await (
+      await page.request.post(
+        url,
+        binary ? { data, headers: { 'content-type': 'application/octet-stream' } } : { data },
+      )
+    ).json()) as T;
+  const map = await post<{ id: string }>('/api/images', solidPng(600, 400, [60, 50, 40]), true);
+  const scene = await post<{ id: string }>(`/api/sessions/${session!.id}/scenes`, {
+    name: names.scene,
+    map_image_id: map.id,
+  });
+  const image = await post<{ id: string }>('/api/images', solidPng(64, 64, [90, 40, 30]), true);
+  const label = `Troll ${id}`;
+  const asset = await post<{ id: string }>('/api/assets', {
+    name: label,
+    category: 'monster',
+    image_id: image.id,
+    size: 'large',
+    default_hidden: false,
+  });
+  await page.request.post(`/api/scenes/${scene.id}/tokens`, { data: { asset_id: asset.id, x: 3, y: 3 } });
+  await page.reload();
+  await selectScene(page, names);
+
+  const centre = async (): Promise<[number, number]> => {
+    const [token] = await drawn(page);
+    const box = (await viewport(page).boundingBox())!;
+    const [point] = await onScreen(page, [
+      [box.x + token!.left + token!.side / 2, box.y + token!.top + token!.side / 2],
+    ]);
+    return point!;
+  };
+
+  // A click with 2 px of jitter opens the popover.
+  let [x, y] = await centre();
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + 2, y + 1);
+  await page.mouse.up();
+  await expect(tokenPopover(page)).toBeVisible();
+  await expect(selectedTokenLabel(page)).toHaveText(label);
+
+  // A drag of the token whose popover is open closes it, moves the token, and leaves it selected.
+  const before = (await drawn(page))[0]!;
+  [x, y] = await centre();
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + 30, y + 10, { steps: 6 });
+  await expect(tokenPopover(page)).toHaveCount(0);
+  await page.mouse.move(x + 120, y + 60, { steps: 6 });
+  await page.mouse.up();
+  await expect.poll(async () => (await drawn(page))[0]!.x).not.toBe(before.x);
+  await expect(selectedTokenLabel(page)).toHaveText(label);
+  await expect(tokenPopover(page)).toHaveCount(0);
+
+  // Clicking it again opens the popover; Space and a drag pans the view and closes it.
+  [x, y] = await centre();
+  await page.mouse.click(x, y);
+  await expect(tokenPopover(page)).toBeVisible();
+  await page.keyboard.down('Space');
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x - 80, y - 40, { steps: 6 });
+  await page.mouse.up();
+  await page.keyboard.up('Space');
+  await expect(tokenPopover(page)).toHaveCount(0);
+  await expect(selectedTokenLabel(page)).toHaveText(label);
 });

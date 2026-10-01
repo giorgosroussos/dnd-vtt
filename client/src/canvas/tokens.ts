@@ -114,3 +114,14 @@ export function nudge(at: Point, size: TokenSize, dx: number, dy: number): Point
 /** Bottom of the stack first, as the server lists them. */
 export const stacked = (tokens: readonly CanvasToken[]): CanvasToken[] =>
   [...tokens].sort((a, b) => a.z_order - b.z_order || a.id.localeCompare(b.id));
+
+/**
+ * How far, in screen pixels, the pointer may travel on either axis between press and release for the press
+ * to still count as a click on a token rather than the start of a drag. A click opens the token's popover;
+ * a drag never does, and closes it.
+ */
+export const DRAG_THRESHOLD_PX = 4;
+
+/** Whether the pointer went from `from` to `to` far enough to be a drag rather than a click. */
+export const movedPast = (from: Point, to: Point, threshold = DRAG_THRESHOLD_PX): boolean =>
+  Math.max(Math.abs(to.x - from.x), Math.abs(to.y - from.y)) >= threshold;

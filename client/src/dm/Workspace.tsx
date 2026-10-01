@@ -17,6 +17,7 @@ import { ConnectDialog } from './ConnectDialog.js';
 import { Header, useScreenCount } from './Header.js';
 import { LiveBar } from './LiveBar.js';
 import { ScenePanel } from './ScenePanel.js';
+import { AboutDialog } from './AboutDialog.js';
 import { SettingsDialog } from './SettingsDialog.js';
 import { SidePanel, type SideTab } from './SidePanel.js';
 import { Library } from './library/Library.js';
@@ -87,6 +88,7 @@ export function Workspace({
   const [failure, setFailure] = useState<string>();
   const [connecting, setConnecting] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [sideTab, setSideTab] = useState<SideTab>('scene');
   // Lock TV camera, for this DM view only and until it reloads (D-140).
@@ -106,6 +108,7 @@ export function Workspace({
   // Focus returns to the button that opened a panel when it closes, as for the other dialogs.
   const connectButton = useRef<HTMLButtonElement>(null);
   const settingsButton = useRef<HTMLButtonElement>(null);
+  const aboutButton = useRef<HTMLButtonElement>(null);
   const switcherButton = useRef<HTMLButtonElement>(null);
   const switcher = useRef<HTMLElement>(null);
   const focusLater = useFocusLater();
@@ -116,6 +119,10 @@ export function Workspace({
   const closeSettings = () => {
     setSettingsOpen(false);
     focusLater(() => settingsButton.current);
+  };
+  const closeAbout = () => {
+    setAboutOpen(false);
+    focusLater(() => aboutButton.current);
   };
   const closeSwitcher = (refocus: boolean) => {
     setSwitcherOpen(false);
@@ -344,6 +351,8 @@ export function Workspace({
         connectRef={connectButton}
         onSettings={() => setSettingsOpen(true)}
         settingsRef={settingsButton}
+        onAbout={() => setAboutOpen(true)}
+        aboutRef={aboutButton}
       />
       {switcherOpen ? (
         <section
@@ -376,6 +385,7 @@ export function Workspace({
         </section>
       ) : null}
       {connecting ? <ConnectDialog onClose={closeConnect} /> : null}
+      {aboutOpen ? <AboutDialog onClose={closeAbout} /> : null}
       {settingsOpen ? (
         <SettingsDialog
           onClose={closeSettings}

@@ -1,11 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
 import Konva from 'konva';
 import { Circle, Group, Image as KonvaImage, Label, Layer, Path, Rect, Tag, Text } from 'react-konva';
-import { imageFileUrl, type AssetCategory, type TokenMarker } from '@emberglass/shared';
+import {
+  badgesOf,
+  conditionOf,
+  hasMarker,
+  imageFileUrl,
+  markerLevel,
+  type AssetCategory,
+  type TokenMarker,
+} from '@emberglass/shared';
+import { t } from '../ui/messages.js';
 import { CANVAS_FONT, THEME } from '../ui/theme.js';
 import {
   dropPosition,
+  DRAG_THRESHOLD_PX,
   footprint,
+  movedPast,
   stacked,
   toGrid,
   toWorld,
@@ -21,16 +32,19 @@ import {
 // coloured by category (player character gold, monster red, anything else a neutral) and the label below
 // it on a dark pill, as the TV shows it too (Q-032). In the DM mode a hidden token can never be taken for a
 // visible one: a dashed blue ring, the circle at 60% opacity over a dark disc, a crossed-eye badge and an
-// italic blue label. A token is selected by a click and moved by dragging it, snapping as it is dropped
-// unless Alt is held. The player mode draws only visible tokens, never a hidden one, and listens to
+// italic blue label. A token is selected when pressed and moved by dragging it, snapping as it is dropped
+// unless Alt is held. A press released within DRAG_THRESHOLD_PX of where it went down is a click and opens
+// the token's popover; past it the press is a drag, which closes the popover (D-156). The player mode draws only visible tokens, never a hidden one, and listens to
 // nothing; what reaches a player view is filtered on the server (LIV-02). Labels and badges keep their
 // size on screen at every zoom, scaled up by `labelScale` on the TV to be read across a room.
 //
-// Condition markers (TBL-02, specs/08-ux-journeys.md §11, the 2026-09-30 brief), on both views, each a shape
-// or a badge and never a colour alone: Bloodied a red ring outside the token, pulsing on the TV, and a
-// blood-drop badge; Concentrating a dotted purple ring further out; Unconscious the token desaturated and a
-// "z" badge; Dead the token desaturated and darkened, an ✕ badge and the label struck through. The badges
-// sit down the token's left side, the hidden badge alone on its right.
+// Condition markers (TBL-02, TBL-05, specs/08-ux-journeys.md §11, D-157, D-158), on both views, each a badge
+// with its condition's own icon and never a colour alone: at most three badges in a row along the token's top
+// edge, by priority Dead, Unconscious, Bloodied, then the rest in the order applied, and a "+N" badge after
+// them for the others; Exhaustion's badge carries its level. Besides its badge, Bloodied draws a red ring outside
+// the token, pulsing on the TV; Concentrating a dotted purple ring further out; Unconscious and Dead
+// desaturate the token, Dead also darkens it and strikes its label through; Invisible draws it semi-
+// transparent, players included, and is not the hide toggle. The hidden badge sits alone on its right edge.
 
 export const TOKEN_COLOURS = {
   hidden: THEME.hidden,
@@ -59,12 +73,15 @@ const LABEL_FONT_PX = 11;
 const LABEL_PADDING = 3;
 // Ring and badge sizes, in screen pixels.
 const RING_PX = 2;
-const BADGE_PX = 7.5;
-// The markers' badges, in the order they sit down the token's left side, and their paths on a 24-unit grid.
-const BADGE_MARKERS: readonly TokenMarker[] = ['bloodied', 'unconscious', 'dead'];
-const BADGE_ANGLES = [(-3 * Math.PI) / 4, Math.PI, (3 * Math.PI) / 4];
-const BLOOD_DROP = 'M12 3c3.5 5 6 8.2 6 11.2a6 6 0 0 1-12 0C6 11.2 8.5 8 12 3z';
-const CROSS = 'M7 7l10 10M17 7L7 17';
+// A badge is 14 px across on the DM's screen, larger on the TV by `labelScale`.
+const BADGE_PX = 7;
+// The badges sit in a row along the token's top edge, centred on it, the "+N" badge last, a fixed distance
+// apart on screen: they never overlap one another or the label below however small the token is drawn.
+const BADGE_GAP_PX = 1;
+// The icons are drawn on a 512-unit square, filling most of the badge.
+const ICON_PX = 10;
+// An Invisible token is drawn at this opacity on both views (D-157).
+export const INVISIBLE_OPACITY = 0.45;
 // The bloodied ring's pulse on the TV: its opacity from 1 down and back over a cycle, a few times from when
 // the marker is drawn, then still (D-146): an endless animation would redraw the tokens every frame.
 export const BLOODIED_PULSE_MS = 1_600;
@@ -150,6 +167,10 @@ export interface TokenControls {
   onSelect: (id: string) => void;
   /** A token dropped at a new position, in grid units, snapped unless Alt was held. */
   onMove: (id: string, at: Point) => void;
+  /** A token clicked without dragging: its popover opens. */
+  onOpenPopover: (id: string) => void;
+  /** A token dragged, or another token pressed: the popover closes and stays closed after the drop. */
+  onClosePopover: () => void;
 }
 
 /** The bloodied ring: still in the DM view, pulsing on the TV unless reduced motion is asked for. */
@@ -187,36 +208,71 @@ function BloodiedRing({ radius, width, pulse }: { radius: number; width: number;
   );
 }
 
-/** A marker's badge: a dark disc with its sign, the same size on screen at every zoom. */
+/** A marker's badge: a dark disc with its condition's icon, the same size on screen at every zoom. */
 function MarkerBadge({ marker }: { marker: TokenMarker }) {
-  const colour = marker === 'bloodied' ? THEME.bloodied : TOKEN_COLOURS.text;
+  const colour =
+    marker.id === 'bloodied'
+      ? THEME.bloodied
+      : marker.id === 'concentrating'
+        ? THEME.concentrating
+        : TOKEN_COLOURS.text;
+  const path = conditionOf(marker.id)?.icon.path;
+  const level = markerLevel(marker);
   return (
     <>
-      <Circle radius={BADGE_PX} fill={TOKEN_COLOURS.halo} stroke={colour} strokeWidth={1.5} />
-      {marker === 'unconscious' ? (
-        <Text
-          text="z"
-          width={BADGE_PX * 2}
-          height={BADGE_PX * 2}
-          x={-BADGE_PX}
-          y={-BADGE_PX - 0.5}
-          align="center"
-          verticalAlign="middle"
-          fill={colour}
-          fontFamily={CANVAS_FONT}
-          fontStyle="bold"
-          fontSize={11}
-        />
-      ) : (
+      <Circle radius={BADGE_PX} fill={TOKEN_COLOURS.halo} stroke={colour} strokeWidth={1.25} />
+      {path ? (
         <Path
-          data={marker === 'bloodied' ? BLOOD_DROP : CROSS}
-          x={-5}
-          y={-5}
-          scaleX={10 / 24}
-          scaleY={10 / 24}
-          {...(marker === 'bloodied' ? { fill: colour } : { stroke: colour, strokeWidth: 3.5, lineCap: 'round' })}
+          name="token-marker-icon"
+          data={path}
+          x={-ICON_PX / 2}
+          y={-ICON_PX / 2}
+          scaleX={ICON_PX / 512}
+          scaleY={ICON_PX / 512}
+          fill={colour}
         />
-      )}
+      ) : null}
+      {level !== undefined ? (
+        // Exhaustion's level, on a small disc at the badge's lower right.
+        <Group name="token-marker-level" x={BADGE_PX * 0.8} y={BADGE_PX * 0.8}>
+          <Circle radius={4.5} fill={TOKEN_COLOURS.text} />
+          <Text
+            text={String(level)}
+            width={9}
+            height={9}
+            x={-4.5}
+            y={-4.5}
+            align="center"
+            verticalAlign="middle"
+            fill={TOKEN_COLOURS.halo}
+            fontFamily={CANVAS_FONT}
+            fontStyle="bold"
+            fontSize={8}
+          />
+        </Group>
+      ) : null}
+    </>
+  );
+}
+
+/** The "+N" badge: how many markers the three badges leave out. */
+function MoreBadge({ count }: { count: number }) {
+  return (
+    <>
+      <Circle radius={BADGE_PX} fill={TOKEN_COLOURS.halo} stroke={TOKEN_COLOURS.text} strokeWidth={1.25} />
+      <Text
+        text={t('tokens.moreBadges', { count })}
+        width={BADGE_PX * 2}
+        height={BADGE_PX * 2}
+        x={-BADGE_PX}
+        y={-BADGE_PX}
+        align="center"
+        verticalAlign="middle"
+        fill={TOKEN_COLOURS.text}
+        fontFamily={CANVAS_FONT}
+        fontStyle="bold"
+        fontSize={count > 9 ? 7 : 8}
+      />
     </>
   );
 }
@@ -244,6 +300,8 @@ export function TokenLayer({
   const fontsLoaded = useFontsLoaded();
   const inverse = 1 / scale;
   const onScreen = inverse * labelScale;
+  // Where the press on a token went down, in screen pixels, to tell a click from a drag on release.
+  const pressed = useRef<{ id: string; at: Point }>(undefined);
 
   function dropped(token: CanvasToken, event: Konva.KonvaEventObject<DragEvent>) {
     const node = event.target;
@@ -269,11 +327,13 @@ export function TokenLayer({
         };
         const initialsPx = Math.max(radius * 0.8, 1);
         const markers = token.markers ?? [];
-        const has = (marker: TokenMarker) => markers.includes(marker);
+        const has = (id: string) => hasMarker(markers, id);
         const dead = has('dead');
+        const invisible = has('invisible');
         // Rings outside the token and badges keep their size on screen, larger on the TV.
         const ringScale = mode === 'player' ? labelScale * 0.6 : 1;
-        const badges = BADGE_MARKERS.filter(has);
+        const badges = badgesOf(markers);
+        const row = badges.shown.length + (badges.more > 0 ? 1 : 0);
         return (
           <Group
             key={token.id}
@@ -282,11 +342,26 @@ export function TokenLayer({
             x={at.x}
             y={at.y}
             draggable={controls !== undefined}
+            dragDistance={DRAG_THRESHOLD_PX}
             onPointerDown={(event) => {
               event.cancelBubble = true;
+              pressed.current = { id: token.id, at: { x: event.evt.clientX, y: event.evt.clientY } };
+              // Pressing another token never carries the open popover over to it: only a click opens one.
+              if (controls && controls.selectedId !== token.id) controls.onClosePopover();
               controls?.onSelect(token.id);
             }}
-            onDragStart={() => controls?.onSelect(token.id)}
+            onPointerUp={(event) => {
+              const press = pressed.current;
+              pressed.current = undefined;
+              if (!controls || press?.id !== token.id) return;
+              if (!movedPast(press.at, { x: event.evt.clientX, y: event.evt.clientY }))
+                controls.onOpenPopover(token.id);
+            }}
+            onDragStart={() => {
+              pressed.current = undefined;
+              controls?.onClosePopover();
+              controls?.onSelect(token.id);
+            }}
             onDragEnd={(event) => dropped(token, event)}
           >
             {selected ? (
@@ -326,7 +401,12 @@ export function TokenLayer({
                 listening={false}
               />
             ) : null}
-            <Group name={hidden ? 'token-body token-body-hidden' : 'token-body'} opacity={hidden ? HIDDEN_OPACITY : 1}>
+            <Group
+              name={['token-body', hidden ? 'token-body-hidden' : '', invisible ? 'token-body-invisible' : '']
+                .filter(Boolean)
+                .join(' ')}
+              opacity={Math.min(hidden ? HIDDEN_OPACITY : 1, invisible ? INVISIBLE_OPACITY : 1)}
+            >
               <Group clipFunc={clip}>
                 {image ? (
                   <KonvaImage name="token-image" image={image} width={side} height={side} />
@@ -382,7 +462,7 @@ export function TokenLayer({
             ) : null}
             {has('concentrating') ? (
               <Circle
-                name="token-marker-concentrating"
+                name="token-marker-concentrating-ring"
                 x={centre}
                 y={centre}
                 radius={radius + 7 * inverse * ringScale}
@@ -406,11 +486,12 @@ export function TokenLayer({
               listening={false}
             />
             {hidden ? (
-              // The crossed-eye badge on the token's top-right, the same size on screen at every zoom (Q-054).
+              // The crossed-eye badge on the token's right edge, clear of the condition badges along its top, the
+              // same size on screen at every zoom (Q-054).
               <Group
                 name="token-hidden-marker"
-                x={centre + radius * 0.72}
-                y={centre - radius * 0.72}
+                x={centre + radius}
+                y={centre}
                 scaleX={inverse}
                 scaleY={inverse}
                 listening={false}
@@ -429,12 +510,12 @@ export function TokenLayer({
                 />
               </Group>
             ) : null}
-            {badges.map((marker, index) => (
+            {badges.shown.map((marker, index) => (
               <Group
-                key={marker}
-                name={`token-marker token-marker-${marker}`}
-                x={centre + Math.cos(BADGE_ANGLES[index]!) * radius}
-                y={centre + Math.sin(BADGE_ANGLES[index]!) * radius}
+                key={marker.id}
+                name={`token-marker token-marker-${marker.id}`}
+                x={centre + (index - (row - 1) / 2) * (BADGE_PX * 2 + BADGE_GAP_PX) * onScreen}
+                y={centre - radius}
                 scaleX={onScreen}
                 scaleY={onScreen}
                 listening={false}
@@ -442,6 +523,18 @@ export function TokenLayer({
                 <MarkerBadge marker={marker} />
               </Group>
             ))}
+            {badges.more > 0 ? (
+              <Group
+                name="token-marker-more"
+                x={centre + (badges.shown.length - (row - 1) / 2) * (BADGE_PX * 2 + BADGE_GAP_PX) * onScreen}
+                y={centre - radius}
+                scaleX={onScreen}
+                scaleY={onScreen}
+                listening={false}
+              >
+                <MoreBadge count={badges.more} />
+              </Group>
+            ) : null}
             <Label
               name="token-label"
               x={centre}

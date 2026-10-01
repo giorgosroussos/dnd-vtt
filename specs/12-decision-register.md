@@ -72,6 +72,7 @@ Each bullet below is an owner decision: stated in the requirements (`[input]`) o
 - The live scene's setup can be edited while live and is pushed as a snapshot (`04` §10). [Q-015, recommendation accepted]
 - No area-of-effect templates (`01` §6). [Q-099, recommendation accepted]
 - Ping, four condition markers and manual fog regions are built after the MVP's features, before the release (`01` §9). [Q-099, recommendation accepted]
+- The condition markers are eighteen, with their SRD 5.1 rule text and bundled icons credited in the DM view, none applying another (`01` §9). [Q-103, recommendation accepted]
 - Installed from source with Node; nothing published to a registry (`09` §1). [Q-017, recommendation accepted]
 - Windows and Linux verified; macOS best-effort (`09` §3). [Q-018, recommendation accepted]
 - Player view accepted on evergreen browsers and the owner's LG TV built-in browser (`10` §4). [Q-019, recommendation accepted]
@@ -101,7 +102,7 @@ Each bullet below is an owner decision: stated in the requirements (`[input]`) o
 - Public name Emberglass; no "D&D" or "Dungeons & Dragons" in names; described as 5e SRD 5.1 compatible (`01` §8). [Q-022]
 - The repository is public on GitHub, with CI on GitHub Actions (Linux and Windows runners) (`13` §3). [Q-066, recommendation accepted]
 - Test maps and tokens are generated; no third-party art enters the repository (`10` §3). [Q-088, recommendation accepted]
-- SRD 5.1 content (CC-BY-4.0) arrives with Phase 2 (`01` §8). [input]
+- SRD 5.1 content (CC-BY-4.0) arrives with Phase 2 (`01` §8), but for the conditions' rule text (`01` §9). [input, Q-103, recommendation accepted]
 
 ## 5. Product identity and UX
 

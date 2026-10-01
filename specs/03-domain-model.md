@@ -14,7 +14,7 @@ The MVP MUST store exactly these nine entities in SQLite: [input, Q-006, Q-037, 
 | Campaign | `name`, `description`, `rules_version` | `rules_version = 5e-2014` |
 | Session | `campaign_id`, `title`, `order`, `date` | |
 | Scene | `session_id`, `name`, `order`, `map_image_id`, `grid`, `token_numbers`, `fog` | grid: `type`, `size`, `offset_x`, `offset_y`, `visible`, `feet_per_square`, `columns`, `rows` (`06` §2); token numbers: the highest number issued per asset on the scene, never sent to a client (`05` §3); fog: the fog the DM painted (`01` §9), cells of a quarter square in grid units, players seeing neither them nor the tokens whose centre they cover (`04` §4, §13), sent only in a live snapshot and its events and, to the DM, over its own route |
-| Token | `scene_id`, `asset_id`, `label`, `x`, `y`, `hidden`, `z_order`, `markers`, `shown`, `character_id` | `character_id` empty in the MVP; `shown`: whether players have seen the token, set when it is first shown and never cleared, never sent to a client (`05` §3); `markers`: the condition markers it carries, each at most once, from bloodied, unconscious, dead and concentrating (`01` §9) |
+| Token | `scene_id`, `asset_id`, `label`, `x`, `y`, `hidden`, `z_order`, `markers`, `shown`, `character_id` | `character_id` empty in the MVP; `shown`: whether players have seen the token, set when it is first shown and never cleared, never sent to a client (`05` §3); `markers`: the condition markers it carries, each condition at most once, in the order applied, Exhaustion with its level from 1 to 6 (`01` §9, Q-103) |
 | Settings | `live_scene_id`, ruler rule, upload limit, display variant size, PIN hash | one game per server |
 
 ## 2. Relationships

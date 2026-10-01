@@ -46,6 +46,8 @@ export function Header({
   connectRef,
   onSettings,
   settingsRef,
+  onAbout,
+  aboutRef,
 }: {
   /** The campaign's name and the session's title, or undefined while no session is chosen. */
   breadcrumb: { campaign: string; session: string } | undefined;
@@ -59,6 +61,9 @@ export function Header({
   connectRef?: Ref<HTMLButtonElement>;
   onSettings: () => void;
   settingsRef?: Ref<HTMLButtonElement>;
+  /** Opens About & credits (TBL-05). */
+  onAbout: () => void;
+  aboutRef?: Ref<HTMLButtonElement>;
 }) {
   const countId = useId();
   const count = screens ?? 0;
@@ -110,6 +115,9 @@ export function Header({
           <Icon name="screen" />
           <span id={countId}>{screensText}</span>
           <span className="eg-screens__dot" aria-hidden="true" />
+        </button>
+        <button ref={aboutRef} type="button" className="eg-icon-button" aria-label={t('about.open')} onClick={onAbout}>
+          <Icon name="info" size={18} />
         </button>
         <button
           ref={settingsRef}

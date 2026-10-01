@@ -72,6 +72,7 @@ The DM view MUST provide, in the palette and typography of the redesign (`01` §
 - on the canvas a tool rail (Select V, Ruler M, Ping P, Fog brush F, Add token T, Undo, Redo), the grid and diagonal rule in use bottom left, the DM's zoom bottom right, and a shortcut bar below;
 - the frame of what the TV shows in the accent colour, the map outside it dimmed (§2);
 - a popover on the selected token with its name and visibility, Hide or Reveal (H), Rename, and a menu with Delete, Duplicate and stacking;
+- the popover opened by a click on the token, by its row in the right panel, or by placing or duplicating it; a press that moves about 4 px is a drag, which closes the popover, leaving it closed after the drop with the token still selected, and Escape, a click on empty map and the start of a pan close it too; [Q-102]
 - in the right panel the live scene's tokens grouped by category, each with its visibility toggle; a row selects and centres its token;
 - tokens drawn as circles ringed by category, a hidden one with a dashed ring, a lighter fill, a crossed-eye badge and an italic label, so it is never taken for a visible one (§9);
 - no shortcut acting while a text field has focus.
@@ -79,7 +80,8 @@ The DM view MUST provide, in the palette and typography of the redesign (`01` §
 The table tools (`01` §9) MUST add to it: [input, Q-099]
 
 - Ping (P) on the live scene: a click, or Enter at the centre of the view, shows two expanding rings with a glowing centre at that point on every view for about two seconds (`04` §12);
-- the popover's condition chips, Bloodied, Unconscious, Dead and Concentrating, each a toggle, each marker drawn on both views with a shape or a badge, never by colour alone (`03` §1);
+- the popover's condition chips, Bloodied, Unconscious, Dead, Concentrating, Prone and Poisoned, each a toggle, then a chip for each other condition the token carries, and More… opening a searchable alphabetical list of the others; Exhaustion's chip with a stepper from 1 to 6; each chip's hover text its rule text; each marker drawn on both views as a badge with an icon of its own, never by colour alone, at most three then "+N", Dead first, then Unconscious, Bloodied and the rest as applied; Dead greying the token and striking its label, Invisible drawing it semi-transparent on both views (`03` §1); [Q-103]
+- About & credits in the header, crediting the condition icons and the SRD 5.1 text; [Q-103]
 - the fog brush (F): a round brush that paints fog by a drag and an eraser that reveals it (E switches them), its radius on a slider from a quarter square to five ([ and ] step it), Fog all and Clear all, each asked first, and Enter painting at the centre of the view; the fog shown to the DM as a blue hatch, and to players as an opaque mask with a soft edge; in the right panel how many tokens under the fog players cannot see (`04` §13). [Q-101]
 
 The player view MUST show the live scene with a subtle vignette, labels sized to be read from 2–3 m, and the scene's name at the bottom left, fading after a few seconds; changes between idle and live, and between scenes, fade. [input, Q-100]

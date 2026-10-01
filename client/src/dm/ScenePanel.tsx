@@ -1,5 +1,8 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import {
+  EXHAUSTION,
+  EXHAUSTION_LEVELS,
+  hasMarker,
   API_IMAGE_PATHS,
   FEET_PER_SQUARE_BOUNDS,
   FIT_CAMERA,
@@ -54,7 +57,8 @@ import { TokenList } from './tokens/TokenList.js';
 import { TokenPicker } from './tokens/TokenPicker.js';
 import { FillFogDialog, FogBrushBar, FogPanel } from './fog/FogPanel.js';
 import { useSceneFog } from './fog/useSceneFog.js';
-import { MARKER_NAMES, TokenPopover } from './tokens/TokenPopover.js';
+import { TokenPopover } from './tokens/TokenPopover.js';
+import { markerName } from '../ui/conditions.js';
 import { toCanvasToken, useSceneTokens } from './tokens/useSceneTokens.js';
 
 // The selected scene in the centre of the workspace (PRP-02, specs/08-ux-journeys.md §1, §3,
@@ -325,6 +329,9 @@ export function ScenePanel({
     toAnnounce.current = undefined;
   }
   const [selectedToken, setSelectedToken] = useState<string>();
+  // Whether the selected token's popover is open: a click on the token, a choice in the list or a token
+  // just placed opens it; a drag of the token or a pan closes it, and the token stays selected (D-156).
+  const [popoverOpen, setPopoverOpen] = useState(false);
   // Choosing a token gives the arrow keys back to it and ends measuring.
   const selectToken = (id: string | undefined) => {
     setSelectedToken(id);
@@ -581,6 +588,7 @@ export function ScenePanel({
     refocus.current = 'canvas';
     if (!token) return;
     setSelectedToken(token.id);
+    setPopoverOpen(true);
     announce(t('tokens.placed', { label: token.label }));
   }
 
@@ -957,6 +965,11 @@ export function ScenePanel({
         selectedId: selectedToken,
         onSelect: selectToken,
         onDeselect: () => setSelectedToken(undefined),
+        onOpenPopover: (id) => {
+          selectToken(id);
+          setPopoverOpen(true);
+        },
+        onClosePopover: () => setPopoverOpen(false),
         onMove: (id, at) => {
           const token = tokens?.find((each) => each.id === id);
           if (token) void changeToken(token, at, moved);
@@ -990,14 +1003,27 @@ export function ScenePanel({
     ).then(() => onTokensChanged?.());
   }
 
-  // A condition marker on or off (TBL-02): the whole set is sent, in live mode as `token.setMarkers`.
-  function toggleMarker(token: SceneToken, marker: TokenMarker) {
-    const on = !token.markers.includes(marker);
-    const markers = on ? [...token.markers, marker] : token.markers.filter((each) => each !== marker);
-    const name = t(MARKER_NAMES[marker]);
+  // A condition marker on or off (TBL-02, TBL-05): the whole set is sent, in live mode as `token.setMarkers`.
+  // One turned on goes last, so the badges after the first three keep the order the DM applied them; Exhaustion
+  // starts at level 1.
+  function toggleMarker(token: SceneToken, id: string) {
+    const on = !hasMarker(token.markers, id);
+    const added: TokenMarker = id === EXHAUSTION ? { id, level: EXHAUSTION_LEVELS.min } : { id };
+    const markers = on ? [...token.markers, added] : token.markers.filter((each) => each.id !== id);
+    // Taken off, it is named as the token carries it, Exhaustion with the level it had.
+    const name = markerName(on ? added : (token.markers.find((each) => each.id === id) ?? added));
     void changeToken(token, { markers }, (updated) =>
       t(on ? 'tokens.markerOn' : 'tokens.markerOff', { label: updated.label, marker: name }),
     );
+  }
+
+  // Exhaustion's level, stepped from its chip: 0 takes it off, any other level replaces it where it stands.
+  function setExhaustion(token: SceneToken, level: number) {
+    if (level < EXHAUSTION_LEVELS.min) return toggleMarker(token, EXHAUSTION);
+    const markers = token.markers.map((each) =>
+      each.id === EXHAUSTION ? { id: EXHAUSTION, level: Math.min(level, EXHAUSTION_LEVELS.max) } : each,
+    );
+    void changeToken(token, { markers }, (updated) => t('tokens.exhaustionSet', { label: updated.label, level }));
   }
 
   // Reveal all hidden monsters: one change each, in turn (UIX-01); on the live scene each is its own
@@ -1016,6 +1042,7 @@ export function ScenePanel({
     const placed = isLive ? await placeLive(token.asset_id, at) : await sceneTokens.place(token.asset_id, at);
     if (!placed) return;
     setSelectedToken(placed.id);
+    setPopoverOpen(true);
     announce(t('tokens.placed', { label: placed.label }));
     onTokensChanged?.();
   }
@@ -1041,7 +1068,7 @@ export function ScenePanel({
     </>
   ) : null;
   const popover =
-    tokens && !placingAsset
+    tokens && !placingAsset && popoverOpen
       ? (anchor: Parameters<NonNullable<Parameters<typeof MapCanvas>[0]['popover']>>[0]) =>
           selected ? (
             <TokenPopover
@@ -1057,7 +1084,8 @@ export function ScenePanel({
                 )
               }
               onDelete={() => openDialog(() => setDeleting(selected))}
-              onToggleMarker={(marker) => toggleMarker(selected, marker)}
+              onToggleMarker={(id) => toggleMarker(selected, id)}
+              onExhaustion={(level) => setExhaustion(selected, level)}
             />
           ) : null
       : undefined;
@@ -1067,6 +1095,7 @@ export function ScenePanel({
       selectedId={selected?.id}
       onSelect={(token) => {
         selectToken(token.id);
+        setPopoverOpen(true);
         canvas.current?.centreOn(token.id);
       }}
       onToggleHidden={toggleHidden}

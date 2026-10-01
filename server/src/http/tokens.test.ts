@@ -312,11 +312,11 @@ describe('numbering (specs/05-assets-and-images.md §3, D-019, Q-063, Q-091)', (
     await place(cave.id, goblin.id);
     const doomed = await place(cave.id, goblin.id);
     ok(await remove(tokenUrl(doomed.token.id)), 204);
-    await changed((await list(cave.id))[0]!.id, { markers: ['bloodied'] });
+    await changed((await list(cave.id))[0]!.id, { markers: [{ id: 'bloodied' }, { id: 'exhaustion', level: 2 }] });
     const copy = ok<Scene>(await post(`/api/scenes/${cave.id}/duplicate`, { name: 'Cave again' }), 201);
     expect(await labels(copy.id)).toEqual(['Goblin 1']);
-    // The copy's tokens carry the original's markers (TBL-02).
-    expect((await list(copy.id))[0]!.markers).toEqual(['bloodied']);
+    // The copy's tokens carry the original's markers (TBL-02, TBL-05).
+    expect((await list(copy.id))[0]!.markers).toEqual([{ id: 'bloodied' }, { id: 'exhaustion', level: 2 }]);
     expect((await place(copy.id, goblin.id)).token.label).toBe('Goblin 3');
     expect((await place(copy.id, goblin.id)).token.label).toBe('Goblin 4');
     expect((await place(cave.id, goblin.id)).token.label).toBe('Goblin 3');
@@ -451,17 +451,15 @@ describe('changing a token', () => {
     expect(await list(cave.id)).toEqual([{ ...token, x: 7.5, y: 2.25, hidden: true, label: 'Chief' }]);
   });
 
-  it('sets its condition markers, stored in the fixed order, and takes them off (TBL-02)', async () => {
+  it('sets its condition markers, stored in the order applied, and takes them off (TBL-02, TBL-05)', async () => {
     const cave = await scene();
     const { token } = await place(cave.id, (await asset('Goblin')).id);
     expect(token.markers).toEqual([]);
-    expect((await changed(token.id, { markers: ['concentrating', 'unconscious'] })).markers).toEqual([
-      'unconscious',
-      'concentrating',
-    ]);
+    const markers = [{ id: 'concentrating' }, { id: 'exhaustion', level: 6 }, { id: 'unconscious' }];
+    expect((await changed(token.id, { markers })).markers).toEqual(markers);
     // Another change keeps them; an empty set takes them off.
-    expect((await changed(token.id, { x: 3 })).markers).toEqual(['unconscious', 'concentrating']);
-    expect((await list(cave.id))[0]!.markers).toEqual(['unconscious', 'concentrating']);
+    expect((await changed(token.id, { x: 3 })).markers).toEqual(markers);
+    expect((await list(cave.id))[0]!.markers).toEqual(markers);
     expect((await changed(token.id, { markers: [] })).markers).toEqual([]);
   });
 
@@ -529,8 +527,18 @@ describe('changing a token', () => {
       { stack: 'top' },
       { hidden: 'yes' },
       { x: Number.MAX_VALUE },
-      { markers: ['poisoned'] },
-      { markers: ['dead', 'dead'] },
+      { markers: ['dead'] },
+      { markers: [{ id: 'hasted' }] },
+      { markers: [{ id: 'dead' }, { id: 'dead' }] },
+      {
+        markers: [
+          { id: 'exhaustion', level: 1 },
+          { id: 'exhaustion', level: 2 },
+        ],
+      },
+      { markers: [{ id: 'exhaustion' }] },
+      { markers: [{ id: 'exhaustion', level: 0 }] },
+      { markers: [{ id: 'poisoned', level: 1 }] },
       { markers: 'dead' },
     ]) {
       expectFailure(await patch(tokenUrl(token.id), body), 400, 'validation_failed');
@@ -569,7 +577,13 @@ describe('the live scene (specs/04-live-sync.md §2)', () => {
     const { token } = await place(cave.id, goblin.id);
     goLive(cave.id);
     expectFailure(await post(tokensUrl(cave.id), { asset_id: goblin.id, x: 0, y: 0 }), 409, 'scene_live');
-    for (const body of [{ x: 4 }, { hidden: false }, { label: 'Renamed' }, { stack: 'back' }, { markers: ['dead'] }]) {
+    for (const body of [
+      { x: 4 },
+      { hidden: false },
+      { label: 'Renamed' },
+      { stack: 'back' },
+      { markers: [{ id: 'dead' }] },
+    ]) {
       expectFailure(await patch(tokenUrl(token.id), body), 409, 'scene_live');
     }
     expectFailure(await remove(tokenUrl(token.id)), 409, 'scene_live');

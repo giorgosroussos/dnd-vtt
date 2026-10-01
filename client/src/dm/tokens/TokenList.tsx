@@ -3,7 +3,7 @@ import { underFog } from '../fog/FogPanel.js';
 import { Icon } from '../../ui/icons.js';
 import { t, type MessageKey } from '../../ui/messages.js';
 import { initialsOf } from '../../canvas/TokenLayer.js';
-import { MARKER_NAMES } from './TokenPopover.js';
+import { markerName } from '../../ui/conditions.js';
 
 const CATEGORY_NAMES: Record<AssetCategory, MessageKey> = {
   pc: 'asset.category.pc',
@@ -27,13 +27,13 @@ const GROUPS: { key: 'party' | 'monsters' | 'others'; heading: MessageKey; categ
 // it. Every control is a native button, so the keyboard reaches all of it.
 /**
  * A row's status line: hidden or what it is, then whether it stands under the fog (TBL-04), then its condition
- * markers (TBL-02), if any.
+ * markers (TBL-02, TBL-05), if any, in the order applied.
  */
 function statusOf(token: SceneToken, fog: FogMask): string {
   const own = token.hidden ? t('sceneTokens.hidden') : t(CATEGORY_NAMES[token.asset.category]);
   const status = underFog(token, fog) ? t('sceneTokens.inFog', { status: own }) : own;
   if (token.markers.length === 0) return status;
-  const markers = token.markers.map((marker) => t(MARKER_NAMES[marker])).join(t('sceneTokens.markerSeparator'));
+  const markers = token.markers.map(markerName).join(t('sceneTokens.markerSeparator'));
   return t('sceneTokens.withMarkers', { status, markers });
 }
 

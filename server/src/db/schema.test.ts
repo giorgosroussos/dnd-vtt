@@ -931,6 +931,44 @@ describe('migrations on the generated fixture database (specs/14-agent-playbook.
     expect(db.pragma('foreign_key_check')).toEqual([]);
   });
 
+  it('turns stored marker names into objects at migration 0007, in the same order, losing none (D-157)', () => {
+    createFixtureDatabase(dataDir);
+    migrateDataDirectory(dataDir, MIGRATIONS_DIR, new Date(), 6);
+    db = openDatabase(dataDir);
+    const [first, second, third] = db.prepare('SELECT id FROM token ORDER BY id LIMIT 3').pluck().all() as string[];
+    const set = db.prepare('UPDATE token SET markers = ? WHERE id = ?');
+    set.run('["dead","bloodied","concentrating","unconscious"]', first);
+    set.run('["concentrating"]', second);
+    const untouched = db.prepare('SELECT count(*) FROM token WHERE markers = ?').pluck().get('[]');
+    db.close();
+
+    const result = migrateDataDirectory(dataDir, MIGRATIONS_DIR);
+
+    expect(result).toMatchObject({ from: 6, to: LATEST });
+    expect(result.backup).not.toBeNull();
+    db = openDatabase(dataDir);
+    const markers = (id: string | undefined) =>
+      JSON.parse(db.prepare('SELECT markers FROM token WHERE id = ?').pluck().get(id) as string) as unknown;
+    expect(markers(first)).toEqual([
+      { id: 'dead' },
+      { id: 'bloodied' },
+      { id: 'concentrating' },
+      { id: 'unconscious' },
+    ]);
+    expect(markers(second)).toEqual([{ id: 'concentrating' }]);
+    if (third !== undefined) expect(markers(third)).toEqual([]);
+    expect(db.prepare('SELECT count(*) FROM token WHERE markers = ?').pluck().get('[]')).toBe(untouched);
+    // Run again over rows that already hold objects, it changes nothing (TBL-05 review).
+    db.exec(readFileSync(path.join(MIGRATIONS_DIR, '0007_marker_objects.sql'), 'utf8'));
+    expect(markers(first)).toEqual([
+      { id: 'dead' },
+      { id: 'bloodied' },
+      { id: 'concentrating' },
+      { id: 'unconscious' },
+    ]);
+    expect(markers(second)).toEqual([{ id: 'concentrating' }]);
+  });
+
   it('migrates the fixture to the latest version, keeping every row and every reference', () => {
     const counts = createFixtureDatabase(dataDir);
     db = openDatabase(dataDir);
@@ -965,7 +1003,8 @@ describe('migrations on the generated fixture database (specs/14-agent-playbook.
     // fog (TBL-04, D-154).
     expect(db.prepare("SELECT count(*) FROM sqlite_schema WHERE name LIKE 'region%'").pluck().get()).toBe(0);
     expect(db.prepare('SELECT DISTINCT fog FROM scene').pluck().all()).toEqual(['[]']);
-    // Migration 0004 gives every existing token no markers (TBL-02), and refuses anything but a JSON array.
+    // Migration 0004 gives every existing token no markers (TBL-02), and refuses anything but a JSON array;
+    // 0007 leaves an empty array as it is (TBL-05).
     expect(db.prepare('SELECT DISTINCT markers FROM token').pluck().all()).toEqual(['[]']);
     for (const markers of ['bloodied', '{"dead":true}', '[']) {
       expect(() => db.prepare('UPDATE token SET markers = ?').run(markers), markers).toThrow(/CHECK constraint failed/);

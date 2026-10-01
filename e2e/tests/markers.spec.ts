@@ -4,7 +4,7 @@ import { openWorkspace, seedCampaign } from './dm.js';
 import { solidPng } from './png.js';
 import { framesOf } from './journeys/support.js';
 
-// TBL-02: condition markers against the production server (specs/03-domain-model.md §1, specs/04-live-sync.md
+// TBL-02 and TBL-05: condition markers against the production server (specs/03-domain-model.md §1, specs/04-live-sync.md
 // §2, §4, §8, specs/08-ux-journeys.md §11, Q-099). A DM context and a player context at once: a marker
 // toggled in the popover on the live scene shows on the TV, is undone and redone, and survives both views
 // reloading; a hidden token's marker reaches the TV not at all, until it is revealed with it.
@@ -15,11 +15,14 @@ const panel = (page: Page) => page.locator('main.eg-scene');
 const liveBar = (page: Page) => page.getByRole('region', { name: 'Live scene' });
 const rail = (page: Page) => page.getByRole('toolbar', { name: 'Tools' });
 
-type Drawn = { id: string; label: string; markers: string[]; hidden?: boolean }[];
+type Drawn = { id: string; label: string; markers: { id: string; level?: number }[]; hidden?: boolean }[];
 const drawn = async (locator: ReturnType<typeof viewport>): Promise<Drawn> =>
   JSON.parse((await locator.getAttribute('data-tokens')) ?? '[]') as Drawn;
+// A token's markers by id, Exhaustion with its level ("exhaustion:2"), in the order applied.
 const markersOn = async (locator: ReturnType<typeof viewport>, label: string) =>
-  (await drawn(locator)).find((token) => token.label === label)?.markers;
+  (await drawn(locator))
+    .find((token) => token.label === label)
+    ?.markers.map((marker) => (marker.level === undefined ? marker.id : `${marker.id}:${marker.level}`));
 const chip = (page: Page, name: string) => tokenPopover(page).getByRole('button', { name, exact: true });
 
 test('a marker set on the live scene shows on the TV, is undone and redone, survives a reload, and a hidden token’s stays off the TV', async ({
@@ -111,6 +114,62 @@ test('a marker set on the live scene shows on the TV, is undone and redone, surv
       .getByRole('button', { name: `Reveal token ${shadeLabel}` })
       .click();
     await expect.poll(() => markersOn(tvCanvas(tv), shadeLabel)).toEqual(['dead']);
+
+    // TBL-05: the other sixteen conditions on the ogre, the pinned ones from their chips and the rest from
+    // More…, each reaching the TV in the order applied; Exhaustion stepped to 2; a reloaded TV gets them all
+    // from its snapshot; undo takes every change back one at a time and redo puts them all back.
+    await selectTokenRow(dm, ogreLabel);
+    const expected = ['bloodied', 'concentrating'];
+    for (const name of ['Unconscious', 'Dead', 'Prone', 'Poisoned']) {
+      await chip(dm, name).click();
+      expected.push(name.toLowerCase());
+      await expect.poll(() => markersOn(tvCanvas(tv), ogreLabel)).toEqual(expected);
+    }
+    for (const name of [
+      'Blinded',
+      'Charmed',
+      'Deafened',
+      'Exhaustion',
+      'Frightened',
+      'Grappled',
+      'Incapacitated',
+      'Invisible',
+      'Paralyzed',
+      'Petrified',
+      'Restrained',
+      'Stunned',
+    ]) {
+      await tokenPopover(dm).getByRole('button', { name: 'More conditions' }).click();
+      await tokenPopover(dm).getByRole('combobox', { name: 'Search conditions' }).fill(name.slice(0, 4));
+      await tokenPopover(dm).getByRole('option', { name, exact: true }).click();
+      expected.push(name === 'Exhaustion' ? 'exhaustion:1' : name.toLowerCase());
+      await expect.poll(() => markersOn(tvCanvas(tv), ogreLabel)).toEqual(expected);
+      // Chosen from the list, it shows as a pressed chip in the popover.
+      await expect(chip(dm, name)).toHaveAttribute('aria-pressed', 'true');
+    }
+    await tokenPopover(dm)
+      .getByRole('button', { name: `Raise exhaustion of ${ogreLabel}` })
+      .click();
+    const all = expected.map((id) => (id === 'exhaustion:1' ? 'exhaustion:2' : id));
+    await expect.poll(() => markersOn(tvCanvas(tv), ogreLabel)).toEqual(all);
+    expect(all).toHaveLength(18);
+    await tv.reload();
+    await expect(player(tv)).toHaveAttribute('data-scene', 'live');
+    await expect.poll(() => markersOn(tvCanvas(tv), ogreLabel)).toEqual(all);
+    const undo = rail(dm).getByRole('button', { name: 'Undo', exact: true });
+    const redo = rail(dm).getByRole('button', { name: 'Redo', exact: true });
+    await undo.click();
+    await expect.poll(() => markersOn(tvCanvas(tv), ogreLabel)).toEqual(expected);
+    for (let left = expected.length - 1; left >= 2; left--) {
+      await undo.click();
+      await expect.poll(() => markersOn(tvCanvas(tv), ogreLabel)).toEqual(expected.slice(0, left));
+    }
+    for (let count = 3; count <= expected.length; count++) {
+      await redo.click();
+      await expect.poll(() => markersOn(tvCanvas(tv), ogreLabel)).toEqual(expected.slice(0, count));
+    }
+    await redo.click();
+    await expect.poll(() => markersOn(tvCanvas(tv), ogreLabel)).toEqual(all);
   } finally {
     await liveBar(dm)
       .getByRole('button', { name: 'Go idle' })
