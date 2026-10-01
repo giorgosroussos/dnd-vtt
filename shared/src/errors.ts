@@ -19,6 +19,10 @@ export const ERROR_CODES = [
   'forbidden',
   'pin_incorrect',
   'locked_out',
+  // REL-03, G-042 (specs/07-security-and-access.md §6, Q-097, Q-098): PIN entry is paused for every address
+  // but the server machine's, after many failures across addresses; sent instead of `locked_out` while
+  // the pause lasts, with the same Retry-After, so that the DM view can name the server PC as the way in.
+  'pin_paused',
   'pin_not_set',
   'pin_already_set',
   // SRV-03 (specs/03-domain-model.md §2, §7):

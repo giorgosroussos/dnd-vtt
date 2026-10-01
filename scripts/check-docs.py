@@ -391,7 +391,9 @@ def check_plan(root, rows):
         fail("now-items", "PLAN.md", "sections must be exactly `## Now` then `## Next`, found %s" % heads)
     now = text.split("## Now", 1)[1].split("## Next", 1)[0] if "## Now" in text else ""
     items = re.findall(r"^###\s+([A-Z]{2,5}-\d{2,3})\b", now, re.M)
-    if not items:
+    # Once every package is done, Now may hold none, and says so in a `None:` line (D-152).
+    all_done = bool(rows) and all(row[1] == "done" for row in rows.values())
+    if not items and not (all_done and re.search(r"^- None:", now, re.M)):
         fail("now-items", "PLAN.md", "no `### <PACKAGE-ID>` item under Now")
     if len(items) > 3:
         fail("now-items", "PLAN.md", "%d Now items; keep 1-3" % len(items))
@@ -402,6 +404,8 @@ def check_plan(root, rows):
             fail("now-items", "PLAN.md", "Now item %s is already `done` in TRACEABILITY.md" % it)
     if items:
         ok("now-items", "Now = %s" % ", ".join(items))
+    elif all_done and re.search(r"^- None:", now, re.M):
+        ok("now-items", "Now = none: every package is done")
 
 
 def check_gaps(root, pkgs, phases):

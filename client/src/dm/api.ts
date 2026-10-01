@@ -12,7 +12,7 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     readonly code: ClientErrorCode,
-    /** Seconds from `Retry-After`, sent with `locked_out`. */
+    /** Seconds from `Retry-After`, sent with `locked_out` and `pin_paused`. */
     readonly retryAfter: number | undefined = undefined,
     /** The scenes that use an asset, sent with `asset_in_use` (D-083). */
     readonly usages: readonly AssetUsage[] = [],

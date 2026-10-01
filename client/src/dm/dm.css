@@ -1445,14 +1445,43 @@ textarea.eg-field__input {
 
 /* The Settings dialog (REL-01): two sections, the PIN change set apart below the table's settings,
  * the rule's radio buttons without the browser's group border, and an empty status taking no room. */
+/* Settings: two columns, the PIN change on the right, set apart by a rule (G-041). */
+.eg-dialog.eg-settings {
+  max-width: 56rem;
+}
+
+/* Closer than other dialogs' rows of buttons: the whole dialog fits a laptop's 620 px window. */
+.eg-settings .eg-dialog__actions {
+  margin-top: var(--space-4);
+}
+
+.eg-settings__columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-6);
+  align-items: start;
+}
+
 .eg-settings__heading {
   font-size: var(--font-size-md);
 }
 
 .eg-settings__pin {
-  border-top: 1px solid var(--color-border);
-  margin-top: var(--space-6);
-  padding-top: var(--space-4);
+  border-left: 1px solid var(--color-border);
+  padding-left: var(--space-6);
+}
+
+@media (width <= 900px) {
+  .eg-settings__columns {
+    grid-template-columns: 1fr;
+  }
+
+  .eg-settings__pin {
+    border-left: 0;
+    padding-left: 0;
+    border-top: 1px solid var(--color-border);
+    padding-top: var(--space-4);
+  }
 }
 
 .eg-settings__rule {

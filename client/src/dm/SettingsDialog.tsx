@@ -17,7 +17,7 @@ import { TextField } from '../ui/TextField.js';
 import { errorMessage } from '../ui/errorMessage.js';
 import { t, type MessageKey } from '../ui/messages.js';
 import { ApiError, errorCode, request } from './api.js';
-import { lockedOutText } from './SignIn.js';
+import { pinRefusalText } from './SignIn.js';
 
 // Settings (REL-01, specs/09-operations.md §7, Q-051): the upload limit, the display-version size and
 // the ruler's diagonal rule, changed without restarting, and the PIN change of
@@ -160,7 +160,7 @@ export function SettingsDialog({
   }
 
   return (
-    <Dialog heading={t('settings.heading')} onClose={onClose}>
+    <Dialog heading={t('settings.heading')} onClose={onClose} className="eg-settings">
       {loadFailure ? (
         <>
           <Notice>{loadFailure}</Notice>
@@ -177,67 +177,71 @@ export function SettingsDialog({
         </p>
       ) : null}
       {loaded ? (
-        <form
-          ref={formRef}
-          className="eg-form eg-settings__section"
-          aria-labelledby={headingId}
-          onSubmit={(event) => void save(event)}
-          noValidate
-          aria-busy={saving || undefined}
-        >
-          <h3 id={headingId} className="eg-settings__heading">
-            {t('settings.tableHeading')}
-          </h3>
-          {failure ? <Notice>{failure}</Notice> : null}
-          <TextField
-            label={t('settings.uploadLimit')}
-            inputMode="numeric"
-            value={limit}
-            error={errors.limit}
-            aria-describedby={`${ids}-limit`}
-            onChange={(event) => edit(() => setLimit(event.target.value))}
-          />
-          <p id={`${ids}-limit`} className="eg-dm__status">
-            {t('settings.uploadLimitHint', shown(LIMIT_MB))}
-          </p>
-          <TextField
-            label={t('settings.displaySize')}
-            inputMode="numeric"
-            value={display}
-            error={errors.display}
-            aria-describedby={`${ids}-display`}
-            onChange={(event) => edit(() => setDisplay(event.target.value))}
-          />
-          <p id={`${ids}-display`} className="eg-dm__status">
-            {t('settings.displaySizeHint', shown(DISPLAY_SIZE_BOUNDS))}
-          </p>
-          <fieldset className="eg-settings__rule">
-            <legend>{t('settings.rulerRule')}</legend>
-            {RULER_RULES.map((each) => (
-              <div className="eg-check" key={each}>
-                <input
-                  id={`${ids}-${each}`}
-                  type="radio"
-                  name={`${ids}-rule`}
-                  value={each}
-                  checked={rule === each}
-                  onChange={() => edit(() => setRule(each))}
-                />
-                <label htmlFor={`${ids}-${each}`}>{t(RULE_LABELS[each])}</label>
-              </div>
-            ))}
-          </fieldset>
-          <p className="eg-dm__status eg-settings__status" role="status">
-            {saving ? t('settings.saving') : (status ?? '')}
-          </p>
-          <div className="eg-dialog__actions">
-            <Button type="submit" variant="primary" aria-disabled={saving || undefined}>
-              {t('settings.save')}
-            </Button>
-          </div>
-        </form>
+        // The table's settings and the PIN change side by side, so that a laptop's short window shows both
+        // without scrolling (G-041); one above the other in a narrow one.
+        <div className="eg-settings__columns">
+          <form
+            ref={formRef}
+            className="eg-form eg-settings__section"
+            aria-labelledby={headingId}
+            onSubmit={(event) => void save(event)}
+            noValidate
+            aria-busy={saving || undefined}
+          >
+            <h3 id={headingId} className="eg-settings__heading">
+              {t('settings.tableHeading')}
+            </h3>
+            {failure ? <Notice>{failure}</Notice> : null}
+            <TextField
+              label={t('settings.uploadLimit')}
+              inputMode="numeric"
+              value={limit}
+              error={errors.limit}
+              aria-describedby={`${ids}-limit`}
+              onChange={(event) => edit(() => setLimit(event.target.value))}
+            />
+            <p id={`${ids}-limit`} className="eg-dm__status">
+              {t('settings.uploadLimitHint', shown(LIMIT_MB))}
+            </p>
+            <TextField
+              label={t('settings.displaySize')}
+              inputMode="numeric"
+              value={display}
+              error={errors.display}
+              aria-describedby={`${ids}-display`}
+              onChange={(event) => edit(() => setDisplay(event.target.value))}
+            />
+            <p id={`${ids}-display`} className="eg-dm__status">
+              {t('settings.displaySizeHint', shown(DISPLAY_SIZE_BOUNDS))}
+            </p>
+            <fieldset className="eg-settings__rule">
+              <legend>{t('settings.rulerRule')}</legend>
+              {RULER_RULES.map((each) => (
+                <div className="eg-check" key={each}>
+                  <input
+                    id={`${ids}-${each}`}
+                    type="radio"
+                    name={`${ids}-rule`}
+                    value={each}
+                    checked={rule === each}
+                    onChange={() => edit(() => setRule(each))}
+                  />
+                  <label htmlFor={`${ids}-${each}`}>{t(RULE_LABELS[each])}</label>
+                </div>
+              ))}
+            </fieldset>
+            <p className="eg-dm__status eg-settings__status" role="status">
+              {saving ? t('settings.saving') : (status ?? '')}
+            </p>
+            <div className="eg-dialog__actions">
+              <Button type="submit" variant="primary" aria-disabled={saving || undefined}>
+                {t('settings.save')}
+              </Button>
+            </div>
+          </form>
+          <PinChange />
+        </div>
       ) : null}
-      {loaded ? <PinChange /> : null}
       {signOutFailure ? <Notice>{signOutFailure}</Notice> : null}
       <div className="eg-dialog__actions">
         {onSignOut ? <Button onClick={onSignOut}>{t('dm.signOut')}</Button> : null}
@@ -294,7 +298,7 @@ function PinChange() {
         focusInvalid.current = true;
       } else {
         const wait = error instanceof ApiError ? error.retryAfter : undefined;
-        const reason = code === 'locked_out' && wait !== undefined ? lockedOutText(wait) : errorMessage(code);
+        const reason = pinRefusalText(code, wait);
         setFailure(t('settings.pinFailed', { reason }));
       }
     } finally {

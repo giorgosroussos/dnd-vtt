@@ -76,7 +76,7 @@ Emberglass is meant for a trusted home network.
 - **Guessing the PIN:**
   - After 5 wrong PINs from one device, PIN entry from it is refused for 1 minute. The wait doubles on each further 5.
   - After 20 wrong PINs from any devices within 10 minutes, or 100 within 24 hours, PIN entry is paused for 10 minutes on every device except the server PC itself. Wrong PINs typed on the server PC count towards neither. The pause doubles on each further run of either kind, and only a restart of the server brings it back to 10 minutes, so a device that keeps guessing can keep PIN entry away from other devices for ever longer; restart the server to end that. Every pause is logged with the addresses that caused it.
-  - Browsers already signed in keep working during a pause. To sign in, or to change the PIN, during a pause, use a browser on the server PC opened at `http://localhost:3000/dm` (not the network address the console prints); its own limit of 5 wrong PINs still applies.
+  - Browsers already signed in keep working during a pause. To sign in, or to change the PIN, during a pause, use a browser on the server PC opened at `http://localhost:3000/dm` (not the network address the console prints); its own limit of 5 wrong PINs still applies. A device refused during a pause says so, gives that address with the port it used, and says how long the pause has left, in hours once it passes two.
   - A device that keeps just under both limits, changing its address, is never paused: at most 99 guesses a day. A 4-digit PIN could be found that way within about 100 days, a 6-digit one only in decades, an 8-digit one practically never.
   - Choose a PIN of 6 to 8 digits: a 4-digit PIN is the easiest to guess.
 
