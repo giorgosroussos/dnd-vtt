@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import zlib from 'node:zlib';
-import { createInterface } from 'node:readline/promises';
+import { createInterface } from 'node:readline';
 import { request as playwrightRequest, type APIRequestContext } from '@playwright/test';
 
 // The large-scene fixture of specs/10-testing-acceptance.md §3 (Q-060, Q-088, D-036): a generated map
@@ -16,7 +16,7 @@ import { request as playwrightRequest, type APIRequestContext } from '@playwrigh
 //   node e2e/fixtures/large-scene.ts <folder>
 //
 // or builds it whole on a running server, in a new campaign, signing in with the DM PIN from
-// EMBERGLASS_PIN or typed when asked (REL-03, docs/acceptance/rel-03-owner-run.md):
+// EMBERGLASS_PIN or typed, unseen, when asked (REL-03, docs/acceptance/rel-03-owner-run.md):
 //
 //   node e2e/fixtures/large-scene.ts --seed http://localhost:3000
 
@@ -171,18 +171,72 @@ export async function seedLargeScene(request: APIRequestContext, sessionId: stri
 }
 
 // As a command: the images, written to the folder named.
-/** Signs in to `server` with the DM PIN and builds the fixture in a new campaign; the PIN is never printed. */
-async function seedOnServer(server: string): Promise<void> {
-  let pin = process.env.EMBERGLASS_PIN;
-  if (!pin) {
-    const prompt = createInterface({ input: process.stdin, output: process.stdout });
-    pin = (await prompt.question('DM PIN: ')).trim();
-    prompt.close();
+/** Reads a line from the terminal without showing it; from a pipe, reads it as it comes (review S-L2). */
+async function readHidden(question: string): Promise<string> {
+  const input = process.stdin;
+  if (!input.isTTY) {
+    // The first line, or nothing if the input ends without one.
+    const lines = createInterface({ input });
+    for await (const line of lines) {
+      lines.close();
+      return line;
+    }
+    return '';
   }
+  process.stdout.write(question);
+  input.setRawMode(true);
+  input.resume();
+  input.setEncoding('utf8');
+  return new Promise((resolve) => {
+    let typed = '';
+    const onData = (chunk: string) => {
+      for (const char of chunk) {
+        if (char === '\r' || char === '\n') {
+          input.off('data', onData);
+          input.setRawMode(false);
+          input.pause();
+          process.stdout.write('\n');
+          resolve(typed);
+          return;
+        }
+        if (char === '\u0003') {
+          input.setRawMode(false);
+          process.stdout.write('\n');
+          process.exit(130);
+        }
+        if (char === '\u007f' || char === '\b') typed = typed.slice(0, -1);
+        else if (char >= ' ') typed += char;
+      }
+    };
+    input.on('data', onData);
+  });
+}
+
+/** Whether `server` is this PC by its loopback name or address. */
+function isLoopbackUrl(server: string): boolean {
+  const host = new URL(server).hostname;
+  return host === 'localhost' || host === '[::1]' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
+}
+
+/**
+ * Signs in to `server` with the DM PIN and builds the fixture in a new campaign. The PIN is never shown or
+ * printed, and the session is signed out whatever happens after the sign-in (review S-L1, S-L2).
+ */
+async function seedOnServer(server: string): Promise<void> {
+  if (!isLoopbackUrl(server)) {
+    // A LAN address carries the PIN over plain HTTP, and a wrong PIN from it counts towards the limits on
+    // wrong PINs, which spare only the server PC's loopback (review S-L3).
+    console.warn(
+      `Warning: ${new URL(server).host} is not this PC's localhost. The PIN goes over the network, and a wrong one counts towards the limits on wrong PINs. Run this on the server PC with http://localhost:<port> where you can.`,
+    );
+  }
+  const pin = process.env.EMBERGLASS_PIN || (await readHidden('DM PIN (not shown): ')).trim();
   const request = await playwrightRequest.newContext({ baseURL: server });
+  let signedIn = false;
   try {
-    const signedIn = await request.post('/api/auth', { data: { pin } });
-    if (!signedIn.ok()) throw new Error(`sign-in refused: ${signedIn.status()} ${await signedIn.text()}`);
+    const answer = await request.post('/api/auth', { data: { pin } });
+    if (!answer.ok()) throw new Error(`sign-in refused: ${answer.status()} ${await answer.text()}`);
+    signedIn = true;
     // Local time, as the DM reads it: 2026-10-01 20:30.
     const tag = new Date().toLocaleString('sv').slice(0, 16);
     const campaign = await request.post('/api/campaigns', { data: { name: `TV run ${tag}` } });
@@ -193,10 +247,10 @@ async function seedOnServer(server: string): Promise<void> {
     const { id: sessionId } = (await session.json()) as { id: string };
     const built = await seedLargeScene(request, sessionId, tag);
     console.log(
-      `Built campaign "TV run ${tag}": scene "Large scene ${tag}" (${MAP_WIDTH} × ${MAP_HEIGHT} px, ${built.tokens.length} tokens) and "Map-less scene ${tag}".`,
+      `Built campaign "TV run ${tag}", session "TV run": scene "Large scene ${tag}" (${MAP_WIDTH} × ${MAP_HEIGHT} px, ${built.tokens.length} tokens) and "Map-less scene ${tag}".`,
     );
-    await request.delete('/api/auth');
   } finally {
+    if (signedIn) await request.delete('/api/auth').catch(() => undefined);
     await request.dispose();
   }
 }
@@ -204,7 +258,12 @@ async function seedOnServer(server: string): Promise<void> {
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [first, second] = process.argv.slice(2);
   if (first === '--seed' && second) {
-    await seedOnServer(second);
+    try {
+      await seedOnServer(second);
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    }
     process.exit(0);
   }
   const folder = first;

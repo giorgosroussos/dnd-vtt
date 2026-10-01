@@ -16,7 +16,7 @@ import {
 } from '../ui/testing/fakeServer.js';
 import { render, type Rendered } from '../ui/testing/render.js';
 import { DmView } from './DmView.js';
-import { pinRefusalText, serverPcAddress, waitText } from './SignIn.js';
+import { lockedOutText, pinRefusalText, serverPcAddress, waitText } from './SignIn.js';
 
 // The DM view's screens (PRP-01, specs/07-security-and-access.md §1, §2, §6,
 // specs/08-ux-journeys.md §1, D-085), against a scripted server behind fetch.
@@ -138,7 +138,7 @@ describe('PIN entry and sign-out (specs/07-security-and-access.md §2, §6)', ()
     await type(inputs(view)[0], '4826');
     await submit(view.querySelector('form'));
     // In minutes once that reads better (REL-01 review U-L6).
-    expect(view.querySelector('[role="alert"]')!.textContent).toBe(t('signIn.lockedOutMinutes', { minutes: 8 }));
+    expect(view.querySelector('[role="alert"]')!.textContent).toBe(t('signIn.lockedOut', { wait: '8 minutes' }));
     expect(view.querySelector('nav')).toBeNull();
   });
 
@@ -147,7 +147,7 @@ describe('PIN entry and sign-out (specs/07-security-and-access.md §2, §6)', ()
     const view = await open();
     await type(inputs(view)[0], '4826');
     await submit(view.querySelector('form'));
-    expect(view.querySelector('[role="alert"]')!.textContent).toBe(t('signIn.lockedOutHours', { hours: 11 }));
+    expect(view.querySelector('[role="alert"]')!.textContent).toBe(t('signIn.lockedOut', { wait: '11 hours' }));
   });
 
   it('says a server-wide pause is not necessarily this device’s doing and names the server PC (G-042)', async () => {
@@ -160,6 +160,8 @@ describe('PIN entry and sign-out (specs/07-security-and-access.md §2, §6)', ()
     expect(alert).toContain('server PC');
     expect(alert).toContain('localhost');
     expect(alert).toContain('20 minutes');
+    // The address ends the message, so that it is copied without punctuation (review U-L5).
+    expect(alert.endsWith(serverPcAddress())).toBe(true);
     expect(view.querySelector('nav')).toBeNull();
   });
 
@@ -169,11 +171,16 @@ describe('PIN entry and sign-out (specs/07-security-and-access.md §2, §6)', ()
   });
 
   it('gives waits in seconds, minutes, then hours past two hours', () => {
+    expect(waitText(1)).toBe('1 second');
     expect(waitText(119)).toBe('119 seconds');
     expect(waitText(120)).toBe('2 minutes');
     expect(waitText(7_200)).toBe('120 minutes');
     expect(waitText(7_201)).toBe('3 hours');
+    expect(lockedOutText(7_200)).toBe('Too many wrong PINs. Try again in 120 minutes.');
+    expect(lockedOutText(7_201)).toBe('Too many wrong PINs. Try again in 3 hours.');
+    // Without a Retry-After, each code's own message (review T-L6).
     expect(pinRefusalText('pin_paused', undefined)).toBe(t('error.code.pin_paused'));
+    expect(pinRefusalText('locked_out', undefined)).toBe(t('error.code.locked_out'));
   });
 
   it('names a short wait in seconds', async () => {
@@ -181,7 +188,7 @@ describe('PIN entry and sign-out (specs/07-security-and-access.md §2, §6)', ()
     const view = await open();
     await type(inputs(view)[0], '4826');
     await submit(view.querySelector('form'));
-    expect(view.querySelector('[role="alert"]')!.textContent).toBe(t('signIn.lockedOut', { seconds: 45 }));
+    expect(view.querySelector('[role="alert"]')!.textContent).toBe(t('signIn.lockedOut', { wait: '45 seconds' }));
   });
 
   it('signs out to the PIN form', async () => {

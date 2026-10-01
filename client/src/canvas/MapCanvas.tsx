@@ -170,6 +170,32 @@ function useViewport(): [React.RefObject<HTMLDivElement | null>, Size] {
 }
 
 /**
+ * Whether a scrolling box hides content above or below its view: the tool rail scrolls without a scrollbar
+ * on a short canvas, and fades at the edge with more beyond it (review U-M2).
+ */
+function useScrollEdges(): [(element: HTMLDivElement | null) => void, { above: boolean; below: boolean }] {
+  const [element, setElement] = useState<HTMLDivElement | null>(null);
+  const [edges, setEdges] = useState({ above: false, below: false });
+  useEffect(() => {
+    if (!element) return;
+    const measure = () => {
+      const above = element.scrollTop > 1;
+      const below = element.scrollTop + element.clientHeight < element.scrollHeight - 1;
+      setEdges((current) => (current.above === above && current.below === below ? current : { above, below }));
+    };
+    measure();
+    element.addEventListener('scroll', measure, { passive: true });
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => {
+      element.removeEventListener('scroll', measure);
+      observer.disconnect();
+    };
+  }, [element]);
+  return [setElement, edges];
+}
+
+/**
  * What the canvas needs of a map image: its id, its size and its display version's size. The
  * player view builds it from what its snapshot carries (LIV-03), never the DM's record.
  */
@@ -388,6 +414,7 @@ export function MapCanvas({
 }) {
   const helpId = useId();
   const [viewportRef, viewport] = useViewport();
+  const [railRef, railEdges] = useScrollEdges();
   const shownSize = map?.variants.display ? `${map.variants.display.width}x${map.variants.display.height}` : '';
   const displayImage = useDisplayImage(map?.id, shownSize, onMapError);
   const info = map
@@ -1388,7 +1415,15 @@ export function MapCanvas({
         {help}
       </p>
       {rail ? (
-        <div className="eg-rail" role="toolbar" aria-label={t('canvas.tools')} aria-orientation="vertical">
+        <div
+          ref={railRef}
+          className="eg-rail"
+          role="toolbar"
+          aria-label={t('canvas.tools')}
+          aria-orientation="vertical"
+          data-more-above={railEdges.above || undefined}
+          data-more-below={railEdges.below || undefined}
+        >
           <button
             type="button"
             className="eg-rail__tool"

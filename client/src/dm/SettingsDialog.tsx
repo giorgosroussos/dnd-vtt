@@ -298,7 +298,7 @@ function PinChange() {
         focusInvalid.current = true;
       } else {
         const wait = error instanceof ApiError ? error.retryAfter : undefined;
-        const reason = pinRefusalText(code, wait);
+        const reason = pinRefusalText(code, wait, 'pinChange');
         setFailure(t('settings.pinFailed', { reason }));
       }
     } finally {
@@ -321,8 +321,8 @@ function PinChange() {
       <h3 id={headingId} className="eg-settings__heading">
         {t('settings.pinHeading')}
       </h3>
-      <p className="eg-dm__status">{t('settings.pinIntro')}</p>
-      {failure ? <Notice>{failure}</Notice> : null}
+      {/* A refusal takes the intro's place, so that the dialog keeps to a laptop's window (review U-M1). */}
+      {failure ? <Notice>{failure}</Notice> : <p className="eg-dm__status">{t('settings.pinIntro')}</p>}
       <TextField
         type="password"
         inputMode="numeric"

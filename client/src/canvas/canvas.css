@@ -73,6 +73,19 @@
   scrollbar-width: none;
 }
 
+/* With tools hidden beyond an edge, that edge fades out, the one sign that the rail scrolls (review U-M2). */
+.eg-rail[data-more-below] {
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+}
+
+.eg-rail[data-more-above] {
+  mask-image: linear-gradient(to top, #000 calc(100% - 28px), transparent);
+}
+
+.eg-rail[data-more-above][data-more-below] {
+  mask-image: linear-gradient(to bottom, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+}
+
 .eg-rail__tool {
   flex: none;
   display: flex;

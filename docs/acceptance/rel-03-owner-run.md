@@ -14,7 +14,7 @@ Allow about an hour. You need the TV, the Windows PC that runs the server, the l
    node e2e/fixtures/large-scene.ts --seed http://localhost:3000
    ```
 
-   It asks for the DM PIN (or reads `EMBERGLASS_PIN`) and prints the scene's name. It takes about ten seconds.
+   It asks for the DM PIN without showing it, and prints the campaign, session and scene it made. It takes about ten seconds. Run it on the server PC with `localhost`: from another address the PIN crosses the network and a wrong one counts towards the limits on wrong PINs. Prefer typing the PIN at the prompt to setting `EMBERGLASS_PIN` on the command line, which keeps it in the shell's history.
 
 **Record (G-002):**
 - TV model (Settings → Support → TV information, or the label on the back):
@@ -54,7 +54,7 @@ In CI, Firefox on Windows took 5 to 26 s to load the views from the machine's ow
 
 1. On the TV, open the web browser and **type** the short URL the console printed (`http://<address>:3000/`). The idle screen appears: the product name and "The table is set. Waiting for the Dungeon Master."
 2. With the phone's camera, **scan the QR code** in the Connect a screen panel. The phone opens the same address and shows the same idle screen. Close it on the phone.
-3. In the DM view, choose the "TV run" campaign's **Large scene**, and **Go live**.
+3. In the DM view, choose the campaign, session and scene the seed command printed ("TV run <date and time>", "TV run", "Large scene <date and time>"), and **Go live**.
 4. On the TV: the map and the 50 coloured tokens are drawn. Note how long it takes from Go live, and whether panning the TV's frame in the DM view moves the TV smoothly.
 5. **Move** a token (drag it); **hide** one (H) and **reveal** it again; **ping** (P, click); put a **condition marker** on a token; draw a **fog region** and reveal it. Each appears on the TV as it should, and nothing hidden appears.
 6. **Measure** with the ruler (M) across about ten squares. Stand where the players sit and read the distance label on the TV.
@@ -81,9 +81,9 @@ The TV is sent a display copy of each map at most 4,096 px on its long side. Thi
 - Display size that worked (4096 / 2048 / other):
 - What happened at 4096, if it failed:
 
-## 5. The laptop's window (G-041)
+## 5. The laptop's window (confirms D-148)
 
-A 1080p laptop at Windows' 150% scaling gives the page about 1,280 × 620. An end-to-end test now checks that size (`e2e/tests/window.spec.ts`); this confirms it on the real laptop.
+A 1080p laptop at Windows' 150% scaling gives the page about 1,280 × 620. An end-to-end test checks that size (`e2e/tests/window.spec.ts`, D-148, which closed G-041); this confirms it on the real laptop, and a disagreement opens a new gap.
 
 1. On the laptop, open `http://<address>:3000/dm` in your usual browser, window maximised, and sign in.
 2. Press F12, and in the Console type `innerWidth + ' × ' + innerHeight`, Enter. Close the developer tools.
@@ -97,4 +97,4 @@ A 1080p laptop at Windows' 150% scaling gives the page about 1,280 × 620. An en
 
 ## 6. Hand back
 
-Send the filled-in record. An agent adds the TV's model and webOS version to `docs/inputs/` with an authority entry (an unlock of that folder, which is yours to authorise), sets the REL-03 row of `TRACEABILITY.md` from the results, and closes or keeps G-002, G-031, G-040 and G-041 with their evidence or a decision.
+Send the filled-in record. An agent adds the TV's model and webOS version to `docs/inputs/` with an authority entry (an unlock of that folder, which is yours to authorise), adds the results to the REL-03 row of `TRACEABILITY.md` (REL-03 is done with this run deferred, D-151), closes G-043 (this run) with them, and closes or keeps G-002, G-031 and G-040 with their evidence or a decision.

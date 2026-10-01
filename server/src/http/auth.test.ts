@@ -516,6 +516,10 @@ describe('guessing protection (specs/07-security-and-access.md §6)', () => {
     const statuses = answers.map((response) => response.statusCode);
     expect(statuses.filter((status) => status === 401)).toHaveLength(20);
     expect(statuses.filter((status) => status === 429)).toHaveLength(20);
+    // Every refusal is the pause's, with its whole wait (review T-M1).
+    const refused = answers.filter((response) => response.statusCode === 429);
+    for (const response of refused) expectFailure(response, 429, 'pin_paused');
+    expect(new Set(refused.map((response) => response.headers['retry-after']))).toEqual(new Set(['600']));
     const paused = readFileSync(logFilePath(data.dataDir), 'utf8')
       .split('\n')
       .filter((line) => line.includes('"event":"pin.paused"'));
@@ -590,6 +594,35 @@ describe('guessing protection (specs/07-security-and-access.md §6)', () => {
     expectFailure(response, 429, 'pin_paused');
     expect(response.headers['retry-after']).toBe('600');
     expect(await verifyPin(PIN, readPinHash(data.db)!)).toBe(true);
+  });
+
+  it('lets the server PC change the PIN during a pause (review T-L6)', async () => {
+    const cookie = await signInFrom('127.0.0.1');
+    await failAcrossAddresses();
+    expect((await changePin(cookie, PIN, NEW_PIN, '127.0.0.1')).statusCode).toBe(204);
+    expect(await verifyPin(NEW_PIN, readPinHash(data.db)!)).toBe(true);
+  });
+
+  it('names the pause while an address’s own longer lock outlasts it, then the lock alone (review T-L6)', async () => {
+    // Five lockouts of LAN, 60 s to 960 s, spread so that the server-wide budget never fills.
+    const started = clock;
+    for (const [at, locked] of [
+      [0, 60],
+      [61, 120],
+      [700, 240],
+      [950, 480],
+      [1_440, 960],
+    ] as const) {
+      clock = started + at * 1000;
+      await failFiveTimes();
+      await expectLocked(locked);
+    }
+    // Ten more failures from other addresses within the window open the 600 s pause.
+    for (let n = 0; n < 10; n++) expectFailure(await enter(WRONG, `192.168.6.${n}`), 401, 'pin_incorrect');
+    await expectPaused(600, '192.168.6.99');
+    await expectPaused(960);
+    clock += 600_000;
+    await expectLocked(360);
   });
 
   it('keeps a DM session already open working during a pause', async () => {
