@@ -13,8 +13,7 @@ import {
   type Scene,
   type SceneGridUpdate,
   type SceneToken,
-  type Region,
-  type RegionShape,
+  FOG_BRUSH_RADIUS,
   type TokenMarker,
   type TokenUpdateBody,
 } from '@emberglass/shared';
@@ -53,8 +52,8 @@ import { entityPath } from './tree/paths.js';
 import { DeleteTokenDialog, RenameDialog } from './tokens/TokenBar.js';
 import { TokenList } from './tokens/TokenList.js';
 import { TokenPicker } from './tokens/TokenPicker.js';
-import { DeleteRegionDialog, RegionList, RegionNameDialog } from './regions/RegionList.js';
-import { useSceneRegions } from './regions/useSceneRegions.js';
+import { FillFogDialog, FogBrushBar, FogPanel } from './fog/FogPanel.js';
+import { useSceneFog } from './fog/useSceneFog.js';
 import { MARKER_NAMES, TokenPopover } from './tokens/TokenPopover.js';
 import { toCanvasToken, useSceneTokens } from './tokens/useSceneTokens.js';
 
@@ -309,11 +308,12 @@ export function ScenePanel({
   liveNow.current = isLive;
   // The ping tool (TBL-01): on the live scene only, so it stops when the scene stops being live.
   const [pingOn, setPingOn] = useState(false);
-  // The fog tool (TBL-03), in preparation and on the live scene; a shape drawn waits for its name.
+  // The fog brush (TBL-04), in preparation and on the live scene: painting or erasing, its radius in
+  // squares, and Fog all or Clear all waiting to be confirmed.
   const [fogOn, setFogOn] = useState(false);
-  const [naming, setNaming] = useState<RegionShape>();
-  const [renamingRegion, setRenamingRegion] = useState<Region>();
-  const [deletingRegion, setDeletingRegion] = useState<Region>();
+  const [fogErase, setFogErase] = useState(false);
+  const [fogRadius, setFogRadius] = useState(1);
+  const [filling, setFilling] = useState<boolean>();
   const [rulerMode, setRulerMode] = useState(isLive);
   if (rulerMode !== isLive) {
     setRulerMode(isLive);
@@ -792,19 +792,18 @@ export function ScenePanel({
           },
         };
 
-  // Fog regions (TBL-03, specs/04-live-sync.md §13): drawn with the fog tool, named, then fogged or revealed
-  // from the list or their tag on the map. On the live scene each change is a region command, undoable; in
-  // preparation a REST write, after which the tokens are read again, since one players see for the first
-  // time is numbered.
-  const sceneRegions = useSceneRegions(sceneId, live, isLive, () => {
+  // Painted fog (TBL-04, specs/04-live-sync.md §13): painted and erased with the brush, the whole map fogged
+  // or cleared from its bar. On the live scene each change is a fog command, undoable; in preparation a REST
+  // write, after which the tokens are read again, since one players see for the first time is numbered.
+  const sceneFog = useSceneFog(sceneId, live, isLive, () => {
     sceneTokens.retry();
     onTokensChanged?.();
   });
-  const regions = sceneRegions.regions ?? [];
-  async function regionWrite(write: () => Promise<string | undefined>, done: string): Promise<boolean> {
+  const fog = sceneFog.fog ?? [];
+  async function fogWrite(write: () => Promise<string | undefined>, done: string): Promise<boolean> {
     setLiveFailure(undefined);
     // Not connected: nothing is sent, and the head already says why, as for undo (D-116).
-    if (offline) {
+    if (isLive && offline) {
       announce(t('fog.offline'));
       return false;
     }
@@ -813,30 +812,29 @@ export function ScenePanel({
     else setLiveFailure(t('fog.failed', { reason }));
     return reason === undefined;
   }
-  const toggleRegion = (region: Region) =>
-    void regionWrite(
-      () => sceneRegions.setHidden(region.id, !region.hidden),
-      t(region.hidden ? 'fog.revealed' : 'fog.fogged', { name: region.name }),
-    );
-  const fogTool: FogTool | undefined = draft
-    ? undefined
-    : {
-        on: fogOn,
-        onToggle: (on) => {
-          if (on) {
-            stopMeasuring();
-            setPingOn(false);
-            setSelectedToken(undefined);
-            if (placingAsset) setPlacingAsset(undefined);
-          }
-          setFogOn(on);
-        },
-        onDraw: (shape) => openDialog(() => setNaming(shape)),
-        onToggleRegion: (id) => {
-          const region = regions.find((each) => each.id === id);
-          if (region) toggleRegion(region);
-        },
-      };
+  const fogTool: FogTool | undefined =
+    draft || sceneFog.fog === undefined
+      ? undefined
+      : {
+          on: fogOn,
+          onToggle: (on) => {
+            if (on) {
+              stopMeasuring();
+              setPingOn(false);
+              setSelectedToken(undefined);
+              if (placingAsset) setPlacingAsset(undefined);
+            }
+            setFogOn(on);
+          },
+          erase: fogErase,
+          onErase: setFogErase,
+          radius: fogRadius,
+          onRadius: setFogRadius,
+          onPaint: (stroke) =>
+            fogWrite(() => sceneFog.paint(stroke), t(stroke.mode === 'erase' ? 'fog.erased' : 'fog.painted')),
+        };
+  const fillFog = (fogged: boolean) =>
+    void fogWrite(() => sceneFog.fill(fogged), t(fogged ? 'fog.filled' : 'fog.cleared'));
 
   // One undo at a time: Ctrl+Z pressed again, or held down, before the server answers is ignored,
   // so a held key never unwinds the live scene one change after another (LIV-05 review U5).
@@ -917,6 +915,13 @@ export function ScenePanel({
     } else if (key === 'f' && fogTool) {
       event.preventDefault();
       fogTool.onToggle(!fogOn);
+    } else if (key === 'e' && fogTool && fogOn) {
+      event.preventDefault();
+      fogTool.onErase(!fogErase);
+    } else if ((key === '[' || key === ']') && fogTool && fogOn) {
+      event.preventDefault();
+      const step = key === '[' ? -FOG_BRUSH_RADIUS.step : FOG_BRUSH_RADIUS.step;
+      fogTool.onRadius(Math.min(FOG_BRUSH_RADIUS.max, Math.max(FOG_BRUSH_RADIUS.min, fogRadius + step)));
     } else if (key === 't' && canAddToken) {
       event.preventDefault();
       openPicker();
@@ -1067,7 +1072,7 @@ export function ScenePanel({
       onToggleHidden={toggleHidden}
       onRevealAll={(hidden) => void revealAll(hidden)}
       onAdd={canAddToken ? openPicker : undefined}
-      regions={regions}
+      fog={fog}
     />
   ) : tokenFailure ? null : (
     <p className="eg-dm__status">{t('tokens.loading')}</p>
@@ -1075,14 +1080,11 @@ export function ScenePanel({
   const sceneTab = (
     <>
       {tokenList}
-      {sceneRegions.regions ? (
-        <RegionList
-          regions={regions}
+      {sceneFog.fog ? (
+        <FogPanel
+          fog={sceneFog.fog}
           tokens={tokens ?? []}
-          onDraw={fogTool ? () => fogTool.onToggle(true) : undefined}
-          onToggle={toggleRegion}
-          onRename={(region) => openDialog(() => setRenamingRegion(region))}
-          onDelete={(region) => openDialog(() => setDeletingRegion(region))}
+          onPaint={fogTool ? () => fogTool.onToggle(true) : undefined}
         />
       ) : null}
     </>
@@ -1313,6 +1315,19 @@ export function ScenePanel({
                 </Button>
               </div>
             ) : null}
+            {fogOn && fogTool ? (
+              <FogBrushBar
+                erase={fogErase}
+                radius={fogRadius}
+                onErase={setFogErase}
+                onRadius={(radius) =>
+                  setFogRadius(Math.min(FOG_BRUSH_RADIUS.max, Math.max(FOG_BRUSH_RADIUS.min, radius)))
+                }
+                onFill={() => openDialog(() => setFilling(true))}
+                onClear={() => openDialog(() => setFilling(false))}
+                onDone={() => fogTool.onToggle(false)}
+              />
+            ) : null}
             {map !== undefined ? (
               <div className="eg-scene__body">
                 {map && draft ? (
@@ -1345,7 +1360,7 @@ export function ScenePanel({
                     tvFrame={tvFrame}
                     ruler={{ shown: shownRuler, tool: rulerTool }}
                     ping={{ shown: isLive && live ? live.pings : [], tool: pingTool }}
-                    fog={{ regions, tool: fogTool }}
+                    fog={{ fog, tool: fogTool }}
                   />
                   {map && draft ? <CornerMagnifier map={map} calibration={draft.calibration} /> : null}
                 </div>
@@ -1380,43 +1395,18 @@ export function ScenePanel({
                 }}
               />
             ) : null}
-            {naming ? (
-              <RegionNameDialog
-                heading={t('fog.newHeading')}
-                initial={t('fog.defaultName', { count: regions.length + 1 })}
-                save={t('fog.newSave')}
-                onSave={(name) => regionWrite(() => sceneRegions.add(name, naming), t('fog.drawn', { name }))}
-                onClose={() => {
-                  setNaming(undefined);
-                  refocus.current = 'opener';
-                }}
-              />
-            ) : null}
-            {renamingRegion ? (
-              <RegionNameDialog
-                heading={t('fog.renameHeading', { name: renamingRegion.name })}
-                initial={renamingRegion.name}
-                save={t('fog.renameSave')}
-                onSave={(name) =>
-                  regionWrite(() => sceneRegions.rename(renamingRegion.id, name), t('fog.renamed', { name }))
-                }
-                onClose={() => {
-                  setRenamingRegion(undefined);
-                  refocus.current = 'opener';
-                }}
-              />
-            ) : null}
-            {deletingRegion ? (
-              <DeleteRegionDialog
-                region={deletingRegion}
+            {filling !== undefined ? (
+              <FillFogDialog
+                fogged={filling}
+                live={isLive}
                 onConfirm={() => {
-                  const region = deletingRegion;
-                  setDeletingRegion(undefined);
+                  const fogged = filling;
+                  setFilling(undefined);
                   refocus.current = 'opener';
-                  void regionWrite(() => sceneRegions.remove(region.id), t('fog.deleted', { name: region.name }));
+                  fillFog(fogged);
                 }}
                 onClose={() => {
-                  setDeletingRegion(undefined);
+                  setFilling(undefined);
                   refocus.current = 'opener';
                 }}
               />

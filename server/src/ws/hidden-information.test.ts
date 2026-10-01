@@ -15,9 +15,9 @@ import { applyPlayerEvent, startLive, type LiveHarness, type PlayerState } from 
 // a hidden token's included (LIV-05), activating another scene, reconnecting, since LIV-04 editing the
 // live scene's setup and assets over REST and deleting the live scene, since LIV-06 steering the
 // TV camera and screens reporting their viewports, and since LIV-07 measuring with the ruler on the live
-// scene, and on a scene that is not live, which reaches players not at all, since TBL-01 pinging both, since TBL-02 marking a hidden token and a visible one, and since TBL-03 a fog region
-// drawn, renamed, revealed, fogged again, undone and redone, with tokens placed, revealed, moved and deleted
-// under it. It asserts that no hidden
+// scene, and on a scene that is not live, which reaches players not at all, since TBL-01 pinging both, since TBL-02 marking a hidden token and a visible one, and since TBL-04 fog
+// painted, erased, painted again, undone and redone, and the whole map fogged and cleared, with tokens
+// placed, revealed, moved and deleted under it. It asserts that no hidden
 // token's id, asset, image or name appears, and that the count of hidden tokens cannot be learnt
 // either: the whole recording is identical, byte for byte once identifiers are numbered by first
 // appearance, to the recording of the same session without any of the hidden-only steps
@@ -284,16 +284,20 @@ async function record(hidden: boolean): Promise<Recording> {
   });
   await step('deactivate', () => send('scene.deactivate', {}));
   await step('activate A again', () => send('scene.activate', { scene_id: sceneA.id }));
-  // Fog regions (TBL-03, specs/04-live-sync.md §4, §13): players receive the fogged shapes, never a
-  // region's name or id, and a token under the fog is to them as a hidden one, placed, revealed, moved or
-  // deleted there; a hidden token stays hidden when the fog lifts.
-  const vault = { kind: 'rect', x: 8, y: 0, width: 4, height: 4 } as const;
-  let vaultId = '';
-  await step('draw the fogged vault', async () => {
-    const events = await send('region.add', { scene_id: sceneA.id, name: 'Treasure vault', shape: vault });
-    vaultId = (events[0]!.payload as { region: { id: string } }).region.id;
-    secrets.push(vaultId, 'Treasure vault');
-  });
+  // Painted fog (TBL-04, specs/04-live-sync.md §4, §13): players receive the mask, which names no token,
+  // and a token under the fog is to them as a hidden one, placed, revealed, moved or deleted there; a
+  // hidden token stays hidden when the fog is erased. The vault: a stroke two squares wide each way of the
+  // line from (9, 2) to (11, 2), so columns 8 to 12 of rows 0 to 4 lie under it.
+  const vault = {
+    mode: 'paint',
+    radius: 2,
+    points: [
+      { x: 9, y: 2 },
+      { x: 11, y: 2 },
+    ],
+  } as const;
+  const fog = (stroke: object) => send('fog.paint', { scene_id: sceneA.id, stroke });
+  await step('paint the vault', () => fog(vault));
   // A lone sentry players see by its bare name: a second one placed under the fog must not rename it, or
   // players would learn of the one they cannot see (numbering follows what they see, Q-092, Q-096).
   const sentry = await live.asset('Sentry', { default_hidden: false });
@@ -309,7 +313,7 @@ async function record(hidden: boolean): Promise<Recording> {
   );
   await step('place a goblin under the fog', async () => {
     const id = tokenOf(await send('token.add', { scene_id: sceneA.id, asset_id: goblin.id, x: 9, y: 1 })).id;
-    shownFrom.push({ id, step: 'reveal the vault' });
+    shownFrom.push({ id, step: 'erase the vault' });
   });
   await step(
     'place a lurker under the fog, reveal it and delete it there',
@@ -331,12 +335,15 @@ async function record(hidden: boolean): Promise<Recording> {
   await step('move the first goblin out of the fog', () =>
     send('token.move', { token_id: firstGoblin.id, x: 1, y: 1 }),
   );
-  await step('rename the vault', () => send('region.rename', { region_id: vaultId, name: 'Treasure vault, sealed' }));
-  secrets.push('Treasure vault, sealed');
-  await step('reveal the vault', () => send('region.setHidden', { region_id: vaultId, hidden: false }));
-  await step('fog the vault again', () => send('region.setHidden', { region_id: vaultId, hidden: true }));
+  await step('erase the vault', () => fog({ ...vault, mode: 'erase', radius: 2.5 }));
+  await step('paint the vault again', () => fog(vault));
   await step('undo the fog of the vault', undo);
   await step('redo the fog of the vault', () => send('redo', {}));
+  await step('fog the whole map and clear it', async () => {
+    await send('fog.fill', { scene_id: sceneA.id, fogged: true });
+    await send('fog.fill', { scene_id: sceneA.id, fogged: false });
+  });
+  await step('paint the vault once more', () => fog(vault));
   // Setup edits and asset changes over REST while A is live (LIV-04, specs/04-live-sync.md §10): a
   // visible change reaches players as a snapshot; one that touches only hidden tokens reaches them
   // not at all, so the recording stays that of the session without them.
@@ -434,18 +441,26 @@ describe('what a player view receives across a live session (specs/10-testing-ac
     expect(eventsOf('the DM clears the measurement')).toEqual(['ruler.cleared', 'scene.snapshot']);
     expect(eventsOf('the DM pings the live scene')).toEqual(['ping', 'scene.snapshot']);
     expect(eventsOf('mark the hidden boss dead')).toEqual(['scene.snapshot']);
-    expect(eventsOf('draw the fogged vault')).toEqual(['fog.updated', 'scene.snapshot']);
+    expect(eventsOf('paint the vault')).toEqual(['fog.updated', 'scene.snapshot']);
     expect(eventsOf('place a lone sentry')).toEqual(['token.added', 'scene.snapshot']);
     expect(eventsOf('place a second sentry under the fog and delete it there')).toEqual(['scene.snapshot']);
     expect(eventsOf('place a goblin under the fog')).toEqual(['scene.snapshot']);
     expect(eventsOf('place a lurker under the fog, reveal it and delete it there')).toEqual(['scene.snapshot']);
     expect(eventsOf('move the first goblin under the fog')).toEqual(['token.removed', 'scene.snapshot']);
     expect(eventsOf('move the first goblin out of the fog')).toEqual(['token.added', 'scene.snapshot']);
-    expect(eventsOf('rename the vault')).toEqual(['scene.snapshot']);
-    expect(eventsOf('reveal the vault')).toEqual(['fog.updated', 'token.added', 'scene.snapshot']);
-    expect(eventsOf('fog the vault again')).toEqual(['fog.updated', 'token.removed', 'scene.snapshot']);
+    expect(eventsOf('erase the vault')).toEqual(['fog.updated', 'token.added', 'scene.snapshot']);
+    expect(eventsOf('paint the vault again')).toEqual(['fog.updated', 'token.removed', 'scene.snapshot']);
     expect(eventsOf('undo the fog of the vault')).toEqual(['fog.updated', 'token.added', 'scene.snapshot']);
     expect(eventsOf('redo the fog of the vault')).toEqual(['fog.updated', 'token.removed', 'scene.snapshot']);
+    // Fogging the whole map removes every token players see, and clearing it adds them back with the one
+    // the vault kept from them, never the hidden lurker.
+    const filled = eventsOf('fog the whole map and clear it');
+    expect(filled[0]).toBe('fog.updated');
+    expect(filled.filter((type) => type === 'fog.updated')).toHaveLength(2);
+    expect(filled.filter((type) => type === 'token.added').length).toBe(
+      filled.filter((type) => type === 'token.removed').length + 1,
+    );
+    expect(eventsOf('paint the vault once more')).toEqual(['fog.updated', 'token.removed', 'scene.snapshot']);
     expect(eventsOf('mark the visible goblin bloodied')).toEqual(['token.updated', 'scene.snapshot']);
     expect(eventsOf('undo the mark of the goblin')).toEqual(['token.updated', 'scene.snapshot']);
     expect(eventsOf('undo the mark of the hidden boss')).toEqual(['scene.snapshot']);

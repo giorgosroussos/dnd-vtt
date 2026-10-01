@@ -123,6 +123,7 @@ Every card opens `Blocking` and is answered before the specification proceeds. `
 - Q-098 — PIN guessing kept just under the server-wide budget — security — Resolved
 - Q-099 — Ping, condition markers and manual fog after the MVP — scope — Resolved
 - Q-100 — The redesigned DM view and idle screen against 08 — ux — Resolved
+- Q-101 — Painted fog in place of fog regions — scope — Resolved
 
 ## Blocking
 
@@ -1268,3 +1269,15 @@ None.
 - Recommendation: A, because the brief is the owner's latest statement and its layout keeps every flow reachable.
 - Blocks: specification
 - Answer: A (2026-09-30; recommendation accepted)
+
+### Q-101 — Painted fog in place of fog regions
+- Surface: scope
+- Source: The owner, in chat on 2026-10-01, after testing TBL-03: «at this point this feature is working with rectangular sets that i want to move into a paintbrush tool. I want the dm to be able with a paintbrush mark the regions that want to hide from players (also i want an eraser to be able to reveal hidden regions as well). I don't mind the mask to be client side as now working.» TBL-03 built named rectangles and polygons on grid corners, each fogged or revealed (D-144, `04` §13, `03` §1).
+- Question: Does a brush and an eraser replace the fog regions, and in what form: what the mask is made of, how the brush is sized, what happens to the regions already stored, and whether painting in preparation is undoable?
+- Options:
+  - A) One painted fog mask per scene replaces the regions: the brush fogs and the eraser reveals, in cells of a quarter square each way so a round brush reads as freehand; Fog all and Clear all; the brush's radius set on a slider from a quarter square to five; the stored regions dropped by the migration; one stroke one undoable command on the live scene, none in preparation, as every other preparation edit → effect on scope: the Region entity, its four commands, three events and the region list leave; a mask on Scene, two commands and the fog event to both rooms replace them; the player filtering rule is unchanged but for the shape it reads.
+  - B) Keep the regions and add the brush and eraser as a second layer → effect on scope: both models, their commands and two DM interfaces kept, and a token's visibility read from both.
+  - C) Named painted regions, each fogged or revealed as a whole → effect on scope: a region gains a painted outline instead of a shape; erasing must choose a region; overlaps need a rule.
+- Recommendation: A, with preset brush sizes (half, one and three squares) cycled by [ and ], and the stored fogged regions converted into the mask, because one mask is the simplest model that answers the request and converting keeps what the DM already drew.
+- Blocks: specification
+- Answer: A, with the brush radius on a slider from a quarter square to five in steps of a quarter, and the stored regions dropped rather than converted (2026-10-01)

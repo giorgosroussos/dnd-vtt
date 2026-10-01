@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 
-// Who writes to a scene's tokens and fog regions (LIV-02, TBL-03, specs/04-live-sync.md §2, D-100):
+// Who writes to a scene's tokens and fog (LIV-02, TBL-04, specs/04-live-sync.md §2, D-100):
 // preparation over REST, refused on the live scene, or a live command over the WebSocket, refused on
 // any scene that is not live. Checked inside the transaction that would make the change.
 

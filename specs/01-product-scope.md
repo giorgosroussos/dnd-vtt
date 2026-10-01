@@ -67,7 +67,7 @@ Phase 2 MUST NOT be implemented in the MVP; it covers: [input]
 - data-driven rules in JSON, importing SRD 5.1;
 - campaign export and import as a zip.
 
-Manual fog regions and four condition markers on tokens (`13` §10) MUST be built after the MVP's features, before the release (§9); automatic fog, hit points and every other condition stay Phase 2. [Q-099]
+Manual fog painted by the DM and four condition markers on tokens (`13` §10) MUST be built after the MVP's features, before the release (§9); automatic fog, hit points and every other condition stay Phase 2. [Q-099, Q-101]
 
 Campaign export/import is Phase 2; in the MVP a campaign moves to another PC only by copying the whole data folder (`09` §5). [Q-013, recommendation accepted]
 
@@ -114,10 +114,10 @@ Emberglass MUST NOT implement: [input]
 
 ## 9. After the MVP, before the release
 
-After the MVP's features and before the owner's TV run (`10` §4), Emberglass MUST add: [Q-099]
+After the MVP's features and before the owner's TV run (`10` §4), Emberglass MUST add: [Q-099, Q-101]
 
 - a ping the DM places on the live scene, shown on every view (`13` §10);
 - four condition markers on tokens, Bloodied, Unconscious, Dead and Concentrating, shown on every view (`13` §10);
-- manual fog regions the DM draws, names and reveals, with tokens inside a fogged region filtered for players (`13` §10).
+- manual fog the DM paints with a brush and reveals with an eraser, with tokens under the fog filtered for players (`13` §10).
 
 The DM view and the player view MUST follow the 2026-09-30 redesign: palette, typography, layout, token visuals and the DM's controls of `08` §11. [input, Q-100]

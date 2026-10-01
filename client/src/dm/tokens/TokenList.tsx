@@ -1,5 +1,5 @@
-import type { AssetCategory, Region, SceneToken } from '@emberglass/shared';
-import { fogOver } from '../regions/RegionList.js';
+import type { AssetCategory, FogMask, SceneToken } from '@emberglass/shared';
+import { underFog } from '../fog/FogPanel.js';
 import { Icon } from '../../ui/icons.js';
 import { t, type MessageKey } from '../../ui/messages.js';
 import { initialsOf } from '../../canvas/TokenLayer.js';
@@ -26,13 +26,12 @@ const GROUPS: { key: 'party' | 'monsters' | 'others'; heading: MessageKey; categ
 // its eye crossed out, so it never reads as a visible one. A row selects its token and centres the map on
 // it. Every control is a native button, so the keyboard reaches all of it.
 /**
- * A row's status line: hidden or what it is, then the fogged region it stands in (TBL-03), then its condition
+ * A row's status line: hidden or what it is, then whether it stands under the fog (TBL-04), then its condition
  * markers (TBL-02), if any.
  */
-function statusOf(token: SceneToken, regions: readonly Region[]): string {
+function statusOf(token: SceneToken, fog: FogMask): string {
   const own = token.hidden ? t('sceneTokens.hidden') : t(CATEGORY_NAMES[token.asset.category]);
-  const fog = fogOver(token, regions);
-  const status = fog ? t('sceneTokens.inFog', { status: own, name: fog.name }) : own;
+  const status = underFog(token, fog) ? t('sceneTokens.inFog', { status: own }) : own;
   if (token.markers.length === 0) return status;
   const markers = token.markers.map((marker) => t(MARKER_NAMES[marker])).join(t('sceneTokens.markerSeparator'));
   return t('sceneTokens.withMarkers', { status, markers });
@@ -45,11 +44,11 @@ export function TokenList({
   onToggleHidden,
   onRevealAll,
   onAdd,
-  regions = [],
+  fog = [],
 }: {
   tokens: readonly SceneToken[];
-  /** The scene's fog regions, which a token's status names when it stands in a fogged one (TBL-03). */
-  regions?: readonly Region[];
+  /** The scene's painted fog, which a token's status says it stands under (TBL-04). */
+  fog?: FogMask;
   selectedId: string | undefined;
   onSelect: (token: SceneToken) => void;
   onToggleHidden: (token: SceneToken) => void;
@@ -111,7 +110,7 @@ export function TokenList({
                     </span>
                     <span className="eg-token-row__text">
                       <span className="eg-token-row__name">{token.label}</span>
-                      <span className="eg-token-row__status">{statusOf(token, regions)}</span>
+                      <span className="eg-token-row__status">{statusOf(token, fog)}</span>
                     </span>
                   </button>
                   <button

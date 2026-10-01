@@ -33,8 +33,8 @@ Who can do what, how the DM proves it, and what the server never reveals or trus
 ## 5. Image files
 
 - A DM session MUST be able to fetch every version of every image. [Q-012, recommendation accepted]
-- A request without a DM session MUST be served only for the display version of the live scene's map and of the images of its tokens visible to players (`04` §4: not hidden and not under a fogged region); every other request MUST be refused as not found. [Q-012, recommendation accepted, Q-099]
-- Hiding a token, fogging the region it stands in, deactivating a scene or activating another one MUST make its images unfetchable for players from that moment. [Q-012, recommendation accepted, Q-099]
+- A request without a DM session MUST be served only for the display version of the live scene's map and of the images of its tokens visible to players (`04` §4: not hidden and not under the fog); every other request MUST be refused as not found. [Q-012, recommendation accepted, Q-099, Q-101]
+- Hiding a token, painting fog over it, deactivating a scene or activating another one MUST make its images unfetchable for players from that moment. [Q-012, recommendation accepted, Q-099, Q-101]
 
 ## 6. Guessing protection
 

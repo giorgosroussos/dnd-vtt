@@ -204,7 +204,7 @@ export interface PlayerState {
  * Applies the players' events as `shared/src/live.ts` states them: an added token goes in at its
  * rank, a removed one leaves, a moved one is replaced, a renamed one takes its new label, and
  * `camera.player` replaces the camera (LIV-06), `ruler.shown` and `ruler.cleared` the measurement
- * (LIV-07), `fog.updated` the fogged shapes (TBL-03). Throws on a version that is not the next one,
+ * (LIV-07), `fog.updated` the painted fog (TBL-04). Throws on a version that is not the next one,
  * which is a gap.
  */
 export function applyPlayerEvent(state: PlayerState, event: EventEnvelope): PlayerState {

@@ -33,8 +33,8 @@ function useLabelScale(): number {
 // the map on every activation (specs/04-live-sync.md §9, Q-038, LIV-06), the grid only when players see it
 // (§4), the visible tokens with their labels (Q-032), sized to be read across a room, and the measurement
 // the DM shows on the live scene, a line and its distance (specs/04-live-sync.md §11, Q-027, LIV-07), and the
-// DM's pings, each for a moment (§12, TBL-01), and the fog: the fogged regions' shapes drawn opaque over the
-// map, soft at the edge (§13, TBL-03). Over
+// DM's pings, each for a moment (§12, TBL-01), and the fog: the painted fog drawn opaque over the map, soft at
+// the edge (§13, TBL-04). Over
 // it a subtle vignette and, at the bottom left, the scene's name, which fades after a few seconds; changes
 // between idle and live, and between scenes, fade (specs/08-ux-journeys.md §11). It has no controls and
 // nothing that takes focus, and hides the pointer after two seconds still (Q-054). It keeps the live
@@ -68,7 +68,7 @@ export function PlayerView() {
               camera={scene.camera}
               ruler={{ shown: scene.ruler }}
               ping={{ shown: live.pings }}
-              fog={{ regions: scene.fog.map((shape) => ({ shape, hidden: true })) }}
+              fog={{ fog: scene.fog }}
               labelScale={labelScale}
             />
             <div className="eg-player__vignette" aria-hidden="true" />

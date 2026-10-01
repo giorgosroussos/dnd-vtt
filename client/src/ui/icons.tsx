@@ -17,6 +17,8 @@ type IconName =
   | 'ruler'
   | 'ping'
   | 'fog'
+  | 'brush'
+  | 'eraser'
   | 'addToken'
   | 'undo'
   | 'redo'
@@ -42,6 +44,8 @@ const STROKED: Record<Exclude<IconName, 'stop' | 'more' | 'drop'>, readonly stri
   ruler: ['M3 17L17 3l4 4L7 21z', 'M7 13l2 2M10 10l2 2M13 7l2 2'],
   ping: ['M9.5 12a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0-5 0', 'M5.5 12a6.5 6.5 0 1 0 13 0a6.5 6.5 0 1 0-13 0'],
   fog: ['M7 18h10a4 4 0 0 0 0-8 6 6 0 0 0-11.5 1.5A3.5 3.5 0 0 0 7 18z'],
+  brush: ['M20 4L10 14', 'M10 14c-2-1-4 0-4.5 2S4 20 3 20c3 1 6 0 7-2.5s1-2.5 0-3.5z'],
+  eraser: ['M8 20l-4-4L14 6l6 6-8 8z', 'M8 20h12M9 11l6 6'],
   addToken: ['M3 12a9 9 0 1 0 18 0a9 9 0 1 0-18 0', 'M12 8v8M8 12h8'],
   undo: ['M9 14L4 9l5-5', 'M4 9h10a6 6 0 0 1 0 12h-3'],
   redo: ['M15 14l5-5-5-5', 'M20 9H10a6 6 0 0 0 0 12h3'],

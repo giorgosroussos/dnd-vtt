@@ -12,13 +12,20 @@ import {
 import type Konva from 'konva';
 import { Circle, Group, Image as KonvaImage, Label, Layer, Line, Rect, Shape, Stage, Tag, Text } from 'react-konva';
 import {
+  applyStroke,
   FIT_CAMERA,
+  FOG_BRUSH_RADIUS,
+  FOG_STROKE_MAX_POINTS,
+  FOG_STROKE_MAX_WORK,
+  fogExtent,
   imageFileUrl,
+  strokeWork,
+  type FogMask,
+  type FogStroke,
   type Grid,
   type Image,
   type Measurement,
   type PlayerCamera,
-  type RegionShape,
   type Screen,
   type TokenSize,
 } from '@emberglass/shared';
@@ -54,7 +61,7 @@ import {
   type Size,
 } from './geometry.js';
 import { labelOffset, rulerForKey, sameSquare, squareAt, squareCentre, type RulerPath } from './ruler.js';
-import { FogLayer, rectBetween, type FogDraft, type FogRegion } from './FogLayer.js';
+import { FogLayer } from './FogLayer.js';
 import { PingLayer, type PingPoint } from './PingLayer.js';
 import { TokenLayer, type TokenControls } from './TokenLayer.js';
 import {
@@ -300,19 +307,23 @@ export interface PingTool {
   onPing: (at: Point) => void;
 }
 
-/** The fog regions drawn (TBL-03), and in the DM view the tool that draws them. */
+/** The painted fog (TBL-04), and in the DM view the brush that paints it. */
 export interface FogView {
-  regions: readonly FogRegion[];
+  fog: FogMask;
   tool?: FogTool | undefined;
 }
 
 export interface FogTool {
   on: boolean;
   onToggle: (on: boolean) => void;
-  /** A shape drawn, its corners on grid corners. */
-  onDraw: (shape: RegionShape) => void;
-  /** A region's tag on the map clicked: it is fogged or revealed. */
-  onToggleRegion?: ((id: string) => void) | undefined;
+  /** Whether the brush erases (E switches it). */
+  erase: boolean;
+  onErase: (erase: boolean) => void;
+  /** The brush's radius in squares ([ and ] step it). */
+  radius: number;
+  onRadius: (radius: number) => void;
+  /** A stroke finished, in grid units: answers whether it was taken, so a refused one stops showing. */
+  onPaint: (stroke: FogStroke) => Promise<boolean>;
 }
 
 /** A rectangle measured on the map during calibration, in the original image's pixels. */
@@ -469,12 +480,24 @@ export function MapCanvas({
   // The ping tool (TBL-01), under the same conditions; a click pings and a drag still pans.
   const pingTool = dm && !measuring && !placingNow && frame ? ping?.tool : undefined;
   const pingOn = pingTool?.on === true && !rulerOn;
-  // The fog tool (TBL-03): a drag draws a rectangle, clicks a polygon's corners, each on a grid corner.
+  // The fog brush (TBL-04): a drag paints or erases a stroke, sent when the pointer is released; the stroke
+  // so far is shown as the fog it would leave, and a stroke sent goes on showing until the fog it made
+  // arrives, or until it is refused.
   const fogTool = dm && !measuring && !placingNow && frame ? fog?.tool : undefined;
   const fogOn = fogTool?.on === true && !rulerOn && !pingOn;
-  const [fogDraft, setFogDraft] = useState<FogDraft>();
-  const fogPress = useRef<{ corner: Point; screen: Point }>(undefined);
-  if (!fogOn && fogDraft) setFogDraft(undefined);
+  const fogStroke = useRef<Point[]>(undefined);
+  const fogPan = useRef<{ x: number; y: number }>(undefined);
+  const [fogPainting, setFogPainting] = useState(false);
+  const [fogPreview, setFogPreview] = useState<{ base: FogMask; mask: FogMask }>();
+  const brushCursor = useRef<Konva.Circle>(null);
+  if (fogPreview && fogPreview.base !== fog?.fog && !fogPainting) setFogPreview(undefined);
+  if (!fogOn && fogPainting) {
+    fogStroke.current = undefined;
+    setFogPainting(false);
+    setFogPreview(undefined);
+  }
+  const extent = frame ? fogExtent(grid, info ? info.original : null) : undefined;
+  const shownFog = fogPreview && fogPreview.base === fog?.fog ? fogPreview.mask : fog?.fog;
   // Space held down: a drag pans the view, whatever the tool (UIX-01).
   const [spaceHeld, setSpaceHeld] = useState(false);
   const panning = dm && spaceHeld;
@@ -614,30 +637,39 @@ export function MapCanvas({
         return;
       }
     }
-    // F turns the fog tool on and off; with it on, Enter puts a corner at the centre of the view (a second
-    // time at the same corner closes the polygon), Backspace takes the last corner off, and Escape drops the
-    // shape, or leaves the tool when there is none.
+    // F turns the fog brush on and off; with it on, Enter paints a dab at the centre of the view, E switches
+    // painting and erasing, [ and ] make the brush smaller and larger, and Escape drops the stroke under way,
+    // or leaves the brush when there is none.
     if (fogTool && (event.key === 'f' || event.key === 'F')) {
       event.preventDefault();
       if (!event.repeat) fogTool.onToggle(!fogOn);
       return;
     }
-    if (fogOn && frame) {
+    if (fogOn && fogTool && frame) {
       if (event.key === 'Enter') {
         event.preventDefault();
-        if (!event.repeat) fogCorner(cornerAt(centreWorld()));
+        if (!event.repeat) sendStroke([toGrid(frame, centreWorld())]);
         return;
       }
-      if (event.key === 'Backspace' && fogDraft?.kind === 'polygon') {
+      if (event.key === 'e' || event.key === 'E') {
         event.preventDefault();
-        const points = fogDraft.points.slice(0, -1);
-        setFogDraft(points.length > 0 ? { kind: 'polygon', points } : undefined);
+        if (!event.repeat) fogTool.onErase(!fogTool.erase);
+        return;
+      }
+      if (event.key === '[' || event.key === ']') {
+        event.preventDefault();
+        const step = event.key === '[' ? -FOG_BRUSH_RADIUS.step : FOG_BRUSH_RADIUS.step;
+        const next = Math.min(FOG_BRUSH_RADIUS.max, Math.max(FOG_BRUSH_RADIUS.min, fogTool.radius + step));
+        if (next !== fogTool.radius) fogTool.onRadius(next);
         return;
       }
       if (event.key === 'Escape') {
         event.preventDefault();
-        if (fogDraft) setFogDraft(undefined);
-        else fogTool.onToggle(false);
+        if (fogStroke.current) {
+          fogStroke.current = undefined;
+          setFogPainting(false);
+          setFogPreview(undefined);
+        } else fogTool.onToggle(false);
         return;
       }
     }
@@ -905,53 +937,102 @@ export function MapCanvas({
     if (controls?.selectedId !== undefined) controls.onDeselect();
   }
 
-  // The fog tool (TBL-03). The nearest grid corner to a point in the world.
-  const cornerAt = (at: Point): Point => {
+  // The fog brush (TBL-04). A point is kept to a thousandth of a square, as a free token position is.
+  const brushPoint = (at: Point): Point => {
     const grid = toGrid(frame!, at);
-    return { x: Math.round(grid.x) + 0, y: Math.round(grid.y) + 0 };
+    return { x: Math.round(grid.x * 1000) / 1000 + 0, y: Math.round(grid.y * 1000) / 1000 + 0 };
   };
-  const sameCorner = (a: Point, b: Point) => a.x === b.x && a.y === b.y;
-  /** A corner of the polygon being drawn: the first again, or the last twice, closes it. */
-  function fogCorner(corner: Point) {
-    const points = fogDraft?.kind === 'polygon' ? fogDraft.points : [];
-    const last = points.at(-1);
-    const closes = points.length >= 3 && (sameCorner(corner, points[0]!) || (last && sameCorner(corner, last)));
-    if (closes) {
-      setFogDraft(undefined);
-      fogTool?.onDraw({ kind: 'polygon', points });
-      return;
-    }
-    if (last && sameCorner(corner, last)) return;
-    setFogDraft({ kind: 'polygon', points: [...points, corner] });
+  /** Shows the stroke so far as the fog it would leave, by the same rule the server applies. */
+  function previewStroke(points: Point[]) {
+    if (!fogTool || !fog || !extent) return;
+    const stroke: FogStroke = { mode: fogTool.erase ? 'erase' : 'paint', radius: fogTool.radius, points };
+    setFogPreview({ base: fog.fog, mask: applyStroke(fog.fog, stroke, extent) });
+  }
+  /** Sends a stroke; one refused stops showing. */
+  function sendStroke(points: Point[]) {
+    if (!fogTool || points.length === 0) return;
+    previewStroke(points);
+    const stroke: FogStroke = { mode: fogTool.erase ? 'erase' : 'paint', radius: fogTool.radius, points };
+    void fogTool.onPaint(stroke).then((taken) => {
+      if (!taken) setFogPreview(undefined);
+    });
+  }
+  function moveBrush(at: Point | undefined) {
+    const cursor = brushCursor.current;
+    if (!cursor) return;
+    if (at) cursor.position(at);
+    cursor.visible(at !== undefined);
+    cursor.getLayer()?.batchDraw();
   }
   function onFogDown(event: Konva.KonvaEventObject<PointerEvent>) {
     const at = worldPoint(event);
-    if (!at || event.evt.button !== 0) return;
-    fogPress.current = { corner: cornerAt(at), screen: { x: event.evt.clientX, y: event.evt.clientY } };
-  }
-  function onFogMove(event: Konva.KonvaEventObject<PointerEvent>) {
-    const press = fogPress.current;
-    const at = worldPoint(event);
-    if (!press || !at) return;
-    const moved = Math.hypot(event.evt.clientX - press.screen.x, event.evt.clientY - press.screen.y);
-    // A drag, not a click: a rectangle from the corner pressed, unless a polygon is under way.
-    if (moved >= MIN_RECT_PX && fogDraft?.kind !== 'polygon') {
-      setFogDraft({ kind: 'rect', from: press.corner, to: cornerAt(at) });
-    }
-  }
-  function onFogUp(event: Konva.KonvaEventObject<PointerEvent>) {
-    const press = fogPress.current;
-    fogPress.current = undefined;
-    const at = worldPoint(event);
-    if (!press || !at) return;
-    if (fogDraft?.kind === 'rect') {
-      const shape = rectBetween(fogDraft.from, cornerAt(at));
-      setFogDraft(undefined);
-      if (shape) fogTool?.onDraw(shape);
+    if (!at || !frame || !fogTool) return;
+    const content = event.target.getStage()?.content;
+    if (typeof event.evt.pointerId === 'number') content?.setPointerCapture?.(event.evt.pointerId);
+    // The right or middle button pans, so the DM reaches the map off screen while painting.
+    if (event.evt.button === 1 || event.evt.button === 2) {
+      event.evt.preventDefault();
+      fogPan.current = { x: event.evt.clientX, y: event.evt.clientY };
+      setFogPainting(true);
       return;
     }
-    fogCorner(press.corner);
+    if (event.evt.button !== 0) return;
+    fogStroke.current = [brushPoint(at)];
+    setFogPainting(true);
+    previewStroke(fogStroke.current);
   }
+  function onFogMove(event: Konva.KonvaEventObject<PointerEvent>) {
+    const at = worldPoint(event);
+    moveBrush(at ?? undefined);
+    const pan = fogPan.current;
+    if (pan) {
+      if (event.evt.buttons === 0) return finishFog();
+      const { clientX, clientY } = event.evt;
+      fogPan.current = { x: clientX, y: clientY };
+      changeCamera((current) => panBy(current, clientX - pan.x, clientY - pan.y));
+      return;
+    }
+    const points = fogStroke.current;
+    if (!points || !at || !fogTool) return;
+    if (event.evt.buttons === 0) return finishFog();
+    const point = brushPoint(at);
+    const last = points.at(-1)!;
+    // A new point every quarter of the radius: close enough that the stroke reads as one line.
+    if (Math.hypot(point.x - last.x, point.y - last.y) < fogTool.radius / 4) return;
+    points.push(point);
+    const long =
+      points.length >= FOG_STROKE_MAX_POINTS ||
+      strokeWork({ mode: 'paint', radius: fogTool.radius, points }) > FOG_STROKE_MAX_WORK / 2;
+    if (long) {
+      // A stroke that long goes as it is, and the drag goes on as a new one from where it got to.
+      sendStroke(points);
+      fogStroke.current = [point];
+      return;
+    }
+    previewStroke(points);
+  }
+  function finishFog() {
+    if (fogPan.current) {
+      fogPan.current = undefined;
+      setFogPainting(false);
+      return;
+    }
+    const points = fogStroke.current;
+    fogStroke.current = undefined;
+    setFogPainting(false);
+    if (points) sendStroke(points);
+  }
+  const fogReleased = useEffectEvent(() => finishFog());
+  useEffect(() => {
+    if (!fogPainting) return;
+    const up = () => fogReleased();
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+    return () => {
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+    };
+  }, [fogPainting]);
 
   // A click with the ping tool on pings the point clicked (TBL-01).
   function onPingClick(event: Konva.KonvaEventObject<MouseEvent>) {
@@ -976,7 +1057,13 @@ export function MapCanvas({
           : pingOn
             ? { onWheel, onDragMove: onDrag, onDragEnd: onDrag, onClick: onPingClick }
             : fogOn
-              ? { onWheel, onPointerDown: onFogDown, onPointerMove: onFogMove, onPointerUp: onFogUp }
+              ? {
+                  onWheel,
+                  onPointerDown: onFogDown,
+                  onPointerMove: onFogMove,
+                  onPointerUp: () => finishFog(),
+                  onMouseLeave: () => moveBrush(undefined),
+                }
               : { onWheel, onDragMove: onDrag, onDragEnd: onDrag, onClick: onStageClick };
 
   const centre = { x: viewport.width / 2, y: viewport.height / 2 };
@@ -1058,16 +1145,14 @@ export function MapCanvas({
           </Label>
         ) : null}
       </Layer>
-      {frame && fog ? (
+      {frame && fog && shownFog ? (
         <FogLayer
-          regions={fog.regions}
+          fog={shownFog}
           frame={frame}
           scale={camera.scale}
           mode={mode}
-          draft={fogOn ? fogDraft : undefined}
-          onToggle={
-            dm && !fogOn && !rulerOn && !pingOn && !placingNow && !measuring ? fog.tool?.onToggleRegion : undefined
-          }
+          brush={fogOn && fogTool ? { radius: fogTool.radius, erase: fogTool.erase } : undefined}
+          cursorRef={brushCursor}
         />
       ) : null}
       {frame ? (
@@ -1280,22 +1365,9 @@ export function MapCanvas({
           }),
         }
       : {};
-  // The fogged shapes drawn, in grid units, for the end-to-end tests (TBL-03): on the TV, what its snapshot
-  // carries; in the DM view each region with its state.
-  const fogState = fog
-    ? {
-        'data-fog': JSON.stringify(
-          dm
-            ? fog.regions.map((region) => ({
-                id: region.id,
-                name: region.name,
-                hidden: region.hidden,
-                shape: region.shape,
-              }))
-            : fog.regions.filter((region) => region.hidden).map((region) => region.shape),
-        ),
-      }
-    : {};
+  // The fog drawn, its rows of fogged cells, for the end-to-end tests (TBL-04): on the TV what its snapshot
+  // and events carry, in the DM view the same, a stroke under way included.
+  const fogState = fog && shownFog ? { 'data-fog': JSON.stringify(shownFog) } : {};
   // Where each ping is drawn, in screen pixels from the viewport's corner, for the end-to-end tests (TBL-01).
   const pingState =
     frame && ping && ping.shown.length > 0
@@ -1403,10 +1475,10 @@ export function MapCanvas({
         data-ruler-tool={rulerTool ? (rulerOn ? 'on' : 'off') : undefined}
         data-ping-tool={pingTool ? (pingOn ? 'on' : 'off') : undefined}
         data-fog-tool={fogTool ? (fogOn ? 'on' : 'off') : undefined}
-        data-fog-draft={fogOn && fogDraft ? JSON.stringify(fogDraft) : undefined}
+        data-fog-brush={fogOn && fogTool ? `${fogTool.erase ? 'erase' : 'paint'} ${fogTool.radius}` : undefined}
         {...fogState}
         // A right-button drag pans while measuring, so it opens no context menu (review U-M2).
-        onContextMenu={rulerOn ? (event) => event.preventDefault() : undefined}
+        onContextMenu={rulerOn || fogOn ? (event) => event.preventDefault() : undefined}
         data-tokens={tokenBoxes}
       >
         {stage}

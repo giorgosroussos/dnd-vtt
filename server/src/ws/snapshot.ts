@@ -13,7 +13,6 @@ import type {
 import { readScene } from '../db/campaigns.js';
 import { readFog, sightOf } from '../db/fog.js';
 import { readImage } from '../db/images.js';
-import { listRegions } from '../db/regions.js';
 import { readSettings } from '../db/settings.js';
 import { listTokens } from '../db/tokens.js';
 import type { PlayerCameraState, ScreenRegistry } from '../domain/camera.js';
@@ -49,9 +48,8 @@ export function liveMeasurement(db: Database.Database, scene: Scene, memory: Liv
 // follows (D-119). Both carry the measurement shown on the TV (LIV-07), so a screen reconnecting, or
 // asking again after a gap, keeps the line the others show; a measurement names no token (D-121).
 // The players' carries the live scene's name, shown on the TV (UIX-01); the DM's alone carries the
-// undo history's state. The DM's carries the scene's fog regions, names included; the players' the fogged
-// shapes alone, and only the tokens they can see: not hidden and under no fogged region (TBL-03), each
-// ranked among those.
+// undo history's state. Both carry the painted fog, the mask alone; the players' only the tokens they can
+// see: not hidden and under no fogged cell (TBL-04), each ranked among those.
 
 export function readSnapshot(db: Database.Database, role: 'dm', memory: LiveMemory): DmSnapshot;
 export function readSnapshot(db: Database.Database, role: 'players', memory: LiveMemory): PlayerSnapshot;
@@ -72,7 +70,7 @@ function readDm(db: Database.Database, memory: LiveMemory): DmSnapshot {
       screen: memory.screens.chosen(),
       ruler: liveMeasurement(db, live.scene, memory),
       history: memory.history.stateFor(live.scene.id),
-      regions: listRegions(db, live.scene.id) ?? [],
+      fog: readFog(db, live.scene.id),
     },
   };
 }

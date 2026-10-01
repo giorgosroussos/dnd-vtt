@@ -219,7 +219,7 @@ describe('what the player view draws (specs/08-ux-journeys.md §4)', () => {
         screen: null,
         history: { can_undo: false, can_redo: false },
         ruler: null,
-        regions: [],
+        fog: [],
       },
     };
     act(() => fake.sockets[0]!.deliver({ type: 'scene.snapshot', version: 2, payload: dm }));

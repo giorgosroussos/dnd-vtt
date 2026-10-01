@@ -6,7 +6,7 @@ import {
   type PlayerMap,
   type PlayerSnapshot,
   type PlayerToken,
-  type RegionShape,
+  type FogMask,
 } from '@emberglass/shared';
 import { applyPlayerEvent, fromSnapshot, type PlayerScene } from './scene.js';
 
@@ -313,29 +313,26 @@ describe('the ruler (LIV-07, specs/04-live-sync.md §11)', () => {
   });
 });
 
-describe('the fog (TBL-03, specs/04-live-sync.md §13)', () => {
-  const room: RegionShape = { kind: 'rect', x: 4, y: 0, width: 4, height: 4 };
-  const corner: RegionShape = {
-    kind: 'polygon',
-    points: [
-      { x: 0, y: 0 },
-      { x: 2, y: 0 },
-      { x: 0, y: 2 },
-    ],
-  };
+describe('the fog (TBL-04, specs/04-live-sync.md §13)', () => {
+  const room: FogMask = [
+    { y: 0, runs: [16, 32] },
+    { y: 1, runs: [16, 32] },
+  ];
+  const more: FogMask = [...room, { y: 2, runs: [0, 4, 16, 32] }];
 
-  it('keeps the fogged shapes a snapshot carries, replaced by each fog.updated, and nothing else of them', () => {
+  it('keeps the fog a snapshot carries, replaced by each fog.updated, and nothing else of it', () => {
     const server = new Server([]);
     const first = server.snapshot();
     const scene = fromSnapshot({
       ...first,
-      scene: { ...first.scene!, fog: [{ ...room, name: 'Back room' } as RegionShape] },
+      scene: { ...first.scene!, fog: [{ ...room[0]!, name: 'Back room' }, room[1]!] as FogMask },
     });
-    expect(scene!.fog).toEqual([room]);
-    const next = applyPlayerEvent(scene, server.event('fog.updated', { fog: [room, corner] }));
-    expect(next!.fog).toEqual([room, corner]);
+    expect(scene!.fog).toEqual(room);
+    const next = applyPlayerEvent(scene, server.event('fog.updated', { fog: more }));
+    expect(next!.fog).toEqual(more);
     expect(applyPlayerEvent(next, server.event('fog.updated', { fog: [] }))!.fog).toEqual([]);
     // A malformed event keeps the fog: it never lifts by mistake.
     expect(applyPlayerEvent(next, server.event('fog.updated', { fog: 'none' }))).toBe(next);
+    expect(applyPlayerEvent(next, server.event('fog.updated', { fog: [{ y: 0, runs: [4] }] }))).toBe(next);
   });
 });

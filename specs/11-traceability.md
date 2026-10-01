@@ -38,7 +38,7 @@ Each row's status restates the tagged statement it cites in `01`. [input, Q-013,
 | Characters with join link/QR; per-player permissions | `01` §4 | Future (Phase 2) |
 | Mobile UI | `01` §4 | Future (Phase 2) |
 | Initiative tracker; HP and conditions beyond four markers; automatic fog of war | `01` §4 | Future (Phase 2) |
-| Ping, four condition markers, manual fog regions | `01` §9 | Before the release (Q-099) |
+| Ping, four condition markers, manual fog painted by the DM | `01` §9 | Before the release (Q-099, Q-101) |
 | The 2026-09-30 redesign of both views | `01` §9, `08` §11 | Before the release (Q-100) |
 | DM notes per scene; handouts | `01` §4 | Future (Phase 2) |
 | Character sheet with derived values; data-driven rules, SRD 5.1 import | `01` §4 | Future (Phase 2) |

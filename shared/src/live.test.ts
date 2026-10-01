@@ -126,7 +126,7 @@ describe('snapshot payloads (specs/04-live-sync.md §4, LIV-01)', () => {
     expect(Value.Check(PlayerTokenSchema, { ...token, z_order: 0.5 })).toBe(false);
   });
 
-  it('gives players no scene id, the name the TV shows (UIX-01), the fogged shapes (TBL-03), and only the display version of the map', () => {
+  it('gives players no scene id, the name the TV shows (UIX-01), the painted fog (TBL-04), and only the display version of the map', () => {
     expect(Object.keys(PlayerLiveSceneSchema.properties).sort()).toEqual([
       'camera',
       'fog',
@@ -142,15 +142,11 @@ describe('snapshot payloads (specs/04-live-sync.md §4, LIV-01)', () => {
     expect(Object.keys(PlayerCameraSchema.properties).sort()).toEqual(['centre_x', 'centre_y', 'height', 'width']);
     expect(Object.keys(PlayerMapSchema.properties).sort()).toEqual(['height', 'id', 'variants', 'width']);
     expect(Object.keys(PlayerMapSchema.properties.variants.properties)).toEqual(['display']);
-    // The fog is shapes alone: a fogged region's name and id never reach players (TBL-03).
-    expect(Value.Check(PlayerLiveSceneSchema.properties.fog, [{ kind: 'rect', x: 0, y: 0, width: 2, height: 2 }])).toBe(
-      true,
-    );
+    // The fog is cells alone: rows of fogged runs, nothing that names a token or the scene (TBL-04).
+    expect(Value.Check(PlayerLiveSceneSchema.properties.fog, [{ y: 0, runs: [0, 8] }])).toBe(true);
     for (const extra of [{ name: 'Back room' }, { id: '00000000-0000-4000-8000-000000000001' }, { hidden: true }]) {
       expect(
-        Value.Check(PlayerLiveSceneSchema.properties.fog, [
-          { kind: 'rect', x: 0, y: 0, width: 2, height: 2, ...extra },
-        ]),
+        Value.Check(PlayerLiveSceneSchema.properties.fog, [{ y: 0, runs: [0, 8], ...extra }]),
         JSON.stringify(extra),
       ).toBe(false);
     }
@@ -180,7 +176,7 @@ describe('live command and event payloads (specs/04-live-sync.md §2, §3, §4, 
   };
   const id = '00000000-0000-4000-8000-000000000001';
 
-  it('defines a payload for every command of specs/04-live-sync.md §2, redo (UIX-01), ping (TBL-01), token.setMarkers (TBL-02) and the region commands (TBL-03) the last', () => {
+  it('defines a payload for every command of specs/04-live-sync.md §2, redo (UIX-01), ping (TBL-01), token.setMarkers (TBL-02) and the fog commands (TBL-04) the last', () => {
     expect(Object.keys(LIVE_COMMAND_PAYLOAD_SCHEMAS).sort()).toEqual([...COMMAND_TYPES].sort());
     expect(Object.keys(LIVE_COMMAND_PAYLOAD_SCHEMAS).sort()).toEqual(
       [
@@ -194,10 +190,8 @@ describe('live command and event payloads (specs/04-live-sync.md §2, §3, §4, 
         'token.move',
         'token.setVisibility',
         'token.setMarkers',
-        'region.add',
-        'region.rename',
-        'region.setHidden',
-        'region.delete',
+        'fog.paint',
+        'fog.fill',
         'undo',
         'redo',
         'ping',

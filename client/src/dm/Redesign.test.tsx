@@ -230,11 +230,11 @@ describe('“In this scene” (specs/08-ux-journeys.md §11)', () => {
     server.addToken(tavern.id, bandit, { x: 5, y: 1 });
     const view = await open();
     const groups = [...view.querySelectorAll('.eg-token-list__heading')].map((each) => each.textContent);
-    // The scene's fog regions follow the tokens (TBL-03): none here.
+    // The scene's fog follows the tokens (TBL-04): none here.
     expect(groups).toEqual([
       t('sceneTokens.party', { count: 1 }),
       t('sceneTokens.monsters', { count: 2 }),
-      t('fog.heading', { count: 0 }),
+      t('fog.heading'),
     ]);
     expect(view.querySelectorAll('.eg-token-row[data-hidden]')).toHaveLength(2);
     expect(button(view, t('sceneTokens.revealOf', { label: 'Bandit' }))).toBeDefined();

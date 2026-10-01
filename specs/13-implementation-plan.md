@@ -283,7 +283,7 @@ If a ticket reveals a locked-decision conflict, stop and create an ADR; do not i
 
 ## 10. Phase 5 — Redesign and table tools
 
-Goal: both views in the 2026-09-30 redesign, and the three table tools the owner moved before the release (`01` §9), with hidden information still never leaving the server.
+Goal: both views in the 2026-09-30 redesign, and the three table tools the owner moved before the release (`01` §9), the fog painted since Q-101, with hidden information still never leaving the server.
 
 ### Work packages
 
@@ -318,6 +318,14 @@ Goal: both views in the 2026-09-30 redesign, and the three table tools the owner
 - Touches red line: yes
 - Contract change: yes
 
+`TBL-04` Painted fog
+
+- The fog regions replaced by one painted fog per scene: a round brush and an eraser, the radius on a slider, Fog all and Clear all, in preparation and on the live scene, each stroke one undoable step; the region table dropped (`01` §9, `03` §1, `03` §7, `04` §2, `04` §8, `04` §13).
+- Tokens under the fog filtered for players on the server, in snapshots, events, numbering and image files; the fog drawn by the player client as a mask (`04` §4, `07` §5, `10` §3).
+- Surfaces: data, security, scope, external, ux
+- Touches red line: yes
+- Contract change: yes
+
 ### Exit criteria
 
-The hidden-information suite of `10` §3 passes with fog regions in its script; the run journey of `10` §5 passes in the new layout; screenshots of the three redesigned screens are compared with the design's boards.
+The hidden-information suite of `10` §3 passes with painted fog in its script; the run journey of `10` §5 passes in the new layout; screenshots of the three redesigned screens are compared with the design's boards.
