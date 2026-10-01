@@ -26,17 +26,21 @@ Commands flow from a DM socket to the server; the server MUST reject any command
 | `camera.setPlayer` | set the player camera | no |
 | `ruler.update`, `ruler.clear` | show or clear a measurement on the TV | no |
 | `ping` | mark a point of the live scene on both views for a moment (§12) | no |
+| `encounter.start`, `encounter.end` | start the live scene's combat from its player characters, or end it (§14) | yes |
+| `encounter.reorder`, `encounter.setInitiative` | set the order of the entries by dragging, or an entry's initiative number, which sorts them (§14) | yes |
+| `encounter.next`, `encounter.previous` | pass the turn to the next or the previous entry, counting rounds (§14) | yes |
+| `encounter.addEntry`, `encounter.removeEntry` | add a player character's entry, or remove one (§14) | yes |
 | `undo` | apply the most recent inverse command | — |
 | `redo` | apply again the most recently undone command | — |
 
-- The token commands on the live scene MUST be exactly `token.add`, `token.move`, `token.setVisibility`, `token.setMarkers` and `token.delete`; label and stacking order are edited only on scenes that are not live. [input, Q-014, Q-099]
+- The token commands on the live scene MUST be exactly `token.add`, `token.move`, `token.setVisibility`, `token.setMarkers` and `token.delete`; label and stacking order are edited only on scenes that are not live; deleting a token also removes its initiative entry, and undoing the delete puts the entry back (§14). [input, Q-014, Q-099, Q-104]
 - Clearing the live scene MUST be possible at any time with `scene.deactivate`. [Q-025]
 - Conflicting commands MUST resolve last-write-wins. [input]
 - Several DM sockets MAY be connected at once, each receiving every `dm` event. [Q-008, recommendation accepted]
 
 ## 3. Events
 
-Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-027, Q-038, Q-047, Q-083, D-049]
+Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-027, Q-038, Q-047, Q-083, D-049, Q-104]
 
 | Event | `dm` room | `players` room |
 | --- | --- | --- |
@@ -50,6 +54,7 @@ Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-02
 | `ping` | on ping | on ping |
 | `history.changed` | when whether undo or redo would change anything changes | never |
 | `fog.updated` | when the fog changes: the whole mask | when the fog changes: the whole mask |
+| `encounter.updated` | when the encounter changes: the whole encounter | when what players see of it changes: its projection (§14) |
 
 ## 4. Role-filtered projection
 
@@ -60,6 +65,7 @@ Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-02
 - A player client MUST NOT receive anything from which the existence of a hidden token can be learnt: no hidden token, no hidden token's ID, asset or image, no count. [input]
 - A player-room token MUST carry only what rendering needs: ID, position, size, image reference, stacking order, label, its asset's category, which colours its ring, and its condition markers; asset notes and defaults are never sent, and a hidden token's markers never reach players. [Q-047, Q-032, Q-100, Q-099]
 - The players' snapshot MUST carry the live scene's name, shown on the TV (`08` §11), and its painted fog, the mask alone; the undo state MUST NOT reach players, nor the count of connected player views, which the DM view reads over REST (`02` §5). [input, Q-100]
+- The players' encounter MUST carry only the round, the entries of player characters players can see and the one Enemies entry, in order, and which of them has the turn and which is next; never an initiative number, an Enemies entry's members, their count, or anything else of a monster or npc token (§14). [Q-104]
 - The grid overlay MUST NOT be drawn on the player view when the scene's grid is set hidden for players (`06` §2). [input]
 
 ## 5. Snapshot and versioning
@@ -81,7 +87,7 @@ Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-02
 
 ## 8. Undo
 
-- The server MUST keep the inverse of every undoable DM command on the live scene: move, add, delete, visibility, markers, and the fog commands, each stroke one step. [input, Q-099, Q-101]
+- The server MUST keep the inverse of every undoable DM command on the live scene: move, add, delete, visibility, markers, the fog commands, each stroke one step, and the encounter commands (§14). [input, Q-099, Q-101, Q-104]
 - Ctrl+Z in the DM view MUST cause the most recent inverse command to be applied as an ordinary command, so synchronisation does not change. [input]
 - Ctrl+Z sends `undo`; the server applies the inverse from its history through the ordinary command path. [D-040]
 - The undo history MUST be held in memory only, cleared when another scene is activated or the server restarts, and bounded to the last 100 commands. [Q-005]
@@ -117,3 +123,16 @@ Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-02
 - A stroke, a fill or a clear, and its undo and redo, MUST reach both rooms as `fog.updated` with the whole mask, and players as a `token.added` for every token it lets them see and a `token.removed` for every token it covers, computed in the same step as the change; a stroke that changes nothing MUST reach nobody and is not undoable. [input, Q-099, Q-101]
 - Painting in preparation MUST have no undo, as no preparation edit has (§8). [Q-101]
 - A token MUST be numbered the first time players can see it, whatever made it so (`05` §3), so that a token placed visible inside the fog renames no token players see. [Q-092, Q-096, Q-099]
+
+## 14. Initiative
+
+- A scene MUST hold at most one encounter (`03` §1); the encounter commands MUST name the live scene and are refused when it is not live, as the ping is (§12). [Q-104, Q-105]
+- The DM records the order; the table rolls physical dice, and the server MUST NOT roll, compute or suggest an initiative number. [Q-104]
+- `encounter.start` MUST build the entries from the scene's player character tokens players can see, in the order of the DM's token list, then one Enemies entry; the round is 1 and the turn the first entry that can take it. Starting an encounter already active MUST be refused. [Q-104]
+- The Enemies entry MUST be exactly one per encounter and cannot be removed; its members are the scene's monster and npc tokens that players can see (§4) and that do not carry Dead (`03` §1), computed whenever needed and never stored. Object tokens are never part of the encounter. [Q-104]
+- Setting an initiative number, or clearing it, MUST sort the entries with the highest number first and the entries without one below them, keeping their order among themselves; ties keep their order. `encounter.reorder` MUST set the order exactly as given, and that order stands until a number is set again. [Q-104]
+- `encounter.next` MUST pass the turn to the next entry that can take it, and past the last entry back to the first, counting one more round; `encounter.previous` MUST do the reverse, and does nothing on round 1's first turn. [Q-104]
+- A player character's entry MUST take its turn whatever markers its token carries, Unconscious and Dead included, but MUST be passed over while players cannot see its token. The Enemies entry MUST take its turn while it has members; with none, it MUST still take its turn once the encounter has had a member, so that the DM is asked whether to end combat, and MUST be passed over while it has never had one. [Q-104, Q-106]
+- `encounter.addEntry` MUST add a player character token players can see and that has no entry yet, at the end; `encounter.removeEntry` removes a player character's entry. [Q-104]
+- `encounter.end` MUST clear the encounter: no entries, round 1, not active. [Q-104]
+- The encounter MUST be carried in both rooms' snapshots, so a view that connects or reconnects shows it, and players' projection (§4) MUST be sent to them only when it changes, whatever command changed it. [Q-104]

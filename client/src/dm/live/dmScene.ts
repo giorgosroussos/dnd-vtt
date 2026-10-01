@@ -1,6 +1,7 @@
-import { isFogMask, isMeasurement } from '@emberglass/shared';
+import { isEncounter, isFogMask, isMeasurement } from '@emberglass/shared';
 import type {
   DmCameraPayload,
+  DmEncounterPayload,
   DmLiveScene,
   DmSnapshot,
   DmTokenEventPayload,
@@ -24,7 +25,7 @@ import type {
 // `ruler.shown` and `ruler.cleared` (LIV-07) replace and remove the measurement the TV shows, so the DM
 // sees what the TV sees, another DM browser's measurement included. `history.changed` (UIX-01) replaces
 // whether undo and redo would change anything, which greys the rail's Undo and Redo. `fog.updated`
-// (TBL-04) replaces the scene's painted fog.
+// (TBL-04) replaces the scene's painted fog. `encounter.updated` (TBL-06) replaces the scene's encounter.
 
 /** The live scene, or null while nothing is live. */
 export type DmScene = DmLiveScene | null;
@@ -38,7 +39,13 @@ const masked = (fog: unknown): FogMask | undefined =>
 
 export function fromDmSnapshot(snapshot: DmSnapshot): DmScene {
   if (snapshot.scene === null) return null;
-  return { ...snapshot.scene, tokens: stacked(snapshot.scene.tokens), fog: masked(snapshot.scene.fog) ?? [] };
+  const { encounter } = snapshot.scene;
+  return {
+    ...snapshot.scene,
+    tokens: stacked(snapshot.scene.tokens),
+    fog: masked(snapshot.scene.fog) ?? [],
+    encounter: isEncounter(encounter) ? structuredClone(encounter) : null,
+  };
 }
 
 /** The scene after one `dm` event that is exactly the next version (the connection checks that). */
@@ -84,6 +91,12 @@ export function applyDmEvent(scene: DmScene, event: EventEnvelope): DmScene {
       const { can_undo, can_redo } = event.payload as unknown as Partial<HistoryChangedPayload>;
       if (typeof can_undo !== 'boolean' || typeof can_redo !== 'boolean') return scene;
       return { ...scene, history: { can_undo, can_redo } };
+    }
+    case 'encounter.updated': {
+      const { encounter } = event.payload as unknown as Partial<DmEncounterPayload>;
+      // A malformed event is skipped: the encounter stays as it was.
+      if (encounter !== null && !isEncounter(encounter)) return scene;
+      return { ...scene, encounter: encounter === null ? null : structuredClone(encounter) };
     }
     default:
       return scene;

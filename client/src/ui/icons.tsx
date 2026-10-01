@@ -29,7 +29,8 @@ type IconName =
   | 'drop'
   | 'setup'
   | 'grip'
-  | 'info';
+  | 'info'
+  | 'swords';
 
 const STROKED: Record<Exclude<IconName, 'stop' | 'more' | 'drop'>, readonly string[]> = {
   logo: ['M12 2l6 8-6 12-6-12z', 'M12 2v20M6 10h12'],
@@ -58,6 +59,13 @@ const STROKED: Record<Exclude<IconName, 'stop' | 'more' | 'drop'>, readonly stri
   setup: ['M4 6h16M4 12h16M4 18h16', 'M9 4v4M15 10v4M7 16v4'],
   grip: ['M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01'],
   info: ['M3 12a9 9 0 1 0 18 0a9 9 0 1 0-18 0', 'M12 11v5M12 8h.01'],
+  // Two crossed blades: the Enemies entry of the initiative order (TBL-06).
+  swords: [
+    'M14.5 17.5L3 6V3h3l11.5 11.5',
+    'M13 19l6-6M16 16l4 4M19 21l2-2',
+    'M9.5 6.5L13 3h3v3l-3.5 3.5',
+    'M5 14l4 4M7 17l-3 3M3 19l2 2',
+  ],
 };
 
 export function Icon({ name, size = 16, strokeWidth = 1.8 }: { name: IconName; size?: number; strokeWidth?: number }) {

@@ -67,7 +67,7 @@ Phase 2 MUST NOT be implemented in the MVP; it covers: [input]
 - data-driven rules in JSON, importing SRD 5.1;
 - campaign export and import as a zip.
 
-Manual fog painted by the DM and condition markers on tokens (`13` §10) MUST be built after the MVP's features, before the release (§9); automatic fog, hit points, DM-defined markers and condition durations stay Phase 2. [Q-099, Q-101, Q-103]
+Manual fog painted by the DM, condition markers on tokens and the initiative tracker (`13` §10) MUST be built after the MVP's features, before the release (§9); automatic fog, hit points, DM-defined markers, condition durations, dice and per-monster initiative stay Phase 2. [Q-099, Q-101, Q-103, Q-104]
 
 Campaign export/import is Phase 2; in the MVP a campaign moves to another PC only by copying the whole data folder (`09` §5). [Q-013, recommendation accepted]
 
@@ -114,10 +114,11 @@ Emberglass MUST NOT implement: [input]
 
 ## 9. After the MVP, before the release
 
-After the MVP's features and before the owner's TV run (`10` §4), Emberglass MUST add: [Q-099, Q-101, Q-103]
+After the MVP's features and before the owner's TV run (`10` §4), Emberglass MUST add: [Q-099, Q-101, Q-103, Q-104]
 
 - a ping the DM places on the live scene, shown on every view (`13` §10);
 - eighteen condition markers on tokens, shown on every view: Bloodied, Unconscious, Dead, Concentrating, Prone and Poisoned pinned, and Blinded, Charmed, Deafened, Exhaustion with its level, Frightened, Grappled, Incapacitated, Invisible, Paralyzed, Petrified, Restrained and Stunned in a searchable list, each with its rule text and none applied by another (`13` §10); [Q-103]
-- manual fog the DM paints with a brush and reveals with an eraser, with tokens under the fog filtered for players (`13` §10).
+- manual fog the DM paints with a brush and reveals with an eraser, with tokens under the fog filtered for players (`13` §10);
+- an initiative tracker: one encounter per scene holding one entry per player character and one Enemies entry the DM plays as a single turn, ordered by the numbers the table rolled with physical dice or by dragging, its turns and rounds advanced by the DM, shown in the DM view and as a strip along the top of the TV that names no enemy and gives no count of them (`04` §14, `08` §12, `13` §10). [Q-104]
 
 The DM view and the player view MUST follow the 2026-09-30 redesign: palette, typography, layout, token visuals and the DM's controls of `08` §11. [input, Q-100]

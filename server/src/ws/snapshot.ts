@@ -1,16 +1,19 @@
 import type Database from 'better-sqlite3';
-import type {
-  DmSnapshot,
-  Measurement,
-  PlayerMap,
-  PlayerSnapshot,
-  PlayerToken,
-  Room,
-  Scene,
-  SceneSnapshot,
-  SceneToken,
+import {
+  playerEncounter,
+  type PlayerEncounter,
+  type DmSnapshot,
+  type Measurement,
+  type PlayerMap,
+  type PlayerSnapshot,
+  type PlayerToken,
+  type Room,
+  type Scene,
+  type SceneSnapshot,
+  type SceneToken,
 } from '@emberglass/shared';
 import { readScene } from '../db/campaigns.js';
+import { readEncounter } from '../db/encounters.js';
 import { readFog, sightOf } from '../db/fog.js';
 import { readImage } from '../db/images.js';
 import { readSettings } from '../db/settings.js';
@@ -49,7 +52,8 @@ export function liveMeasurement(db: Database.Database, scene: Scene, memory: Liv
 // asking again after a gap, keeps the line the others show; a measurement names no token (D-121).
 // The players' carries the live scene's name, shown on the TV (UIX-01); the DM's alone carries the
 // undo history's state. Both carry the painted fog, the mask alone; the players' only the tokens they can
-// see: not hidden and under no fogged cell (TBL-04), each ranked among those.
+// see: not hidden and under no fogged cell (TBL-04), each ranked among those. Both carry the encounter: the
+// DM's whole, the players' as their projection (TBL-06).
 
 export function readSnapshot(db: Database.Database, role: 'dm', memory: LiveMemory): DmSnapshot;
 export function readSnapshot(db: Database.Database, role: 'players', memory: LiveMemory): PlayerSnapshot;
@@ -71,6 +75,7 @@ function readDm(db: Database.Database, memory: LiveMemory): DmSnapshot {
       ruler: liveMeasurement(db, live.scene, memory),
       history: memory.history.stateFor(live.scene.id),
       fog: readFog(db, live.scene.id),
+      encounter: readEncounter(db, live.scene.id),
     },
   };
 }
@@ -91,8 +96,21 @@ function readPlayers(db: Database.Database, memory: LiveMemory): PlayerSnapshot 
       camera: { ...memory.camera.of(scene.id) },
       ruler: liveMeasurement(db, scene, memory),
       fog: readFog(db, scene.id),
+      encounter: livePlayerEncounter(db, scene.id, tokens),
     },
   };
+}
+
+/**
+ * What players see of the live scene's encounter (TBL-06, specs/04-live-sync.md §4, §14): built here from the
+ * stored encounter and what players can see now, so it names no hidden token and no enemy.
+ */
+export function livePlayerEncounter(
+  db: Database.Database,
+  sceneId: string,
+  tokens: readonly SceneToken[] = listTokens(db, sceneId) ?? [],
+): PlayerEncounter | null {
+  return playerEncounter(readEncounter(db, sceneId), tokens, readFog(db, sceneId));
 }
 
 /**

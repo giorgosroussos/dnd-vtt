@@ -75,6 +75,7 @@ class Server {
         camera: FIT_CAMERA,
         ruler: null,
         fog: [],
+        encounter: null,
       },
     };
   }
@@ -251,7 +252,7 @@ describe('the player camera (LIV-06, specs/04-live-sync.md §9)', () => {
   const steered = { centre_x: 0.25, centre_y: 0.75, width: 0.5, height: 0.25 };
   const base = (camera = FIT_CAMERA): PlayerSnapshot => ({
     role: 'players',
-    scene: { name: 'Crypt', map: MAP, grid: GRID, tokens: [], camera, ruler: null, fog: [] },
+    scene: { name: 'Crypt', map: MAP, grid: GRID, tokens: [], camera, ruler: null, fog: [], encounter: null },
   });
 
   it('keeps the camera a snapshot carries, and fits the map when it carries none', () => {
@@ -278,7 +279,7 @@ describe('the ruler (LIV-07, specs/04-live-sync.md §11)', () => {
   const measurement = { from: { column: 1, row: 2 }, to: { column: 3, row: 5 }, feet: 15 };
   const base = (ruler: typeof measurement | null = null): PlayerSnapshot => ({
     role: 'players',
-    scene: { name: 'Crypt', map: MAP, grid: GRID, tokens: [], camera: FIT_CAMERA, ruler, fog: [] },
+    scene: { name: 'Crypt', map: MAP, grid: GRID, tokens: [], camera: FIT_CAMERA, ruler, fog: [], encounter: null },
   });
 
   it('keeps the measurement a snapshot carries, or none', () => {

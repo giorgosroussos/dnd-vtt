@@ -1,5 +1,6 @@
 import type {
   CommandEnvelope,
+  Encounter,
   FogMask,
   SceneToken,
   TokenDeletePayload,
@@ -11,8 +12,8 @@ import type { LiveEffect } from './live.js';
 
 // The DM's undo history (LIV-05; specs/04-live-sync.md §8, Q-005, Q-050, D-040, D-117). The server
 // keeps, in memory only, the inverse of every undoable command applied to the live scene: `token.add`,
-// `token.move`, `token.setVisibility`, `token.setMarkers` (TBL-02), `token.delete` and the fog commands
-// (TBL-04). Setup edits over REST are not commands and
+// `token.move`, `token.setVisibility`, `token.setMarkers` (TBL-02), `token.delete`, the fog commands
+// (TBL-04) and the encounter commands (TBL-06). Setup edits over REST are not commands and
 // never enter it (Q-050). It belongs to one live scene and is emptied whenever the live scene changes
 // (another scene activated, Blank TV, the live scene deleted), holds the last 100 inverses, and dies
 // with the process. One history serves every DM browser: undo takes back the most recent command on
@@ -35,10 +36,14 @@ export type Inverse =
   | { type: 'token.setVisibility'; payload: TokenSetVisibilityPayload }
   | { type: 'token.setMarkers'; payload: TokenSetMarkersPayload }
   | { type: 'token.delete'; payload: TokenDeletePayload }
-  | { type: 'token.add'; restore: SceneToken; shown: boolean }
+  // `encounter`: the scene's encounter before the deletion took the token's entry, put back with it (TBL-06).
+  | { type: 'token.add'; restore: SceneToken; shown: boolean; encounter?: Encounter }
   // The painted fog (TBL-04): a stroke, a fill or a clear is undone by putting the whole mask back as it
   // was, which is not on the wire.
-  | { type: 'fog.restore'; scene_id: string; restore: FogMask };
+  | { type: 'fog.restore'; scene_id: string; restore: FogMask }
+  // The encounter (TBL-06): every encounter command is undone by putting the whole encounter back as it
+  // was, or taking it away when the scene had none; not on the wire either.
+  | { type: 'encounter.restore'; scene_id: string; restore: Encounter | null };
 
 export const UNDO_LIMIT = 100;
 
@@ -77,10 +82,26 @@ export function inverseOf(command: CommandEnvelope, effects: readonly LiveEffect
       return effect.type === 'fog.changed'
         ? { type: 'fog.restore', scene_id: effect.sceneId, restore: effect.before }
         : undefined;
-    case 'token.delete':
-      return effect.type === 'token.removed'
-        ? { type: 'token.add', restore: effect.token, shown: effect.shown }
+    case 'encounter.start':
+    case 'encounter.end':
+    case 'encounter.reorder':
+    case 'encounter.setInitiative':
+    case 'encounter.next':
+    case 'encounter.previous':
+    case 'encounter.addEntry':
+    case 'encounter.removeEntry':
+    case 'encounter.restore' as CommandEnvelope['type']:
+      return effect.type === 'encounter.changed'
+        ? { type: 'encounter.restore', scene_id: effect.sceneId, restore: effect.before }
         : undefined;
+    case 'token.delete': {
+      if (effect.type !== 'token.removed') return undefined;
+      // The entry the deletion took, if any, comes back with the token.
+      const entry = effects.find((each) => each.type === 'encounter.changed');
+      return entry?.type === 'encounter.changed' && entry.before !== null
+        ? { type: 'token.add', restore: effect.token, shown: effect.shown, encounter: entry.before }
+        : { type: 'token.add', restore: effect.token, shown: effect.shown };
+    }
     default:
       return undefined;
   }

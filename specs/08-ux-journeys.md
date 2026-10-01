@@ -85,3 +85,17 @@ The table tools (`01` §9) MUST add to it: [input, Q-099]
 - the fog brush (F): a round brush that paints fog by a drag and an eraser that reveals it (E switches them), its radius on a slider from a quarter square to five ([ and ] step it), Fog all and Clear all, each asked first, and Enter painting at the centre of the view; the fog shown to the DM as a blue hatch, and to players as an opaque mask with a soft edge; in the right panel how many tokens under the fog players cannot see (`04` §13). [Q-101]
 
 The player view MUST show the live scene with a subtle vignette, labels sized to be read from 2–3 m, and the scene's name at the bottom left, fading after a few seconds; changes between idle and live, and between scenes, fade. [input, Q-100]
+
+## 12. Initiative
+
+The DM view MUST add, on the live scene (`04` §14): [Q-104]
+
+- an Initiative tab in the right panel, its header showing the round while combat runs, and Start combat while it does not;
+- one row per entry in turn order, each with a drag handle, the token's avatar, its name and an optional initiative number field; typing a number sorts the rows, a drag sets the order and stands until a number is typed again, and Move up and Move down do what a drag does from the keyboard;
+- the entry whose turn it is highlighted, and the next one marked; on a player character's turn its token ringed on the map and the DM's camera centred on it; on the Enemies turn the row opened to list its members with their conditions, each member's token lightly ringed on the map, and a member chosen selecting and centring its token;
+- Next turn (Enter) and Previous turn (Shift+Enter), the round counted when the turn passes the last entry; neither acting while a field, a button or a dialog has focus;
+- when the Enemies turn starts with no members left, "No enemies left. End combat?" with End combat and Continue; [Q-106]
+- an offer to add a player character token that players can now see and that has no entry ("Add {name} to initiative?"), at the end of the order;
+- End combat asked first, saying that it cannot be undone once another scene goes live or the server restarts.
+
+While combat runs, the player view MUST show a strip along its top edge, readable from 2–3 m and no taller than it must be: each player character's portrait and name and one "Enemies" card in turn order, the turn's entry highlighted, the next one marked, and the round at one end; it MUST name no monster or npc and give no count of them, and fades in and out as scene changes do. [Q-104]

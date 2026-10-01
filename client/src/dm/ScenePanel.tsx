@@ -3,6 +3,7 @@ import {
   EXHAUSTION,
   EXHAUSTION_LEVELS,
   hasMarker,
+  membersOf,
   API_IMAGE_PATHS,
   FEET_PER_SQUARE_BOUNDS,
   FIT_CAMERA,
@@ -60,6 +61,7 @@ import { useSceneFog } from './fog/useSceneFog.js';
 import { TokenPopover } from './tokens/TokenPopover.js';
 import { markerName } from '../ui/conditions.js';
 import { toCanvasToken, useSceneTokens } from './tokens/useSceneTokens.js';
+import { InitiativePanel } from './initiative/InitiativePanel.js';
 
 // The selected scene in the centre of the workspace (PRP-02, specs/08-ux-journeys.md §1, §3,
 // specs/06-grid-and-measurement.md §2, specs/03-domain-model.md §6, D-090, D-093): its setup and
@@ -145,6 +147,13 @@ const typesText = (target: EventTarget | null): boolean =>
   (target.isContentEditable ||
     target instanceof HTMLTextAreaElement ||
     (target instanceof HTMLInputElement && TEXT_INPUTS.has(target.type)));
+
+// Where Enter already does something of its own, which Next turn must leave alone (TBL-06): a button, a
+// link, a field, a tab, a menu item.
+const OWNS_ENTER =
+  'button, a[href], input, select, textarea, summary, [role="tab"], [role="menuitem"], [role="option"]';
+const ownsEnter = (target: EventTarget | null): boolean =>
+  target instanceof Element && (typesText(target) || target.closest(OWNS_ENTER) !== null);
 
 // An undo refused because its change no longer applies: it was dropped, and the next Ctrl+Z undoes
 // the change before it (D-117). Reloading would not help, so the reason says so (review U4).
@@ -808,6 +817,24 @@ export function ScenePanel({
     onTokensChanged?.();
   });
   const fog = sceneFog.fog ?? [];
+
+  // The initiative tracker (TBL-06, specs/08-ux-journeys.md §12): the live scene's encounter, whose turn it is
+  // and, on the Enemies turn, its members, ringed on the map.
+  const encounter = liveScene?.encounter ?? null;
+  const combat = isLive && encounter !== null && encounter.active;
+  const turnEntry = combat ? encounter.entries[encounter.current_index] : undefined;
+  const turnTokenId = turnEntry?.kind === 'pc' ? turnEntry.token_id : undefined;
+  const turnMembers = new Set(turnEntry?.kind === 'dm' ? membersOf(tokens ?? [], fog).map((member) => member.id) : []);
+  const turnOf = (token: SceneToken): 'current' | 'member' | undefined =>
+    token.id === turnTokenId ? 'current' : turnMembers.has(token.id) ? 'member' : undefined;
+  // The DM's camera centres on the player character whose turn comes up, not on one already shown when the
+  // view opened.
+  const turnShown = useRef(turnTokenId);
+  useEffect(() => {
+    if (turnShown.current === turnTokenId) return;
+    turnShown.current = turnTokenId;
+    if (turnTokenId !== undefined) canvas.current?.centreOn(turnTokenId);
+  }, [turnTokenId]);
   async function fogWrite(write: () => Promise<string | undefined>, done: string): Promise<boolean> {
     setLiveFailure(undefined);
     // Not connected: nothing is sent, and the head already says why, as for undo (D-116).
@@ -907,6 +934,18 @@ export function ScenePanel({
       if (event.repeat) return;
       if (isRedoKey(event)) void redoLast();
       else void undoLast();
+      return;
+    }
+    // Next turn (Enter) and Previous turn (Shift+Enter) while combat runs on the live scene (TBL-06).
+    if (event.key === 'Enter' && !event.ctrlKey && !event.metaKey && !event.altKey && combat) {
+      if (ownsEnter(event.target)) return;
+      event.preventDefault();
+      if (event.repeat) return;
+      void command(
+        event.shiftKey ? 'encounter.previous' : 'encounter.next',
+        { scene_id: sceneId },
+        'initiative.failed',
+      );
       return;
     }
     if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || event.repeat) return;
@@ -1383,7 +1422,7 @@ export function ScenePanel({
                     rail={draft ? undefined : rail}
                     status={gridStatus}
                     popover={draft ? undefined : popover}
-                    tokens={tokens?.map(toCanvasToken) ?? []}
+                    tokens={tokens?.map((token) => ({ ...toCanvasToken(token), turn: turnOf(token) })) ?? []}
                     tokenControls={tokenControls}
                     placing={placing}
                     tvFrame={tvFrame}
@@ -1397,7 +1436,7 @@ export function ScenePanel({
             ) : failure ? null : (
               loading
             )}
-            <ShortcutBar live={isLive} />
+            <ShortcutBar live={isLive} combat={combat} />
             {picking ? (
               <TokenPicker
                 onPick={pick}
@@ -1486,19 +1525,40 @@ export function ScenePanel({
           loading
         )}
       </main>
-      <SidePanel tab={sideTab} onTab={onSideTab} scene={sceneTab} library={library} />
+      <SidePanel
+        tab={sideTab}
+        onTab={onSideTab}
+        scene={sceneTab}
+        initiative={
+          <InitiativePanel
+            sceneId={sceneId}
+            live={isLive}
+            encounter={encounter}
+            tokens={tokens ?? []}
+            fog={fog}
+            onCommand={(type, payload) => command(type, payload, 'initiative.failed')}
+            onShowToken={(token) => {
+              selectToken(token.id);
+              canvas.current?.centreOn(token.id);
+            }}
+          />
+        }
+        round={combat ? encounter.round : undefined}
+        library={library}
+      />
     </>
   );
 }
 
 /** The shortcut bar along the bottom of the map area (UIX-01, specs/08-ux-journeys.md §11). */
-function ShortcutBar({ live }: { live: boolean }) {
+function ShortcutBar({ live, combat = false }: { live: boolean; combat?: boolean }) {
   const keys: [MessageKey, MessageKey][] = [
     ['shortcuts.keyV', 'shortcuts.select'],
     ['shortcuts.keyM', 'shortcuts.ruler'],
     ['shortcuts.keyP', 'shortcuts.ping'],
     ['shortcuts.keyH', 'shortcuts.hide'],
     ['shortcuts.keyUndo', 'shortcuts.undo'],
+    ...(combat ? ([['shortcuts.keyEnter', 'shortcuts.nextTurn']] as [MessageKey, MessageKey][]) : []),
     ['shortcuts.keySpace', 'shortcuts.pan'],
   ];
   return (

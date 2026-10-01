@@ -25,3 +25,5 @@ Numbered SQL migrations, applied in order by `src/db/migrate.ts` before the serv
 `0006_fog_mask.sql` adds `scene.fog`, the scene's painted fog, none on an existing scene, and drops `region`: painted fog replaces the fog regions, which are not converted, by the owner's choice; the runner's backup before it keeps them (TBL-04, Q-101, D-154). It is the one destructive step so far, approved in D-154.
 
 `0007_marker_objects.sql` turns every stored condition marker name into an object, `{"id": name}`, in the same order, so a marker can carry Exhaustion's level; lossless, the four names of 0004 being among the eighteen conditions (TBL-05, Q-103, D-157).
+
+`0008_encounter.sql` adds `encounter`, the initiative tracker of a scene, at most one per scene and deleted with it, its entries a JSON array; additive (TBL-06, Q-104, Q-105, D-160).

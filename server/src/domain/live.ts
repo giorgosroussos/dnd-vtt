@@ -5,6 +5,13 @@ import {
   errorEnvelope,
   type CameraSetPlayerPayload,
   type CommandEnvelope,
+  type Encounter,
+  type EncounterChange,
+  type EncounterAddEntryPayload,
+  type EncounterRemoveEntryPayload,
+  type EncounterReorderPayload,
+  type EncounterScenePayload,
+  type EncounterSetInitiativePayload,
   type ErrorEnvelope,
   type PingPayload,
   type FogFillPayload,
@@ -20,6 +27,7 @@ import {
   type TokenSetMarkersPayload,
   type TokenSetVisibilityPayload,
 } from '@emberglass/shared';
+import { changeEncounter, noteEnemies, type EncounterOutcome } from '../db/encounters.js';
 import { writeFog, type FogWriteOutcome } from '../db/fog.js';
 import { readSettings, setLiveScene } from '../db/settings.js';
 import { createToken, deleteToken, readToken, restoreToken, updateToken } from '../db/tokens.js';
@@ -68,7 +76,12 @@ export type LiveEffect =
    */
   | { type: 'token.appeared'; token: SceneToken; relabelled: SceneToken[]; renamed: boolean }
   /** A token players no longer see because the fog covers it: they receive `token.removed`. */
-  | { type: 'token.vanished'; token: SceneToken };
+  | { type: 'token.vanished'; token: SceneToken }
+  /**
+   * The live scene's encounter changed (TBL-06): the DM's room receives the whole of it. `before` is what
+   * undo puts back. Players hear of it through their projection, compared before and after each command.
+   */
+  | { type: 'encounter.changed'; sceneId: string; before: Encounter | null; encounter: Encounter | null };
 
 export type LiveResult = LiveEffect[] | ErrorEnvelope;
 
@@ -98,6 +111,58 @@ function fogChanged(result: FogWriteOutcome): LiveResult {
   ];
 }
 const notLive = (): ErrorEnvelope => errorEnvelope('scene_not_live', 'The scene is not live.');
+
+/** The effect of an encounter command (TBL-06); one that changes nothing tells nobody and is not undoable. */
+function encounterChanged(result: EncounterOutcome): LiveResult {
+  switch (result.outcome) {
+    case 'unchanged':
+      return [];
+    case 'not_live':
+      return notLive();
+    case 'refused':
+      return errorEnvelope(result.code, result.message);
+    case 'changed':
+      return [
+        { type: 'encounter.changed', sceneId: result.sceneId, before: result.before, encounter: result.encounter },
+      ];
+  }
+}
+
+/** What each encounter command asks of the encounter (specs/04-live-sync.md §14). */
+function encounterChange(command: CommandEnvelope): { sceneId: string; change: EncounterChange } | undefined {
+  const { scene_id: sceneId } = command.payload as EncounterScenePayload;
+  switch (command.type) {
+    case 'encounter.start':
+      return { sceneId, change: { type: 'start' } };
+    case 'encounter.end':
+      return { sceneId, change: { type: 'end' } };
+    case 'encounter.next':
+      return { sceneId, change: { type: 'next' } };
+    case 'encounter.previous':
+      return { sceneId, change: { type: 'previous' } };
+    case 'encounter.reorder':
+      return {
+        sceneId,
+        change: { type: 'reorder', entry_ids: (command.payload as EncounterReorderPayload).entry_ids },
+      };
+    case 'encounter.setInitiative': {
+      const { entry_id, initiative } = command.payload as EncounterSetInitiativePayload;
+      return { sceneId, change: { type: 'setInitiative', entry_id, initiative } };
+    }
+    case 'encounter.addEntry':
+      return {
+        sceneId,
+        change: { type: 'addEntry', token_id: (command.payload as EncounterAddEntryPayload).token_id },
+      };
+    case 'encounter.removeEntry':
+      return {
+        sceneId,
+        change: { type: 'removeEntry', entry_id: (command.payload as EncounterRemoveEntryPayload).entry_id },
+      };
+    default:
+      return undefined;
+  }
+}
 
 /** Applies a valid live command; the envelope and payload were checked against their schemas. */
 export function applyLiveCommand(db: Database.Database, command: CommandEnvelope): LiveResult {
@@ -151,7 +216,11 @@ export function applyLiveCommand(db: Database.Database, command: CommandEnvelope
       const result = deleteToken(db, token_id, 'live');
       if (result.outcome === 'not_found') return tokenNotFound();
       if (result.outcome !== 'deleted') return notLive();
-      return [{ type: 'token.removed', token: result.token, shown: result.shown }];
+      // The token's initiative entry goes with it (TBL-06), after the removal, which undo reads first.
+      const removed: LiveEffect = { type: 'token.removed', token: result.token, shown: result.shown };
+      if (result.encounter === undefined) return [removed];
+      const { before, encounter } = result.encounter;
+      return [removed, { type: 'encounter.changed', sceneId: result.token.scene_id, before, encounter }];
     }
     case 'scene.activate': {
       const { scene_id } = command.payload as SceneActivatePayload;
@@ -164,10 +233,13 @@ export function applyLiveCommand(db: Database.Database, command: CommandEnvelope
       // Possible at any time (specs/04-live-sync.md §2); with nothing live there is nothing to tell.
       return result.outcome === 'set' && result.previous !== null ? [{ type: 'cleared' }] : [];
     }
-    default:
+    default: {
+      const asked = encounterChange(command);
+      if (asked !== undefined) return encounterChanged(changeEncounter(db, asked.sceneId, asked.change));
       // Validation refuses every type without a payload schema, and `undo` is answered by
       // `createLiveCommands`, so this is never reached.
       return errorEnvelope('command_unsupported', 'This command is not supported yet.');
+    }
   }
 }
 
@@ -188,11 +260,20 @@ export function applyInverse(db: Database.Database, inverse: Inverse): LiveResul
   if (inverse.type === 'fog.restore') {
     return fogChanged(writeFog(db, inverse.scene_id, { restore: inverse.restore }, 'live'));
   }
+  if (inverse.type === 'encounter.restore') {
+    return encounterChanged(changeEncounter(db, inverse.scene_id, { type: 'restore', encounter: inverse.restore }));
+  }
   if (inverse.type !== 'token.add') return applyLiveCommand(db, inverse);
   const result = restoreToken(db, inverse.restore, 'live', inverse.shown);
   switch (result.outcome) {
-    case 'restored':
-      return [{ type: 'token.added', token: result.token, relabelled: result.relabelled }];
+    case 'restored': {
+      const added: LiveEffect = { type: 'token.added', token: result.token, relabelled: result.relabelled };
+      if (inverse.encounter === undefined) return [added];
+      // The entry the deletion took goes back with the token (TBL-06).
+      const restored = changeEncounter(db, result.token.scene_id, { type: 'restore', encounter: inverse.encounter });
+      const changed = encounterChanged(restored);
+      return Array.isArray(changed) ? [added, ...changed] : [added];
+    }
     case 'asset_not_found':
       return errorEnvelope('reference_not_found', 'The asset does not exist.');
     default:
@@ -313,12 +394,23 @@ export function createLiveCommands(
       }
     }
   };
+  // After every command that changed something: the live scene's encounter remembers that it has had an
+  // enemy once the Enemies entry has a member (TBL-06, Q-106). Not a step of the undo history.
+  const applyNoting = (command: CommandEnvelope, sender?: string): LiveResult => {
+    const result = apply(command, sender);
+    const live = liveSceneId();
+    if (!Array.isArray(result) || result.length === 0 || live === null) return result;
+    const noted = noteEnemies(db, live);
+    return noted === undefined
+      ? result
+      : [...result, { type: 'encounter.changed', sceneId: live, before: noted.before, encounter: noted.encounter }];
+  };
   const release = (sender: string): LiveEffect[] => {
     if (!ruler.drawnBy(liveSceneId(), sender)) return [];
     ruler.clear();
     return [{ type: 'ruler.cleared' }];
   };
-  return { apply, release, history, camera, ruler };
+  return { apply: applyNoting, release, history, camera, ruler };
 }
 
 function changed(result: ReturnType<typeof updateToken>): LiveResult {

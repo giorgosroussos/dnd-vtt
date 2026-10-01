@@ -57,15 +57,17 @@ In CI, Firefox on Windows took 5 to 26 s to load the views from the machine's ow
 3. In the DM view, choose the campaign, session and scene the seed command printed ("TV run <date and time>", "TV run", "Large scene <date and time>"), and **Go live**.
 4. On the TV: the map and the 50 coloured tokens are drawn. Note how long it takes from Go live, and whether panning the TV's frame in the DM view moves the TV smoothly.
 5. **Move** a token (drag it); **hide** one (H) and **reveal** it again; **ping** (P, click); put a **condition marker** on a token, one pinned and one from **More…**, and step **Exhaustion** up (its level shows on the TV badge); **paint fog** over a token with the fog brush (F) and **erase** it again (E switches the brush). Each appears on the TV as it should, and nothing hidden appears.
-6. **Measure** with the ruler (M) across about ten squares. Stand where the players sit and read the distance label on the TV.
-7. **Go idle** in the header: the TV returns to the idle screen.
-8. **Go live** again, then **cut the TV's network** (TV Settings → Network → turn Wi-Fi off, or unplug its cable) for about 30 s, and restore it. The TV returns to the live scene by itself, without reloading or typing anything. Do the same to the laptop's Wi-Fi while it shows the DM view: it returns without asking for the PIN.
+6. **Initiative** (TBL-06): open the **Initiative** tab and **Start combat**; type a number for a player character and the Enemies, press Enter a few times to pass turns into round 2. Stand where the players sit: the strip along the top of the TV names each player character and one "Enemies" card, the turn's card glows with **NOW**, the next one shows **NEXT**, and "Round 2" reads at the left; it covers little of the map, and names no monster. **End combat**: the strip fades away.
+7. **Measure** with the ruler (M) across about ten squares. Stand where the players sit and read the distance label on the TV.
+8. **Go idle** in the header: the TV returns to the idle screen.
+9. **Go live** again, then **cut the TV's network** (TV Settings → Network → turn Wi-Fi off, or unplug its cable) for about 30 s, and restore it. The TV returns to the live scene by itself, without reloading or typing anything. Do the same to the laptop's Wi-Fi while it shows the DM view: it returns without asking for the PIN.
 
 **Record (each: pass or fail, and what you saw):**
 - Typed URL opens the idle screen:
 - QR code opens the same address on the phone:
 - Large scene drawn on Go live (seconds), pans smoothly (yes/no):
 - Move, hide, reveal, ping, marker, fog on the TV:
+- Initiative strip readable from the players' seats, names no monster, fades on End combat:
 - Ruler label readable from the players' seats (distance from the TV, in metres):
 - Go idle shows the idle screen:
 - TV back after a network cut (seconds), laptop back without a PIN:

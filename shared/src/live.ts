@@ -8,6 +8,7 @@ import {
   TokenSchema,
   UuidSchema,
 } from './entities.js';
+import { EncounterSchema, InitiativeSchema, MAX_ENCOUNTER_ENTRIES, PlayerEncounterSchema } from './encounter.js';
 import type { ErrorEnvelope } from './errors.js';
 import { FogMaskSchema, FogStrokeSchema } from './fog.js';
 import { SceneTokenSchema, TokenChangeSchema, TokenCreateBodySchema } from './tokens.js';
@@ -74,6 +75,14 @@ export const COMMAND_TYPES = [
   'ruler.update',
   'ruler.clear',
   'ping',
+  'encounter.start',
+  'encounter.end',
+  'encounter.reorder',
+  'encounter.setInitiative',
+  'encounter.next',
+  'encounter.previous',
+  'encounter.addEntry',
+  'encounter.removeEntry',
   'undo',
   'redo',
 ] as const;
@@ -91,6 +100,7 @@ export const EVENT_TYPES = [
   'ping',
   'history.changed',
   'fog.updated',
+  'encounter.updated',
 ] as const;
 
 export type CommandType = (typeof COMMAND_TYPES)[number];
@@ -230,6 +240,8 @@ export const PlayerLiveSceneSchema = Type.Object(
     ruler: Type.Union([MeasurementSchema, Type.Null()]),
     // The painted fog, which the TV draws opaque over the map (TBL-04).
     fog: FogMaskSchema,
+    // What players see of the encounter, the strip along the TV's top edge, or null (TBL-06).
+    encounter: Type.Union([PlayerEncounterSchema, Type.Null()]),
   },
   strict,
 );
@@ -251,6 +263,8 @@ export const DmLiveSceneSchema = Type.Object(
     history: UndoStateSchema,
     // The painted fog, which the DM view draws as a hatch (TBL-04).
     fog: FogMaskSchema,
+    // The scene's encounter, or null when it never had one (TBL-06).
+    encounter: Type.Union([EncounterSchema, Type.Null()]),
   },
   strict,
 );
@@ -328,6 +342,19 @@ export const PingPayloadSchema = Type.Object({ scene_id: UuidSchema, x: Coordina
 // live.
 export const FogPaintPayloadSchema = Type.Object({ scene_id: UuidSchema, stroke: FogStrokeSchema }, strict);
 export const FogFillPayloadSchema = Type.Object({ scene_id: UuidSchema, fogged: Type.Boolean() }, strict);
+// The encounter commands (TBL-06, specs/04-live-sync.md §14): each names the live scene, refused when it is
+// not live, and each is one undoable step. `encounter.reorder` gives every entry's id in the new order.
+export const EncounterScenePayloadSchema = Type.Object({ scene_id: UuidSchema }, strict);
+export const EncounterReorderPayloadSchema = Type.Object(
+  { scene_id: UuidSchema, entry_ids: Type.Array(UuidSchema, { uniqueItems: true, maxItems: MAX_ENCOUNTER_ENTRIES }) },
+  strict,
+);
+export const EncounterSetInitiativePayloadSchema = Type.Object(
+  { scene_id: UuidSchema, entry_id: UuidSchema, initiative: InitiativeSchema },
+  strict,
+);
+export const EncounterAddEntryPayloadSchema = Type.Object({ scene_id: UuidSchema, token_id: UuidSchema }, strict);
+export const EncounterRemoveEntryPayloadSchema = Type.Object({ scene_id: UuidSchema, entry_id: UuidSchema }, strict);
 
 /** The payload schema of every live command implemented so far; the server registers exactly these. */
 export const LIVE_COMMAND_PAYLOAD_SCHEMAS = {
@@ -344,6 +371,14 @@ export const LIVE_COMMAND_PAYLOAD_SCHEMAS = {
   ping: PingPayloadSchema,
   'fog.paint': FogPaintPayloadSchema,
   'fog.fill': FogFillPayloadSchema,
+  'encounter.start': EncounterScenePayloadSchema,
+  'encounter.end': EncounterScenePayloadSchema,
+  'encounter.reorder': EncounterReorderPayloadSchema,
+  'encounter.setInitiative': EncounterSetInitiativePayloadSchema,
+  'encounter.next': EncounterScenePayloadSchema,
+  'encounter.previous': EncounterScenePayloadSchema,
+  'encounter.addEntry': EncounterAddEntryPayloadSchema,
+  'encounter.removeEntry': EncounterRemoveEntryPayloadSchema,
   undo: UndoPayloadSchema,
   redo: RedoPayloadSchema,
 } as const satisfies Partial<Record<CommandType, object>>;
@@ -363,6 +398,11 @@ export type RulerClearPayload = Static<typeof RulerClearPayloadSchema>;
 export type PingPayload = Static<typeof PingPayloadSchema>;
 export type FogPaintPayload = Static<typeof FogPaintPayloadSchema>;
 export type FogFillPayload = Static<typeof FogFillPayloadSchema>;
+export type EncounterScenePayload = Static<typeof EncounterScenePayloadSchema>;
+export type EncounterReorderPayload = Static<typeof EncounterReorderPayloadSchema>;
+export type EncounterSetInitiativePayload = Static<typeof EncounterSetInitiativePayloadSchema>;
+export type EncounterAddEntryPayload = Static<typeof EncounterAddEntryPayloadSchema>;
+export type EncounterRemoveEntryPayload = Static<typeof EncounterRemoveEntryPayloadSchema>;
 
 // What each room's events carry (specs/04-live-sync.md §3, §4; D-049, Q-083, G-023, G-025). One
 // event per room per command, as the table of §3 has it. The DM's token events carry the token in
@@ -406,6 +446,14 @@ export const PingShownPayloadSchema = Type.Object({ x: Coordinate, y: Coordinate
 // also hear of the tokens the change showed or covered, as `token.added` and `token.removed`.
 export const FogUpdatedPayloadSchema = Type.Object({ fog: FogMaskSchema }, strict);
 
+// `encounter.updated` (TBL-06): the DM room hears the whole encounter each time it changes; players hear their
+// projection, and only when it changed, whatever command changed it (specs/04-live-sync.md §14).
+export const DmEncounterPayloadSchema = Type.Object({ encounter: Type.Union([EncounterSchema, Type.Null()]) }, strict);
+export const PlayerEncounterPayloadSchema = Type.Object(
+  { encounter: Type.Union([PlayerEncounterSchema, Type.Null()]) },
+  strict,
+);
+
 // `history.changed` (UIX-01): the DM room's only. Players never learn anything of the undo history.
 export const HistoryChangedPayloadSchema = UndoStateSchema;
 
@@ -421,6 +469,8 @@ export type RulerClearedPayload = Static<typeof RulerClearedPayloadSchema>;
 export type PingShownPayload = Static<typeof PingShownPayloadSchema>;
 export type FogUpdatedPayload = Static<typeof FogUpdatedPayloadSchema>;
 export type HistoryChangedPayload = Static<typeof HistoryChangedPayloadSchema>;
+export type DmEncounterPayload = Static<typeof DmEncounterPayloadSchema>;
+export type PlayerEncounterPayload = Static<typeof PlayerEncounterPayloadSchema>;
 
 /** Every event of the dm room with its payload. */
 export type DmEvent =
@@ -433,7 +483,8 @@ export type DmEvent =
   | EventEnvelope<'ruler.cleared', RulerClearedPayload>
   | EventEnvelope<'ping', PingShownPayload>
   | EventEnvelope<'history.changed', HistoryChangedPayload>
-  | EventEnvelope<'fog.updated', FogUpdatedPayload>;
+  | EventEnvelope<'fog.updated', FogUpdatedPayload>
+  | EventEnvelope<'encounter.updated', DmEncounterPayload>;
 
 /** Every event of the players room with its payload: nothing here names a hidden token. */
 export type PlayerEvent =
@@ -446,4 +497,5 @@ export type PlayerEvent =
   | EventEnvelope<'ruler.shown', RulerShownPayload>
   | EventEnvelope<'ruler.cleared', RulerClearedPayload>
   | EventEnvelope<'ping', PingShownPayload>
-  | EventEnvelope<'fog.updated', FogUpdatedPayload>;
+  | EventEnvelope<'fog.updated', FogUpdatedPayload>
+  | EventEnvelope<'encounter.updated', PlayerEncounterPayload>;
