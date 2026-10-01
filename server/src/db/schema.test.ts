@@ -17,7 +17,6 @@ import {
   SceneSchema,
   SessionSchema,
   SettingsSchema,
-  RegionSchema,
   TokenSchema,
 } from '@emberglass/shared';
 import { MIGRATIONS_DIR } from '../paths.js';
@@ -100,7 +99,6 @@ const TABLE_OF: Record<string, SchemaTable> = {
   Session: 'session',
   Scene: 'scene',
   Token: 'token',
-  Region: 'region',
   Settings: 'settings',
 };
 
@@ -124,7 +122,7 @@ const columns = (
 const columnNames = (table: string): string[] => columns(table).map((c) => c.name);
 
 describe('migration 0001 on a fresh database', () => {
-  it('creates exactly the nine entities of specs/03-domain-model.md §1', () => {
+  it('creates exactly the eight entities of specs/03-domain-model.md §1', () => {
     migrated();
     const tables = db
       .prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
@@ -221,6 +219,8 @@ describe('migration 0001 on a fresh database', () => {
         'grid_rows INTEGER NOT NULL DEFAULT 20',
         // Migration 0002 (Q-091, D-101).
         "token_numbers TEXT NOT NULL DEFAULT '{}'",
+        // Migration 0006 (TBL-04, D-154).
+        "fog TEXT NOT NULL DEFAULT '[]'",
       ],
       token: [
         'id TEXT NOT NULL',
@@ -236,15 +236,6 @@ describe('migration 0001 on a fresh database', () => {
         'shown INTEGER NOT NULL DEFAULT 0',
         // Migration 0004 (TBL-02, Q-099).
         "markers TEXT NOT NULL DEFAULT '[]'",
-      ],
-      // Migration 0005 (TBL-03, Q-099).
-      region: [
-        'id TEXT NOT NULL',
-        'scene_id TEXT NOT NULL',
-        'name TEXT NOT NULL',
-        'order INTEGER NOT NULL',
-        'shape TEXT NOT NULL',
-        'hidden INTEGER NOT NULL DEFAULT 1',
       ],
       settings: [
         'id TEXT NOT NULL',
@@ -277,7 +268,6 @@ describe('migration 0001 on a fresh database', () => {
     expect(keys).toEqual([
       'asset.image_id -> image.id on delete RESTRICT',
       'asset_tag.asset_id -> asset.id on delete CASCADE',
-      'region.scene_id -> scene.id on delete CASCADE',
       'scene.map_image_id -> image.id on delete RESTRICT',
       'scene.session_id -> session.id on delete CASCADE',
       'session.campaign_id -> campaign.id on delete CASCADE',
@@ -573,10 +563,6 @@ describe('constraints refuse what the specifications forbid', () => {
           .run(id, IMAGE),
       () => db.prepare("INSERT INTO asset_tag (id, asset_id, tag) VALUES (?, ?, 'cave')").run(id, ASSET),
       () => insertToken({ id }),
-      () =>
-        db
-          .prepare("INSERT INTO region (id, scene_id, name, \"order\", shape) VALUES (?, ?, 'Back room', 1, '{}')")
-          .run(id, SCENE),
     ];
     for (const insert of inserts) expect(insert).toThrow(/CHECK constraint failed/);
   });
@@ -673,6 +659,18 @@ describe('constraints refuse what the specifications forbid', () => {
     }
     expect(() => db.prepare('UPDATE scene SET token_numbers = NULL WHERE id = ?').run(SCENE)).toThrow(/NOT NULL/);
     db.prepare('UPDATE scene SET token_numbers = ? WHERE id = ?').run(`{"${ASSET}":4}`, SCENE);
+  });
+
+  it('keeps a scene’s painted fog as a JSON array, starting empty (TBL-04)', () => {
+    withParents();
+    expect(db.prepare('SELECT fog FROM scene WHERE id = ?').pluck().get(SCENE)).toBe('[]');
+    for (const value of ['', 'not json', '{}', '3', 'null', '"x"']) {
+      expect(() => db.prepare('UPDATE scene SET fog = ? WHERE id = ?').run(value, SCENE), value).toThrow(
+        /CHECK constraint failed/,
+      );
+    }
+    expect(() => db.prepare('UPDATE scene SET fog = NULL WHERE id = ?').run(SCENE)).toThrow(/NOT NULL/);
+    db.prepare('UPDATE scene SET fog = ? WHERE id = ?').run('[{"y":0,"runs":[0,4]}]', SCENE);
   });
 
   it('refuses an image inserted with a non-square preset', () => {
@@ -818,7 +816,6 @@ const CONTRACT: Record<SchemaTable, TSchema & { properties: Record<string, unkno
   session: SessionSchema,
   scene: SceneSchema,
   token: TokenSchema,
-  region: RegionSchema,
   settings: SettingsSchema,
 };
 
@@ -830,6 +827,7 @@ describe('the contract types in shared', () => {
     const internal = (table: string, column: string) =>
       (table === 'settings' && column === 'pin_hash') ||
       (table === 'scene' && column === 'token_numbers') ||
+      (table === 'scene' && column === 'fog') ||
       (table === 'token' && column === 'shown');
     for (const table of SCHEMA_TABLES) {
       const stored = columnNames(table).filter((c) => !internal(table, c));
@@ -838,6 +836,7 @@ describe('the contract types in shared', () => {
     expect(Object.keys(GridSchema.properties)).toEqual(GRID_FIELDS);
     expect(Object.keys(SettingsSchema.properties)).not.toContain('pin_hash');
     expect(Object.keys(SceneSchema.properties)).not.toContain('token_numbers');
+    expect(Object.keys(SceneSchema.properties)).not.toContain('fog');
     expect(Object.keys(TokenSchema.properties)).not.toContain('shown');
   });
 
@@ -910,6 +909,28 @@ describe('migrations on the generated fixture database (specs/14-agent-playbook.
     expect(db.prepare('SELECT DISTINCT probe FROM campaign').pluck().all()).toEqual(['']);
   });
 
+  it('drops the fog regions at migration 0006, keeping the scenes and a backup that still holds them (D-154)', () => {
+    createFixtureDatabase(dataDir);
+    migrateDataDirectory(dataDir, MIGRATIONS_DIR, new Date(), 5);
+    db = openDatabase(dataDir);
+    const scene = db.prepare('SELECT id FROM scene ORDER BY id LIMIT 1').pluck().get() as string;
+    const scenes = db.prepare('SELECT count(*) FROM scene').pluck().get();
+    db.prepare(
+      `INSERT INTO region (id, scene_id, name, "order", shape) VALUES (?, ?, 'Back room', 1, '{"kind":"rect"}')`,
+    ).run(fixtureUuid(900), scene);
+    db.close();
+
+    const result = migrateDataDirectory(dataDir, MIGRATIONS_DIR);
+
+    expect(result).toMatchObject({ from: 5, to: LATEST });
+    expect(result.backup).not.toBeNull();
+    db = openDatabase(dataDir);
+    expect(db.prepare("SELECT count(*) FROM sqlite_schema WHERE name LIKE 'region%'").pluck().get()).toBe(0);
+    expect(db.prepare('SELECT count(*) FROM scene').pluck().get()).toBe(scenes);
+    expect(db.prepare('SELECT fog FROM scene WHERE id = ?').pluck().get(scene)).toBe('[]');
+    expect(db.pragma('foreign_key_check')).toEqual([]);
+  });
+
   it('migrates the fixture to the latest version, keeping every row and every reference', () => {
     const counts = createFixtureDatabase(dataDir);
     db = openDatabase(dataDir);
@@ -940,8 +961,10 @@ describe('migrations on the generated fixture database (specs/14-agent-playbook.
       .all() as { hidden: 0 | 1; bare: 0 | 1; shown: 0 | 1 }[];
     expect(shown.length).toBeGreaterThan(0);
     for (const row of shown) expect(row.shown, JSON.stringify(row)).toBe(row.hidden === 0 || row.bare === 0 ? 1 : 0);
-    // Migration 0005 adds fog regions, none on an existing scene (TBL-03), each deleted with its scene.
-    expect(db.prepare('SELECT count(*) FROM region').pluck().get()).toBe(0);
+    // Migration 0005 added fog regions (TBL-03); 0006 drops them and gives every existing scene no painted
+    // fog (TBL-04, D-154).
+    expect(db.prepare("SELECT count(*) FROM sqlite_schema WHERE name LIKE 'region%'").pluck().get()).toBe(0);
+    expect(db.prepare('SELECT DISTINCT fog FROM scene').pluck().all()).toEqual(['[]']);
     // Migration 0004 gives every existing token no markers (TBL-02), and refuses anything but a JSON array.
     expect(db.prepare('SELECT DISTINCT markers FROM token').pluck().all()).toEqual(['[]']);
     for (const markers of ['bloodied', '{"dead":true}', '[']) {

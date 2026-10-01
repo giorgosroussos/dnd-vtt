@@ -13,9 +13,8 @@ The MVP MUST store exactly these nine entities in SQLite: [input, Q-006, Q-037, 
 | AssetTag | `asset_id`, `tag` | free tags for filtering and search |
 | Campaign | `name`, `description`, `rules_version` | `rules_version = 5e-2014` |
 | Session | `campaign_id`, `title`, `order`, `date` | |
-| Scene | `session_id`, `name`, `order`, `map_image_id`, `grid`, `token_numbers` | grid: `type`, `size`, `offset_x`, `offset_y`, `visible`, `feet_per_square`, `columns`, `rows` (`06` §2); token numbers: the highest number issued per asset on the scene, never sent to a client (`05` §3) |
+| Scene | `session_id`, `name`, `order`, `map_image_id`, `grid`, `token_numbers`, `fog` | grid: `type`, `size`, `offset_x`, `offset_y`, `visible`, `feet_per_square`, `columns`, `rows` (`06` §2); token numbers: the highest number issued per asset on the scene, never sent to a client (`05` §3); fog: the fog the DM painted (`01` §9), cells of a quarter square in grid units, players seeing neither them nor the tokens whose centre they cover (`04` §4, §13), sent only in a live snapshot and its events and, to the DM, over its own route |
 | Token | `scene_id`, `asset_id`, `label`, `x`, `y`, `hidden`, `z_order`, `markers`, `shown`, `character_id` | `character_id` empty in the MVP; `shown`: whether players have seen the token, set when it is first shown and never cleared, never sent to a client (`05` §3); `markers`: the condition markers it carries, each at most once, from bloodied, unconscious, dead and concentrating (`01` §9) |
-| Region | `scene_id`, `name`, `order`, `shape`, `hidden` | a fog region (`01` §9): `shape` a rectangle or a polygon in grid units on grid corners; `hidden`: fogged, so players see neither it nor the tokens whose centre it covers (`04` §4, §13); `order`: the order regions were drawn in |
 | Settings | `live_scene_id`, ruler rule, upload limit, display variant size, PIN hash | one game per server |
 
 ## 2. Relationships
@@ -25,7 +24,6 @@ erDiagram
   Campaign ||--o{ Session : has
   Session ||--o{ Scene : has
   Scene ||--o{ Token : has
-  Scene ||--o{ Region : has
   Asset ||--o{ Token : "instantiated as"
   Asset ||--o{ AssetTag : tagged
   Image ||--o{ Asset : pictures
@@ -34,7 +32,7 @@ erDiagram
 
 - A token MUST reference exactly one scene and one asset; an asset is the template, a token its instance on a scene. [input]
 - A scene MAY have no map image; `map_image_id` is nullable. [Q-006]
-- A fog region MUST reference exactly one scene. [D-139]
+- A scene MUST hold one painted fog, none on a new scene; the fog regions of TBL-03 are no longer an entity. [D-154]
 - Sessions within a campaign and scenes within a session MUST keep an `order`. [input]
 
 ## 3. Identifiers
@@ -62,14 +60,14 @@ erDiagram
 ## 7. Deletion and duplication
 
 - Deleting a session MUST delete its scenes and their tokens. [input]
-- Deleting a scene MUST delete its tokens and its fog regions. [input, D-139]
+- Deleting a scene MUST delete its tokens and its fog. [input, D-139, D-154]
 - Deleting a campaign MUST delete its sessions, scenes and tokens, after a confirmation that states what will be removed. [Q-003]
 - Deleting an asset used by any token MUST be refused, with the list of scenes that use it. [input]
 - Every deletion is permanent once confirmed; there is no trash and no restore outside the live-scene undo (`04` §8). [Q-004]
 - When no asset and no scene references an image any more, its files and its grid preset MUST be removed. [Q-002]
 - Deleting the live scene, or a session or campaign that contains it, MUST be allowed after a confirmation that warns it is live, and MUST clear the live scene so the player view shows the idle screen (`08` §4). [Q-031, recommendation accepted]
 - Changing an asset's image MUST change the image of every token of that asset. [input]
-- Duplicating a scene MUST create a new scene with its own copies of all its tokens and fog regions. [input, D-139]
+- Duplicating a scene MUST create a new scene with its own copies of all its tokens and its fog. [input, D-139, D-154]
 
 ## 8. Prepared for later phases
 

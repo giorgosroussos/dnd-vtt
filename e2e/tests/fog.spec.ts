@@ -4,11 +4,11 @@ import { openWorkspace, seedCampaign } from './dm.js';
 import { solidPng } from './png.js';
 import { framesOf } from './journeys/support.js';
 
-// TBL-03: fog regions against the production server (specs/04-live-sync.md §2, §4, §13, specs/07-security-
-// and-access.md §5, specs/08-ux-journeys.md §11, Q-099). A DM context and a player context at once: a region
-// drawn with the fog tool over a visible token covers that part of the TV's map in black and takes the
-// token off it, its image refused to the TV; the fog survives the TV reconnecting; revealing the region
-// brings the token back; the region's name never reaches the TV.
+// TBL-04: painted fog against the production server (specs/04-live-sync.md §2, §4, §13, specs/07-security-
+// and-access.md §5, specs/08-ux-journeys.md §11, Q-101). A DM context and a player context at once: fog
+// painted with the brush over a visible token covers that part of the TV's map in black and takes the token
+// off it, its image refused to the TV; the fog survives the TV reconnecting; erasing it brings the token
+// back, and undo fogs it again.
 
 const player = (page: Page) => page.locator('main[data-view="player"]');
 const tvCanvas = (page: Page) => page.locator('main[data-view="player"] .eg-canvas--player');
@@ -20,6 +20,8 @@ const tokensOn = async (page: Page): Promise<Drawn> =>
   JSON.parse((await tvCanvas(page).getAttribute('data-tokens')) ?? '[]') as Drawn;
 const fogOn = async (page: Page): Promise<unknown[]> =>
   JSON.parse((await tvCanvas(page).getAttribute('data-fog')) ?? '[]') as unknown[];
+const dmFog = async (page: Page): Promise<unknown[]> =>
+  JSON.parse((await viewport(page).getAttribute('data-fog')) ?? '[]') as unknown[];
 
 /** The colour the TV's fog layer drew at screen point (x, y). */
 async function fogPixel(page: Page, x: number, y: number): Promise<number[]> {
@@ -35,7 +37,7 @@ async function fogPixel(page: Page, x: number, y: number): Promise<number[]> {
   );
 }
 
-test('a fog region drawn on the live scene blacks out that part of the TV and the token under it, until revealed', async ({
+test('fog painted on the live scene blacks out that part of the TV and the token under it, until erased', async ({
   browser,
 }) => {
   const dmContext = await browser.newContext();
@@ -46,7 +48,7 @@ test('a fog region drawn on the live scene blacks out that part of the TV and th
   await openWorkspace(dm);
 
   const stamp = Date.now();
-  const names = { campaign: `Fog TBL-03 ${stamp}`, session: 'Dark night', scene: 'Old manor' };
+  const names = { campaign: `Fog TBL-04 ${stamp}`, session: 'Dark night', scene: 'Old manor' };
   const campaignId = await seedCampaign(dm, names.campaign, [names.session]);
   const [session] = (await (await dm.request.get(`/api/campaigns/${campaignId}/sessions`)).json()) as { id: string }[];
   const post = async <T>(url: string, data: unknown, binary = false): Promise<T> =>
@@ -81,32 +83,33 @@ test('a fog region drawn on the live scene blacks out that part of the TV and th
     const [ghoulOnTv] = await tokensOn(tv);
     expect((await tv.request.get(`/images/${image.id}/display`)).status()).toBe(200);
 
-    // The fog tool: a drag over the ghoul's squares, from the corner of square (2, 2) to that of (5, 5).
-    await dm.getByRole('toolbar', { name: 'Tools' }).getByRole('button', { name: 'Fog regions, F' }).click();
+    // The fog brush: a drag across the ghoul's square, from square (2, 2) to square (5, 5).
+    await dm.getByRole('toolbar', { name: 'Tools' }).getByRole('button', { name: 'Fog brush, F' }).click();
     await expect(viewport(dm)).toHaveAttribute('data-fog-tool', 'on');
+    await expect(viewport(dm)).toHaveAttribute('data-fog-brush', 'paint 1');
     const dmTokens = JSON.parse((await viewport(dm).getAttribute('data-tokens'))!) as Drawn;
     const box = (await viewport(dm).boundingBox())!;
     const square = dmTokens[0]!.side;
-    const origin = { x: box.x + dmTokens[0]!.left - square, y: box.y + dmTokens[0]!.top - square };
-    await dm.mouse.move(origin.x, origin.y);
-    await dm.mouse.down();
-    await dm.mouse.move(origin.x + 1.5 * square, origin.y + 1.5 * square, { steps: 4 });
-    await dm.mouse.move(origin.x + 3 * square, origin.y + 3 * square, { steps: 4 });
-    await dm.mouse.up();
-    const dialog = dm.getByRole('dialog', { name: 'Name the new fog region' });
-    await dialog.getByLabel('Name').fill('Crypt of secrets');
-    await dialog.getByRole('button', { name: 'Save the region' }).click();
+    const origin = { x: box.x + dmTokens[0]!.left - square / 2, y: box.y + dmTokens[0]!.top - square / 2 };
+    const stroke = async () => {
+      await dm.mouse.move(origin.x, origin.y);
+      await dm.mouse.down();
+      await dm.mouse.move(origin.x + 1.5 * square, origin.y + 1.5 * square, { steps: 6 });
+      await dm.mouse.move(origin.x + 3 * square, origin.y + 3 * square, { steps: 6 });
+      await dm.mouse.up();
+    };
+    await stroke();
 
-    // The TV: the fog's shape, black where the ghoul stood, and the ghoul gone with its image.
-    await expect.poll(() => fogOn(tv)).toEqual([{ kind: 'rect', x: 2, y: 2, width: 3, height: 3 }]);
+    // The TV: the fog, black where the ghoul stood, and the ghoul gone with its image.
+    await expect.poll(async () => (await fogOn(tv)).length).toBeGreaterThan(0);
+    await expect.poll(() => dmFog(dm)).toEqual(await fogOn(tv));
     await expect.poll(async () => (await tokensOn(tv)).length).toBe(0);
     const middle = { x: ghoulOnTv!.left + ghoulOnTv!.side / 2, y: ghoulOnTv!.top + ghoulOnTv!.side / 2 };
     await expect.poll(async () => (await fogPixel(tv, middle.x, middle.y)).slice(0, 3)).toEqual([10, 8, 6]);
     expect((await tv.request.get(`/images/${image.id}/display`)).status()).toBe(404);
-    await expect(dm.locator('.eg-region-row', { hasText: 'Crypt of secrets' })).toContainText(
-      'Fogged · 1 hidden token',
-    );
-    // For comparison with the design: the DM's hatch and tag, the TV's mask.
+    await expect(dm.locator('.eg-fog-row')).toContainText('Fog painted · 1 token under it players cannot see');
+    const painted = await fogOn(tv);
+    // For comparison with the design: the DM's hatch, the TV's mask.
     for (const [page, name] of [
       [dm, 'dm-fogged'],
       [tv, 'tv-fogged'],
@@ -119,19 +122,26 @@ test('a fog region drawn on the live scene blacks out that part of the TV and th
     // The TV reconnects: the fog comes back with its snapshot.
     await tv.reload();
     await expect(player(tv)).toHaveAttribute('data-scene', 'live');
-    await expect.poll(() => fogOn(tv)).toEqual([{ kind: 'rect', x: 2, y: 2, width: 3, height: 3 }]);
+    await expect.poll(() => fogOn(tv)).toEqual(painted);
     expect(await tokensOn(tv)).toEqual([]);
 
-    // Revealed from the list: the fog lifts and the ghoul is back.
-    await dm.getByRole('button', { name: 'Reveal fog region Crypt of secrets' }).click();
+    // Erased along the same line with a brush twice as wide, ] four times: the fog lifts and the ghoul is
+    // back. (The same width would leave slivers where the two strokes' points differ.)
+    await dm.getByRole('group', { name: 'Fog brush' }).getByRole('button', { name: 'Erase' }).click();
+    for (let i = 0; i < 4; i++) await dm.keyboard.press(']');
+    await expect(viewport(dm)).toHaveAttribute('data-fog-brush', 'erase 2');
+    await stroke();
     await expect.poll(() => fogOn(tv)).toEqual([]);
     await expect.poll(async () => (await tokensOn(tv)).length).toBe(1);
     expect((await tv.request.get(`/images/${image.id}/display`)).status()).toBe(200);
-    // And undone: fogged again.
+    // And undone: fogged again, as it was.
     await dm.getByRole('toolbar', { name: 'Tools' }).getByRole('button', { name: 'Undo', exact: true }).click();
+    await expect.poll(() => fogOn(tv)).toEqual(painted);
     await expect.poll(async () => (await tokensOn(tv)).length).toBe(0);
 
-    expect(tvFrames.join('')).not.toContain('Crypt of secrets');
+    // The fog reached the TV, and nothing in what it received names a scene or says what is hidden.
+    expect(tvFrames.join('')).toContain('fog.updated');
+    for (const secret of ['"scene_id"', '"hidden"']) expect(tvFrames.join('')).not.toContain(secret);
   } finally {
     await liveBar(dm)
       .getByRole('button', { name: 'Go idle' })

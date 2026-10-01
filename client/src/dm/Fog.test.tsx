@@ -1,27 +1,18 @@
 // @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { LibraryAsset, Region, Scene, SceneToken } from '@emberglass/shared';
+import type { FogMask, LibraryAsset, Scene, SceneToken } from '@emberglass/shared';
 import { t } from '../ui/messages.js';
 import { installCanvas2d, installImageLoading, installResizeObserver } from '../ui/testing/canvas2d.js';
-import {
-  button,
-  click,
-  FakeServer,
-  installDialog,
-  openSwitcher,
-  selectScene,
-  settle,
-  type,
-} from '../ui/testing/fakeServer.js';
+import { button, click, FakeServer, installDialog, selectScene, settle } from '../ui/testing/fakeServer.js';
 import { render, type Rendered } from '../ui/testing/render.js';
-import { fogOver, hiddenInside } from './regions/RegionList.js';
+import { underFog } from './fog/FogPanel.js';
 import { Workspace } from './Workspace.js';
 
-// Fog regions in the DM view (TBL-03, specs/04-live-sync.md §2, §13, specs/08-ux-journeys.md §11, Q-099),
-// against a scripted server: the fog tool draws a region, which is named and listed with its state and the
-// tokens it hides; Reveal and Fog, rename and delete, live as region commands that undo takes back, in
-// preparation over REST.
+// Painted fog in the DM view (TBL-04, specs/04-live-sync.md §2, §13, specs/08-ux-journeys.md §11, Q-101),
+// against a scripted server: the brush paints and erases, its size on a slider and by [ and ]; Fog all and
+// Clear all, each asked first; the panel says how many tokens the fog keeps from players. On the live scene
+// each change is a fog command that undo takes back, in preparation a REST write.
 
 let server: FakeServer;
 let rendered: Rendered | undefined;
@@ -29,6 +20,9 @@ let tavern: Scene;
 let cellar: Scene;
 let bandit: LibraryAsset;
 let hero: LibraryAsset;
+
+// Grid (4, 0) to (8, 4), over the bandit's centre (5.5, 1.5) and away from the hero's (1.5, 1.5).
+const BACK_ROOM: FogMask = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].map((y) => ({ y, runs: [16, 32] }));
 
 beforeEach(() => {
   installCanvas2d();
@@ -39,7 +33,7 @@ beforeEach(() => {
   const session = server.addSession(server.addCampaign('Campaine Test').id, 'Session 1');
   tavern = server.addScene(session.id, 'Tavern');
   cellar = server.addScene(session.id, 'Cellar');
-  bandit = server.addAsset({ name: 'Bandit', category: 'monster' });
+  bandit = server.addAsset({ name: 'Bandit', category: 'monster', default_hidden: false });
   hero = server.addAsset({ name: 'Hero', category: 'pc', default_hidden: false });
   server.addToken(tavern.id, hero, { x: 1, y: 1 });
   server.addToken(tavern.id, bandit, { x: 5, y: 1 });
@@ -61,191 +55,150 @@ async function open(): Promise<HTMLElement> {
 
 const commands = () => server.sockets.flatMap((socket) => socket.commands());
 const canvas = (view: HTMLElement) => view.querySelector<HTMLElement>('[role="application"]')!;
-const press = (target: EventTarget, key: string) =>
+const press = async (target: EventTarget, key: string) => {
   act(() => {
     target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
   });
-const regionRow = (view: HTMLElement, name: string) =>
-  [...view.querySelectorAll<HTMLElement>('.eg-region-row')].find(
-    (row) => row.querySelector('.eg-token-row__name')?.textContent === name,
-  );
+  await settle();
+};
+const fogStatus = (view: HTMLElement) => view.querySelector('.eg-fog-row .eg-token-row__status')?.textContent;
 const statusOfToken = (view: HTMLElement, label: string) =>
   [...view.querySelectorAll('.eg-token-row')]
     .find((row) => row.querySelector('.eg-token-row__name')?.textContent === label)!
     .querySelector('.eg-token-row__status')!.textContent;
 const status = (view: HTMLElement) => view.querySelector('[role="status"].eg-scene__progress')?.textContent;
+const bar = (view: HTMLElement) => view.querySelector<HTMLElement>(`[role="group"][aria-label="${t('fog.bar')}"]`);
+const slider = (view: HTMLElement) => bar(view)!.querySelector<HTMLInputElement>('input[type="range"]')!;
+const dialog = () => document.querySelector<HTMLElement>('dialog[open]');
 
-/** Draws a triangle by the keys: a corner at the centre, then two more after panning, the last twice. */
-async function drawByKeys(view: HTMLElement) {
-  press(document.body, 'f');
-  await settle();
-  const map = canvas(view);
-  press(map, 'Enter');
-  for (let i = 0; i < 4; i++) press(map, 'ArrowRight');
-  press(map, 'Enter');
-  for (let i = 0; i < 4; i++) press(map, 'ArrowDown');
-  press(map, 'Enter');
-  press(map, 'Enter');
-  await settle();
-}
-
-const BACK_ROOM = { kind: 'rect', x: 4, y: 0, width: 4, height: 4 } as const;
-
-describe('the fog tool and the region list on the live scene', () => {
-  it('draws a region with the keys, names it, and sends region.add; the list shows it fogged', async () => {
+describe('the fog brush on the live scene', () => {
+  it('paints with the keys and sends fog.paint; the panel and the token rows say what the fog hides', async () => {
     server.liveSceneId = tavern.id;
     const view = await open();
+    expect(fogStatus(view)).toBe(t('fog.status.none'));
     expect(button(view, t('canvas.toolFog'))!.getAttribute('aria-disabled')).toBeNull();
-    await drawByKeys(view);
-    const dialog = document.querySelector('dialog[open]')!;
-    expect(dialog.textContent).toContain(t('fog.newHeading'));
-    expect(dialog.querySelector('input')!.value).toBe(t('fog.defaultName', { count: 1 }));
-    await click(button(dialog, t('fog.newSave')));
+    await press(document.body, 'f');
+    expect(canvas(view).dataset.fogTool).toBe('on');
+    expect(bar(view)).not.toBeNull();
+    await press(canvas(view), 'Enter');
     const sent = commands().at(-1)!;
-    expect(sent).toMatchObject({ type: 'region.add', payload: { scene_id: tavern.id, name: 'Region 1' } });
-    const shape = (sent.payload as { shape: { kind: string; points: { x: number; y: number }[] } }).shape;
-    expect(shape.kind).toBe('polygon');
-    expect(shape.points).toHaveLength(3);
-    for (const point of shape.points) expect(Number.isInteger(point.x) && Number.isInteger(point.y)).toBe(true);
-    expect(regionRow(view, 'Region 1')).toBeDefined();
-    expect(regionRow(view, 'Region 1')!.dataset.hidden).toBe('true');
-    expect(status(view)).toBe(t('fog.drawn', { name: 'Region 1' }));
-    expect(JSON.parse(canvas(view).dataset.fog!)).toEqual([
-      expect.objectContaining({ name: 'Region 1', hidden: true, shape }),
-    ]);
+    expect(sent).toMatchObject({ type: 'fog.paint', payload: { scene_id: tavern.id, stroke: { mode: 'paint' } } });
+    expect(status(view)).toBe(t('fog.painted'));
+    expect(server.fogOf(tavern.id).length).toBeGreaterThan(0);
+    expect(JSON.parse(canvas(view).dataset.fog!)).toEqual(server.fogOf(tavern.id));
   });
 
-  it('reveals and fogs a region from its row, counts the tokens it hides, and undo takes the reveal back', async () => {
+  it('counts the tokens under the fog, and names it in their rows', async () => {
     server.liveSceneId = tavern.id;
-    server.addRegion(tavern.id, { name: 'Back room', shape: BACK_ROOM });
+    server.fogs[tavern.id] = BACK_ROOM;
     const view = await open();
-    // The bandit stands in the back room: players see neither it nor, while fogged, anything under it.
-    expect(regionRow(view, 'Back room')!.querySelector('.eg-token-row__status')!.textContent).toBe(
-      t('fog.statusFogged.one', { count: 1 }),
-    );
-    expect(statusOfToken(view, 'Bandit')).toBe(
-      t('sceneTokens.inFog', { status: t('sceneTokens.hidden'), name: 'Back room' }),
-    );
+    expect(fogStatus(view)).toBe(t('fog.status.one', { count: 1 }));
+    expect(statusOfToken(view, 'Bandit')).toBe(t('sceneTokens.inFog', { status: t('asset.category.monster') }));
     expect(statusOfToken(view, 'Hero')).toBe(t('asset.category.pc'));
-    await click(button(view, t('fog.revealOf', { name: 'Back room' })));
-    expect(commands().at(-1)).toMatchObject({ type: 'region.setHidden', payload: { hidden: false } });
-    expect(regionRow(view, 'Back room')!.dataset.hidden).toBeUndefined();
-    // Revealed, the bandit is still hidden by its own flag.
-    expect(regionRow(view, 'Back room')!.querySelector('.eg-token-row__status')!.textContent).toBe(
-      t('fog.statusRevealed.one', { count: 1 }),
-    );
-    expect(status(view)).toBe(t('fog.revealed', { name: 'Back room' }));
+  });
+
+  it('erases, sizes the brush on its slider and by the keys, and turns off with Done or V', async () => {
+    server.liveSceneId = tavern.id;
+    server.fogs[tavern.id] = BACK_ROOM;
+    const view = await open();
+    await click(button(view, t('fog.paintFog')));
+    expect(canvas(view).dataset.fogTool).toBe('on');
+    await click(button(bar(view)!, t('fog.erase')));
+    expect(button(bar(view)!, t('fog.erase'))!.getAttribute('aria-pressed')).toBe('true');
+    expect(canvas(view).dataset.fogBrush).toBe('erase 1');
+    act(() => {
+      Reflect.set(HTMLInputElement.prototype, 'value', '2.5', slider(view));
+      slider(view).dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await settle();
+    expect(canvas(view).dataset.fogBrush).toBe('erase 2.5');
+    expect(slider(view).getAttribute('aria-valuetext')).toBe(t('fog.radiusValue.other', { radius: '2.5' }));
+    await press(document.body, ']');
+    expect(canvas(view).dataset.fogBrush).toBe('erase 2.75');
+    await press(document.body, 'e');
+    expect(canvas(view).dataset.fogBrush).toBe('paint 2.75');
+    await press(document.body, 'e');
+    await press(canvas(view), 'Enter');
+    expect(commands().at(-1)).toMatchObject({
+      type: 'fog.paint',
+      payload: { stroke: { mode: 'erase', radius: 2.75 } },
+    });
+    expect(status(view)).toBe(t('fog.erased'));
+    await click(button(bar(view)!, t('fog.done')));
+    expect(canvas(view).dataset.fogTool).toBe('off');
+    expect(bar(view)).toBeNull();
+    await press(document.body, 'f');
+    await press(document.body, 'v');
+    expect(canvas(view).dataset.fogTool).toBe('off');
+  });
+
+  it('fogs the whole map and clears it, each asked first, and undo takes a change back', async () => {
+    server.liveSceneId = tavern.id;
+    const view = await open();
+    await press(document.body, 'f');
+    await click(button(bar(view)!, t('fog.fillAll')));
+    expect(dialog()!.textContent).toContain(t('fog.fillHeading'));
+    expect(dialog()!.textContent).toContain(t('fog.fillBody'));
+    await click(button(dialog()!, t('fog.cancel')));
+    expect(commands().filter((each) => each.type === 'fog.fill')).toEqual([]);
+    await click(button(bar(view)!, t('fog.fillAll')));
+    await click(button(dialog()!, t('fog.fillConfirm')));
+    expect(commands().at(-1)).toEqual({ type: 'fog.fill', payload: { scene_id: tavern.id, fogged: true } });
+    expect(status(view)).toBe(t('fog.filled'));
+    expect(fogStatus(view)).toBe(t('fog.status.other', { count: 2 }));
+    await click(button(bar(view)!, t('fog.clearAll')));
+    expect(dialog()!.textContent).toContain(t('fog.clearBody'));
+    await click(button(dialog()!, t('fog.clearConfirm')));
+    expect(commands().at(-1)).toEqual({ type: 'fog.fill', payload: { scene_id: tavern.id, fogged: false } });
+    expect(fogStatus(view)).toBe(t('fog.status.none'));
     await click(button(view, t('canvas.undo')));
     expect(commands().at(-1)).toEqual({ type: 'undo', payload: {} });
-    expect(regionRow(view, 'Back room')!.dataset.hidden).toBe('true');
-  });
-
-  it('renames and deletes a region from its menu, the deletion asked first', async () => {
-    server.liveSceneId = tavern.id;
-    const region = server.addRegion(tavern.id, { name: 'Back room', shape: BACK_ROOM });
-    const view = await open();
-    const menu = async (item: string) => {
-      await click(button(view, t('fog.moreOf', { name: region.name })));
-      const entry = [...view.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(
-        (each) => each.textContent === item,
-      )!;
-      await click(entry);
-    };
-    await menu(t('fog.rename'));
-    const dialog = document.querySelector('dialog[open]')!;
-    const input = dialog.querySelector('input')!;
-    await type(input, 'Study');
-    await click(button(dialog, t('fog.renameSave')));
-    expect(commands().at(-1)).toEqual({ type: 'region.rename', payload: { region_id: region.id, name: 'Study' } });
-    expect(regionRow(view, 'Study')).toBeDefined();
-    region.name = 'Study';
-    await menu(t('fog.delete'));
-    expect(document.querySelector('dialog[open]')!.textContent).toContain(t('fog.deleteBodyFogged'));
-    await click(button(document.querySelector('dialog[open]') as HTMLElement, t('fog.deleteConfirm')));
-    expect(commands().at(-1)).toEqual({ type: 'region.delete', payload: { region_id: region.id } });
-    expect(regionRow(view, 'Study')).toBeUndefined();
-    expect(server.regions).toEqual([]);
-  });
-
-  it('turns the fog tool on from the rail and the list’s +, and leaves it for another tool', async () => {
-    server.liveSceneId = tavern.id;
-    const view = await open();
-    const tool = button(view, t('canvas.toolFog'))!;
-    await click(tool);
-    expect(canvas(view).dataset.fogTool).toBe('on');
-    expect(tool.getAttribute('aria-pressed')).toBe('true');
-    press(document.body, 'm');
-    await settle();
-    expect(canvas(view).dataset.fogTool).toBe('off');
-    expect(canvas(view).dataset.rulerTool).toBe('on');
-    await click(button(view, t('fog.draw')));
-    expect(canvas(view).dataset.fogTool).toBe('on');
-    expect(canvas(view).dataset.rulerTool).toBe('off');
-    press(document.body, 'v');
-    await settle();
-    expect(canvas(view).dataset.fogTool).toBe('off');
+    expect(fogStatus(view)).toBe(t('fog.status.other', { count: 2 }));
   });
 });
 
-describe('fog regions in preparation', () => {
-  it('draws, reveals and deletes a region over REST on a scene that is not live, reading the tokens again after each', async () => {
+describe('the fog brush in preparation', () => {
+  it('paints and fills over REST on a scene that is not live, reading the tokens again after each', async () => {
     server.liveSceneId = cellar.id;
     const view = await open();
     await selectScene(view, 'Tavern');
     const tokenReads = () =>
       server.calls.filter((call) => call.method === 'GET' && call.path.endsWith('/tokens')).length;
     const before = tokenReads();
-    await drawByKeys(view);
-    await click(button(document.querySelector('dialog[open]') as HTMLElement, t('fog.newSave')));
-    expect(server.writes().at(-1)).toBe(`POST /api/scenes/${tavern.id}/regions`);
-    expect(server.regions).toHaveLength(1);
+    await press(document.body, 'f');
+    await press(canvas(view), 'Enter');
+    expect(server.writes().at(-1)).toBe(`POST /api/scenes/${tavern.id}/fog`);
+    expect(server.fogOf(tavern.id).length).toBeGreaterThan(0);
     expect(tokenReads()).toBeGreaterThan(before);
-    await click(button(view, t('fog.revealOf', { name: 'Region 1' })));
-    expect(server.writes().at(-1)).toBe(`PATCH /api/regions/${server.regions[0]!.id}`);
-    expect(server.regions[0]!.hidden).toBe(false);
+    await click(button(bar(view)!, t('fog.clearAll')));
+    // In preparation there is no undo, and the dialog says so.
+    expect(dialog()!.textContent).toContain(t('fog.clearBodyPrep'));
+    await click(button(dialog()!, t('fog.clearConfirm')));
+    expect(server.fogOf(tavern.id)).toEqual([]);
     expect(commands()).toEqual([]);
   });
 
-  it('says why the server refused a write, and keeps the region as it was', async () => {
+  it('says why the server refused a write, and keeps the fog as it was', async () => {
+    server.liveSceneId = cellar.id;
     const view = await open();
-    await openSwitcher(view);
-    await click(button(view, 'Campaine Test'));
-    await click(button(view, t('tree.openOf', { name: 'Session 1' })));
     await selectScene(view, 'Tavern');
-    const region = server.addRegion(tavern.id, { name: 'Back room', shape: BACK_ROOM });
-    // Read again, as a reselection would.
-    await selectScene(view, 'Cellar');
-    await selectScene(view, 'Tavern');
-    server.regions = [];
-    await click(button(view, t('fog.revealOf', { name: region.name })));
+    await press(document.body, 'f');
+    // The scene goes live elsewhere: the server refuses preparation writes to it.
+    server.liveSceneId = tavern.id;
+    await press(canvas(view), 'Enter');
     expect(view.textContent).toContain(t('fog.failed', { reason: '' }).trim());
+    expect(JSON.parse(canvas(view).dataset.fog!)).toEqual([]);
   });
 });
 
-describe('what a region hides (specs/04-live-sync.md §4)', () => {
+describe('what the fog hides (specs/04-live-sync.md §4)', () => {
   const token = (fields: Partial<SceneToken>): SceneToken =>
     ({ id: 't', x: 0, y: 0, hidden: false, asset: { size: 'medium' }, ...fields }) as SceneToken;
-  const region = (hidden: boolean): Region => ({
-    id: 'r',
-    scene_id: 's',
-    name: 'Back room',
-    order: 1,
-    shape: BACK_ROOM,
-    hidden,
-  });
 
-  it('counts the tokens whose centre it covers: all while fogged, the hidden ones once revealed', () => {
-    const tokens = [
-      token({ id: 'in', x: 5, y: 1 }),
-      token({ id: 'in-hidden', x: 6, y: 2, hidden: true }),
-      // Its footprint overlaps the region, its centre (8.5, 1.5) does not lie in it.
-      token({ id: 'edge', x: 8, y: 1 }),
-      token({ id: 'out', x: 1, y: 1, hidden: true }),
-    ];
-    expect(hiddenInside(region(true), tokens)).toBe(2);
-    expect(hiddenInside(region(false), tokens)).toBe(1);
-    expect(fogOver(tokens[0]!, [region(true)])?.name).toBe('Back room');
-    expect(fogOver(tokens[0]!, [region(false)])).toBeUndefined();
-    expect(fogOver(tokens[2]!, [region(true)])).toBeUndefined();
+  it('takes a token as under the fog by its centre', () => {
+    expect(underFog(token({ x: 5, y: 1 }), BACK_ROOM)).toBe(true);
+    // Its footprint overlaps the fog, its centre (8.5, 1.5) does not lie under it.
+    expect(underFog(token({ x: 8, y: 1 }), BACK_ROOM)).toBe(false);
+    expect(underFog(token({ x: 1, y: 1 }), BACK_ROOM)).toBe(false);
   });
 });

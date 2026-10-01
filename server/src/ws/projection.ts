@@ -17,12 +17,11 @@ import { liveMeasurement, readSnapshot, toPlayerToken, type LiveMemory } from '.
 // database it reads is the state the command left. The player camera (LIV-06) and the ruler (LIV-07)
 // reach both rooms alike, as a ping does (TBL-01): they say nothing of any token.
 //
-// Fog (TBL-03, specs/04-live-sync.md §4, §13): "visible" here is what players see, a token not hidden
-// whose centre is under no fogged region, judged by the fog as it stands after the change, which a token
+// Fog (TBL-04, specs/04-live-sync.md §4, §13): "visible" here is what players see, a token not hidden
+// whose centre is under no fogged cell, judged by the fog as it stands after the change, which a token
 // command never changes. A move into the fog reaches players as `token.removed`, a move out of it as
-// `token.added`. A fog region reaches the DM's room with its name, the players' as the fogged shapes alone
-// (`fog.updated`), and only when the fogged set changed; the tokens it covered or showed follow as their
-// own effects.
+// `token.added`. A change to the painted fog reaches both rooms as the whole mask (`fog.updated`), which
+// names no token; the tokens it covered or showed follow as their own effects.
 
 /** An event before it takes its room's version. */
 export type Unversioned<E> = E extends { type: infer T; payload: infer P }
@@ -92,21 +91,10 @@ export function project(db: Database.Database, effect: LiveEffect, memory: LiveM
       if (!sightOf(db, effect.token.scene_id)(effect.token)) return { dm };
       return { dm, players: { type: 'token.removed', payload: { id: effect.token.id } } };
     }
-    case 'region.added':
+    case 'fog.changed':
       return {
-        dm: { type: 'region.added', payload: { region: effect.region } },
-        ...(effect.region.hidden ? fog(db, effect.region.scene_id) : {}),
-      };
-    case 'region.updated':
-      return {
-        dm: { type: 'region.updated', payload: { region: effect.region } },
-        // A rename changes nothing players see.
-        ...(effect.before.hidden !== effect.region.hidden ? fog(db, effect.region.scene_id) : {}),
-      };
-    case 'region.removed':
-      return {
-        dm: { type: 'region.removed', payload: { id: effect.region.id } },
-        ...(effect.region.hidden ? fog(db, effect.region.scene_id) : {}),
+        dm: { type: 'fog.updated', payload: { fog: readFog(db, effect.sceneId) } },
+        players: { type: 'fog.updated', payload: { fog: readFog(db, effect.sceneId) } },
       };
     case 'token.appeared':
       return {
@@ -118,11 +106,6 @@ export function project(db: Database.Database, effect: LiveEffect, memory: LiveM
     case 'token.vanished':
       return { players: { type: 'token.removed', payload: { id: effect.token.id } } };
   }
-}
-
-/** The fogged shapes of the scene now, as players receive them: no name, no id. */
-function fog(db: Database.Database, sceneId: string): Pick<RoomEvents, 'players'> {
-  return { players: { type: 'fog.updated', payload: { fog: readFog(db, sceneId) } } };
 }
 
 /** A token shown to players, with the visible token it renamed, if any (G-023). */

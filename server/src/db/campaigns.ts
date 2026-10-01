@@ -208,7 +208,7 @@ export function listScenes(db: Database.Database, sessionId: string): Scene[] {
 
 /**
  * Each scene of a session with how many tokens it holds and how many players cannot see, hidden or under
- * a fogged region (UIX-01, TBL-03), in scene order.
+ * the fog (UIX-01, TBL-04), in scene order.
  */
 export function listSceneSummaries(db: Database.Database, sessionId: string): SceneSummary[] {
   return db.transaction(() =>
@@ -477,16 +477,8 @@ export function duplicateScene(db: Database.Database, id: string, name: string):
         token.character_id,
       );
     }
-    // And its own copies of its fog regions, fogged or revealed as they are (TBL-03).
-    const regions = db
-      .prepare('SELECT name, "order", shape, hidden FROM region WHERE scene_id = ? ORDER BY "order", id')
-      .all(id) as { name: string; order: number; shape: string; hidden: 0 | 1 }[];
-    const insertRegion = db.prepare(
-      'INSERT INTO region (id, scene_id, name, "order", shape, hidden) VALUES (?, ?, ?, ?, ?, ?)',
-    );
-    for (const region of regions) {
-      insertRegion.run(randomUUID(), copyId, region.name, region.order, region.shape, region.hidden);
-    }
+    // And its own copy of its painted fog (TBL-04).
+    db.prepare('UPDATE scene SET fog = (SELECT fog FROM scene WHERE id = ?) WHERE id = ?').run(id, copyId);
     return true;
   })();
   return done ? readScene(db, copyId) : undefined;

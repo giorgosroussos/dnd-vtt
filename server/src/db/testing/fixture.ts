@@ -20,8 +20,11 @@ export const fixtureSha256 = (n: number): string => createHash('sha256').update(
 /** The tables of the fixture's version, each of which the fixture fills. */
 export const TABLES = ['image', 'asset', 'asset_tag', 'campaign', 'session', 'scene', 'token', 'settings'] as const;
 export type Table = (typeof TABLES)[number];
-/** Every table of the latest schema: the fixture's, and those later migrations add (0005, TBL-03). */
-export const SCHEMA_TABLES = [...TABLES, 'region'] as const;
+/**
+ * Every table of the latest schema: the fixture's, and those later migrations add. Migration 0005 added
+ * `region` (TBL-03) and 0006 dropped it (TBL-04, D-154), so there is none.
+ */
+export const SCHEMA_TABLES = [...TABLES] as const;
 export type SchemaTable = (typeof SCHEMA_TABLES)[number];
 
 export function countRows(db: Database.Database): Record<Table, number> {
@@ -185,9 +188,10 @@ export function readEntities(db: Database.Database): Entities {
     asset_tag: all('asset_tag') as AssetTag[],
     campaign: all('campaign') as Campaign[],
     session: all('session') as Session[],
-    // The token numbers a scene has issued are the server's own, not part of the record (Q-091).
+    // The token numbers a scene has issued are the server's own, not part of the record (Q-091), as is its
+    // painted fog (migration 0006, TBL-04), which reaches the DM view by snapshot and its own route.
     scene: all('scene').map((row) => ({
-      ...without(without(row, 'grid_'), 'token_numbers'),
+      ...without(without(without(row, 'grid_'), 'token_numbers'), 'fog'),
       grid: grid(row, 'grid_'),
     })) as Scene[],
     // Whether players have seen a token is the server's own too (Q-096).

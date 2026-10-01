@@ -1,9 +1,6 @@
 import type {
   CommandEnvelope,
-  Region,
-  RegionDeletePayload,
-  RegionRenamePayload,
-  RegionSetHiddenPayload,
+  FogMask,
   SceneToken,
   TokenDeletePayload,
   TokenMovePayload,
@@ -14,8 +11,8 @@ import type { LiveEffect } from './live.js';
 
 // The DM's undo history (LIV-05; specs/04-live-sync.md §8, Q-005, Q-050, D-040, D-117). The server
 // keeps, in memory only, the inverse of every undoable command applied to the live scene: `token.add`,
-// `token.move`, `token.setVisibility`, `token.setMarkers` (TBL-02), `token.delete` and the fog region
-// commands (TBL-03). Setup edits over REST are not commands and
+// `token.move`, `token.setVisibility`, `token.setMarkers` (TBL-02), `token.delete` and the fog commands
+// (TBL-04). Setup edits over REST are not commands and
 // never enter it (Q-050). It belongs to one live scene and is emptied whenever the live scene changes
 // (another scene activated, Blank TV, the live scene deleted), holds the last 100 inverses, and dies
 // with the process. One history serves every DM browser: undo takes back the most recent command on
@@ -39,11 +36,9 @@ export type Inverse =
   | { type: 'token.setMarkers'; payload: TokenSetMarkersPayload }
   | { type: 'token.delete'; payload: TokenDeletePayload }
   | { type: 'token.add'; restore: SceneToken; shown: boolean }
-  // The fog regions (TBL-03); undoing a deletion puts the same region back, which is not on the wire.
-  | { type: 'region.delete'; payload: RegionDeletePayload }
-  | { type: 'region.rename'; payload: RegionRenamePayload }
-  | { type: 'region.setHidden'; payload: RegionSetHiddenPayload }
-  | { type: 'region.restore'; restore: Region };
+  // The painted fog (TBL-04): a stroke, a fill or a clear is undone by putting the whole mask back as it
+  // was, which is not on the wire.
+  | { type: 'fog.restore'; scene_id: string; restore: FogMask };
 
 export const UNDO_LIMIT = 100;
 
@@ -76,21 +71,12 @@ export function inverseOf(command: CommandEnvelope, effects: readonly LiveEffect
       return effect.type === 'token.updated'
         ? { type: 'token.setMarkers', payload: { token_id: effect.token.id, markers: [...effect.before.markers] } }
         : undefined;
-    case 'region.add':
-    case 'region.restore' as CommandEnvelope['type']:
-      return effect.type === 'region.added'
-        ? { type: 'region.delete', payload: { region_id: effect.region.id } }
+    case 'fog.paint':
+    case 'fog.fill':
+    case 'fog.restore' as CommandEnvelope['type']:
+      return effect.type === 'fog.changed'
+        ? { type: 'fog.restore', scene_id: effect.sceneId, restore: effect.before }
         : undefined;
-    case 'region.rename':
-      return effect.type === 'region.updated'
-        ? { type: 'region.rename', payload: { region_id: effect.region.id, name: effect.before.name } }
-        : undefined;
-    case 'region.setHidden':
-      return effect.type === 'region.updated'
-        ? { type: 'region.setHidden', payload: { region_id: effect.region.id, hidden: effect.before.hidden } }
-        : undefined;
-    case 'region.delete':
-      return effect.type === 'region.removed' ? { type: 'region.restore', restore: effect.region } : undefined;
     case 'token.delete':
       return effect.type === 'token.removed'
         ? { type: 'token.add', restore: effect.token, shown: effect.shown }

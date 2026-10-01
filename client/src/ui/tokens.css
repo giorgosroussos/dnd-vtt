@@ -311,6 +311,25 @@ main[tabindex='-1']:focus {
   font-size: var(--font-size-sm);
 }
 
+.eg-slider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.eg-slider__input {
+  width: 140px;
+  accent-color: var(--color-accent);
+}
+
+.eg-slider__value {
+  min-width: 6.5em;
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+
 .eg-notice {
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius);

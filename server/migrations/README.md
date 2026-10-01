@@ -21,3 +21,5 @@ Numbered SQL migrations, applied in order by `src/db/migrate.ts` before the serv
 `0004_token_markers.sql` adds `token.markers`, the condition markers a token carries, a JSON array, none on an existing token (TBL-02, Q-099).
 
 `0005_regions.sql` adds `region`, the fog regions of a scene, deleted with it (TBL-03, Q-099).
+
+`0006_fog_mask.sql` adds `scene.fog`, the scene's painted fog, none on an existing scene, and drops `region`: painted fog replaces the fog regions, which are not converted, by the owner's choice; the runner's backup before it keeps them (TBL-04, Q-101, D-154). It is the one destructive step so far, approved in D-154.

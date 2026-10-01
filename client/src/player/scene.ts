@@ -1,5 +1,6 @@
 import {
   FIT_CAMERA,
+  isFogMask,
   isMeasurement,
   type EventEnvelope,
   type Measurement,
@@ -9,8 +10,8 @@ import {
   type PlayerToken,
   type PlayerTokenAddedPayload,
   type PlayerTokenUpdatedPayload,
+  type FogMask,
   type FogUpdatedPayload,
-  type RegionShape,
   type RulerShownPayload,
   type TokenRemovedPayload,
 } from '@emberglass/shared';
@@ -24,8 +25,8 @@ import {
 // the idle screen. `camera.player` replaces the camera the TV shows (LIV-06, specs/04-live-sync.md
 // §9); a snapshot brings the current one, fitted to the map after an activation. `ruler.shown` and
 // `ruler.cleared` (LIV-07, §11) replace and remove the measurement drawn; a snapshot brings the one
-// shown, if any. `fog.updated` (TBL-03) replaces the fogged shapes drawn over the map; a snapshot brings
-// them. Only the player fields are kept, whatever an event carried.
+// shown, if any. `fog.updated` (TBL-04) replaces the painted fog drawn over the map; a snapshot brings
+// it. Only the player fields are kept, whatever an event carried.
 
 /** The live scene the player view draws, or null for the idle screen. */
 export type PlayerScene = PlayerLiveScene | null;
@@ -59,15 +60,9 @@ const measurement = ({ from, to, feet }: Measurement): Measurement => ({
   feet,
 });
 
-/** The fogged shapes, copied: a shape that is neither a rectangle nor a polygon is skipped. */
-const shapes = (fog: readonly RegionShape[] | undefined): RegionShape[] =>
-  (fog ?? []).flatMap((shape): RegionShape[] =>
-    shape.kind === 'rect'
-      ? [{ kind: 'rect', x: shape.x, y: shape.y, width: shape.width, height: shape.height }]
-      : shape.kind === 'polygon' && Array.isArray(shape.points)
-        ? [{ kind: 'polygon', points: shape.points.map(({ x, y }) => ({ x, y })) }]
-        : [],
-  );
+/** The fog, copied, or undefined when it is not a mask. */
+const masked = (fog: unknown): FogMask | undefined =>
+  isFogMask(fog) ? fog.map((row) => ({ y: row.y, runs: [...row.runs] })) : undefined;
 
 export function fromSnapshot(snapshot: PlayerSnapshot): PlayerScene {
   if (snapshot.scene === null) return null;
@@ -79,7 +74,8 @@ export function fromSnapshot(snapshot: PlayerSnapshot): PlayerScene {
     tokens: ranked([...tokens].sort((a, b) => a.z_order - b.z_order).map(playerToken)),
     camera: camera ? { ...camera } : FIT_CAMERA,
     ruler: ruler ? measurement(ruler) : null,
-    fog: shapes(fog),
+    // A snapshot whose fog is malformed is drawn fogged nowhere rather than not at all.
+    fog: masked(fog) ?? [],
   };
 }
 
@@ -121,10 +117,9 @@ export function applyPlayerEvent(scene: PlayerScene, event: EventEnvelope): Play
     case 'ruler.cleared':
       return { ...scene, ruler: null };
     case 'fog.updated': {
-      const { fog } = event.payload as unknown as Partial<FogUpdatedPayload>;
+      const fog = masked((event.payload as unknown as Partial<FogUpdatedPayload>).fog);
       // A malformed event is skipped: the fog stays as it was rather than lifting.
-      if (!Array.isArray(fog)) return scene;
-      return { ...scene, fog: shapes(fog) };
+      return fog ? { ...scene, fog } : scene;
     }
     default:
       return scene;
