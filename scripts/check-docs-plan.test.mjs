@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,13 +11,15 @@ import { afterEach, describe, expect, it } from 'vitest';
 const script = fileURLToPath(new URL('./check-docs.py', import.meta.url));
 const dirs = [];
 
+// No path goes to Python: on Windows CI it is MSYS2's, which reads a Windows path as a relative POSIX one.
+// The script's source arrives on stdin, and Python runs in the temporary folder, as its root `.`.
+const SOURCE = readFileSync(script, 'utf8');
 const RUN = `
-import importlib.util, json, sys
-spec = importlib.util.spec_from_file_location("check_docs", sys.argv[1])
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
-rows = {key: tuple(value) for key, value in json.loads(sys.argv[3]).items()}
-module.check_plan(sys.argv[2], rows)
+import json, sys, types
+module = types.ModuleType("check_docs")
+exec(compile(sys.stdin.buffer.read().decode("utf-8"), "check-docs.py", "exec"), module.__dict__)
+rows = {key: tuple(value) for key, value in json.loads(sys.argv[1]).items()}
+module.check_plan(".", rows)
 print(json.dumps([line for line in module.failures if "now-items" in line]))
 `;
 
@@ -27,7 +29,7 @@ function nowFailures(now, statuses) {
   dirs.push(root);
   writeFileSync(path.join(root, 'PLAN.md'), `# PLAN\n\n## Now\n\n${now}\n\n## Next\n\n- None.\n`);
   const rows = Object.fromEntries(Object.entries(statuses).map(([id, status], n) => [id, [n + 1, status, 'x']]));
-  const run = spawnSync('python3', ['-c', RUN, script, root, JSON.stringify(rows)], { encoding: 'utf8' });
+  const run = spawnSync('python3', ['-c', RUN, JSON.stringify(rows)], { cwd: root, input: SOURCE, encoding: 'utf8' });
   expect(run.status, run.stderr).toBe(0);
   return JSON.parse(run.stdout);
 }
