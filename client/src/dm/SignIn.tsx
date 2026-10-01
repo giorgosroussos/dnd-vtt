@@ -17,22 +17,19 @@ const MINUTES_FROM_S = 120;
 const HOURS_FROM_S = 2 * 60 * 60;
 
 /**
- * How long PIN entry is refused, in minutes once that reads better than seconds (REL-01 review U-L6),
- * and in hours past two hours, where a doubled wait would read as hundreds of minutes (G-042).
+ * A wait as a phrase: seconds below two minutes, minutes up to two hours (REL-01 review U-L6), and whole
+ * hours past two hours, where a doubled wait would read as hundreds of minutes (G-042); each rounded up,
+ * so that the screen never says to try again before the server allows it.
  */
-export function lockedOutText(seconds: number): string {
-  if (seconds > HOURS_FROM_S) return t('signIn.lockedOutHours', { hours: Math.ceil(seconds / 3600) });
-  return seconds >= MINUTES_FROM_S
-    ? t('signIn.lockedOutMinutes', { minutes: Math.ceil(seconds / 60) })
-    : t('signIn.lockedOut', { seconds });
-}
-
-/** A wait as a phrase, by the same steps as `lockedOutText`. */
 export function waitText(seconds: number): string {
   if (seconds > HOURS_FROM_S) return t('wait.hours', { count: Math.ceil(seconds / 3600) });
-  return seconds >= MINUTES_FROM_S
-    ? t('wait.minutes', { count: Math.ceil(seconds / 60) })
-    : t('wait.seconds', { count: seconds });
+  if (seconds >= MINUTES_FROM_S) return t('wait.minutes', { count: Math.ceil(seconds / 60) });
+  return seconds === 1 ? t('wait.second') : t('wait.seconds', { count: seconds });
+}
+
+/** How long PIN entry is refused from this address. */
+export function lockedOutText(seconds: number): string {
+  return t('signIn.lockedOut', { wait: waitText(seconds) });
 }
 
 /**
@@ -45,13 +42,19 @@ export function serverPcAddress(location: Pick<Location, 'port'> = window.locati
 
 /**
  * What a refused PIN entry or PIN change says: a lockout with its wait, or the server-wide pause with the
- * server PC's address and the wait, which other devices' guesses may have caused (G-042); otherwise the
- * code's own message.
+ * wait and the server PC's address, last so that it is copied without punctuation, which other devices'
+ * guesses may have caused (G-042); otherwise the code's own message. The PIN change says it shorter, since
+ * the Settings dialog must fit a laptop's window with it (review U-M1).
  */
-export function pinRefusalText(code: ClientErrorCode, wait: number | undefined): string {
+export function pinRefusalText(
+  code: ClientErrorCode,
+  wait: number | undefined,
+  where: 'signIn' | 'pinChange' = 'signIn',
+): string {
   if (wait !== undefined && code === 'locked_out') return lockedOutText(wait);
   if (wait !== undefined && code === 'pin_paused') {
-    return t('signIn.paused', { address: serverPcAddress(), wait: waitText(wait) });
+    const params = { address: serverPcAddress(), wait: waitText(wait) };
+    return t(where === 'signIn' ? 'signIn.paused' : 'settings.pinPaused', params);
   }
   return errorMessage(code);
 }

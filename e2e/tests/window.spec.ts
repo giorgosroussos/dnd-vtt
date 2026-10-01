@@ -8,7 +8,8 @@ import { calibrationPanel, newAsset, pick, saveCalibration, squareCentre, tokens
 // default 150% scaling leaves the page about 1,280 × 620 CSS pixels once the browser's toolbars and the
 // taskbar are counted. There, calibrating, placing a token and changing the PIN are done with the canvas
 // and the Settings dialog whole on screen: the page never scrolls, the canvas's tool rail stays on the
-// canvas and above its grid status, and the dialog shows every control without scrolling inside it.
+// canvas and above its grid status, and the dialog shows every control without scrolling inside it, a
+// pause's refusal included.
 
 const WIDTH = 1280;
 const HEIGHT = 620;
@@ -81,7 +82,7 @@ test('the DM view at a laptop’s 1,280 × 620: calibration, token placement and
     })
   ).json()) as { id: string };
   const asset = `Laptop scout ${unique()}`;
-  await newAsset(page, asset, { category: 'npc', size: 'medium' }, [40, 90, 60]);
+  const { id: assetId } = await newAsset(page, asset, { category: 'npc', size: 'medium' }, [40, 90, 60]);
 
   try {
     await page.reload();
@@ -103,6 +104,28 @@ test('the DM view at a laptop’s 1,280 × 620: calibration, token placement and
     expect(within(now.canvas!, screen)).toBe(true);
     expect(within(now.rail!, now.canvas!)).toBe(true);
     expect(now.rail!.bottom).toBeLessThanOrEqual(now.status!.top);
+    // Its seven tools do not fit there: the hidden edge fades, and Tab brings the last tool into view,
+    // where a click reaches it (review U-M2, T-M2).
+    const rail = page.getByRole('toolbar', { name: 'Tools' });
+    expect(await rail.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+    await expect(rail).toHaveAttribute('data-more-below', 'true');
+    await expect(rail).not.toHaveAttribute('data-more-above');
+    const redo = rail.getByRole('button', { name: 'Redo', exact: true });
+    await redo.focus();
+    await expect(redo).toBeInViewport({ ratio: 1 });
+    const railBox = (await rail.boundingBox())!;
+    const redoBox = (await redo.boundingBox())!;
+    expect(redoBox.y + redoBox.height).toBeLessThanOrEqual(railBox.y + railBox.height + 0.5);
+    // Nothing covers it: the topmost element at its centre is the button (a trial click would wait,
+    // since Redo is aria-disabled with nothing to redo).
+    const hit = await redo.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      return element.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+    });
+    expect(hit).toBe(true);
+    await expect(rail).toHaveAttribute('data-more-above', 'true');
+    await expect(rail).not.toHaveAttribute('data-more-below');
+    await rail.evaluate((element) => element.scrollTo(0, 0));
 
     // Calibrating: the panel, the whole canvas and the magnifier inside it, unscrolled.
     await page.getByRole('button', { name: 'Calibrate grid' }).click();
@@ -150,6 +173,27 @@ test('the DM view at a laptop’s 1,280 × 620: calibration, token placement and
     await dialog.getByRole('button', { name: 'Change PIN' }).click();
     await expect(dialog.getByText('PIN changed', { exact: false })).toBeVisible();
     await fits();
+    // The PIN still signs in (review T-L4).
+    expect((await page.request.post('/api/auth', { data: { pin: E2E_PIN } })).ok()).toBe(true);
+    // A refusal during a server-wide pause, the longest message the PIN change shows, still fits with
+    // its controls on screen (review U-M1). The browser here is the server PC, which is never paused,
+    // so the answer is the server's for a LAN device.
+    await page.route('**/api/settings/pin', (route) =>
+      route.fulfill({
+        status: 429,
+        headers: { 'retry-after': String(640 * 60) },
+        contentType: 'application/json',
+        body: JSON.stringify({ error: { code: 'pin_paused', message: 'paused' } }),
+      }),
+    );
+    await dialog.getByLabel('Current PIN').fill(E2E_PIN);
+    await dialog.getByLabel('New PIN, 4 to 8 digits').fill('135792');
+    await dialog.getByLabel('The new PIN again').fill('135792');
+    await dialog.getByRole('button', { name: 'Change PIN' }).click();
+    await expect(dialog.getByRole('alert')).toContainText('11 hours');
+    await page.unroute('**/api/settings/pin');
+    await fits();
+    for (const name of ['Change PIN', 'Sign out', 'Close']) await reachable(page, name, dialog);
   } finally {
     const summary = await page.request.get(`/api/campaigns/${campaignId}/deletion`);
     if (summary.ok()) {
@@ -157,6 +201,8 @@ test('the DM view at a laptop’s 1,280 × 620: calibration, token placement and
         data: { confirm: (await summary.json()) as object },
       });
     }
+    // Leftover assets crowd the library other specs search (review T-M3).
+    await page.request.delete(`/api/assets/${assetId}`);
     await context.close();
   }
 });

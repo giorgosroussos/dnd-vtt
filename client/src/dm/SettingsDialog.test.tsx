@@ -318,7 +318,7 @@ describe('Change the PIN (specs/07-security-and-access.md §1)', () => {
     server.lockedFor = 600;
     await fill(dialog, '4826', '591837');
     expect(pinForm(dialog).querySelector('[role="alert"]')!.textContent).toBe(
-      t('settings.pinFailed', { reason: t('signIn.lockedOutMinutes', { minutes: 10 }) }),
+      t('settings.pinFailed', { reason: t('signIn.lockedOut', { wait: '10 minutes' }) }),
     );
     expect(server.pin).toBe('4826');
     expect([...pinForm(dialog).querySelectorAll('input')].map((input) => input.value)).toEqual(['', '', '']);
@@ -331,10 +331,12 @@ describe('Change the PIN (specs/07-security-and-access.md §1)', () => {
     const alert = pinForm(dialog).querySelector('[role="alert"]')!.textContent;
     expect(alert).toBe(
       t('settings.pinFailed', {
-        reason: t('signIn.paused', { address: serverPcAddress(), wait: t('wait.hours', { count: 11 }) }),
+        reason: t('settings.pinPaused', { address: serverPcAddress(), wait: t('wait.hours', { count: 11 }) }),
       }),
     );
     expect(alert).toContain('11 hours');
     expect(server.pin).toBe('4826');
+    // The refusal takes the intro's place, so that the dialog keeps to a laptop's window (review U-M1).
+    expect(pinForm(dialog).textContent).not.toContain(t('settings.pinIntro'));
   });
 });
