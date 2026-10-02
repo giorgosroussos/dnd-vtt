@@ -19,6 +19,10 @@
 //     app/node_modules/       better-sqlite3 and sharp with their production dependencies, copied from
 //                             this machine's `npm ci`, so the native binaries are this system's own
 //
+// On Windows the same folder is also wrapped by Inno Setup in Emberglass-<version>-win-x64-setup.exe,
+// beside its .sha256 (PKG-02, D-172): installed for every user, with Start Menu shortcuts and a firewall
+// rule for private networks only.
+//
 // Nothing is downloaded: the runtime is the Node that runs this script (setup-node's, from .nvmrc, in
 // CI), the native modules are the ones `make setup` installed, and the licence texts are in the
 // repository. A build without a tag names its commit instead and says it is not a release.
@@ -43,6 +47,7 @@ import {
   createIco,
   createZip,
   hostTarget,
+  innoScript,
   installedManifest,
   licenceFiles,
   nameOfKey,
@@ -206,6 +211,36 @@ writeFileSync(path.join(out, `${zipName}.sha256`), `${sha256(zip)}  ${zipName}\n
 log(`${zipName}: ${(zip.length / 1024 / 1024).toFixed(1)} MiB, ${entries.length} files, sha256 ${sha256(zip)}`);
 log(source.tag ? `built from tag ${source.tag}` : `built from commit ${source.commit ?? 'unknown'}, no tag`);
 
+// 9. The installer, on Windows (PKG-02, specs/09-operations.md §4, §5, Q-108, D-172): Inno Setup over the
+// staged folder, beside the zip with its own checksum. Inno Setup is on the Windows runner's image; a
+// Windows machine without it is told where to get it.
+if (windows) {
+  const iscc = [
+    process.env.ISCC,
+    path.join(process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)', 'Inno Setup 6', 'ISCC.exe'),
+    path.join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Inno Setup 6', 'ISCC.exe'),
+    path.join(process.env.LOCALAPPDATA ?? '', 'Programs', 'Inno Setup 6', 'ISCC.exe'),
+  ].find((file) => file && existsSync(file));
+  if (!iscc)
+    throw new Error('Inno Setup 6 is not installed (https://jrsoftware.org/isdl.php); set ISCC to its ISCC.exe.');
+  const work = path.join(out, 'installer');
+  mkdirSync(work, { recursive: true });
+  const icon = path.join(work, 'emberglass.ico');
+  writeFileSync(icon, await emberglassIco());
+  const setupName = `Emberglass-${version}-win-x64-setup`;
+  const script = path.join(work, 'emberglass.iss');
+  writeFileSync(
+    script,
+    innoScript({ version, stage, outDir: out, outName: setupName, icon, licence: path.join(stage, 'LICENSE') }),
+  );
+  const compiled = spawnSync(iscc, ['/Q', script], { stdio: 'inherit' });
+  if (compiled.status !== 0) throw new Error(`Inno Setup failed (exit ${compiled.status}).`);
+  rmSync(work, { recursive: true, force: true });
+  const setup = readFileSync(path.join(out, `${setupName}.exe`));
+  writeFileSync(path.join(out, `${setupName}.exe.sha256`), `${sha256(setup)}  ${setupName}.exe\n`);
+  log(`${setupName}.exe: ${(setup.length / 1024 / 1024).toFixed(1)} MiB, sha256 ${sha256(setup)}`);
+}
+
 function filesOf(dir) {
   return readdirSync(dir, { withFileTypes: true })
     .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
@@ -215,8 +250,8 @@ function filesOf(dir) {
     });
 }
 
-async function brandWindowsRuntime(executable) {
-  const ResEdit = await import('resedit');
+/** Emberglass's icon as an ICO, from the favicon: the runtime's icon and the installer's. */
+async function emberglassIco() {
   const { default: sharp } = await import('sharp');
   const svg = readFileSync(at('client', 'public', 'favicon.svg'));
   const images = [];
@@ -229,7 +264,12 @@ async function brandWindowsRuntime(executable) {
         .toBuffer(),
     });
   }
-  const icon = ResEdit.Data.IconFile.from(createIco(images));
+  return createIco(images);
+}
+
+async function brandWindowsRuntime(executable) {
+  const ResEdit = await import('resedit');
+  const icon = ResEdit.Data.IconFile.from(await emberglassIco());
   // Node's Authenticode signature would no longer match the edited file; the package is unsigned (Q-109).
   const exe = ResEdit.NtExecutable.from(executable, { ignoreCert: true });
   const resources = ResEdit.NtExecutableResource.from(exe);
@@ -471,9 +511,11 @@ function readme({ commit, tag, changed }) {
     '  any other device.',
     '',
     'FIREWALL',
-    '  The first time, Windows Defender Firewall asks whether Emberglass may communicate on',
-    '  networks. Allow it on private networks only. Your home Wi-Fi must be a private network in',
-    "  Windows' network settings: on a network Windows classes as Public the TV cannot reach it.",
+    '  Installed with the installer, Emberglass is already allowed on private networks only. From',
+    '  the zip, Windows Defender Firewall asks the first time whether Emberglass may communicate',
+    '  on networks: allow it on private networks only. Either way your home Wi-Fi must be a private',
+    "  network in Windows' network settings: on a network Windows classes as Public the TV cannot",
+    '  reach it.',
     '',
     'YOUR DATA',
     '  Campaigns, images and logs are in %APPDATA%\\Emberglass, not in this folder. To back up,',
@@ -485,10 +527,12 @@ function readme({ commit, tag, changed }) {
     `  Double-click ${reset}, then choose a new PIN at http://127.0.0.1:3000/dm (or the port you set)`,
     '  in a browser on this PC.',
     '',
-    'UPDATING',
-    '  Emberglass never checks for updates. To update, stop the server, unzip the newer package',
-    '  into a new folder and start it from there; it upgrades your data on its first start, after',
-    '  a dated backup copy of the database in the data folder.',
+    'UPDATING AND UNINSTALLING',
+    '  Emberglass never checks for updates. Installed: run the newer installer, which upgrades in',
+    '  place. From the zip: stop the server, unzip the newer package into a new folder and start',
+    '  it from there. The first start upgrades your data, after a dated backup copy of the database',
+    '  in the data folder. Uninstalling (Start Menu, or Settings, Apps) or deleting the zip folder',
+    '  never deletes your data.',
     '',
     'NETWORK',
     '  Plain HTTP on your home network: anyone who can watch your Wi-Fi could read the PIN. Do not',

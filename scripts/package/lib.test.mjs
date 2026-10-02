@@ -1,7 +1,18 @@
 import { readFileSync } from 'node:fs';
 import { inflateRawSync, crc32 } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
-import { createIco, createZip, nameOfKey, packageDirOf, productionClosure, resolveLockKey, runsOn } from './lib.mjs';
+import {
+  createIco,
+  createZip,
+  FIREWALL_RULE,
+  INSTALLER_APP_ID,
+  innoScript,
+  nameOfKey,
+  packageDirOf,
+  productionClosure,
+  resolveLockKey,
+  runsOn,
+} from './lib.mjs';
 
 // The helpers of the Windows package build (PKG-01, D-164, D-166). `make package` runs the build
 // and its acceptance check on the real package; these pin the parts whose mistakes would ship
@@ -201,5 +212,86 @@ describe('createIco', () => {
     expect(ico[6 + 16]).toBe(0);
     const second = ico.readUInt32LE(6 + 16 + 12);
     expect(ico.subarray(second, second + 6).toString()).toBe('bbbbbb');
+  });
+});
+
+// The installer's script (PKG-02, specs/09-operations.md §4, §5, Q-108, D-172): the promises the spec makes
+// are lines of it, so that an edit that drops one fails here, before any Windows runner.
+describe('innoScript', () => {
+  const script = innoScript({
+    version: '1.0.0-rc.1',
+    stage: 'D:\\a\\dist\\package\\Emberglass',
+    outDir: 'D:\\a\\dist\\package',
+    outName: 'Emberglass-1.0.0-rc.1-win-x64-setup',
+    icon: 'D:\\a\\emberglass.ico',
+    licence: 'D:\\a\\LICENSE',
+  });
+  const lines = script.split('\r\n');
+  const section = (name) => {
+    const start = lines.indexOf(`[${name}]`);
+    expect(start, name).toBeGreaterThan(-1);
+    const end = lines.findIndex((line, index) => index > start && line.startsWith('['));
+    return lines.slice(start + 1, end < 0 ? undefined : end).filter((line) => line && !line.startsWith(';'));
+  };
+
+  it('installs for every user, under Program Files, with one administrator prompt, as one fixed app', () => {
+    const setup = section('Setup');
+    expect(setup).toContain(`AppId={{${INSTALLER_APP_ID}}`);
+    expect(setup).toContain('PrivilegesRequired=admin');
+    expect(setup).toContain('DefaultDirName={autopf}\\Emberglass');
+    expect(setup).toContain('ArchitecturesInstallIn64BitMode=x64compatible');
+    expect(setup).toContain('AppVersion=1.0.0-rc.1');
+    expect(setup).toContain('VersionInfoVersion=1.0.0.0');
+    // An upgrade closes a running Emberglass rather than failing on its locked files.
+    expect(setup).toContain('CloseApplications=yes');
+    // The licence is shown, not accepted: the AGPL asks nothing of whoever runs the program.
+    expect(setup.some((line) => line.startsWith('LicenseFile='))).toBe(false);
+    expect(setup).toContain('InfoBeforeFile=D:\\a\\LICENSE');
+  });
+
+  it('adds Start Menu shortcuts, a desktop one only on request, all with the Emberglass icon', () => {
+    const icons = section('Icons');
+    expect(icons.filter((line) => line.startsWith('Name: "{group}\\'))).toHaveLength(3);
+    expect(icons.find((line) => line.startsWith('Name: "{group}\\Emberglass"'))).toContain(
+      'Filename: "{app}\\Emberglass.cmd"',
+    );
+    expect(icons.find((line) => line.startsWith('Name: "{autodesktop}'))).toContain('Tasks: desktopicon');
+    expect(section('Tasks')).toEqual([
+      'Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked',
+    ]);
+    for (const line of icons.filter((each) => each.includes('.cmd')))
+      expect(line).toContain('IconFilename: "{app}\\emberglass.exe"');
+  });
+
+  it('keeps exactly one inbound rule, private only, for emberglass.exe, and removes it on uninstall', () => {
+    const run = section('Run');
+    const netsh = run.filter((line) => line.startsWith('Filename: "{sys}\\netsh.exe"'));
+    expect(netsh).toHaveLength(2);
+    const program = `name=""${FIREWALL_RULE}"" program=""{app}\\emberglass.exe""`;
+    // The older one goes before the new one is added, so an upgrade never leaves two.
+    expect(netsh[0]).toContain(`advfirewall firewall delete rule ${program}`);
+    expect(netsh[1]).toContain(
+      `advfirewall firewall add rule ${program} dir=in action=allow profile=private enable=yes`,
+    );
+    expect(script).not.toMatch(/profile=(?:any|public|domain)/);
+    expect(section('UninstallRun')).toEqual([expect.stringContaining(`advfirewall firewall delete rule ${program}`)]);
+  });
+
+  it('starts Emberglass after installing as the DM, never as the administrator, and not when silent', () => {
+    const start = section('Run').find((line) => line.includes('Emberglass.cmd'));
+    expect(start).toContain('runasoriginaluser');
+    expect(start).toContain('postinstall');
+    expect(start).toContain('skipifsilent');
+  });
+
+  it('replaces the app folder whole on an upgrade and never names the data directory', () => {
+    expect(section('InstallDelete')).toEqual(['Type: filesandordirs; Name: "{app}\\app"']);
+    expect(script).not.toMatch(/userappdata|commonappdata|appdata|localappdata|UninstallDelete/i);
+  });
+
+  it('refuses a version without major.minor.patch', () => {
+    expect(() =>
+      innoScript({ version: 'next', stage: 's', outDir: 'o', outName: 'n', icon: 'i', licence: 'l' }),
+    ).toThrow(/major\.minor\.patch/);
   });
 });

@@ -28,14 +28,29 @@ On start the console prints the player view's address and a QR code for it, for 
 
 ### Windows package
 
-Each release on the repository's GitHub Releases page carries `Emberglass-<version>-win-x64.zip`, a portable package for Windows x64 with its own Node.js runtime, and its SHA-256 checksum. To check the download, run `certutil -hashfile Emberglass-<version>-win-x64.zip SHA256` in Command Prompt and compare it with the `.sha256` file.
+Each release on the repository's GitHub Releases page carries two files for Windows x64, each with its own Node.js runtime and its SHA-256 checksum:
 
-- Unzip it into a folder of its own, for example `Documents\Emberglass`, and double-click `Emberglass.cmd`. It opens the DM view, `http://localhost:3000/dm`, in your browser, and starts the server first if it is not already running; starting it again while it runs only opens the browser. Keep its window open while you play: closing it stops the server. The window shows the TV's address and QR code.
-- Your data is in `%APPDATA%\Emberglass` as with a source install, never in the package's folder. To update, stop the server and unzip the newer package into a new folder; the first start upgrades the data after a dated backup copy.
-- **Forgotten PIN.** Double-click `Reset PIN.cmd` in the package folder, then set a new one from `http://localhost:3000/dm`.
-- **The package is not signed.** The first time you start it, Windows may show "Windows protected your PC": choose **More info**, then **Run anyway**. Do this only for a zip whose checksum matches the `.sha256` file of the release.
-- `README.txt` in the package says the same, and names the source tag it was built from; `THIRD_PARTY_NOTICES.txt` holds the licences of everything it carries. The package never checks for updates.
+- `Emberglass-<version>-win-x64-setup.exe`, the **installer** (recommended);
+- `Emberglass-<version>-win-x64.zip`, the **portable package**, for a PC where you cannot or do not want to install.
+
+To check a download, run `certutil -hashfile <file> SHA256` in Command Prompt and compare it with the file's `.sha256`. **Neither is signed.** The first time you run one, Windows may show "Windows protected your PC": choose **More info**, then **Run anyway**. Do this only for a file whose checksum matches.
+
+**The installer.**
+
+- It installs Emberglass for every user of the PC under `C:\Program Files\Emberglass`, with one administrator prompt. It adds an **Emberglass** folder to the Start Menu (Emberglass, Reset the Emberglass PIN, Uninstall Emberglass) and, if you tick it, a desktop shortcut.
+- It allows Emberglass through Windows Defender Firewall on **private networks only**, so there is no firewall prompt. Your Wi-Fi must still be a private network in Windows' settings: on a network Windows classes as Public the TV cannot reach the server.
+- **To update,** run the newer installer: it upgrades in place, closing Emberglass first if it is running. The first start then upgrades your data after a dated backup copy.
+- **To uninstall,** use Uninstall Emberglass in the Start Menu, or Settings, Apps. It removes the program, its shortcuts and its firewall rule. It **never** removes your data in `%APPDATA%\Emberglass`; delete that folder yourself if you want it gone.
+
+**The portable zip.** Unzip it into a folder of its own, for example `Documents\Emberglass`, and double-click `Emberglass.cmd`. To update, stop the server and unzip the newer package into a new folder. Windows asks about the firewall on the first start: allow private networks only.
+
+**Either way:**
+
+- Start Emberglass from its shortcut or `Emberglass.cmd`. It opens the DM view, `http://127.0.0.1:3000/dm`, in your browser, starting the server first if it is not already running; starting it again while it runs only opens the browser. Keep its window open while you play: closing it stops the server. The window shows the TV's address and QR code.
+- Your data is in `%APPDATA%\Emberglass`, as with a source install, never in the program's folder.
+- **Forgotten PIN.** Use Reset the Emberglass PIN, or `Reset PIN.cmd` in the zip's folder, then set a new one from `http://127.0.0.1:3000/dm`.
 - If another program already uses port 3000, the window says so and how to start Emberglass on another port.
+- `README.txt` in the program's folder says the same and names the source tag it was built from; `THIRD_PARTY_NOTICES.txt` holds the licences of everything it carries. Emberglass never checks for updates.
 
 ## Settings
 

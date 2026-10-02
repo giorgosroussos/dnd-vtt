@@ -137,6 +137,9 @@ jobs:
     timeout-minutes: 30
     env:
       SETUP_BROWSERS: ''
+      # The runner is thrown away after the job, so the check may install, upgrade and uninstall the
+      # installer on it (PKG-02, D-172); nowhere else does it.
+      EMBERGLASS_PACKAGE_SYSTEM_TESTS: '1'
     defaults:
       run:
         shell: msys2 {0}
@@ -168,5 +171,7 @@ jobs:
           path: |
             dist/package/*.zip
             dist/package/*.zip.sha256
+            dist/package/*-setup.exe
+            dist/package/*-setup.exe.sha256
           if-no-files-found: error
           retention-days: 7

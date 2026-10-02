@@ -11,9 +11,20 @@
 // and exit, starting no second server; the PIN must be set from loopback, an image must go through
 // sharp and the live WebSocket must open; the PIN reset must clear the PIN; a restart must use the TV
 // address stored in Settings; two launches at once must start one server; a port another program holds
-// must fail with advice. On Windows the runtime must carry Emberglass's name. Every process it starts is stopped at the end.
+// must fail with advice. On Windows the runtime must carry Emberglass's name, and the installer is checked:
+// its checksum always, and where EMBERGLASS_PACKAGE_SYSTEM_TESTS=1 (the CI runner) an install, an upgrade
+// over data of an older schema and an uninstall (PKG-02). Every process it starts is stopped at the end.
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer as createHttpServer } from 'node:http';
 import { connect, createServer } from 'node:net';
 import os from 'node:os';
@@ -178,6 +189,151 @@ function cleanEnv(dataDir, port, home) {
 function nodeOnPath(env) {
   const names = windows ? ['node.exe', 'node.cmd', 'node'] : ['node'];
   return env.PATH.split(path.delimiter).some((dir) => names.some((name) => existsSync(path.join(dir, name))));
+}
+
+/**
+ * Installs, upgrades and uninstalls the installer on this machine, which must be a throwaway one (the CI
+ * runner): the acceptance of PKG-02. A first install; a v8 database in the DM's %APPDATA%\Emberglass and a
+ * file the older app would have left; the installer again over it, as an upgrade; a start that migrates
+ * after its backup; a silent uninstall that removes the rule and the program and leaves the data.
+ */
+async function installerChecks(setup, cleanEnvironment) {
+  const programFiles = process.env.ProgramFiles ?? 'C:\\Program Files';
+  const app = path.join(programFiles, 'Emberglass');
+  const data = path.join(process.env.APPDATA ?? '', 'Emberglass');
+  const startMenu = path.join(
+    process.env.ProgramData ?? 'C:\\ProgramData',
+    'Microsoft',
+    'Windows',
+    'Start Menu',
+    'Programs',
+    'Emberglass',
+  );
+  if (existsSync(data) || existsSync(app)) {
+    expect(
+      false,
+      `the installer checks refuse to run where ${data} or ${app} already exists: they would touch a real install`,
+    );
+    return;
+  }
+  const logs = mkdtempSync(path.join(os.tmpdir(), 'emberglass-setup-'));
+  const install = (name) => {
+    const logFile = path.join(logs, `${name}.log`);
+    const result = spawnSync(setup, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', `/LOG=${logFile}`], {
+      timeout: 300_000,
+    });
+    if (result.status !== 0 && existsSync(logFile)) console.log(readFileSync(logFile, 'utf8'));
+    return result.status;
+  };
+  const rules = () => {
+    const shown = spawnSync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        "@(Get-NetFirewallRule -DisplayName 'Emberglass' -ErrorAction SilentlyContinue | ForEach-Object { [pscustomobject]@{ direction = $_.Direction.ToString(); action = $_.Action.ToString(); profile = $_.Profile.ToString(); enabled = $_.Enabled.ToString(); program = ($_ | Get-NetFirewallApplicationFilter).Program } }) | ConvertTo-Json -Compress -AsArray",
+      ],
+      { encoding: 'utf8' },
+    );
+    const text = shown.stdout.trim();
+    return text === '' ? [] : JSON.parse(text);
+  };
+  const oneRule = (when) => {
+    const found = rules();
+    expect(
+      found.length === 1 &&
+        found[0].direction === 'Inbound' &&
+        found[0].action === 'Allow' &&
+        found[0].profile === 'Private' &&
+        found[0].enabled === 'True' &&
+        found[0].program.toLowerCase() === path.join(app, 'emberglass.exe').toLowerCase(),
+      `${when}: exactly one inbound rule, allowing emberglass.exe on private networks only (${JSON.stringify(found)})`,
+    );
+  };
+
+  // A first install, for every user.
+  expect(install('first') === 0, 'the installer installs silently');
+  expect(
+    existsSync(path.join(app, 'emberglass.exe')) && existsSync(path.join(app, 'app', 'server.mjs')),
+    `it installs into ${app}`,
+  );
+  expect(existsSync(path.join(startMenu, 'Emberglass.lnk')), 'it adds the Start Menu shortcut');
+  expect(existsSync(path.join(startMenu, 'Reset the Emberglass PIN.lnk')), 'it adds the PIN reset to the Start Menu');
+  const desktop = path.join(process.env.PUBLIC ?? 'C:\\Users\\Public', 'Desktop', 'Emberglass.lnk');
+  expect(!existsSync(desktop), 'it adds no desktop shortcut unless asked');
+  oneRule('after installing');
+
+  // The DM's data as an older Emberglass left it: schema version 8, a setting changed, and a file of the
+  // older app's that the new one does not have.
+  const { default: Database } = await import('better-sqlite3');
+  mkdirSync(data, { recursive: true });
+  const old = new Database(path.join(data, 'emberglass.db'));
+  // As the migration runner applies them: foreign keys off, one transaction and version each.
+  old.pragma('foreign_keys = OFF');
+  for (const file of readdirSync(path.join(app, 'app', 'migrations')).sort()) {
+    const number = Number(file.slice(0, 4));
+    if (number > 8) continue;
+    old.exec('BEGIN');
+    old.exec(readFileSync(path.join(app, 'app', 'migrations', file), 'utf8'));
+    old.pragma(`user_version = ${number}`);
+    old.exec('COMMIT');
+  }
+  old.prepare("UPDATE settings SET ruler_rule = 'dmg'").run();
+  const settingsId = old.prepare('SELECT id FROM settings').pluck().get();
+  old.close();
+  const before = sha256(readFileSync(path.join(data, 'emberglass.db')));
+  writeFileSync(path.join(app, 'app', 'left-by-an-older-version.txt'), 'old');
+
+  // The installer again, over the install: an upgrade in place.
+  expect(install('upgrade') === 0, 'the installer upgrades an install in place, silently');
+  oneRule('after upgrading');
+  expect(
+    !existsSync(path.join(app, 'app', 'left-by-an-older-version.txt')),
+    "the upgrade leaves nothing of the older app's folder",
+  );
+  expect(sha256(readFileSync(path.join(data, 'emberglass.db'))) === before, 'the upgrade leaves the data untouched');
+
+  // The first start after the upgrade migrates the data, after a dated backup (specs/09-operations.md §2).
+  const port = await freePort();
+  const runEnv = { ...cleanEnvironment, EMBERGLASS_PORT: String(port) };
+  delete runEnv.EMBERGLASS_DATA_DIR;
+  const started = run(
+    path.join(runEnv.SystemRoot ?? 'C:\\Windows', 'System32', 'cmd.exe'),
+    ['/d', '/s', '/c', `""${path.join(app, 'Emberglass.cmd')}""`],
+    runEnv,
+    { verbatim: true },
+  );
+  await waitFor(async () => started.child.exitCode !== null || (await answersAuth(port)), 60_000);
+  expect(await answersAuth(port), 'the installed Emberglass starts from the Start Menu target');
+  stop(started);
+  await within(10_000, started.exit);
+  await waitFor(async () => !(await portTaken(port)), 10_000);
+  const backups = readdirSync(data).filter((name) => /^emberglass-backup-.*-v8\.db$/.test(name));
+  expect(backups.length === 1, `the migration's backup of the version 8 database appears (${backups.join(', ')})`);
+  const migrated = new Database(path.join(data, 'emberglass.db'), { readonly: true });
+  const kept = migrated.prepare('SELECT id, ruler_rule FROM settings').get();
+  const schema = migrated.pragma('user_version', { simple: true });
+  migrated.close();
+  expect(
+    kept?.id === settingsId && kept?.ruler_rule === 'dmg' && schema >= 9,
+    `the upgraded install keeps the data and migrates it (version ${schema})`,
+  );
+
+  // A silent uninstall: the program, its shortcuts and its rule go; the data stays (specs/09-operations.md §5).
+  const uninstaller = path.join(app, 'unins000.exe');
+  spawnSync(uninstaller, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'], { timeout: 300_000 });
+  // The uninstaller runs a copy of itself from a temporary folder and returns at once.
+  await waitFor(() => !existsSync(path.join(app, 'emberglass.exe')), 120_000);
+  expect(
+    !existsSync(path.join(app, 'emberglass.exe')) && !existsSync(path.join(app, 'app')),
+    'the uninstaller removes the program',
+  );
+  expect(!existsSync(path.join(startMenu, 'Emberglass.lnk')), 'it removes the Start Menu shortcuts');
+  await waitFor(() => rules().length === 0, 30_000);
+  expect(rules().length === 0, 'it removes the firewall rule');
+  expect(existsSync(path.join(data, 'emberglass.db')), `it leaves the data directory, ${data}`);
+  rmSync(logs, { recursive: true, force: true });
 }
 
 const zips = existsSync(out) ? readdirSync(out).filter((name) => name.endsWith('.zip')) : [];
@@ -442,6 +598,23 @@ try {
     expect(!taken.output.includes('Opening the DM view'), 'it opens no browser');
   } finally {
     await new Promise((resolve) => blocker.close(() => resolve(undefined)));
+  }
+
+  // The installer (PKG-02, specs/09-operations.md §4, §5, Q-108, D-172). Built on Windows beside the zip.
+  // Installing changes the machine (Program Files, the firewall, the Start Menu), so it runs only where
+  // EMBERGLASS_PACKAGE_SYSTEM_TESTS=1 says the machine is a throwaway one, the CI runner.
+  if (windows) {
+    const setups = readdirSync(out).filter((name) => name.endsWith('-setup.exe'));
+    expect(setups.length === 1, `one installer beside the zip (${setups.join(', ')})`);
+    const setupName = setups[0] ?? '';
+    const setup = path.join(out, setupName);
+    const setupSum = existsSync(`${setup}.sha256`) ? readFileSync(`${setup}.sha256`, 'utf8') : '';
+    expect(
+      setupSum === `${sha256(readFileSync(setup))}  ${setupName}\n`,
+      `${setupName}.sha256 is the installer's SHA-256`,
+    );
+    if (process.env.EMBERGLASS_PACKAGE_SYSTEM_TESTS === '1') await installerChecks(setup, env);
+    else log('skip the installer installs here: they change the machine; CI sets EMBERGLASS_PACKAGE_SYSTEM_TESTS=1');
   }
 
   if (failures.length > 0) {

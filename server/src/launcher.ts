@@ -1,5 +1,5 @@
 // The Windows package's launcher (PKG-01, specs/09-operations.md §1, D-164, D-166): open the DM view
-// on loopback in the default browser, starting the server first only when none answers on the port,
+// on loopback (127.0.0.1, D-171) in the default browser, starting the server first only when none answers on the port,
 // so that the first run's PIN setup happens from this PC (specs/07-security-and-access.md §1).
 import { spawn } from 'node:child_process';
 

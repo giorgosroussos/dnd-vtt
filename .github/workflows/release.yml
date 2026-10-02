@@ -32,6 +32,9 @@ jobs:
     timeout-minutes: 30
     env:
       SETUP_BROWSERS: ''
+      # The runner is thrown away after the job, so the check may install, upgrade and uninstall the
+      # installer on it (PKG-02, D-172); nowhere else does it.
+      EMBERGLASS_PACKAGE_SYSTEM_TESTS: '1'
     defaults:
       run:
         shell: msys2 {0}
@@ -69,6 +72,8 @@ jobs:
           path: |
             dist/package/*.zip
             dist/package/*.zip.sha256
+            dist/package/*-setup.exe
+            dist/package/*-setup.exe.sha256
           if-no-files-found: error
           retention-days: 30
 
@@ -84,27 +89,30 @@ jobs:
         with:
           name: package-windows
           path: package
-      - name: Draft the GitHub Release with the zip and its SHA-256
+      - name: Draft the GitHub Release with the installer, the zip and their SHA-256
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          setup="$(ls package/*-setup.exe)"
           zip="$(ls package/*.zip)"
-          (cd package && sha256sum --check --strict "$(basename "$zip").sha256")
+          (cd package && sha256sum --check --strict "$(basename "$setup").sha256" "$(basename "$zip").sha256")
           {
-            echo "Emberglass ${GITHUB_REF_NAME#v} for Windows x64: a portable zip with its own Node.js runtime."
+            echo "Emberglass ${GITHUB_REF_NAME#v} for Windows x64, with its own Node.js runtime."
             echo
-            echo "Unzip it into a folder of its own and double-click Emberglass.cmd; README.txt inside says the rest."
-            echo "The package is not signed: Windows SmartScreen may warn before the first start."
+            echo "- **Installer** ($(basename "$setup")): installs for every user with one administrator prompt, adds the Start Menu shortcuts and a firewall rule for private networks only, and upgrades an older version in place. Uninstalling keeps your data in %APPDATA%\\Emberglass."
+            echo "- **Portable zip** ($(basename "$zip")): unzip it into a folder of its own and double-click Emberglass.cmd; README.txt inside says the rest."
+            echo
+            echo "The files are not signed. Windows SmartScreen may show \"Windows protected your PC\": choose More info, then Run anyway, once you have checked the file against its SHA-256 below (in Command Prompt: certutil -hashfile <file> SHA256)."
             echo
             echo "SHA-256:"
             echo
             echo '```'
-            cat package/*.zip.sha256
+            cat package/*.sha256
             echo '```'
           } > notes.md
           prerelease=()
           case "$GITHUB_REF_NAME" in *-*) prerelease=(--prerelease) ;; esac
-          gh release create "$GITHUB_REF_NAME" package/*.zip package/*.zip.sha256 \
+          gh release create "$GITHUB_REF_NAME" package/*-setup.exe package/*-setup.exe.sha256 package/*.zip package/*.zip.sha256 \
             --repo "$GITHUB_REPOSITORY" --verify-tag --draft "${prerelease[@]}" \
             --title "Emberglass ${GITHUB_REF_NAME#v}" --notes-file notes.md
