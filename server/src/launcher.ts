@@ -89,15 +89,19 @@ export class PortInUseError extends Error {
 const SETTLE_TRIES = 20;
 const SETTLE_MS = 500;
 
-const isPortInUse = (error: unknown): boolean =>
-  typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'EADDRINUSE';
+const codeOf = (error: unknown): unknown =>
+  typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
+// Taken by another server: its port, or its data directory, which a server takes before its port (D-173).
+const isTaken = (error: unknown): boolean =>
+  codeOf(error) === 'EADDRINUSE' || codeOf(error) === 'EMBERGLASS_DATA_DIR_IN_USE';
 
 /**
  * One launch. A server already running is left alone and only the DM view is opened, so a second
  * launch never starts a second server; otherwise the server starts in this process (its console is
  * the launcher's window, and closing it stops the server) and the DM view opens once it listens. When
- * the port turns out to be taken, another Emberglass that is just starting is waited for and its DM
- * view opened; anything else on the port is a PortInUseError.
+ * the port or the data directory turns out to be taken, another Emberglass that is just starting is
+ * waited for and its DM view opened; anything else on the port is a PortInUseError, and a data
+ * directory another server holds without answering here is that server's error.
  */
 export async function launch(deps: LaunchDeps): Promise<LaunchOutcome> {
   const url = dmViewUrl(deps.port);
@@ -110,11 +114,13 @@ export async function launch(deps: LaunchDeps): Promise<LaunchOutcome> {
   try {
     await deps.startServer();
   } catch (error) {
-    if (!isPortInUse(error)) throw error;
+    if (!isTaken(error)) throw error;
     for (let tries = 0; tries < SETTLE_TRIES; tries++) {
       if (await deps.isAnswering(deps.port)) return openRunning();
       await sleep(SETTLE_MS);
     }
+    // Another server holds the data but answers on no port of ours: say that, not "port in use".
+    if (codeOf(error) === 'EMBERGLASS_DATA_DIR_IN_USE') throw error;
     throw new PortInUseError(deps.port);
   }
   deps.print(`Opening the DM view: ${url}`);

@@ -185,6 +185,30 @@ describe('launch', () => {
     expect(d.events.some((event) => event.startsWith('open'))).toBe(false);
   });
 
+  it('opens the DM view of another Emberglass that holds the data directory while this one was starting', async () => {
+    let answers = 0;
+    const d = deps({
+      isAnswering: () => Promise.resolve(answers++ >= 2),
+      startServer: () => Promise.reject(Object.assign(new Error('in use'), { code: 'EMBERGLASS_DATA_DIR_IN_USE' })),
+      sleep: () => Promise.resolve(),
+    });
+    expect(await launch(d)).toEqual({ outcome: 'opened-running', opened: true });
+  });
+
+  it('says another Emberglass holds the data directory when it answers on no port of ours', async () => {
+    const d = deps({
+      port: 3001,
+      startServer: () =>
+        Promise.reject(
+          Object.assign(new Error('Another Emberglass is already running with the data directory D.'), {
+            code: 'EMBERGLASS_DATA_DIR_IN_USE',
+          }),
+        ),
+      sleep: () => Promise.resolve(),
+    });
+    await expect(launch(d)).rejects.toThrow('Another Emberglass is already running with the data directory D.');
+  });
+
   it('lets any other start-up failure through at once', async () => {
     let asked = 0;
     const d = deps({

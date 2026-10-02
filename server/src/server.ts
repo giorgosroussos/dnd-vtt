@@ -1,6 +1,7 @@
 import { loadConfig } from './config.js';
 import { connectBanner, connectInfo, systemInterfaces } from './connect.js';
 import { openDatabase } from './db/database.js';
+import { lockDataDirectory } from './db/lock.js';
 import { migrateDataDirectory } from './db/migrate.js';
 import { readPinHash, readSettings } from './db/settings.js';
 import { buildApp } from './http/app.js';
@@ -14,6 +15,8 @@ export async function start({ dev }: { dev: boolean }): Promise<void> {
   // Console and logs/emberglass.log in the data directory (specs/09-operations.md §6, D-035).
   const logger = createLogger({ dataDir: config.dataDir });
 
+  // Before anything touches the data: one server per data directory, since start-up cleans it (D-173).
+  const lock = lockDataDirectory(config.dataDir);
   try {
     // Migrations run before the server accepts connections (specs/09-operations.md §2).
     const migration = migrateDataDirectory(config.dataDir, MIGRATIONS_DIR);
@@ -26,7 +29,10 @@ export async function start({ dev }: { dev: boolean }): Promise<void> {
       db,
       dataDir: config.dataDir,
     });
-    app.addHook('onClose', () => db.close());
+    app.addHook('onClose', () => {
+      db.close();
+      lock.release();
+    });
     await app.listen({ port: config.port, host: '0.0.0.0' });
     logger.info('server.started', `Emberglass is running on port ${config.port}${dev ? ' (development)' : ''}.`, {
       port: config.port,
@@ -55,6 +61,7 @@ export async function start({ dev }: { dev: boolean }): Promise<void> {
     process.once('SIGINT', stop);
     process.once('SIGTERM', stop);
   } catch (error) {
+    lock.release();
     logger.error('server.failed', 'Emberglass could not start.', { error });
     throw error;
   }

@@ -83,14 +83,15 @@ It holds:
 
 - `emberglass.db`, the database: campaigns, sessions, scenes, tokens, the asset library and the settings;
 - `images/`, every uploaded image in its three versions;
-- `logs/`, `emberglass.log` and up to three older files, 5 MB each.
+- `logs/`, `emberglass.log` and up to three older files, 5 MB each;
+- `emberglass.lock`, which a running server holds so that no second one uses the folder (it holds no data).
 
 Nothing about the game is stored anywhere else.
 
 - **Backup.** Stop the server, then copy the whole data directory somewhere safe. There is no database server to set up or dump. To restore, or to move your campaigns to another PC, put the copy in place (or point `EMBERGLASS_DATA_DIR` at it) and start Emberglass.
 - **Automatic backups.** Before it applies a database change after an update, Emberglass copies the database to `emberglass-backup-<date and time>-v<version>.db` in the data directory. Delete old ones when you no longer need them.
 - **Backups hold the PIN hash.** The database, every `emberglass-backup-*.db` file and every copy of the folder hold the PIN as a salted hash, never the PIN itself. A 4-to-8-digit PIN can still be guessed offline from a stolen copy. After changing the PIN or running `npm run reset-pin`, delete the old `emberglass-backup-*.db` files and old copies you do not need, and keep the others where only you can read them.
-- **One server per data directory.** Run only one Emberglass server on a data folder at a time. A second server started on the same folder breaks any upload the first is receiving and deletes images uploaded but not yet used by an asset or a scene, even if it then fails to start because the port is taken.
+- **One server per data directory.** Emberglass runs only one server on a data folder at a time: a second one started on the same folder, on any port, says that another Emberglass is running with it and stops before it touches anything. It holds the folder through `emberglass.lock`, which it releases when it stops, even after a crash; leave the file where it is. Started from the Windows package, a second start just opens the running server's DM view.
 - **The images folder grows with your uploads.** An image is removed only when nothing uses it any more: no asset and no scene. The same file uploaded twice is stored once.
 
 ## Network and security

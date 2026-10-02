@@ -607,6 +607,17 @@ try {
     twinCode === openedCode && other !== undefined && other.output.includes('Emberglass is already running on port'),
     `the other launch opens the running server's DM view and exits (code ${twinCode})`,
   );
+  // A second server on the same data directory, even on another port, starts nothing and touches nothing:
+  // the data directory is locked by the running one (D-173).
+  const intruder = run(runtime, [path.join(pkg, 'app', 'server.mjs')], { ...env, EMBERGLASS_PORT: String(port + 2) });
+  const intruderCode = await within(30_000, intruder.exit);
+  expect(
+    intruderCode !== 0 &&
+      intruderCode !== 'timeout' &&
+      intruder.output.includes('Another Emberglass is already running with the data directory'),
+    `a second server on the same data directory refuses to start (code ${intruderCode})`,
+  );
+  expect(!(await portTaken(port + 2)), 'it listens on no port');
   for (const twin of twins) stop(twin);
   await Promise.all(twins.map((twin) => within(10_000, twin.exit)));
   await waitFor(async () => !(await portTaken(port)), 10_000);
