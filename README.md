@@ -4,7 +4,7 @@ A free, self-hosted virtual tabletop for in-person play, compatible with 5th edi
 
 ## Install and start
 
-On Windows you can use the portable package instead, which needs no Node.js, Git or terminal: see [Windows package](#windows-package) below. Everywhere else, and on Windows if you prefer, you need Node.js 24 or newer (<https://nodejs.org>) and Git. Emberglass is installed from source; nothing is published to a package registry.
+On Windows you can use the installer or the portable zip instead, which need no Node.js, Git or terminal: see [Windows package](#windows-package) below. Everywhere else, and on Windows if you prefer, you need Node.js 24 or newer (<https://nodejs.org>) and Git. Emberglass is installed from source; nothing is published to a package registry.
 
 Type the commands below in a terminal: on Windows, Command Prompt or PowerShell; on Linux or macOS, Terminal. `npm install` can take a few minutes the first time. Keep the terminal window open while you play: closing it stops the server.
 
@@ -33,23 +33,25 @@ Each release on the repository's GitHub Releases page carries two files for Wind
 - `Emberglass-<version>-win-x64-setup.exe`, the **installer** (recommended);
 - `Emberglass-<version>-win-x64.zip`, the **portable package**, for a PC where you cannot or do not want to install.
 
-To check a download, run `certutil -hashfile <file> SHA256` in Command Prompt and compare it with the file's `.sha256`. **Neither is signed.** The first time you run one, Windows may show "Windows protected your PC": choose **More info**, then **Run anyway**. Do this only for a file whose checksum matches.
+To check a download, run `certutil -hashfile <file> SHA256` in Command Prompt and compare it with the file's `.sha256`: a match shows the file is the one published on the release page, intact; it does not prove who built it. **Neither is signed.** The first time you run one, Windows may show "Windows protected your PC": choose **More info**, then **Run anyway**. Do this only for a file whose checksum matches.
 
 **The installer.**
 
 - It installs Emberglass for every user of the PC under `C:\Program Files\Emberglass`, with one administrator prompt. It adds an **Emberglass** folder to the Start Menu (Emberglass, Reset the Emberglass PIN, Uninstall Emberglass) and, if you tick it, a desktop shortcut.
-- It allows Emberglass through Windows Defender Firewall on **private networks only**, so there is no firewall prompt. Your Wi-Fi must still be a private network in Windows' settings: on a network Windows classes as Public the TV cannot reach the server.
-- **To update,** run the newer installer: it upgrades in place, closing Emberglass first if it is running. The first start then upgrades your data after a dated backup copy.
-- **To uninstall,** use Uninstall Emberglass in the Start Menu, or Settings, Apps. It removes the program, its shortcuts and its firewall rule. It **never** removes your data in `%APPDATA%\Emberglass`; delete that folder yourself if you want it gone.
+- It allows Emberglass through Windows Defender Firewall on **private networks only**, and blocks it on public ones, so Windows never asks. Your Wi-Fi must be a private network in Windows' settings: on a network Windows classes as Public the TV cannot reach the server. To change it: Settings, Network & internet, Wi-Fi, your network, Network profile type: **Private network**.
+- **To update,** finish your session, then run the newer installer: it upgrades in place, and stops Emberglass if it is still running. The first start then upgrades your data after a dated backup copy.
+- **To uninstall,** use Uninstall Emberglass in the Start Menu, or Settings, Apps. It stops Emberglass if it is running, then removes the program, its shortcuts and its firewall rules. It **never** removes your data in `%APPDATA%\Emberglass`; delete that folder yourself if you want it gone.
+- The Emberglass shortcut opens a console window, which cannot be pinned to the taskbar: pin it to Start instead.
+- **One DM at a time on a shared PC.** If two Windows users of the same PC start Emberglass, the second one's shortcut opens the first one's DM view, on the same port. Use one Windows account for Emberglass, or give each user their own `EMBERGLASS_PORT`.
 
 **The portable zip.** Unzip it into a folder of its own, for example `Documents\Emberglass`, and double-click `Emberglass.cmd`. To update, stop the server and unzip the newer package into a new folder. Windows asks about the firewall on the first start: allow private networks only.
 
 **Either way:**
 
-- Start Emberglass from its shortcut or `Emberglass.cmd`. It opens the DM view, `http://127.0.0.1:3000/dm`, in your browser, starting the server first if it is not already running; starting it again while it runs only opens the browser. Keep its window open while you play: closing it stops the server. The window shows the TV's address and QR code.
+- Start Emberglass from its shortcut or `Emberglass.cmd`. It opens the DM view, `http://127.0.0.1:3000/dm`, in your browser, starting the server first if it is not already running; starting it again on the same port while it runs only opens the browser. Keep its window open while you play: closing it stops the server. The window shows the TV's address and QR code.
 - Your data is in `%APPDATA%\Emberglass`, as with a source install, never in the program's folder.
 - **Forgotten PIN.** Use Reset the Emberglass PIN, or `Reset PIN.cmd` in the zip's folder, then set a new one from `http://127.0.0.1:3000/dm`.
-- If another program already uses port 3000, the window says so and how to start Emberglass on another port.
+- If another program already uses port 3000, the window says so and how to start Emberglass on another port, for that start only.
 - `README.txt` in the program's folder says the same and names the source tag it was built from; `THIRD_PARTY_NOTICES.txt` holds the licences of everything it carries. Emberglass never checks for updates.
 
 ## Settings
@@ -91,7 +93,7 @@ Nothing about the game is stored anywhere else.
 - **Backup.** Stop the server, then copy the whole data directory somewhere safe. There is no database server to set up or dump. To restore, or to move your campaigns to another PC, put the copy in place (or point `EMBERGLASS_DATA_DIR` at it) and start Emberglass.
 - **Automatic backups.** Before it applies a database change after an update, Emberglass copies the database to `emberglass-backup-<date and time>-v<version>.db` in the data directory. Delete old ones when you no longer need them.
 - **Backups hold the PIN hash.** The database, every `emberglass-backup-*.db` file and every copy of the folder hold the PIN as a salted hash, never the PIN itself. A 4-to-8-digit PIN can still be guessed offline from a stolen copy. After changing the PIN or running `npm run reset-pin`, delete the old `emberglass-backup-*.db` files and old copies you do not need, and keep the others where only you can read them.
-- **One server per data directory.** Emberglass runs only one server on a data folder at a time: a second one started on the same folder, on any port, says that another Emberglass is running with it and stops before it touches anything. It holds the folder through `emberglass.lock`, which it releases when it stops, even after a crash; leave the file where it is. Started from the Windows package, a second start just opens the running server's DM view.
+- **One server per data directory.** Emberglass runs only one server on a data folder at a time: a second one started on the same folder, on any port, says that another Emberglass is running with it and stops before it touches anything. It holds the folder through `emberglass.lock`, which it releases when it stops, even after a crash; leave the file where it is. Started from the Windows package on the same port, a second start just opens the running server's DM view.
 - **The images folder grows with your uploads.** An image is removed only when nothing uses it any more: no asset and no scene. The same file uploaded twice is stored once.
 
 ## Network and security
@@ -110,7 +112,7 @@ Emberglass is meant for a trusted home network.
 
 ### Firewall
 
-**Windows.** The first time Emberglass starts, Windows Defender Firewall asks whether Node.js (with the Windows package: Emberglass) may communicate on networks. Allow it on **private networks only**, and leave public networks unticked. Your home Wi-Fi must be set as a private network in Windows' network settings; otherwise the TV cannot reach the server. To change the answer later, open Windows Defender Firewall, then "Allow an app through firewall", then Node.js (or Emberglass).
+**Windows.** With the Windows installer this is done for you: see [Windows package](#windows-package). Otherwise, the first time Emberglass starts, Windows Defender Firewall asks whether Node.js (with the zip: Emberglass) may communicate on networks. Allow it on **private networks only**, and leave public networks unticked. Your home Wi-Fi must be set as a private network in Windows' network settings; otherwise the TV cannot reach the server. To change the answer later, open Windows Defender Firewall, then "Allow an app through firewall", then Node.js (or Emberglass).
 
 **Linux.** If a host firewall is active, open the port (3000 by default) to your home network only. For example, for a network of `192.168.1.x`:
 

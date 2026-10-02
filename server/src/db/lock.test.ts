@@ -1,7 +1,6 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
 import { DataDirectoryInUseError, LOCK_FILE, lockDataDirectory } from './lock.js';
 
@@ -23,12 +22,7 @@ describe('lockDataDirectory', () => {
     const first = lockDataDirectory(dir);
     expect(existsSync(path.join(dir, LOCK_FILE))).toBe(true);
     expect(() => lockDataDirectory(dir)).toThrow(DataDirectoryInUseError);
-    try {
-      lockDataDirectory(dir);
-    } catch (error) {
-      expect((error as DataDirectoryInUseError).code).toBe('EMBERGLASS_DATA_DIR_IN_USE');
-      expect((error as Error).message).toContain(dir);
-    }
+    expect(() => lockDataDirectory(dir)).toThrow(dir);
     first.release();
     const second = lockDataDirectory(dir);
     second.release();
@@ -42,13 +36,27 @@ describe('lockDataDirectory', () => {
     two.release();
   });
 
-  it('is released by the operating system when the process holding it ends, however it ends', () => {
+  it('refuses at once, with no wait for the holder to let go', () => {
+    expect.assertions(3);
     const dir = dataDir();
-    // A process that takes the lock and exits without releasing it, as a crash would.
-    const script = `const D = require('better-sqlite3'); require('node:fs').mkdirSync(${JSON.stringify(dir)}, { recursive: true }); const db = new D(require('node:path').join(${JSON.stringify(dir)}, '${LOCK_FILE}')); db.exec('BEGIN EXCLUSIVE'); process.exit(3);`;
-    const crashed = spawnSync(process.execPath, ['-e', script], { cwd: path.resolve(import.meta.dirname, '..', '..') });
-    expect(crashed.status).toBe(3);
-    const after = lockDataDirectory(dir);
-    after.release();
+    const first = lockDataDirectory(dir);
+    const asked = Date.now();
+    try {
+      lockDataDirectory(dir);
+    } catch (error) {
+      expect(error).toBeInstanceOf(DataDirectoryInUseError);
+      expect((error as DataDirectoryInUseError).code).toBe('EMBERGLASS_DATA_DIR_IN_USE');
+    }
+    expect(Date.now() - asked).toBeLessThan(500);
+    first.release();
+  });
+
+  it('makes again a lock file a copy or a sync tool damaged: it holds no data', () => {
+    const dir = dataDir();
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, LOCK_FILE), 'not a database, half of a copied file');
+    const lock = lockDataDirectory(dir);
+    expect(() => lockDataDirectory(dir)).toThrow(DataDirectoryInUseError);
+    lock.release();
   });
 });

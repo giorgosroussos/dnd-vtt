@@ -1,4 +1,6 @@
 // The package's launcher entry (`app/launcher.mjs`, run by `Emberglass.cmd`; PKG-01, D-164, D-166).
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { assertSupportedNode } from './node-version.js';
 
 assertSupportedNode(process.versions.node);
@@ -27,8 +29,10 @@ try {
   });
   if (outcome === 'opened-running') process.exit(opened ? 0 : 2);
 } catch (error) {
-  if (error instanceof PortInUseError)
-    for (const line of portInUseAdvice(error.port, process.platform)) console.error(line);
-  else console.error(error instanceof Error ? error.message : error);
+  if (error instanceof PortInUseError) {
+    // The package's folder: app/launcher.mjs is one level below it.
+    const folder = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+    for (const line of portInUseAdvice(error.port, process.platform, folder)) console.error(line);
+  } else console.error(error instanceof Error ? error.message : error);
   process.exit(1);
 }

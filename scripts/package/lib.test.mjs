@@ -4,9 +4,11 @@ import { describe, expect, it } from 'vitest';
 import {
   createIco,
   createZip,
+  FIREWALL_BLOCK_RULE,
   FIREWALL_RULE,
   INSTALLER_APP_ID,
   innoScript,
+  installerInfo,
   nameOfKey,
   packageDirOf,
   productionClosure,
@@ -215,8 +217,8 @@ describe('createIco', () => {
   });
 });
 
-// The installer's script (PKG-02, specs/09-operations.md §4, §5, Q-108, D-172): the promises the spec makes
-// are lines of it, so that an edit that drops one fails here, before any Windows runner.
+// The installer's script (PKG-02, specs/09-operations.md §4, §5, Q-108, D-172, D-174, D-175): the promises the
+// spec makes are lines of it, so that an edit that drops one fails here, before any Windows runner.
 describe('innoScript', () => {
   const script = innoScript({
     version: '1.0.0-rc.1',
@@ -224,29 +226,40 @@ describe('innoScript', () => {
     outDir: 'D:\\a\\dist\\package',
     outName: 'Emberglass-1.0.0-rc.1-win-x64-setup',
     icon: 'D:\\a\\emberglass.ico',
-    licence: 'D:\\a\\LICENSE',
+    info: 'D:\\a\\info.txt',
   });
   const lines = script.split('\r\n');
   const section = (name) => {
     const start = lines.indexOf(`[${name}]`);
     expect(start, name).toBeGreaterThan(-1);
-    const end = lines.findIndex((line, index) => index > start && line.startsWith('['));
+    const end = lines.findIndex((line, index) => index > start && /^\[[A-Za-z]+\]$/.test(line));
     return lines.slice(start + 1, end < 0 ? undefined : end).filter((line) => line && !line.startsWith(';'));
   };
 
-  it('installs for every user, under Program Files, with one administrator prompt, as one fixed app', () => {
+  it('installs for every user, always under Program Files, x64 only, with one administrator prompt, as one fixed app', () => {
     const setup = section('Setup');
     expect(setup).toContain(`AppId={{${INSTALLER_APP_ID}}`);
     expect(setup).toContain('PrivilegesRequired=admin');
+    expect(setup.some((line) => line.startsWith('PrivilegesRequiredOverridesAllowed'))).toBe(false);
     expect(setup).toContain('DefaultDirName={autopf}\\Emberglass');
-    expect(setup).toContain('ArchitecturesInstallIn64BitMode=x64compatible');
+    // No other folder: one a user may write to would let them replace what the firewall and Start Menu trust.
+    expect(setup).toContain('DisableDirPage=yes');
+    expect(setup).toContain('UsePreviousAppDir=no');
+    expect(setup).toContain('ArchitecturesAllowed=x64os');
+    expect(setup).toContain('ArchitecturesInstallIn64BitMode=x64os');
     expect(setup).toContain('AppVersion=1.0.0-rc.1');
     expect(setup).toContain('VersionInfoVersion=1.0.0.0');
-    // An upgrade closes a running Emberglass rather than failing on its locked files.
-    expect(setup).toContain('CloseApplications=yes');
-    // The licence is shown, not accepted: the AGPL asks nothing of whoever runs the program.
+    expect(setup).toContain('CloseApplications=force');
+    // A short page on what it does, never a licence to accept: the AGPL asks nothing of whoever runs it.
     expect(setup.some((line) => line.startsWith('LicenseFile='))).toBe(false);
-    expect(setup).toContain('InfoBeforeFile=D:\\a\\LICENSE');
+    expect(setup).toContain('InfoBeforeFile=D:\\a\\info.txt');
+  });
+
+  it('tells the DM on uninstalling that the data is kept, and where', () => {
+    const messages = section('Messages');
+    expect(messages.find((line) => line.startsWith('ConfirmUninstall='))).toContain('%APPDATA%\\Emberglass are kept');
+    expect(messages.find((line) => line.startsWith('UninstalledAll='))).toContain('still in %APPDATA%\\Emberglass');
+    expect(installerInfo('1.0.0')).toContain('Updating or\r\n  uninstalling never deletes them.');
   });
 
   it('adds Start Menu shortcuts, a desktop one only on request, all with the Emberglass icon', () => {
@@ -263,18 +276,35 @@ describe('innoScript', () => {
       expect(line).toContain('IconFilename: "{app}\\emberglass.exe"');
   });
 
-  it('keeps exactly one inbound rule, private only, for emberglass.exe, and removes it on uninstall', () => {
-    const run = section('Run');
-    const netsh = run.filter((line) => line.startsWith('Filename: "{sys}\\netsh.exe"'));
-    expect(netsh).toHaveLength(2);
-    const program = `name=""${FIREWALL_RULE}"" program=""{app}\\emberglass.exe""`;
-    // The older one goes before the new one is added, so an upgrade never leaves two.
-    expect(netsh[0]).toContain(`advfirewall firewall delete rule ${program}`);
-    expect(netsh[1]).toContain(
-      `advfirewall firewall add rule ${program} dir=in action=allow profile=private enable=yes`,
+  it('keeps exactly two inbound rules for emberglass.exe: TCP allowed on private networks, all blocked on the others', () => {
+    const netsh = section('Run').filter((line) => line.startsWith('Filename: "{sys}\\netsh.exe"'));
+    const program = 'program=""{app}\\emberglass.exe""';
+    const allow = `name=""${FIREWALL_RULE}"" ${program}`;
+    const block = `name=""${FIREWALL_BLOCK_RULE}"" ${program}`;
+    // The older ones go before the new ones are added, so an upgrade never leaves more.
+    expect(netsh).toHaveLength(4);
+    expect(netsh[0]).toContain(`advfirewall firewall delete rule ${allow}`);
+    expect(netsh[1]).toContain(`advfirewall firewall delete rule ${block}`);
+    expect(netsh[2]).toContain(
+      `advfirewall firewall add rule ${allow} dir=in action=allow protocol=TCP profile=private enable=yes`,
     );
-    expect(script).not.toMatch(/profile=(?:any|public|domain)/);
-    expect(section('UninstallRun')).toEqual([expect.stringContaining(`advfirewall firewall delete rule ${program}`)]);
+    expect(netsh[3]).toContain(
+      `advfirewall firewall add rule ${block} dir=in action=block profile=public,domain enable=yes`,
+    );
+    expect(script).not.toMatch(/action=allow[^\r\n]*profile=(?:any|public|domain)/);
+    const uninstall = section('UninstallRun');
+    expect(uninstall.filter((line) => line.includes(`delete rule ${allow}`))).toHaveLength(1);
+    expect(uninstall.filter((line) => line.includes(`delete rule ${block}`))).toHaveLength(1);
+  });
+
+  it('stops a running Emberglass from this folder, and only that one, before an upgrade or an uninstall', () => {
+    // As a parameter in [UninstallRun]; inside a Pascal string in [Code], where a quote is doubled.
+    expect(section('UninstallRun')[0]).toContain("Where-Object Path -eq '{app}\\emberglass.exe' | Stop-Process -Force");
+    expect(section('Code').join('\n')).toMatch(
+      /function PrepareToInstall[\s\S]*Where-Object Path -eq ''\{app\}\\emberglass\.exe'' \| Stop-Process -Force/,
+    );
+    // No braces in what Inno Setup expands: { would start one of its constants.
+    expect(section('UninstallRun')[0]).not.toMatch(/\{ \$_/);
   });
 
   it('starts Emberglass after installing as the DM, never as the administrator, and not when silent', () => {
@@ -284,14 +314,16 @@ describe('innoScript', () => {
     expect(start).toContain('skipifsilent');
   });
 
-  it('replaces the app folder whole on an upgrade and never names the data directory', () => {
+  it('replaces the app folder whole on an upgrade and never acts on the data directory', () => {
     expect(section('InstallDelete')).toEqual(['Type: filesandordirs; Name: "{app}\\app"']);
-    expect(script).not.toMatch(/userappdata|commonappdata|appdata|localappdata|UninstallDelete/i);
+    // The messages name %APPDATA%\Emberglass to the DM; no directive acts on it.
+    const acting = lines.filter((line) => !line.startsWith('ConfirmUninstall=') && !line.startsWith('UninstalledAll='));
+    expect(acting.join('\n')).not.toMatch(/userappdata|commonappdata|localappdata|%APPDATA%|UninstallDelete/i);
   });
 
   it('refuses a version without major.minor.patch', () => {
-    expect(() =>
-      innoScript({ version: 'next', stage: 's', outDir: 'o', outName: 'n', icon: 'i', licence: 'l' }),
-    ).toThrow(/major\.minor\.patch/);
+    expect(() => innoScript({ version: 'next', stage: 's', outDir: 'o', outName: 'n', icon: 'i', info: 'f' })).toThrow(
+      /major\.minor\.patch/,
+    );
   });
 });

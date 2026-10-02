@@ -27,6 +27,7 @@ How a DM installs, starts, configures and backs up Emberglass.
 
 - On Windows the firewall asks for permission on first start; the README MUST explain allowing Node on private networks only. [input, Q-076]
 - The Windows installer MUST add an inbound firewall rule for the package's executable on the private profile only and remove it when it uninstalls; the README MUST say that a network Windows classes as Public keeps the TV out. [Q-108, recommendation accepted]
+- Beside it, the installer MUST add an inbound rule blocking the executable on the public and domain profiles, so that Windows asks nothing there and a hurried "Allow" on a network classed as Public cannot expose the server, and MUST remove both rules when it uninstalls. [Q-108, recommendation accepted]
 - The installer MUST install for every user with one administrator prompt, add Start Menu shortcuts, upgrade an older version in place, and never delete the data directory (§5) when it uninstalls. [Q-108, recommendation accepted]
 - The README MUST also explain opening the port on Linux with a common host firewall. [Q-018, recommendation accepted]
 

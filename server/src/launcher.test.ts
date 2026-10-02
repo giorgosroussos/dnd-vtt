@@ -118,6 +118,8 @@ describe('launch', () => {
       'start',
       'print Opening the DM view: http://127.0.0.1:3000/dm',
       'open http://127.0.0.1:3000/dm',
+      // An installed DM may never read a README (review U-L3).
+      'print Keep this window open while you play: closing it stops Emberglass.',
     ]);
   });
 
@@ -145,7 +147,7 @@ describe('launch', () => {
   it('prints the address to open when no browser could be started, and says it did not open', async () => {
     const d = deps({ open: () => Promise.resolve(false) });
     expect(await launch(d)).toEqual({ outcome: 'started', opened: false });
-    expect(d.events.at(-1)).toBe(
+    expect(d.events).toContain(
       'print Could not open a browser. Open http://127.0.0.1:3000/dm in a browser on this PC.',
     );
   });
@@ -193,20 +195,29 @@ describe('launch', () => {
       sleep: () => Promise.resolve(),
     });
     expect(await launch(d)).toEqual({ outcome: 'opened-running', opened: true });
+    expect(d.events).toContain('print Emberglass is already running on port 3000. Opening http://127.0.0.1:3000/dm');
   });
 
-  it('says another Emberglass holds the data directory when it answers on no port of ours', async () => {
+  it('waits a minute for a server that holds the data directory, then says so, opening nothing', async () => {
+    const waits: number[] = [];
+    const held = Object.assign(new Error('Emberglass is already running in another window, perhaps on another port.'), {
+      code: 'EMBERGLASS_DATA_DIR_IN_USE',
+    });
     const d = deps({
       port: 3001,
-      startServer: () =>
-        Promise.reject(
-          Object.assign(new Error('Another Emberglass is already running with the data directory D.'), {
-            code: 'EMBERGLASS_DATA_DIR_IN_USE',
-          }),
-        ),
-      sleep: () => Promise.resolve(),
+      startServer: () => Promise.reject(held),
+      sleep: (ms) => {
+        waits.push(ms);
+        return Promise.resolve();
+      },
     });
-    await expect(launch(d)).rejects.toThrow('Another Emberglass is already running with the data directory D.');
+    const failure = await launch(d).catch((error: unknown) => error);
+    // Its own error, not a taken port: that server holds the data on another port.
+    expect(failure).toBe(held);
+    expect(failure).not.toBeInstanceOf(PortInUseError);
+    // A whole start-up to wait out, a backup and a migration on a slow disk included (review C-L6).
+    expect(waits.reduce((sum, ms) => sum + ms, 0)).toBe(60_000);
+    expect(d.events.some((event) => event.startsWith('open'))).toBe(false);
   });
 
   it('lets any other start-up failure through at once', async () => {
@@ -222,12 +233,16 @@ describe('launch', () => {
 
 describe('portInUseAdvice', () => {
   it('names the port and gives a way to start on the next one, for Windows and elsewhere', () => {
-    const windows = portInUseAdvice(3000, 'win32');
+    const windows = portInUseAdvice(3000, 'win32', 'C:\\Program Files\\Emberglass');
     expect(windows[0]).toBe('Port 3000 is used by another program, so Emberglass cannot start on it.');
     expect(windows).toContain('  set EMBERGLASS_PORT=3001');
     expect(windows).toContain('  Emberglass.cmd');
-    expect(portInUseAdvice(3000, 'linux').join(' ')).toContain('EMBERGLASS_PORT=3001 ./emberglass.sh');
-    expect(portInUseAdvice(65535, 'win32')).toContain('  set EMBERGLASS_PORT=65534');
+    expect(windows.join(' ')).toContain('open the folder C:\\Program Files\\Emberglass in File Explorer');
+    expect(windows.join(' ')).toContain('for this time only');
+    expect(portInUseAdvice(3000, 'linux', '/opt/Emberglass').join(' ')).toContain(
+      'EMBERGLASS_PORT=3001 /opt/Emberglass/emberglass.sh',
+    );
+    expect(portInUseAdvice(65535, 'win32', 'C:\\Program Files\\Emberglass')).toContain('  set EMBERGLASS_PORT=65534');
   });
 });
 

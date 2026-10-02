@@ -10,7 +10,19 @@ import { CLIENT_DIST, CLIENT_ROOT, MIGRATIONS_DIR } from './paths.js';
 
 // One process: the built client (or Vite in development), the REST API and the
 // WebSocket of the live scene, all on one port (specs/02-architecture.md §2).
-export async function start({ dev }: { dev: boolean }): Promise<void> {
+/** A running server: closing it stops it and releases its data directory (D-173). */
+export interface Running {
+  port: number;
+  close(): Promise<void>;
+}
+
+export async function start({
+  dev,
+  clientDist = CLIENT_DIST,
+}: {
+  dev: boolean;
+  clientDist?: string;
+}): Promise<Running> {
   const config = loadConfig();
   // Console and logs/emberglass.log in the data directory (specs/09-operations.md §6, D-035).
   const logger = createLogger({ dataDir: config.dataDir });
@@ -24,7 +36,7 @@ export async function start({ dev }: { dev: boolean }): Promise<void> {
 
     const db = openDatabase(config.dataDir);
     const app = await buildApp({
-      client: dev ? { kind: 'dev', root: CLIENT_ROOT } : { kind: 'static', dist: CLIENT_DIST },
+      client: dev ? { kind: 'dev', root: CLIENT_ROOT } : { kind: 'static', dist: clientDist },
       logger,
       db,
       dataDir: config.dataDir,
@@ -60,6 +72,15 @@ export async function start({ dev }: { dev: boolean }): Promise<void> {
     };
     process.once('SIGINT', stop);
     process.once('SIGTERM', stop);
+    const address = app.server.address();
+    return {
+      port: address !== null && typeof address === 'object' ? address.port : config.port,
+      close: async () => {
+        process.off('SIGINT', stop);
+        process.off('SIGTERM', stop);
+        await app.close();
+      },
+    };
   } catch (error) {
     lock.release();
     logger.error('server.failed', 'Emberglass could not start.', { error });

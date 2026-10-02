@@ -48,6 +48,8 @@ import {
   createZip,
   hostTarget,
   innoScript,
+  installerInfo,
+  UPGRADE_FROM_VERSION,
   installedManifest,
   licenceFiles,
   nameOfKey,
@@ -227,18 +229,27 @@ if (windows) {
   mkdirSync(work, { recursive: true });
   const icon = path.join(work, 'emberglass.ico');
   writeFileSync(icon, await emberglassIco());
-  const setupName = `Emberglass-${version}-win-x64-setup`;
-  const script = path.join(work, 'emberglass.iss');
-  writeFileSync(
-    script,
-    innoScript({ version, stage, outDir: out, outName: setupName, icon, licence: path.join(stage, 'LICENSE') }),
-  );
-  const compiled = spawnSync(iscc, ['/Q', script], { stdio: 'inherit' });
-  if (compiled.status !== 0) throw new Error(`Inno Setup failed (exit ${compiled.status}).`);
+  /** Compiles the installer for `label` into `dir`, beside its .sha256; answers its file name. */
+  const compile = (label, dir) => {
+    mkdirSync(dir, { recursive: true });
+    const name = `Emberglass-${label}-win-x64-setup`;
+    const info = path.join(work, `info-${label}.txt`);
+    writeFileSync(info, installerInfo(label));
+    const script = path.join(work, `emberglass-${label}.iss`);
+    writeFileSync(script, innoScript({ version: label, stage, outDir: dir, outName: name, icon, info }));
+    const compiled = spawnSync(iscc, ['/Q', script], { stdio: 'inherit' });
+    if (compiled.status !== 0) throw new Error(`Inno Setup failed (exit ${compiled.status}).`);
+    const setup = readFileSync(path.join(dir, `${name}.exe`));
+    writeFileSync(path.join(dir, `${name}.exe.sha256`), `${sha256(setup)}  ${name}.exe\n`);
+    log(`${name}.exe: ${(setup.length / 1024 / 1024).toFixed(1)} MiB, sha256 ${sha256(setup)}`);
+    return name;
+  };
+  compile(version, out);
+  // Where the installer checks run (the CI runner), an older-labelled installer of the same folder, for a real
+  // upgrade from an older version to this one (review T-M5), in a folder of its own that no upload names.
+  if (process.env.EMBERGLASS_PACKAGE_SYSTEM_TESTS === '1')
+    compile(UPGRADE_FROM_VERSION, path.join(out, 'upgrade-test'));
   rmSync(work, { recursive: true, force: true });
-  const setup = readFileSync(path.join(out, `${setupName}.exe`));
-  writeFileSync(path.join(out, `${setupName}.exe.sha256`), `${sha256(setup)}  ${setupName}.exe\n`);
-  log(`${setupName}.exe: ${(setup.length / 1024 / 1024).toFixed(1)} MiB, sha256 ${sha256(setup)}`);
 }
 
 function filesOf(dir) {
@@ -486,6 +497,7 @@ function writeLaunchers() {
 }
 
 function readme({ commit, tag, changed }) {
+  // One text for the installed program (Program Files, Start Menu) and for the zip (review U-M7).
   const start = windows ? 'Emberglass.cmd' : 'emberglass.sh';
   const reset = windows ? 'Reset PIN.cmd' : 'reset-pin.sh';
   const built = tag
@@ -498,41 +510,41 @@ function readme({ commit, tag, changed }) {
     'The server runs on this PC; the TV opens the player view in its browser over the home Wi-Fi.',
     '',
     'START',
-    `  Double-click ${start}. It opens the DM view, http://127.0.0.1:3000/dm (or the port you set),`,
-    '  in your browser, and starts the server first if it is not running yet. Keep its window open',
-    '  while you play: closing it stops the server. The window shows the address and QR code for',
-    '  the TV. If the TV cannot open it, check first that Windows calls your Wi-Fi a private',
-    '  network (FIREWALL below), then choose the TV address in Settings in the DM view.',
-    '',
-    '  The package is not signed. When Windows shows "Windows protected your PC" on the first start,',
-    '  choose More info, then Run anyway. Compare the zip with its .sha256 from the release first.',
+    `  Installed: Emberglass in the Start Menu. From the zip: double-click ${start} in its folder.`,
+    '  It opens the DM view, http://127.0.0.1:3000/dm (or the port you set), in your browser, and',
+    '  starts the server first if it is not running yet. Keep its window open while you play:',
+    '  closing it stops the server. The window shows the address and QR code for the TV. If the',
+    '  TV cannot open it, check first that Windows calls your Wi-Fi a private network (FIREWALL',
+    '  below), then choose the TV address in Settings in the DM view.',
     '',
     '  First run: choose the DM PIN in the browser that opens, on this PC. Setup is refused from',
     '  any other device.',
     '',
+    '  The installer and the zip are not signed. When Windows shows "Windows protected your PC",',
+    '  choose More info, then Run anyway, once the file matches its .sha256 from the release.',
+    '',
     'FIREWALL',
-    '  Installed with the installer, Emberglass is already allowed on private networks only. From',
-    '  the zip, Windows Defender Firewall asks the first time whether Emberglass may communicate',
-    '  on networks: allow it on private networks only. Either way your home Wi-Fi must be a private',
-    "  network in Windows' network settings: on a network Windows classes as Public the TV cannot",
-    '  reach it.',
+    '  Installed: Emberglass is allowed on private networks only and blocked on public ones, so',
+    '  Windows does not ask. From the zip: Windows Defender Firewall asks the first time whether',
+    '  Emberglass may communicate on networks; allow it on private networks only. Either way your',
+    "  home Wi-Fi must be a private network in Windows' settings (Settings, Network & internet,",
+    '  Wi-Fi, your network, Network profile type: Private): on a Public one the TV cannot reach it.',
     '',
     'YOUR DATA',
     '  Campaigns, images and logs are in %APPDATA%\\Emberglass, not in this folder. To back up,',
-    '  stop the server and copy that folder. Deleting this folder does not delete your data.',
-    '  EMBERGLASS_DATA_DIR and EMBERGLASS_PORT change the folder and the port (3000): in this folder,',
-    '  type cmd in the address bar of File Explorer, then set EMBERGLASS_PORT=3001 and Emberglass.cmd.',
+    '  stop the server and copy that folder. EMBERGLASS_DATA_DIR and EMBERGLASS_PORT change the',
+    '  folder and the port (3000).',
     '',
     'FORGOTTEN PIN',
-    `  Double-click ${reset}, then choose a new PIN at http://127.0.0.1:3000/dm (or the port you set)`,
-    '  in a browser on this PC.',
+    `  Installed: Reset the Emberglass PIN in the Start Menu. From the zip: double-click ${reset}.`,
+    '  Then choose a new PIN at http://127.0.0.1:3000/dm (or the port you set) on this PC.',
     '',
     'UPDATING AND UNINSTALLING',
-    '  Emberglass never checks for updates. Installed: run the newer installer, which upgrades in',
-    '  place. From the zip: stop the server, unzip the newer package into a new folder and start',
-    '  it from there. The first start upgrades your data, after a dated backup copy of the database',
-    '  in the data folder. Uninstalling (Start Menu, or Settings, Apps) or deleting the zip folder',
-    '  never deletes your data.',
+    '  Emberglass never checks for updates. Installed: finish your session, then run the newer',
+    '  installer, which upgrades in place; uninstall it from the Start Menu or Settings, Apps. From',
+    '  the zip: stop the server, unzip the newer package into a new folder and start it there;',
+    '  delete the old folder when you like. The first start upgrades your data, after a dated',
+    '  backup copy of the database. Neither uninstalling nor deleting the folder deletes your data.',
     '',
     'NETWORK',
     '  Plain HTTP on your home network: anyone who can watch your Wi-Fi could read the PIN. Do not',

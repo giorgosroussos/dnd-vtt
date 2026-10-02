@@ -2,6 +2,7 @@
 // on loopback (127.0.0.1, D-171) in the default browser, starting the server first only when none answers on the port,
 // so that the first run's PIN setup happens from this PC (specs/07-security-and-access.md §1).
 import { spawn } from 'node:child_process';
+import path from 'node:path';
 
 /**
  * The DM view on the loopback address, the only place PIN setup is accepted from. The IPv4 address the
@@ -86,8 +87,12 @@ export class PortInUseError extends Error {
 
 // How long a launch waits for another Emberglass that took the port first to answer: two
 // double-clicks in a row start two launches before either server listens (PKG-01 review C-L1).
-const SETTLE_TRIES = 20;
 const SETTLE_MS = 500;
+const SETTLE_TRIES = 20;
+// A server holds its data directory before it migrates and cleans it, so a launch that finds it held may
+// have to wait out that server's whole start-up, a backup and a migration on a slow disk included (review
+// C-L6): up to a minute.
+const SETTLE_TRIES_DATA_DIR = 120;
 
 const codeOf = (error: unknown): unknown =>
   typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
@@ -115,7 +120,8 @@ export async function launch(deps: LaunchDeps): Promise<LaunchOutcome> {
     await deps.startServer();
   } catch (error) {
     if (!isTaken(error)) throw error;
-    for (let tries = 0; tries < SETTLE_TRIES; tries++) {
+    const tries = codeOf(error) === 'EMBERGLASS_DATA_DIR_IN_USE' ? SETTLE_TRIES_DATA_DIR : SETTLE_TRIES;
+    for (let tried = 0; tried < tries; tried++) {
       if (await deps.isAnswering(deps.port)) return openRunning();
       await sleep(SETTLE_MS);
     }
@@ -124,7 +130,10 @@ export async function launch(deps: LaunchDeps): Promise<LaunchOutcome> {
     throw new PortInUseError(deps.port);
   }
   deps.print(`Opening the DM view: ${url}`);
-  return { outcome: 'started', opened: await openOrSay(deps, url) };
+  const opened = await openOrSay(deps, url);
+  // An installed DM may never read a README: the window says what it is for (review U-L3).
+  deps.print('Keep this window open while you play: closing it stops Emberglass.');
+  return { outcome: 'started', opened };
 }
 
 async function openOrSay(deps: LaunchDeps, url: string): Promise<boolean> {
@@ -133,19 +142,20 @@ async function openOrSay(deps: LaunchDeps, url: string): Promise<boolean> {
   return opened;
 }
 
-/** What the window says when the port is taken: the way out, for Windows and elsewhere. */
-export function portInUseAdvice(port: number, platform: NodeJS.Platform): string[] {
+/** What the window says when the port is taken: the way out, for Windows and elsewhere, naming the folder. */
+export function portInUseAdvice(port: number, platform: NodeJS.Platform, folder: string): string[] {
   const next = port === 65535 ? port - 1 : port + 1;
   return platform === 'win32'
     ? [
         `Port ${port} is used by another program, so Emberglass cannot start on it.`,
-        'Close that program and start Emberglass again, or start Emberglass on another port: in this folder, type cmd',
-        `in the address bar of File Explorer, press Enter, then type these two lines, each followed by Enter:`,
+        'Close that program and start Emberglass again. Or start Emberglass on another port, for this time only:',
+        `open the folder ${folder} in File Explorer, type cmd in its address bar and press Enter, then type`,
+        'these two lines, each followed by Enter:',
         `  set EMBERGLASS_PORT=${next}`,
         '  Emberglass.cmd',
       ]
     : [
         `Port ${port} is used by another program, so Emberglass cannot start on it.`,
-        `Close that program and start Emberglass again, or start it on another port: EMBERGLASS_PORT=${next} ./emberglass.sh`,
+        `Close that program and start Emberglass again, or start it on another port: EMBERGLASS_PORT=${next} ${path.join(folder, 'emberglass.sh')}`,
       ];
 }

@@ -100,10 +100,10 @@ jobs:
           {
             echo "Emberglass ${GITHUB_REF_NAME#v} for Windows x64, with its own Node.js runtime."
             echo
-            echo "- **Installer** ($(basename "$setup")): installs for every user with one administrator prompt, adds the Start Menu shortcuts and a firewall rule for private networks only, and upgrades an older version in place. Uninstalling keeps your data in %APPDATA%\\Emberglass."
-            echo "- **Portable zip** ($(basename "$zip")): unzip it into a folder of its own and double-click Emberglass.cmd; README.txt inside says the rest."
+            echo "- **Installer (recommended)**: \`$(basename "$setup")\`. Installs for every user with one administrator prompt, adds the Start Menu shortcuts, allows Emberglass on private networks only and blocks it on public ones, and upgrades an older version in place. Uninstalling keeps your data in %APPDATA%\\Emberglass."
+            echo "- **Portable zip**: \`$(basename "$zip")\`. For a PC where you cannot or do not want to install: unzip it into a folder of its own and double-click Emberglass.cmd; README.txt inside says the rest."
             echo
-            echo "The files are not signed. Windows SmartScreen may show \"Windows protected your PC\": choose More info, then Run anyway, once you have checked the file against its SHA-256 below (in Command Prompt: certutil -hashfile <file> SHA256)."
+            echo "Neither is signed. Windows SmartScreen may show \"Windows protected your PC\": choose More info, then Run anyway, once the file matches its SHA-256 below. To check one, run \`certutil -hashfile $(basename "$setup") SHA256\` in Command Prompt (or the zip's name for the zip). A match shows the file is the one published here, intact; it does not prove who built it."
             echo
             echo "SHA-256:"
             echo

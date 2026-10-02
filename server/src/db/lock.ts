@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 
@@ -17,7 +17,10 @@ export const LOCK_FILE = 'emberglass.lock';
 export class DataDirectoryInUseError extends Error {
   readonly code = 'EMBERGLASS_DATA_DIR_IN_USE';
   constructor(readonly dataDir: string) {
-    super(`Another Emberglass is already running with the data directory ${dataDir}.`);
+    super(
+      'Emberglass is already running in another window, perhaps on another port. Use that window, or close it ' +
+        `and start Emberglass again. (Its data folder: ${dataDir})`,
+    );
   }
 }
 
@@ -28,7 +31,25 @@ export interface DataDirectoryLock {
 /** Takes the data directory for this process, or throws DataDirectoryInUseError at once. */
 export function lockDataDirectory(dataDir: string): DataDirectoryLock {
   mkdirSync(dataDir, { recursive: true });
-  const db = new Database(path.join(dataDir, LOCK_FILE), { timeout: 0 });
+  const file = path.join(dataDir, LOCK_FILE);
+  try {
+    return take(file, dataDir);
+  } catch (error) {
+    // The file holds no data: one a copy or a sync tool damaged is made again, once (review S-L3, C-L5).
+    const code = (error as { code?: unknown }).code;
+    if (code !== 'SQLITE_NOTADB' && code !== 'SQLITE_CORRUPT') throw error;
+    rmSync(file, { force: true });
+    return take(file, dataDir);
+  }
+}
+
+// Every lock held in this process. A connection nothing refers to can be collected, and closing it would
+// let the lock go while the server still runs (found by server/src/server.test.ts), so each stays here until
+// it is released.
+const held = new Set<Database.Database>();
+
+function take(file: string, dataDir: string): DataDirectoryLock {
+  const db = new Database(file, { timeout: 0 });
   try {
     db.exec('BEGIN EXCLUSIVE');
   } catch (error) {
@@ -36,8 +57,10 @@ export function lockDataDirectory(dataDir: string): DataDirectoryLock {
     if ((error as { code?: unknown }).code === 'SQLITE_BUSY') throw new DataDirectoryInUseError(dataDir);
     throw error;
   }
+  held.add(db);
   return {
     release() {
+      held.delete(db);
       if (!db.open) return;
       db.exec('ROLLBACK');
       db.close();

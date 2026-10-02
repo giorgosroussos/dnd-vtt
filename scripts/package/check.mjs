@@ -30,7 +30,7 @@ import { connect, createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { sha256 } from './lib.mjs';
+import { INSTALLER_APP_ID, sha256 } from './lib.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const out = path.join(root, 'dist', 'package');
@@ -193,13 +193,14 @@ function nodeOnPath(env) {
 
 /**
  * Installs, upgrades and uninstalls the installer on this machine, which must be a throwaway one (the CI
- * runner): the acceptance of PKG-02. A first install; a v8 database in the DM's %APPDATA%\Emberglass and a
- * file the older app would have left; the installer again over it, as an upgrade; a start that migrates
- * after its backup; a silent uninstall that removes the rule and the program and leaves the data.
+ * runner): the acceptance of PKG-02 (specs/09-operations.md §4, §5, D-172, D-174, D-175). An older-labelled
+ * installer of the same folder first, then the DM's data as an older schema left it, then this installer over
+ * it while Emberglass runs, a start that migrates after its backup, and an uninstall while it runs again.
  */
-async function installerChecks(setup, cleanEnvironment) {
+async function installerChecks(setup, older, cleanEnvironment) {
   const programFiles = process.env.ProgramFiles ?? 'C:\\Program Files';
   const app = path.join(programFiles, 'Emberglass');
+  const exe = path.join(app, 'emberglass.exe');
   const data = path.join(process.env.APPDATA ?? '', 'Emberglass');
   const startMenu = path.join(
     process.env.ProgramData ?? 'C:\\ProgramData',
@@ -209,6 +210,7 @@ async function installerChecks(setup, cleanEnvironment) {
     'Programs',
     'Emberglass',
   );
+  const desktop = path.join(process.env.PUBLIC ?? 'C:\\Users\\Public', 'Desktop', 'Emberglass.lnk');
   if (existsSync(data) || existsSync(app)) {
     expect(
       false,
@@ -217,26 +219,42 @@ async function installerChecks(setup, cleanEnvironment) {
     return;
   }
   const logs = mkdtempSync(path.join(os.tmpdir(), 'emberglass-setup-'));
-  const install = (name) => {
+  const powershell = (command) =>
+    spawnSync(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', `$ErrorActionPreference = 'Stop'; ${command}`],
+      {
+        encoding: 'utf8',
+      },
+    );
+  const install = (file, name, extra = []) => {
     const logFile = path.join(logs, `${name}.log`);
-    const result = spawnSync(setup, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', `/LOG=${logFile}`], {
-      timeout: 300_000,
-    });
+    const result = spawnSync(
+      file,
+      ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', `/LOG=${logFile}`, ...extra],
+      {
+        timeout: 300_000,
+      },
+    );
     if (result.status !== 0 && existsSync(logFile)) console.log(readFileSync(logFile, 'utf8'));
     return result.status;
   };
-  // Windows PowerShell 5.1, the runner's powershell.exe, has no ConvertTo-Json -AsArray: -InputObject with an
-  // array keeps one rule a list. A query that fails is a failure, never "no rules" (review of CI run 37002551643).
+  const printLog = (name) => {
+    const logFile = path.join(logs, `${name}.log`);
+    if (existsSync(logFile)) {
+      console.log(
+        readFileSync(logFile, 'utf8')
+          .split('\n')
+          .filter((line) => /netsh|powershell|exit code|firewall|PrepareToInstall|close/i.test(line))
+          .join('\n'),
+      );
+    }
+  };
+  // Every inbound rule that names this emberglass.exe, whatever it is called (a prompt's Allow would add one
+  // under another name), as Windows PowerShell 5.1 can list them. A query that fails is a failure.
   const rules = () => {
-    const shown = spawnSync(
-      'powershell.exe',
-      [
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command',
-        "$ErrorActionPreference = 'Stop'; $found = @(Get-NetFirewallRule -All | Where-Object { $_.DisplayName -eq 'Emberglass' } | ForEach-Object { [pscustomobject]@{ direction = $_.Direction.ToString(); action = $_.Action.ToString(); profile = $_.Profile.ToString(); enabled = $_.Enabled.ToString(); program = ($_ | Get-NetFirewallApplicationFilter).Program } }); ConvertTo-Json -Compress -InputObject $found",
-      ],
-      { encoding: 'utf8' },
+    const shown = powershell(
+      `$found = @(Get-NetFirewallApplicationFilter -Program '${exe.replaceAll("'", "''")}' | Get-NetFirewallRule | Where-Object { $_.Direction -eq 'Inbound' } | ForEach-Object { [pscustomobject]@{ name = $_.DisplayName; action = $_.Action.ToString(); profile = $_.Profile.ToString(); enabled = $_.Enabled.ToString(); protocol = ($_ | Get-NetFirewallPortFilter).Protocol } }); ConvertTo-Json -Compress -InputObject $found`,
     );
     if (shown.status !== 0) {
       expect(false, `the firewall rules can be read (powershell exit ${shown.status}: ${shown.stderr.trim()})`);
@@ -246,40 +264,84 @@ async function installerChecks(setup, cleanEnvironment) {
     const parsed = text === '' ? [] : JSON.parse(text);
     return Array.isArray(parsed) ? parsed : [parsed];
   };
-  const oneRule = (when) => {
-    const found = rules() ?? [];
+  const twoRules = (when) => {
+    const found = (rules() ?? []).sort((a, b) => (a.action < b.action ? -1 : 1));
     return expect(
-      found.length === 1 &&
-        found[0].direction === 'Inbound' &&
+      found.length === 2 &&
+        found[0].name === 'Emberglass' &&
         found[0].action === 'Allow' &&
         found[0].profile === 'Private' &&
+        found[0].protocol === 'TCP' &&
         found[0].enabled === 'True' &&
-        found[0].program.toLowerCase() === path.join(app, 'emberglass.exe').toLowerCase(),
-      `${when}: exactly one inbound rule, allowing emberglass.exe on private networks only (${JSON.stringify(found)})`,
+        found[1].name === 'Emberglass (blocked on public networks)' &&
+        found[1].action === 'Block' &&
+        /^(?:Domain, Public|Public, Domain)$/.test(found[1].profile) &&
+        found[1].enabled === 'True',
+      `${when}: exactly two inbound rules for emberglass.exe, TCP allowed on private networks and all blocked on public and domain ones (${JSON.stringify(found)})`,
     );
   };
+  // The installs Windows lists under Apps: exactly one Emberglass, at the expected version.
+  const registered = () => {
+    const shown = powershell(
+      "$found = @(Get-ChildItem 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall', 'HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall' | Get-ItemProperty | Where-Object { $_.DisplayName -eq 'Emberglass' } | ForEach-Object { [pscustomobject]@{ key = $_.PSChildName; version = $_.DisplayVersion } }); ConvertTo-Json -Compress -InputObject $found",
+    );
+    if (shown.status !== 0) return null;
+    const text = shown.stdout.trim();
+    const parsed = text === '' ? [] : JSON.parse(text);
+    return Array.isArray(parsed) ? parsed : [parsed];
+  };
+  const oneInstall = (versionLabel, when) => {
+    const found = registered();
+    expect(
+      found !== null &&
+        found.length === 1 &&
+        found[0].key === `{${INSTALLER_APP_ID}}_is1` &&
+        found[0].version === versionLabel,
+      `${when}: Windows lists exactly one Emberglass, version ${versionLabel} (${JSON.stringify(found)})`,
+    );
+  };
+  const shortcutTarget = (link) =>
+    powershell(
+      `(New-Object -ComObject WScript.Shell).CreateShortcut('${link.replaceAll("'", "''")}').TargetPath`,
+    ).stdout.trim();
+  const port = await freePort();
+  const runEnv = { ...cleanEnvironment, EMBERGLASS_PORT: String(port) };
+  delete runEnv.EMBERGLASS_DATA_DIR;
+  const startInstalled = () =>
+    run(
+      path.join(runEnv.SystemRoot ?? 'C:\\Windows', 'System32', 'cmd.exe'),
+      ['/d', '/s', '/c', `""${shortcutTarget(path.join(startMenu, 'Emberglass.lnk'))}""`],
+      runEnv,
+      { verbatim: true },
+    );
+  const serverProcesses = () =>
+    Number(
+      powershell(
+        `@(Get-Process -Name emberglass -ErrorAction SilentlyContinue | Where-Object Path -eq '${exe}').Count`,
+      ).stdout.trim(),
+    );
 
-  // A first install, for every user.
-  expect(install('first') === 0, 'the installer installs silently');
+  // An older version first, for every user (Q-108).
+  const olderLabel = path.basename(older).replace(/^Emberglass-(.+)-win-x64-setup\.exe$/, '$1');
+  expect(install(older, 'older') === 0, `an older installer (${olderLabel}) installs silently`);
   expect(
-    existsSync(path.join(app, 'emberglass.exe')) && existsSync(path.join(app, 'app', 'server.mjs')),
-    `it installs into ${app}`,
+    existsSync(exe) && existsSync(path.join(app, 'app', 'server.mjs')),
+    `it installs into ${app}, the only folder it offers`,
   );
-  expect(existsSync(path.join(startMenu, 'Emberglass.lnk')), 'it adds the Start Menu shortcut');
-  expect(existsSync(path.join(startMenu, 'Reset the Emberglass PIN.lnk')), 'it adds the PIN reset to the Start Menu');
-  const desktop = path.join(process.env.PUBLIC ?? 'C:\\Users\\Public', 'Desktop', 'Emberglass.lnk');
-  expect(!existsSync(desktop), 'it adds no desktop shortcut unless asked');
-  if (!oneRule('after installing')) {
-    // Inno Setup's log records each netsh call and its exit code.
-    const logFile = path.join(logs, 'first.log');
-    if (existsSync(logFile))
-      console.log(
-        readFileSync(logFile, 'utf8')
-          .split('\n')
-          .filter((line) => /netsh|exit code|firewall/i.test(line))
-          .join('\n'),
-      );
+  for (const [link, target] of [
+    ['Emberglass.lnk', path.join(app, 'Emberglass.cmd')],
+    ['Reset the Emberglass PIN.lnk', path.join(app, 'Reset PIN.cmd')],
+    ['Uninstall Emberglass.lnk', path.join(app, 'unins000.exe')],
+  ]) {
+    const found = existsSync(path.join(startMenu, link)) ? shortcutTarget(path.join(startMenu, link)) : '';
+    expect(
+      found.toLowerCase() === target.toLowerCase(),
+      `the Start Menu has ${link.slice(0, -4)}, opening ${target} (got "${found}")`,
+    );
   }
+  expect(!existsSync(desktop), 'it adds no desktop shortcut unless asked');
+  if (!twoRules('after installing')) printLog('older');
+  oneInstall(olderLabel, 'after installing the older version');
 
   // The DM's data as an older Emberglass left it: schema version 8, a setting changed, and a file of the
   // older app's that the new one does not have.
@@ -288,7 +350,10 @@ async function installerChecks(setup, cleanEnvironment) {
   const old = new Database(path.join(data, 'emberglass.db'));
   // As the migration runner applies them: foreign keys off, one transaction and version each.
   old.pragma('foreign_keys = OFF');
-  for (const file of readdirSync(path.join(app, 'app', 'migrations')).sort()) {
+  const migrations = readdirSync(path.join(app, 'app', 'migrations'))
+    .filter((file) => /^\d{4}_[a-z0-9][a-z0-9_-]*\.sql$/.test(file))
+    .sort();
+  for (const file of migrations) {
     const number = Number(file.slice(0, 4));
     if (number > 8) continue;
     old.exec('BEGIN');
@@ -302,40 +367,41 @@ async function installerChecks(setup, cleanEnvironment) {
   const before = sha256(readFileSync(path.join(data, 'emberglass.db')));
   writeFileSync(path.join(app, 'app', 'left-by-an-older-version.txt'), 'old');
 
-  // The installer again, over the install: an upgrade in place.
-  expect(install('upgrade') === 0, 'the installer upgrades an install in place, silently');
-  if (!oneRule('after upgrading')) {
-    // Inno Setup's log records each netsh call and its exit code.
-    const logFile = path.join(logs, 'upgrade.log');
-    if (existsSync(logFile))
-      console.log(
-        readFileSync(logFile, 'utf8')
-          .split('\n')
-          .filter((line) => /netsh|exit code|firewall/i.test(line))
-          .join('\n'),
-      );
-  }
+  // The newer installer over it, as an upgrade, while the older Emberglass runs, with the desktop shortcut
+  // asked for this time (review C-M1, T-M5, T-M6).
+  const running = startInstalled();
+  await waitFor(async () => running.child.exitCode !== null || (await answersAuth(port)), 60_000);
+  expect(await answersAuth(port), 'the older Emberglass runs before the upgrade');
+  const exeBefore = sha256(readFileSync(exe));
+  expect(
+    install(setup, 'upgrade', ['/TASKS=desktopicon']) === 0,
+    'the newer installer upgrades it in place, silently, while it runs',
+  );
+  await within(30_000, running.exit);
+  expect(
+    serverProcesses() === 0 && !(await portTaken(port)),
+    'the upgrade stopped the running Emberglass, freeing its port',
+  );
+  expect(
+    sha256(readFileSync(exe)) !== exeBefore,
+    'the upgrade replaced emberglass.exe (its version information names the new version)',
+  );
+  oneInstall(path.basename(setup).replace(/^Emberglass-(.+)-win-x64-setup\.exe$/, '$1'), 'after upgrading');
+  if (!twoRules('after upgrading')) printLog('upgrade');
   expect(
     !existsSync(path.join(app, 'app', 'left-by-an-older-version.txt')),
     "the upgrade leaves nothing of the older app's folder",
   );
   expect(sha256(readFileSync(path.join(data, 'emberglass.db'))) === before, 'the upgrade leaves the data untouched');
+  expect(
+    existsSync(desktop) && shortcutTarget(desktop).toLowerCase() === path.join(app, 'Emberglass.cmd').toLowerCase(),
+    'the desktop shortcut is added when asked',
+  );
 
   // The first start after the upgrade migrates the data, after a dated backup (specs/09-operations.md §2).
-  const port = await freePort();
-  const runEnv = { ...cleanEnvironment, EMBERGLASS_PORT: String(port) };
-  delete runEnv.EMBERGLASS_DATA_DIR;
-  const started = run(
-    path.join(runEnv.SystemRoot ?? 'C:\\Windows', 'System32', 'cmd.exe'),
-    ['/d', '/s', '/c', `""${path.join(app, 'Emberglass.cmd')}""`],
-    runEnv,
-    { verbatim: true },
-  );
+  const started = startInstalled();
   await waitFor(async () => started.child.exitCode !== null || (await answersAuth(port)), 60_000);
-  expect(await answersAuth(port), 'the installed Emberglass starts from the Start Menu target');
-  stop(started);
-  await within(10_000, started.exit);
-  await waitFor(async () => !(await portTaken(port)), 10_000);
+  expect(await answersAuth(port), 'the upgraded Emberglass starts from its Start Menu shortcut');
   const backups = readdirSync(data).filter((name) => /^emberglass-backup-.*-v8\.db$/.test(name));
   expect(backups.length === 1, `the migration's backup of the version 8 database appears (${backups.join(', ')})`);
   const migrated = new Database(path.join(data, 'emberglass.db'), { readonly: true });
@@ -343,23 +409,30 @@ async function installerChecks(setup, cleanEnvironment) {
   const schema = migrated.pragma('user_version', { simple: true });
   migrated.close();
   expect(
-    kept?.id === settingsId && kept?.ruler_rule === 'dmg' && schema >= 9,
-    `the upgraded install keeps the data and migrates it (version ${schema})`,
+    kept?.id === settingsId && kept?.ruler_rule === 'dmg' && schema === migrations.length,
+    `the upgraded install keeps the data and migrates it to version ${migrations.length} (got ${schema})`,
   );
 
-  // A silent uninstall: the program, its shortcuts and its rule go; the data stays (specs/09-operations.md §5).
-  const uninstaller = path.join(app, 'unins000.exe');
-  spawnSync(uninstaller, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'], { timeout: 300_000 });
-  // The uninstaller runs a copy of itself from a temporary folder and returns at once.
-  await waitFor(() => !existsSync(path.join(app, 'emberglass.exe')), 120_000);
-  expect(
-    !existsSync(path.join(app, 'emberglass.exe')) && !existsSync(path.join(app, 'app')),
-    'the uninstaller removes the program',
+  // A silent uninstall while Emberglass runs: it stops, the program, its shortcuts and its rules go, and the
+  // data stays (specs/09-operations.md §5).
+  const uninstallLog = path.join(logs, 'uninstall.log');
+  const uninstalled = spawnSync(
+    path.join(app, 'unins000.exe'),
+    ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', `/LOG=${uninstallLog}`],
+    { timeout: 300_000 },
   );
-  expect(!existsSync(path.join(startMenu, 'Emberglass.lnk')), 'it removes the Start Menu shortcuts');
-  await waitFor(() => rules()?.length === 0, 30_000);
+  expect(uninstalled.status === 0, `the uninstaller starts and returns 0 (got ${uninstalled.status})`);
+  // It runs a copy of itself from a temporary folder and returns at once: done once the folder is gone.
+  await waitFor(() => !existsSync(app), 120_000);
+  await within(30_000, started.exit);
+  if (existsSync(uninstallLog) && existsSync(app)) console.log(readFileSync(uninstallLog, 'utf8'));
+  expect(!existsSync(app), `the uninstaller removes the program folder, ${app}`);
+  expect(serverProcesses() === 0 && !(await portTaken(port)), 'it stopped the running Emberglass first');
+  expect(!existsSync(startMenu) && !existsSync(desktop), 'it removes the Start Menu folder and the desktop shortcut');
   const left = rules();
-  expect(left !== null && left.length === 0, `it removes the firewall rule (${JSON.stringify(left)})`);
+  expect(left !== null && left.length === 0, `it removes both firewall rules (${JSON.stringify(left)})`);
+  const listed = registered();
+  expect(listed !== null && listed.length === 0, `Windows no longer lists Emberglass (${JSON.stringify(listed)})`);
   expect(existsSync(path.join(data, 'emberglass.db')), `it leaves the data directory, ${data}`);
   rmSync(logs, { recursive: true, force: true });
 }
@@ -614,7 +687,7 @@ try {
   expect(
     intruderCode !== 0 &&
       intruderCode !== 'timeout' &&
-      intruder.output.includes('Another Emberglass is already running with the data directory'),
+      intruder.output.includes('Emberglass is already running in another window'),
     `a second server on the same data directory refuses to start (code ${intruderCode})`,
   );
   expect(!(await portTaken(port + 2)), 'it listens on no port');
@@ -652,8 +725,20 @@ try {
       setupSum === `${sha256(readFileSync(setup))}  ${setupName}\n`,
       `${setupName}.sha256 is the installer's SHA-256`,
     );
-    if (process.env.EMBERGLASS_PACKAGE_SYSTEM_TESTS === '1') await installerChecks(setup, env);
-    else log('skip the installer installs here: they change the machine; CI sets EMBERGLASS_PACKAGE_SYSTEM_TESTS=1');
+    if (process.env.EMBERGLASS_PACKAGE_SYSTEM_TESTS === '1') {
+      const olderDir = path.join(out, 'upgrade-test');
+      const older = existsSync(olderDir)
+        ? readdirSync(olderDir).find((name) => name.endsWith('-setup.exe'))
+        : undefined;
+      expect(older !== undefined, 'the older-labelled installer for the upgrade check was built');
+      if (older) await installerChecks(setup, path.join(olderDir, older), env);
+    } else if (process.env.CI === 'true') {
+      // In CI the installer checks are the release's gate: a job that lost the variable must fail, not skip
+      // (review T-H1).
+      expect(false, 'EMBERGLASS_PACKAGE_SYSTEM_TESTS=1 is set where the package is checked in CI');
+    } else {
+      log('skip the installer installs here: they change the machine; CI sets EMBERGLASS_PACKAGE_SYSTEM_TESTS=1');
+    }
   }
 
   if (failures.length > 0) {

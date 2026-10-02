@@ -111,6 +111,28 @@ describe('CI and the command contract agree', () => {
     expect(readme).toContain('| `package · windows` | `windows-latest` | `make package` |');
   });
 
+  // The installer is installed, upgraded and uninstalled only where the variable says the machine may be
+  // changed; a job that lost it would skip that silently (review T-H1). Both jobs keep both files.
+  it('runs the installer checks in both package jobs, and keeps and releases the installer beside the zip', () => {
+    for (const text of [workflow, release]) {
+      const job = /^ {2}package:\n([\s\S]*?)(?=^ {2}\S|(?![\s\S]))/m.exec(text)?.[1] ?? '';
+      expect(job).toContain("EMBERGLASS_PACKAGE_SYSTEM_TESTS: '1'");
+      for (const glob of [
+        'dist/package/*.zip',
+        'dist/package/*.zip.sha256',
+        'dist/package/*-setup.exe',
+        'dist/package/*-setup.exe.sha256',
+      ]) {
+        expect(job).toContain(glob);
+      }
+    }
+    const draft = /^ {2}release:\n([\s\S]*)/m.exec(release)?.[1] ?? '';
+    expect(draft).toContain('sha256sum --check --strict "$(basename "$setup").sha256" "$(basename "$zip").sha256"');
+    expect(draft).toContain(
+      'gh release create "$GITHUB_REF_NAME" package/*-setup.exe package/*-setup.exe.sha256 package/*.zip package/*.zip.sha256',
+    );
+  });
+
   it('checks that the tag names this version, and builds with it, before make package (review T-L10)', () => {
     const job = /^ {2}package:\n([\s\S]*?)(?=^ {2}\S)/m.exec(release)?.[1] ?? '';
     const check = job.indexOf('- name: The tag names this version');
