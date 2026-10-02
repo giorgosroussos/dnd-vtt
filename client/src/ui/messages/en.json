@@ -484,6 +484,7 @@
   "tokens.moreBadges": "+{count}",
   "about.open": "About & credits",
   "about.title": "About Emberglass",
+  "about.version": "Version {version}",
   "about.licence": "Emberglass is free software under the GNU Affero General Public License, version 3. It is compatible with 5th edition (SRD 5.1).",
   "about.iconsTitle": "Condition icons",
   "about.icons": "Condition icons by {authors}, from game-icons.net, licensed under Creative Commons Attribution 3.0 (CC BY 3.0).",

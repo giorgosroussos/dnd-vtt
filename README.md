@@ -4,7 +4,7 @@ A free, self-hosted virtual tabletop for in-person play, compatible with 5th edi
 
 ## Install and start
 
-You need Node.js 24 or newer (<https://nodejs.org>) and Git. Emberglass is installed from source; nothing is published to a package registry.
+On Windows you can use the portable package instead, which needs no Node.js, Git or terminal: see [Windows package](#windows-package) below. Everywhere else, and on Windows if you prefer, you need Node.js 24 or newer (<https://nodejs.org>) and Git. Emberglass is installed from source; nothing is published to a package registry.
 
 Type the commands below in a terminal: on Windows, Command Prompt or PowerShell; on Linux or macOS, Terminal. `npm install` can take a few minutes the first time. Keep the terminal window open while you play: closing it stops the server.
 
@@ -25,6 +25,15 @@ On start the console prints the player view's address and a QR code for it, for 
 - **The TV.** Open the printed address in the TV's browser, or use Connect a screen in the DM view (the screens counter in its header), which shows the same address and code. The player view needs no PIN.
 - **The DM view.** On any browser on the Wi-Fi, open the same address followed by `/dm`, then enter the PIN. A browser stays signed in until the server restarts, the PIN changes or it signs out.
 - **Forgotten PIN.** Run `npm run reset-pin` in the Emberglass folder on this PC, then set a new one from `http://localhost:3000/dm` (or your port).
+
+### Windows package
+
+Each release on the repository's GitHub Releases page carries `Emberglass-<version>-win-x64.zip`, a portable package for Windows x64 with its own Node.js runtime, and its SHA-256 checksum. To check the download, run `certutil -hashfile Emberglass-<version>-win-x64.zip SHA256` in Command Prompt and compare it with the `.sha256` file.
+
+- Unzip it into a folder of its own, for example `Documents\Emberglass`, and double-click `Emberglass.cmd`. It opens the DM view, `http://localhost:3000/dm`, in your browser, and starts the server first if it is not already running; starting it again while it runs only opens the browser. Keep its window open while you play: closing it stops the server. The window shows the TV's address and QR code.
+- Your data is in `%APPDATA%\Emberglass` as with a source install, never in the package's folder. To update, stop the server and unzip the newer package into a new folder; the first start upgrades the data after a dated backup copy.
+- **Forgotten PIN.** Double-click `Reset PIN.cmd` in the package folder, then set a new one from `http://localhost:3000/dm`.
+- `README.txt` in the package says the same, and names the source tag it was built from; `THIRD_PARTY_NOTICES.txt` holds the licences of everything it carries. The package is not signed, and it never checks for updates.
 
 ## Settings
 
@@ -82,7 +91,7 @@ Emberglass is meant for a trusted home network.
 
 ### Firewall
 
-**Windows.** The first time Emberglass starts, Windows Defender Firewall asks whether Node.js may communicate on networks. Allow it on **private networks only**, and leave public networks unticked. Your home Wi-Fi must be set as a private network in Windows' network settings; otherwise the TV cannot reach the server. To change the answer later, open Windows Defender Firewall, then "Allow an app through firewall", then Node.js.
+**Windows.** The first time Emberglass starts, Windows Defender Firewall asks whether Node.js (with the Windows package: Emberglass) may communicate on networks. Allow it on **private networks only**, and leave public networks unticked. Your home Wi-Fi must be set as a private network in Windows' network settings; otherwise the TV cannot reach the server. To change the answer later, open Windows Defender Firewall, then "Allow an app through firewall", then Node.js (or Emberglass).
 
 **Linux.** If a host firewall is active, open the port (3000 by default) to your home network only. For example, for a network of `192.168.1.x`:
 
@@ -153,8 +162,11 @@ GitHub Actions, `.github/workflows/ci.yml` (FND-02, `specs/13-implementation-pla
 | `check-docs · linux`, `check-docs · windows` | both | `make check-docs` |
 | `audit · linux`, `audit · windows` | both | `make audit` |
 | `scan-secrets · linux`, `scan-secrets · windows` | both | `make scan-secrets` |
+| `package · windows` | `windows-latest` | `make package` |
 
 The `e2e` jobs run the acceptance suite (`specs/10-testing-acceptance.md` §4–§6, D-127): Chromium runs every spec, and the five journeys of `e2e/tests/journeys/` also run in Firefox and WebKit on both runners and in Edge on Windows, as named by `EMBERGLASS_E2E_BROWSERS` (locally the default is Chromium alone; `npx playwright install firefox webkit` adds the others). Every browser runs behind a proxy that refuses and records anything beyond the local host, and the server under a guard that does the same, so `make e2e` is also the offline run. Its last test, `e2e/tests/offline.spec.ts`, fails unless every server announced the guard and nothing was attempted but one probe request from each browser, which shows that browser's traffic was watched; Edge's own calls to Microsoft's services are blocked and listed, not counted (D-133). `make build` fails when the built client references another host (`scripts/check-external-urls.mjs`).
+
+The `package · windows` job builds the portable Windows package from the commit (`scripts/package/build.mjs`: the server bundled by esbuild, the runner's own Node.js renamed `emberglass.exe`, the native modules `npm ci` installed for Windows, the licences) and checks it as a DM would use it (`scripts/package/check.mjs`): unzipped, started by `Emberglass.cmd` with no Node.js on PATH and an empty data directory, it must pass `make smoke`'s checks, and a second start must only open the browser; the zip is kept as an artifact for seven days. Elsewhere `make package` builds and checks the same folder for that system, to try it; only Windows x64 is published. `.github/workflows/release.yml` runs the same target on a `v<version>` tag and drafts a GitHub Release with the zip and its checksum (D-164, D-166).
 
 Gates that the testing specification requires and nothing implements yet would run as failing-forward tripwires (`make tripwire`, D-061), one job each; there are none left, since REL-02 promoted the last two, and `make tripwire` says so.
 

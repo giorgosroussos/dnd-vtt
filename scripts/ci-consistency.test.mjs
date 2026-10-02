@@ -18,6 +18,7 @@ const list = (text) =>
 
 const makefile = read('Makefile');
 const workflow = read('.github/workflows/ci.yml');
+const release = read('.github/workflows/release.yml');
 const readme = read('README.md');
 
 const verifyGates = list(/^verify:([^#\n]*)##/m.exec(makefile)[1].replace(/\s+/g, ','));
@@ -94,5 +95,28 @@ describe('CI and the command contract agree', () => {
     for (const id of tripwireMatrix) {
       expect(readme).toContain(`| \`tripwire · ${id} (absent)\` | \`ubuntu-latest\` | \`make tripwire GATE=${id}\` |`);
     }
+  });
+
+  // The package is built and checked by one target on the Windows runner, in CI and on a tag, so a
+  // release is the package CI already checked (PKG-01, D-164, D-166).
+  it('builds the package with make package, on Windows, in CI and in the release workflow', () => {
+    for (const text of [workflow, release]) {
+      const job = /^ {2}package:\n([\s\S]*?)(?=^ {2}\S|(?![\s\S]))/m.exec(text)?.[1] ?? '';
+      expect(job).toContain('name: package · windows');
+      expect(job).toContain('runs-on: windows-latest');
+      expect(job).toContain('run: make package');
+      expect(job).not.toContain('contents: write');
+    }
+    expect(/^package:[^#\n]*##/m.test(makefile)).toBe(true);
+    expect(readme).toContain('| `package · windows` | `windows-latest` | `make package` |');
+  });
+
+  it('releases only from a version tag, as a draft, with the token to write held by the job that runs no project code', () => {
+    expect(release).toMatch(/^on:\n {2}push:\n {4}tags: \['v\*'\]\n/m);
+    expect(release).toMatch(/^permissions:\n {2}contents: read\n/m);
+    const draft = /^ {2}release:\n([\s\S]*)/m.exec(release)?.[1] ?? '';
+    expect(draft).toContain('contents: write');
+    expect(draft).toContain('--draft');
+    expect(draft).not.toMatch(/make |npm |node /);
   });
 });

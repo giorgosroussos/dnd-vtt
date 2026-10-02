@@ -1,6 +1,6 @@
 {
   "name": "@emberglass/client",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "private": true,
   "license": "AGPL-3.0-only",
   "type": "module",
@@ -8,7 +8,7 @@
     "build": "vite build && node ../scripts/check-external-urls.mjs dist"
   },
   "dependencies": {
-    "@emberglass/shared": "0.0.0",
+    "@emberglass/shared": "1.0.0",
     "@fontsource/alegreya": "^5.3.0",
     "@fontsource/alegreya-sans": "^5.3.0",
     "@fontsource/ibm-plex-mono": "^5.3.0",

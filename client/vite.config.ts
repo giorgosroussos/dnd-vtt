@@ -1,5 +1,6 @@
 import react from '@vitejs/plugin-react';
 import { defineConfig, type Plugin } from 'vite';
+import { readBuildVersion } from './build-version.js';
 import { LOCALE, t } from './src/ui/messages.js';
 
 // The page title and language come from the message catalogue like every other
@@ -19,5 +20,6 @@ function catalogueHtml(): Plugin {
 // runs Vite in middleware mode on its own port (D-010).
 export default defineConfig({
   plugins: [react(), catalogueHtml()],
+  define: { __EMBERGLASS_VERSION__: JSON.stringify(readBuildVersion()) },
   build: { outDir: 'dist', emptyOutDir: true },
 });

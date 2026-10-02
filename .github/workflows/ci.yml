@@ -127,3 +127,45 @@ jobs:
           path: e2e/test-results/
           if-no-files-found: ignore
           retention-days: 7
+
+  # The portable package (PKG-01, D-164, D-166): built on Windows from this commit and checked as a DM
+  # would use it, with no Node on PATH and an empty data directory. Not a matrix entry: only Windows
+  # x64 is packaged (specs/09-operations.md §3). The release workflow runs the same target on a tag.
+  package:
+    name: package · windows
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      SETUP_BROWSERS: ''
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
+        with:
+          msystem: MSYS
+          release: false
+          update: false
+          path-type: inherit
+          install: make python
+      - name: make setup
+        run: make setup
+      - name: make package
+        run: make package
+      - name: Keep the package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: package-windows
+          path: |
+            dist/package/*.zip
+            dist/package/*.zip.sha256
+          if-no-files-found: error
+          retention-days: 7
