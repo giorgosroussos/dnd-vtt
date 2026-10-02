@@ -22,14 +22,23 @@ import {
   type TokenChange,
 } from '@emberglass/shared';
 import { compileSchema } from '../validation.js';
-import { applyPlayerEvent, ok, startLive, type Client, type LiveHarness, type PlayerState } from './testing/harness.js';
+import {
+  applyPlayerEvent,
+  ok,
+  PACKAGE_DIR,
+  startLive,
+  type Client,
+  type LiveHarness,
+  type PlayerState,
+} from './testing/harness.js';
 
 // LIV-02: the live commands and the role-filtered projection, against a real SQLite file and real
 // Socket.io clients over a real port (specs/04-live-sync.md §2, §3, §4, §5,
 // specs/07-security-and-access.md §3, §5, specs/05-assets-and-images.md §3, §4, Q-083, Q-092,
 // Q-093, D-108, G-020, G-023, G-025). Images are generated (Q-088).
 
-vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
+// Against a package (PKG-03) the harness sets longer limits: a real server answers one snapshot a second.
+if (!PACKAGE_DIR) vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
 const isEnvelope = compileSchema<ErrorEnvelope>(ErrorEnvelopeSchema);
 const isDmSnapshot = compileSchema<DmSnapshot>(DmSnapshotSchema);
@@ -668,7 +677,12 @@ describe('player commands (specs/10-testing-acceptance.md §3, specs/07-security
     };
     expect(Object.keys(valid).sort()).toEqual([...COMMAND_TYPES].sort());
     const before = dump();
-    const versions = [h.versions.dm.current(), h.versions.players.current()];
+    // The version each room is at: the in-process counters, and what the snapshots say, which is all a
+    // package shows (PKG-03).
+    const counters = () => (PACKAGE_DIR ? [] : [h.versions.dm.current(), h.versions.players.current()]);
+    const shown = () => [dm, tv, laptopTv].map((client) => client.events.at(-1)!.version);
+    const versions = counters();
+    const snapshotted = shown();
     for (const player of [tv, laptopTv]) {
       for (const type of COMMAND_TYPES) await refused(player, type, valid[type], 'forbidden');
       for (const raw of [null, 'scene.deactivate', { type: 'scene.deactivate' }, [valid['scene.deactivate']]]) {
@@ -677,8 +691,9 @@ describe('player commands (specs/10-testing-acceptance.md §3, specs/07-security
       }
     }
     expect(dump()).toEqual(before);
-    expect([h.versions.dm.current(), h.versions.players.current()]).toEqual(versions);
+    expect(counters()).toEqual(versions);
     for (const client of [dm, tv, laptopTv]) expect(await client.settle()).toEqual([]);
+    expect(shown()).toEqual(snapshotted);
     // The player camera, held in memory rather than the database, is still fitted to the map (LIV-06).
     expect((tv.events.at(-1)!.payload as PlayerSnapshot).scene?.camera).toEqual(FIT_CAMERA);
     // Nor does any measurement show, also held in memory (LIV-07).
@@ -691,7 +706,7 @@ describe('player commands (specs/10-testing-acceptance.md §3, specs/07-security
 
 describe('image entitlement follows the live scene (specs/07-security-and-access.md §5, specs/10-testing-acceptance.md §3, G-020)', () => {
   const fetchAs = (id: string, variant = 'display', cookie?: string) =>
-    h.app.inject({ method: 'GET', url: `/images/${id}/${variant}`, headers: cookie ? { cookie } : {} });
+    h.request({ method: 'GET', url: `/images/${id}/${variant}`, headers: cookie ? { cookie } : {} });
   const status = async (id: string, variant = 'display') => (await fetchAs(id, variant)).statusCode;
 
   it('@gate:image-revocation refuses an image a player fetched once its token is hidden, the scene deactivated or replaced, or the map replaced', async () => {

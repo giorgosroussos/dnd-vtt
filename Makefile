@@ -25,7 +25,7 @@ SMOKE_WAIT ?= 0
 # Browsers `make setup` installs for Playwright; CI sets it empty on jobs that run no browser.
 SETUP_BROWSERS ?= chromium
 
-.PHONY: help node-check setup infra-up infra-status infra-down migrate dev test lint format format-check typecheck e2e build verify smoke package audit scan-secrets tripwire check-docs check-locks verify-chain rebuild-decisions rebuild-questions install-hooks unlock clean-start
+.PHONY: help node-check setup infra-up infra-status infra-down migrate dev test lint format format-check typecheck e2e build verify smoke package package-gates audit scan-secrets tripwire check-docs check-locks verify-chain rebuild-decisions rebuild-questions install-hooks unlock clean-start
 
 help: ## List targets
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(firstword $(MAKEFILE_LIST)) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
@@ -87,6 +87,12 @@ smoke: node-check ## Health of the running system through its public entry point
 package: node-check ## Portable package of this machine's build in dist/package/, then its acceptance check
 	node scripts/package/build.mjs
 	node scripts/package/check.mjs
+
+# The package gates (PKG-03, D-176): the package make package left in dist/package/ passes the hidden-information
+# suite, the journeys and the offline run once installed (on Windows, only where EMBERGLASS_PACKAGE_SYSTEM_TESTS=1),
+# or once unzipped elsewhere. The release publishes nothing until it passes on the Windows runner.
+package-gates: node-check ## The hidden-information suite, the journeys and the offline run against the package in dist/package/
+	node scripts/package/gates.mjs
 
 audit: node-check ## Dependency advisories
 	npm audit --audit-level=high

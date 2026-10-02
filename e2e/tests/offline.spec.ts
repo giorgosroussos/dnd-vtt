@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
 import { armed, attempts, browserService, hostOf, OUTSIDE, probeUrl } from '../offline/log.js';
+import { PACKAGE_DIR } from '../package.js';
 
 // The offline acceptance of specs/10-testing-acceptance.md §6 (specs/02-architecture.md §6, Q-020,
 // D-127). Every other spec of this run has already run, each browser behind the blackhole proxy and
@@ -28,10 +29,16 @@ const guard = new URL('../offline/guard.mjs', import.meta.url).href;
 
 test('@gate:offline-e2e the end-to-end run sent nothing beyond the local host, and the block it ran under holds', () => {
   // 1. The servers of the run were watched: the suite's own and each First run journey's, one per
-  // browser, all started with the guard (review H2).
+  // browser, all started with the guard (review H2). Against a package (PKG-03) every one of them is its
+  // launcher, and none is the source install's start script.
   const all = attempts();
-  const servers = all.filter((each) => armed(each) && /start\.mjs/.test(each.target));
+  const entry = PACKAGE_DIR ? /launcher\.mjs/ : /start\.mjs/;
+  const servers = all.filter((each) => armed(each) && entry.test(each.target));
   expect(servers.length, 'servers started under the guard').toBeGreaterThanOrEqual(1 + browsers.length);
+  if (PACKAGE_DIR) {
+    expect(all.filter((each) => armed(each) && /start\.mjs/.test(each.target))).toEqual([]);
+    for (const each of servers) expect(each.target, 'a server of the package').toContain(PACKAGE_DIR);
+  }
 
   // 2. Nothing was attempted by any view or by the server during the whole run, but each browser's own
   // probe (journeys/offline-probe.spec.ts), which shows its traffic went through the proxy; Edge's calls

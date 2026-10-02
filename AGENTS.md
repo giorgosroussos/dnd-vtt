@@ -92,6 +92,7 @@ make build          # production builds
 make verify         # lint + format-check + typecheck + test + e2e + build + check-docs
 make smoke          # health of the running system through its public entry points
 make package        # portable package of this machine's build, then its acceptance check (PKG-01)
+make package-gates  # hidden-information suite, journeys and offline run against the installed package (PKG-03)
 make audit          # dependency advisories
 make scan-secrets   # secret scan of everything Git tracks
 make tripwire       # failing-forward tripwires for missing gates: GATE=<id>, or all
@@ -105,7 +106,7 @@ make unlock         # ceremonial unlock of one hard-locked path: PATH=<path> REA
 make clean-start    # fresh isolated environment: setup, infra-up, migrate, verify, smoke, teardown
 ```
 
-The tooling behind the targets is recorded in D-051 to D-057; the pipeline and the tripwires in D-060 and D-061; `make package`, the CI job `package · windows` and the release workflow in D-164 and D-166.
+The tooling behind the targets is recorded in D-051 to D-057; the pipeline and the tripwires in D-060 and D-061; `make package`, the CI job `package · windows` and the release workflow in D-164 and D-166; `make package-gates` and the job `package gates · windows`, which the release waits for, in D-176.
 
 CI (FND-02) runs on every merge request and every push to the default branch. Each job runs exactly one of the targets above, so a gate cannot pass in CI and fail locally; `README.md` maps job to command. Gates the testing specification requires that nothing implements yet run as failing-forward tripwires (`make tripwire`) that pass only while the gate is provably absent (`13` §3): a gate's implementing test carries the marker `@gate:<id>`, and the first one turns its tripwire red with promotion steps.
 
