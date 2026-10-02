@@ -54,7 +54,9 @@ describe('Connect a screen', () => {
     expect([...dialog.querySelectorAll('.eg-connect__others li')].map((li) => li.textContent)).toEqual([
       t('connect.otherEntry', { url: 'http://100.64.3.4:3000/', adapter: 'vEthernet (WSL)' }),
     ]);
-    expect(dialog.textContent).not.toContain(t('connect.chosen'));
+    expect(dialog.textContent).not.toContain(t('connect.adapterChosen', { adapter: 'Wi-Fi' }));
+    // The likelier cause of a TV that cannot connect, then the Settings correction (specs/09-operations.md §4).
+    expect(dialog.textContent).toContain(t('connect.cannotOpen'));
     expect(dialog.textContent).not.toContain('/dm');
     expect(server.calls.filter((call) => call.path === '/api/connect')).toHaveLength(1);
   });
@@ -67,7 +69,7 @@ describe('Connect a screen', () => {
       t('connect.qrLabel', { url: 'http://100.64.3.4:3000/' }),
     );
     expect(dialog.querySelector('.eg-connect__adapter')!.textContent).toBe(
-      `${t('connect.adapter', { adapter: 'vEthernet (WSL)' })} ${t('connect.chosen')}`,
+      t('connect.adapterChosen', { adapter: 'vEthernet (WSL)' }),
     );
     expect(dialog.textContent).not.toContain(t('connect.chosenMissing', { address: '100.64.3.4' }));
   });
@@ -75,7 +77,11 @@ describe('Connect a screen', () => {
   it('says so when the chosen TV address is not an address of this PC now, and shows the automatic one', async () => {
     server.tvAddress = '10.0.0.40';
     const dialog = await openPanel();
-    expect(dialog.textContent).toContain(t('connect.chosenMissing', { address: '10.0.0.40' }));
+    // A fallback, said as a status, not an error alert: the panel works.
+    const fallback = dialog.querySelector('.eg-connect__fallback')!;
+    expect(fallback.textContent).toBe(t('connect.chosenMissing', { address: '10.0.0.40' }));
+    expect(fallback.getAttribute('role')).toBe('status');
+    expect(dialog.querySelector('[role="alert"]')).toBeNull();
     expect(dialog.querySelector('.eg-connect__url')!.textContent).toBe('http://192.168.1.20:3000/');
   });
 

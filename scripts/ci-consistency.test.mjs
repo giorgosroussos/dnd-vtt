@@ -111,6 +111,15 @@ describe('CI and the command contract agree', () => {
     expect(readme).toContain('| `package · windows` | `windows-latest` | `make package` |');
   });
 
+  it('checks that the tag names this version, and builds with it, before make package (review T-L10)', () => {
+    const job = /^ {2}package:\n([\s\S]*?)(?=^ {2}\S)/m.exec(release)?.[1] ?? '';
+    const check = job.indexOf('- name: The tag names this version');
+    expect(check).toBeGreaterThan(-1);
+    expect(job.indexOf('run: make package')).toBeGreaterThan(check);
+    expect(job).toContain('"v$version" | "v$version"-*) ;;');
+    expect(job).toContain('echo "EMBERGLASS_BUILD_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"');
+  });
+
   it('releases only from a version tag, as a draft, with the token to write held by the job that runs no project code', () => {
     expect(release).toMatch(/^on:\n {2}push:\n {4}tags: \['v\*'\]\n/m);
     expect(release).toMatch(/^permissions:\n {2}contents: read\n/m);

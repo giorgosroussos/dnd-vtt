@@ -164,6 +164,36 @@ describe('LAN addresses (Q-110)', () => {
     expect(compileSchema(ConnectInfoSchema)(info)).toBe(true);
   });
 
+  it('puts a link-local address last within its group: after other public ones, before nothing private', () => {
+    const listed = lanAddresses(
+      {
+        eth0: [entry('169.254.7.7')],
+        usb0: [entry('100.64.1.2')],
+        wlan0: [entry('10.0.0.9')],
+        'vEthernet (WSL)': [entry('169.254.8.8')],
+        docker0: [entry('172.17.0.1')],
+      },
+      3000,
+    );
+    expect(listed.map((each) => each.address)).toEqual([
+      '10.0.0.9',
+      '100.64.1.2',
+      '169.254.7.7',
+      '172.17.0.1',
+      '169.254.8.8',
+    ]);
+  });
+
+  it('says in the console when the address shown was chosen in Settings', () => {
+    const banner = connectBanner(connectInfo(OWNERS_PC, 3000, '192.168.36.1'), 'win32');
+    expect(banner).toContain(
+      "Connect a screen (VMware Network Adapter VMnet8, chosen in Settings): open http://192.168.36.1:3000/ in the TV's browser",
+    );
+    expect(connectBanner(connectInfo(OWNERS_PC, 3000), 'win32')).toContain(
+      'Connect a screen (Wi-Fi): open http://192.168.1.133:3000/',
+    );
+  });
+
   it('falls back to the automatic order when the PC no longer has the chosen address, and says so', () => {
     const info = connectInfo(OWNERS_PC, 3000, '10.0.0.40');
     expect(info.addresses[0]!.address).toBe('192.168.1.133');
@@ -269,11 +299,15 @@ describe('the console at start (specs/09-operations.md §2, §4)', () => {
   it('names the player view’s URL, draws its QR code and lists the other addresses, never the DM view', () => {
     const banner = connectBanner(connectInfo(INTERFACES, 3000), 'linux');
     expect(banner).toContain('open http://192.168.1.20:3000/ in the TV');
-    expect(banner).toContain("open http://192.168.1.20:3000/ in the TV's browser, or scan this code (wlan0).");
+    expect(banner).toContain(
+      "Connect a screen (wlan0): open http://192.168.1.20:3000/ in the TV's browser, or scan this code.",
+    );
     expect(banner).toContain(
       'Other addresses of this PC: http://169.254.10.3:3000/ (eth1)  http://172.20.0.1:3000/ (vEthernet)  http://100.64.12.7:3000/ (vpn0)',
     );
-    expect(banner).toContain('choose the right one as the TV address in Settings');
+    expect(banner).toContain(
+      'If the TV cannot open it, check that the firewall of this PC lets the port in (see the README), then choose the TV address in Settings.',
+    );
     expect(banner).not.toContain('/dm');
     // The QR code block: every line of it drawn with block characters only.
     const block = banner.split('\n').filter((line) => /^[█▀▄ ]+$/.test(line) && line.includes('█'));
@@ -284,7 +318,13 @@ describe('the console at start (specs/09-operations.md §2, §4)', () => {
 
   it('tells the DM on Windows to allow private networks only (Q-076)', () => {
     const banner = connectBanner(connectInfo(INTERFACES, 3000), 'win32');
-    expect(banner).toContain('If Windows Firewall asks about Emberglass or Node.js, allow it on private networks only');
+    expect(banner).toContain(
+      'If Windows Firewall asks about Emberglass or Node.js, allow it on private networks only, not public ones.',
+    );
+    // The likelier cause of a TV that cannot connect comes before the Settings correction (specs/09-operations.md §4).
+    expect(banner).toContain(
+      'If the TV cannot open it, check that Windows calls this network private (Settings, Network & internet), then choose the TV address in Settings.',
+    );
   });
 
   it('says so when the PC has no network address', () => {

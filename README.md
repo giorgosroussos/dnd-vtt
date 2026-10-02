@@ -33,7 +33,9 @@ Each release on the repository's GitHub Releases page carries `Emberglass-<versi
 - Unzip it into a folder of its own, for example `Documents\Emberglass`, and double-click `Emberglass.cmd`. It opens the DM view, `http://localhost:3000/dm`, in your browser, and starts the server first if it is not already running; starting it again while it runs only opens the browser. Keep its window open while you play: closing it stops the server. The window shows the TV's address and QR code.
 - Your data is in `%APPDATA%\Emberglass` as with a source install, never in the package's folder. To update, stop the server and unzip the newer package into a new folder; the first start upgrades the data after a dated backup copy.
 - **Forgotten PIN.** Double-click `Reset PIN.cmd` in the package folder, then set a new one from `http://localhost:3000/dm`.
-- `README.txt` in the package says the same, and names the source tag it was built from; `THIRD_PARTY_NOTICES.txt` holds the licences of everything it carries. The package is not signed, and it never checks for updates.
+- **The package is not signed.** The first time you start it, Windows may show "Windows protected your PC": choose **More info**, then **Run anyway**. Do this only for a zip whose checksum matches the `.sha256` file of the release.
+- `README.txt` in the package says the same, and names the source tag it was built from; `THIRD_PARTY_NOTICES.txt` holds the licences of everything it carries. The package never checks for updates.
+- If another program already uses port 3000, the window says so and how to start Emberglass on another port.
 
 ## Settings
 

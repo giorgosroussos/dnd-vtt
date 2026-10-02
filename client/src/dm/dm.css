@@ -1625,31 +1625,22 @@ textarea.eg-field__input {
   align-items: start;
 }
 
+/* minmax(0, 1fr): a long adapter name in the TV address select must not widen its column (review U-L11). */
 .eg-settings__fields {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-6);
   align-items: start;
+}
+
+.eg-settings__fields select {
+  width: 100%;
 }
 
 .eg-settings__group {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-}
-
-@media (width <= 1200px) {
-  .eg-dialog.eg-settings {
-    max-width: min(56rem, calc(100vw - 2rem));
-  }
-
-  .eg-settings__columns {
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .eg-settings__fields {
-    grid-template-columns: 1fr;
-  }
 }
 
 .eg-settings__heading {
@@ -1664,6 +1655,10 @@ textarea.eg-field__input {
 @media (width <= 940px) {
   .eg-settings__columns {
     grid-template-columns: 1fr;
+  }
+
+  .eg-settings__fields {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .eg-settings__pin {

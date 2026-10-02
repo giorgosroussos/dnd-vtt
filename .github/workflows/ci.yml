@@ -155,7 +155,8 @@ jobs:
           release: false
           update: false
           path-type: inherit
-          install: make python
+          # make alone: the package build and its check run no Python on Windows (review S-L3).
+          install: make
       - name: make setup
         run: make setup
       - name: make package

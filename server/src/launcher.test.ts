@@ -2,20 +2,29 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildTestApp, createTestData, type TestData } from './http/testing/app.js';
-import { browserCommand, dmViewUrl, isEmberglassAnswering, launch, type LaunchDeps } from './launcher.js';
+import {
+  browserCommand,
+  dmViewUrl,
+  isEmberglassAnswering,
+  launch,
+  openInBrowser,
+  PortInUseError,
+  portInUseAdvice,
+  type LaunchDeps,
+} from './launcher.js';
 
 // The package's launcher (PKG-01, specs/09-operations.md §1, D-164, D-166).
 
 describe('dmViewUrl', () => {
-  it('is the DM view on the loopback name, where PIN setup is accepted (specs/07 §1)', () => {
-    expect(dmViewUrl(3000)).toBe('http://localhost:3000/dm');
-    expect(dmViewUrl(8123)).toBe('http://localhost:8123/dm');
+  it('is the DM view on the loopback address the probe asks, where PIN setup is accepted (specs/07 §1)', () => {
+    expect(dmViewUrl(3000)).toBe('http://127.0.0.1:3000/dm');
+    expect(dmViewUrl(8123)).toBe('http://127.0.0.1:8123/dm');
   });
 });
 
 describe('browserCommand', () => {
   it('opens the URL with no shell in between on every system', () => {
-    const url = 'http://localhost:3000/dm';
+    const url = 'http://127.0.0.1:3000/dm';
     expect(browserCommand('win32', url)).toEqual({
       command: 'rundll32.exe',
       args: ['url.dll,FileProtocolHandler', url],
@@ -104,19 +113,19 @@ describe('launch', () => {
 
   it('starts the server and then opens the DM view when none answers', async () => {
     const d = deps({});
-    expect(await launch(d)).toBe('started');
+    expect(await launch(d)).toEqual({ outcome: 'started', opened: true });
     expect(d.events).toEqual([
       'start',
-      'print Opening the DM view: http://localhost:3000/dm',
-      'open http://localhost:3000/dm',
+      'print Opening the DM view: http://127.0.0.1:3000/dm',
+      'open http://127.0.0.1:3000/dm',
     ]);
   });
 
   it('starts no second server when one answers, and only opens the DM view', async () => {
     const d = deps({ isAnswering: () => Promise.resolve(true) });
-    expect(await launch(d)).toBe('opened-running');
+    expect(await launch(d)).toEqual({ outcome: 'opened-running', opened: true });
     expect(d.events).not.toContain('start');
-    expect(d.events).toContain('open http://localhost:3000/dm');
+    expect(d.events).toContain('open http://127.0.0.1:3000/dm');
   });
 
   it('asks on the configured port', async () => {
@@ -130,14 +139,14 @@ describe('launch', () => {
     });
     await launch(d);
     expect(asked).toEqual([8123]);
-    expect(d.events).toContain('open http://localhost:8123/dm');
+    expect(d.events).toContain('open http://127.0.0.1:8123/dm');
   });
 
-  it('prints the address to open when no browser could be started', async () => {
+  it('prints the address to open when no browser could be started, and says it did not open', async () => {
     const d = deps({ open: () => Promise.resolve(false) });
-    await launch(d);
+    expect(await launch(d)).toEqual({ outcome: 'started', opened: false });
     expect(d.events.at(-1)).toBe(
-      'print Could not open a browser. Open http://localhost:3000/dm in a browser on this PC.',
+      'print Could not open a browser. Open http://127.0.0.1:3000/dm in a browser on this PC.',
     );
   });
 
@@ -145,5 +154,67 @@ describe('launch', () => {
     const d = deps({ startServer: () => Promise.reject(new Error('listen EADDRINUSE')) });
     await expect(launch(d)).rejects.toThrow('EADDRINUSE');
     expect(d.events.some((event) => event.startsWith('open'))).toBe(false);
+  });
+
+  // Two double-clicks in a row: both launches find nothing, the first server takes the port, and the second
+  // must open its DM view rather than fail (PKG-01 review C-L1).
+  it('opens the DM view of another Emberglass that took the port while this one was starting', async () => {
+    let answers = 0;
+    const d = deps({
+      isAnswering: () => Promise.resolve(answers++ >= 3),
+      startServer: () => Promise.reject(Object.assign(new Error('listen EADDRINUSE'), { code: 'EADDRINUSE' })),
+      sleep: () => Promise.resolve(),
+    });
+    expect(await launch(d)).toEqual({ outcome: 'opened-running', opened: true });
+    expect(d.events).toContain('print Emberglass is already running on port 3000. Opening http://127.0.0.1:3000/dm');
+  });
+
+  it('gives up on a port another program holds, after waiting, with a PortInUseError', async () => {
+    const waits: number[] = [];
+    const d = deps({
+      startServer: () => Promise.reject(Object.assign(new Error('listen EADDRINUSE'), { code: 'EADDRINUSE' })),
+      sleep: (ms) => {
+        waits.push(ms);
+        return Promise.resolve();
+      },
+    });
+    const failure = await launch(d).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(PortInUseError);
+    expect((failure as PortInUseError).port).toBe(3000);
+    expect(waits.reduce((sum, ms) => sum + ms, 0)).toBe(10_000);
+    expect(d.events.some((event) => event.startsWith('open'))).toBe(false);
+  });
+
+  it('lets any other start-up failure through at once', async () => {
+    let asked = 0;
+    const d = deps({
+      isAnswering: () => Promise.resolve(asked++ > 0),
+      startServer: () => Promise.reject(Object.assign(new Error('EACCES'), { code: 'EACCES' })),
+    });
+    await expect(launch(d)).rejects.toThrow('EACCES');
+    expect(asked).toBe(1);
+  });
+});
+
+describe('portInUseAdvice', () => {
+  it('names the port and gives a way to start on the next one, for Windows and elsewhere', () => {
+    const windows = portInUseAdvice(3000, 'win32');
+    expect(windows[0]).toBe('Port 3000 is used by another program, so Emberglass cannot start on it.');
+    expect(windows).toContain('  set EMBERGLASS_PORT=3001');
+    expect(windows).toContain('  Emberglass.cmd');
+    expect(portInUseAdvice(3000, 'linux').join(' ')).toContain('EMBERGLASS_PORT=3001 ./emberglass.sh');
+    expect(portInUseAdvice(65535, 'win32')).toContain('  set EMBERGLASS_PORT=65534');
+  });
+});
+
+describe('openInBrowser', () => {
+  it('answers false, without throwing, when the opener cannot be started', async () => {
+    const path = process.env.PATH;
+    process.env.PATH = '';
+    try {
+      expect(await openInBrowser('http://127.0.0.1:3000/dm', 'linux')).toBe(false);
+    } finally {
+      process.env.PATH = path;
+    }
   });
 });

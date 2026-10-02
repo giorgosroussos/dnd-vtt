@@ -139,7 +139,8 @@ export function packageInfo(dir) {
     typeof manifest.license === 'string'
       ? manifest.license
       : (manifest.license?.type ?? manifest.licenses?.map((entry) => entry.type).join(' OR ') ?? 'UNKNOWN');
-  return { name: manifest.name, version: manifest.version, license };
+  const author = typeof manifest.author === 'string' ? manifest.author : (manifest.author?.name ?? null);
+  return { name: manifest.name, version: manifest.version, license, author };
 }
 
 /** The package folder of a file inside node_modules, or null for a file outside one. */

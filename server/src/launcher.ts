@@ -3,9 +3,13 @@
 // so that the first run's PIN setup happens from this PC (specs/07-security-and-access.md §1).
 import { spawn } from 'node:child_process';
 
-/** The DM view on the loopback address: the only place PIN setup is accepted from. */
+/**
+ * The DM view on the loopback address, the only place PIN setup is accepted from. The IPv4 address the
+ * probe asks, not `localhost`: the server listens on IPv4, and a browser that resolves `localhost` to
+ * `::1` first could reach another program holding that port there (PKG-01 review S-L1).
+ */
 export function dmViewUrl(port: number): string {
-  return `http://localhost:${port}/dm`;
+  return `http://127.0.0.1:${port}/dm`;
 }
 
 /**
@@ -63,28 +67,79 @@ export interface LaunchDeps {
   startServer: () => Promise<void>;
   open: (url: string) => Promise<boolean>;
   print: (line: string) => void;
+  /** Waits between the checks for another Emberglass that holds the port while it starts. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
-export type LaunchOutcome = 'opened-running' | 'started';
+/** What one launch did, and whether the DM view opened in a browser. */
+export interface LaunchOutcome {
+  outcome: 'opened-running' | 'started';
+  opened: boolean;
+}
+
+/** The port is held by a program that is not Emberglass, so the server cannot listen on it. */
+export class PortInUseError extends Error {
+  constructor(readonly port: number) {
+    super(`Port ${port} is used by another program, so Emberglass cannot start on it.`);
+  }
+}
+
+// How long a launch waits for another Emberglass that took the port first to answer: two
+// double-clicks in a row start two launches before either server listens (PKG-01 review C-L1).
+const SETTLE_TRIES = 20;
+const SETTLE_MS = 500;
+
+const isPortInUse = (error: unknown): boolean =>
+  typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'EADDRINUSE';
 
 /**
  * One launch. A server already running is left alone and only the DM view is opened, so a second
  * launch never starts a second server; otherwise the server starts in this process (its console is
- * the launcher's window, and closing it stops the server) and the DM view opens once it listens.
+ * the launcher's window, and closing it stops the server) and the DM view opens once it listens. When
+ * the port turns out to be taken, another Emberglass that is just starting is waited for and its DM
+ * view opened; anything else on the port is a PortInUseError.
  */
 export async function launch(deps: LaunchDeps): Promise<LaunchOutcome> {
   const url = dmViewUrl(deps.port);
-  if (await deps.isAnswering(deps.port)) {
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const openRunning = async (): Promise<LaunchOutcome> => {
     deps.print(`Emberglass is already running on port ${deps.port}. Opening ${url}`);
-    await openOrSay(deps, url);
-    return 'opened-running';
+    return { outcome: 'opened-running', opened: await openOrSay(deps, url) };
+  };
+  if (await deps.isAnswering(deps.port)) return openRunning();
+  try {
+    await deps.startServer();
+  } catch (error) {
+    if (!isPortInUse(error)) throw error;
+    for (let tries = 0; tries < SETTLE_TRIES; tries++) {
+      if (await deps.isAnswering(deps.port)) return openRunning();
+      await sleep(SETTLE_MS);
+    }
+    throw new PortInUseError(deps.port);
   }
-  await deps.startServer();
   deps.print(`Opening the DM view: ${url}`);
-  await openOrSay(deps, url);
-  return 'started';
+  return { outcome: 'started', opened: await openOrSay(deps, url) };
 }
 
-async function openOrSay(deps: LaunchDeps, url: string): Promise<void> {
-  if (!(await deps.open(url))) deps.print(`Could not open a browser. Open ${url} in a browser on this PC.`);
+async function openOrSay(deps: LaunchDeps, url: string): Promise<boolean> {
+  const opened = await deps.open(url);
+  if (!opened) deps.print(`Could not open a browser. Open ${url} in a browser on this PC.`);
+  return opened;
+}
+
+/** What the window says when the port is taken: the way out, for Windows and elsewhere. */
+export function portInUseAdvice(port: number, platform: NodeJS.Platform): string[] {
+  const next = port === 65535 ? port - 1 : port + 1;
+  return platform === 'win32'
+    ? [
+        `Port ${port} is used by another program, so Emberglass cannot start on it.`,
+        'Close that program and start Emberglass again, or start Emberglass on another port: in this folder, type cmd',
+        `in the address bar of File Explorer, press Enter, then type these two lines, each followed by Enter:`,
+        `  set EMBERGLASS_PORT=${next}`,
+        '  Emberglass.cmd',
+      ]
+    : [
+        `Port ${port} is used by another program, so Emberglass cannot start on it.`,
+        `Close that program and start Emberglass again, or start it on another port: EMBERGLASS_PORT=${next} ./emberglass.sh`,
+      ];
 }

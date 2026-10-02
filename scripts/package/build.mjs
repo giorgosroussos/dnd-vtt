@@ -275,6 +275,8 @@ function notices() {
   for (const key of productionClosure(lock, ['client', 'shared'], target, installed, ownManifest))
     dirs.add(at(...key.split('/')));
   for (const key of nativeKeys) dirs.add(at(...key.split('/')));
+  // Vite is a devDependency, but its preload and dependency-map helpers are inside client/dist's entry.
+  dirs.add(at('node_modules', 'vite'));
   const components = [...dirs]
     .map((dir) => ({ dir, ...packageInfo(dir) }))
     // Ours, and type declarations, of which nothing reaches the package.
@@ -305,7 +307,13 @@ function notices() {
   for (const component of sorted) {
     sections.push(rule, `${component.name} ${component.version}`, `Licence: ${component.license}`, rule);
     const files = licenceFiles(component.dir);
-    for (const file of files) sections.push(readFileSync(file, 'utf8').trim(), '');
+    for (const file of files) {
+      const text = readFileSync(file, 'utf8');
+      // Vite's licence file goes on with the licences of its own bundled dependencies, which reach the
+      // package only through Vite's build, not as code; its own MIT licence comes first.
+      const own = component.name === 'vite' ? (text.split(/^# Licenses of bundled dependencies/m)[0] ?? text) : text;
+      sections.push(own.trim(), '');
+    }
     // libvips and the libraries it is built with: in @img/sharp-libvips-* off Windows, inside the DLLs
     // of @img/sharp-win32-* on it. Neither ships their licence texts, so the list is vendored, for
     // the libvips version it belongs to, and the full texts are appended below.
@@ -334,10 +342,22 @@ function notices() {
     }
     if (files.length === 0 && !listed) {
       missing.push(`${component.name}@${component.version}`);
-      sections.push(`The package declares the licence ${component.license} and includes no licence file.`, '');
+      if (component.license === 'MIT') {
+        // The MIT licence asks for its notice with the copyright: the package's author stands for it.
+        sections.push(
+          `The package declares the MIT licence and includes no licence file; its text, with the author the`,
+          'package names:',
+          '',
+          mitLicence(component.author ?? `the authors of ${component.name}`),
+          '',
+        );
+      } else {
+        sections.push(`The package declares the licence ${component.license} and includes no licence file.`, '');
+      }
     }
   }
-  if (missing.length > 0) log(`no licence file in: ${missing.join(', ')} (named with their declared licence)`);
+  if (missing.length > 0)
+    log(`no licence file in: ${missing.join(', ')} (given their declared licence; MIT with the author as its holder)`);
   for (const [name, file] of [
     ['GNU Lesser General Public License, version 3', 'LGPL-3.0.txt'],
     ['GNU General Public License, version 3', 'GPL-3.0.txt'],
@@ -346,6 +366,30 @@ function notices() {
     sections.push(rule, name, rule, readFileSync(at('scripts', 'package', 'licences', file), 'utf8').trim(), '');
   }
   return sections.join(windows ? '\r\n' : '\n').replaceAll(/\r?\n/g, windows ? '\r\n' : '\n');
+}
+
+/** The MIT licence's text, for a package that declares it but carries no licence file. */
+function mitLicence(holder) {
+  return [
+    'MIT License',
+    '',
+    `Copyright (c) ${holder}`,
+    '',
+    'Permission is hereby granted, free of charge, to any person obtaining a copy of this software and',
+    'associated documentation files (the "Software"), to deal in the Software without restriction,',
+    'including without limitation the rights to use, copy, modify, merge, publish, distribute,',
+    'sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is',
+    'furnished to do so, subject to the following conditions:',
+    '',
+    'The above copyright notice and this permission notice shall be included in all copies or',
+    'substantial portions of the Software.',
+    '',
+    'THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT',
+    'NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND',
+    'NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,',
+    'DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT',
+    'OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.',
+  ].join('\n');
 }
 
 /** The libvips version a sharp binary package records in its versions.json, if it does. */
@@ -364,9 +408,14 @@ function writeLaunchers() {
       path.join(stage, 'Emberglass.cmd'),
       [
         '@echo off',
+        // A path with `!` stays whole even where cmd expands variables late by default (review S-L4).
+        'setlocal DisableDelayedExpansion',
         'title Emberglass',
         '"%~dp0emberglass.exe" "%~dp0app\\launcher.mjs"',
-        'if errorlevel 1 pause',
+        // On a failure, or a DM view no browser opened, wait so the DM can read why; the code goes on.
+        'set code=%errorlevel%',
+        'if not "%code%"=="0" pause',
+        'exit /b %code%',
         '',
       ].join('\r\n'),
     );
@@ -374,9 +423,13 @@ function writeLaunchers() {
       path.join(stage, 'Reset PIN.cmd'),
       [
         '@echo off',
+        // A path with `!` stays whole even where cmd expands variables late by default (review S-L4).
+        'setlocal DisableDelayedExpansion',
         'title Emberglass: reset the DM PIN',
         '"%~dp0emberglass.exe" "%~dp0app\\reset-pin.mjs"',
+        'set code=%errorlevel%',
         'pause',
+        'exit /b %code%',
         '',
       ].join('\r\n'),
     );
@@ -405,10 +458,14 @@ function readme({ commit, tag, changed }) {
     'The server runs on this PC; the TV opens the player view in its browser over the home Wi-Fi.',
     '',
     'START',
-    `  Double-click ${start}. It opens the DM view, http://localhost:3000/dm, in your browser, and`,
-    '  starts the server first if it is not running yet. Keep its window open while you play:',
-    '  closing it stops the server. The window shows the address and QR code for the TV. If the',
-    '  TV cannot open it, choose the TV address in Settings in the DM view.',
+    `  Double-click ${start}. It opens the DM view, http://127.0.0.1:3000/dm (or the port you set),`,
+    '  in your browser, and starts the server first if it is not running yet. Keep its window open',
+    '  while you play: closing it stops the server. The window shows the address and QR code for',
+    '  the TV. If the TV cannot open it, check first that Windows calls your Wi-Fi a private',
+    '  network (FIREWALL below), then choose the TV address in Settings in the DM view.',
+    '',
+    '  The package is not signed. When Windows shows "Windows protected your PC" on the first start,',
+    '  choose More info, then Run anyway. Compare the zip with its .sha256 from the release first.',
     '',
     '  First run: choose the DM PIN in the browser that opens, on this PC. Setup is refused from',
     '  any other device.',
@@ -421,10 +478,12 @@ function readme({ commit, tag, changed }) {
     'YOUR DATA',
     '  Campaigns, images and logs are in %APPDATA%\\Emberglass, not in this folder. To back up,',
     '  stop the server and copy that folder. Deleting this folder does not delete your data.',
-    '  EMBERGLASS_DATA_DIR and EMBERGLASS_PORT change the folder and the port (3000).',
+    '  EMBERGLASS_DATA_DIR and EMBERGLASS_PORT change the folder and the port (3000): in this folder,',
+    '  type cmd in the address bar of File Explorer, then set EMBERGLASS_PORT=3001 and Emberglass.cmd.',
     '',
     'FORGOTTEN PIN',
-    `  Double-click ${reset}, then choose a new PIN at http://localhost:3000/dm in a browser on this PC.`,
+    `  Double-click ${reset}, then choose a new PIN at http://127.0.0.1:3000/dm (or the port you set)`,
+    '  in a browser on this PC.',
     '',
     'UPDATING',
     '  Emberglass never checks for updates. To update, stop the server, unzip the newer package',

@@ -133,3 +133,51 @@ test('settings saved in the DM view take effect with no restart: the upload limi
     await playerContext.close();
   }
 });
+
+// The TV address against the real server (specs/08-ux-journeys.md §5, specs/09-operations.md §7, Q-110;
+// PKG-01 review T-M4): chosen in Settings from this PC's addresses, it is what Connect a screen shows and
+// encodes, said to be chosen; Automatic again gives the panel back its own choice.
+test('a TV address chosen in Settings is the one Connect a screen shows, until Automatic is chosen again', async ({
+  browser,
+}) => {
+  const context = await browser.newContext();
+  const dm = await context.newPage();
+  try {
+    await openWorkspace(dm);
+    const connect = (await (await dm.request.get('/api/connect')).json()) as {
+      addresses: { address: string; url: string; adapter: string }[];
+      automatic: string | null;
+    };
+    test.skip(connect.addresses.length === 0, 'this machine has no network address to choose');
+    // The last address listed: on a machine with several, not the one Automatic picks.
+    const pick = connect.addresses.at(-1)!;
+
+    await saveSettings(dm, async (dialog) => {
+      const tv = dialog.getByLabel('TV address');
+      await expect(tv.locator('option').first()).toHaveText(/^Automatic \(recommended\)/);
+      await tv.selectOption(pick.address);
+      await dialog.getByRole('button', { name: 'Save settings' }).click();
+    });
+    await dm.getByRole('button', { name: 'Connect a screen' }).click();
+    const panel = dm.getByRole('dialog', { name: 'Connect a screen' });
+    await expect(panel.getByTestId('connect-url')).toHaveText(pick.url);
+    await expect(
+      panel.getByText(`Network adapter: ${pick.adapter}. Chosen as the TV address in Settings.`),
+    ).toBeVisible();
+    await expect(panel.getByRole('img', { name: `QR code that opens ${pick.url}` })).toBeVisible();
+    await panel.getByRole('button', { name: 'Close' }).click();
+
+    await saveSettings(dm, async (dialog) => {
+      await dialog.getByLabel('TV address').selectOption('');
+      await dialog.getByRole('button', { name: 'Save settings' }).click();
+    });
+    await dm.getByRole('button', { name: 'Connect a screen' }).click();
+    const automatic = connect.addresses.find((entry) => entry.address === connect.automatic)!;
+    await expect(panel.getByTestId('connect-url')).toHaveText(automatic.url);
+    await expect(panel.getByText('Chosen as the TV address in Settings')).toHaveCount(0);
+  } finally {
+    const restored = await dm.request.patch('/api/settings', { data: { tv_address: null } });
+    expect(restored.ok(), await restored.text()).toBe(true);
+    await context.close();
+  }
+});

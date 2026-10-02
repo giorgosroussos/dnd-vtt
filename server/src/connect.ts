@@ -33,6 +33,11 @@ export function isPrivateIpv4(address: string): boolean {
   return PRIVATE_RANGES.some(([base, bits]) => Math.floor(value / 2 ** (32 - bits)) === base / 2 ** (32 - bits));
 }
 
+/** In 169.254.0.0/16, an address a system gives itself when no DHCP server answered. */
+export function isLinkLocalIpv4(address: string): boolean {
+  return address.startsWith('169.254.');
+}
+
 /** The player view's URL on `address`: the root of the server (specs/02-architecture.md §2). */
 export function playerViewUrl(address: string, port: number): string {
   return `http://${address}${port === 80 ? '' : `:${port}`}${VIEW_PATHS.player}`;
@@ -53,7 +58,8 @@ export function isVirtualAdapter(name: string): boolean {
 /**
  * Every non-internal IPv4 address, ranked (specs/08-ux-journeys.md §5, Q-110): the TV address chosen
  * in Settings first while the PC has it; then the other adapters' addresses before virtual ones', a
- * private-range address first within each group, the system's order kept otherwise.
+ * private-range address first within each group and a link-local one last, the system's order kept
+ * otherwise.
  */
 export function lanAddresses(
   interfaces: NodeJS.Dict<os.NetworkInterfaceInfo[]>,
@@ -77,8 +83,11 @@ export function lanAddresses(
       });
     }
   }
+  // Within each group: private-range first, then other addresses, then link-local ones (169.254/16), which a
+  // TV can rarely reach.
+  const kind = (entry: ConnectAddress): number => (entry.private ? 0 : isLinkLocalIpv4(entry.address) ? 2 : 1);
   const rank = (entry: ConnectAddress): number =>
-    (entry.address === chosen ? 0 : 4) + (entry.virtual ? 2 : 0) + (entry.private ? 0 : 1);
+    (entry.address === chosen ? 0 : 8) + (entry.virtual ? 4 : 0) + kind(entry);
   // Array.prototype.sort is stable, so equal ranks keep the system's order.
   return listed.sort((a, b) => rank(a) - rank(b));
 }
@@ -124,14 +133,18 @@ export function connectBanner(info: ConnectInfo, platform: NodeJS.Platform): str
         `The TV address chosen in Settings, ${info.chosen}, is not an address of this PC now: showing the automatic one.`,
       );
     }
-    lines.push(`Connect a screen: open ${first.url} in the TV's browser, or scan this code (${first.adapter}).`);
+    const source = info.chosen_found ? `${first.adapter}, chosen in Settings` : first.adapter;
+    lines.push(`Connect a screen (${source}): open ${first.url} in the TV's browser, or scan this code.`);
     lines.push(renderUnicodeCompact(first.url, { border: 2, ecc: 'M' }).trimEnd());
     if (others.length > 0) {
-      lines.push(
-        `Other addresses of this PC: ${others.map((entry) => `${entry.url} (${entry.adapter})`).join('  ')}`,
-        'If the TV cannot open the address above, choose the right one as the TV address in Settings.',
-      );
+      lines.push(`Other addresses of this PC: ${others.map((entry) => `${entry.url} (${entry.adapter})`).join('  ')}`);
     }
+    // The likelier cause first: a network Windows classes as Public keeps the TV out (specs/09-operations.md §4).
+    lines.push(
+      platform === 'win32'
+        ? 'If the TV cannot open it, check that Windows calls this network private (Settings, Network & internet), then choose the TV address in Settings.'
+        : 'If the TV cannot open it, check that the firewall of this PC lets the port in (see the README), then choose the TV address in Settings.',
+    );
   }
   if (platform === 'win32') {
     lines.push(

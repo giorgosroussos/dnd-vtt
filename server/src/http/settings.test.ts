@@ -103,6 +103,27 @@ describe('PATCH /api/settings (specs/09-operations.md §7)', () => {
     ]);
   });
 
+  // The TV address of the connect panel (specs/08-ux-journeys.md §5, specs/09-operations.md §7, Q-110).
+  it('sets the TV address alone and back to Automatic with null, logging each change and not a re-save', async () => {
+    const before = readSettings(data.db);
+    const chosen = ok(await patch({ tv_address: '192.168.1.133' }));
+    expect(chosen).toEqual({ ...before, tv_address: '192.168.1.133' });
+    expect(readSettings(data.db)).toEqual(chosen);
+    ok(await patch({ tv_address: '192.168.1.133' }));
+    const automatic = ok(await patch({ tv_address: null }));
+    expect(automatic).toEqual(before);
+    expect(automatic.tv_address).toBeNull();
+    const lines = readFileSync(logFilePath(data.dataDir), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((line) => line.event === 'settings.changed');
+    expect(lines).toEqual([
+      expect.objectContaining({ msg: 'Settings changed: tv_address.', tv_address: '192.168.1.133' }),
+      expect.objectContaining({ msg: 'Settings changed: tv_address.', tv_address: null }),
+    ]);
+  });
+
   it('is refused without a DM session, and with a foreign Origin, changing nothing', async () => {
     const before = readSettings(data.db);
     expectFailure(
@@ -126,6 +147,11 @@ describe('PATCH /api/settings (specs/09-operations.md §7)', () => {
     ['a display size over what WebP stores', { display_variant_size: DISPLAY_SIZE_BOUNDS.max + 1 }],
     ['an unknown rule', { ruler_rule: 'euclid' }],
     ['a valid field beside an invalid one', { ruler_rule: 'dmg', display_variant_size: 0 }],
+    ['a TV address that is not an IPv4 address', { tv_address: '192.168.1.256' }],
+    ['a TV address with a port', { tv_address: '192.168.1.133:3000' }],
+    ['a TV address as a number', { tv_address: 3232235909 }],
+    ['a valid field beside an invalid TV address', { ruler_rule: 'dmg', tv_address: '1.2.3.256' }],
+    ['a valid TV address beside an invalid field', { tv_address: '192.168.1.133', display_variant_size: 0 }],
     ['not an object', [1]],
   ])('refuses %s and changes nothing', async (_name, body) => {
     const before = readSettings(data.db);

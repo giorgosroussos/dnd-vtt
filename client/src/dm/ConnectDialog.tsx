@@ -64,16 +64,19 @@ export function ConnectDialog({ onClose }: { onClose: () => void }) {
         <div className="eg-dialog__body eg-connect">
           <p>{t('connect.intro')}</p>
           {info?.chosen !== null && info?.chosen_found === false ? (
-            <Notice>{t('connect.chosenMissing', { address: info.chosen })}</Notice>
+            // A fallback, not a failure: the panel still works, so a status rather than an alert (review U-L7).
+            <p className="eg-dm__status eg-connect__fallback" role="status">
+              {t('connect.chosenMissing', { address: info.chosen })}
+            </p>
           ) : null}
           <p className="eg-connect__url" data-testid="connect-url">
             {first.url}
           </p>
           <p className="eg-dm__status eg-connect__adapter">
-            {t('connect.adapter', { adapter: first.adapter })}
-            {info?.chosen_found ? ` ${t('connect.chosen')}` : ''}
+            {t(info?.chosen_found ? 'connect.adapterChosen' : 'connect.adapter', { adapter: first.adapter })}
           </p>
           {info?.qr ? <QrImage qr={info.qr} label={t('connect.qrLabel', { url: first.url })} /> : null}
+          <p className="eg-dm__status">{t('connect.cannotOpen')}</p>
           {others.length > 0 ? (
             <>
               <h3 className="eg-connect__subheading">{t('connect.others')}</h3>

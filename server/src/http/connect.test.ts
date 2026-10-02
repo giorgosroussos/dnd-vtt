@@ -14,7 +14,7 @@ import {
 } from '@emberglass/shared';
 import { io as connectSocket, type Socket } from 'socket.io-client';
 import { compileSchema } from '../validation.js';
-import { buildTestApp, createTestData, setUpPin, type TestData } from './testing/app.js';
+import { buildTestApp, createTestData, dmCookie, setUpPin, type TestData } from './testing/app.js';
 
 // GET /api/connect, what the "Connect a screen" panel shows (LIV-03, PKG-01, specs/08-ux-journeys.md §5,
 // specs/02-architecture.md §5, D-112, Q-110), against a real SQLite file and a real port.
@@ -120,8 +120,20 @@ describe('the TV address chosen in Settings', () => {
     const chosen = await connect(cookie);
     expect(chosen.addresses.map((entry) => entry.address)).toEqual(['172.21.112.1', '192.168.1.20', '100.64.3.4']);
     expect(chosen).toMatchObject({ chosen: '172.21.112.1', chosen_found: true, automatic: '192.168.1.20' });
-    // Stored in the database, not in memory: a restarted server keeps it.
-    expect(data.reopen().prepare('SELECT tv_address FROM settings').pluck().get()).toBe('172.21.112.1');
+    // Stored in the database, not in memory: a restarted server, on the same data directory, still uses it.
+    const restarted = await buildTestApp({ ...data, db: data.reopen() }, { networkInterfaces: () => interfaces });
+    try {
+      const signIn = await restarted.inject({ method: 'POST', url: '/api/auth', payload: { pin: PIN } });
+      const again = await restarted.inject({
+        method: 'GET',
+        url: API_CONNECT_PATH,
+        headers: { cookie: dmCookie(signIn) },
+      });
+      expect(again.json<ConnectInfo>()).toMatchObject({ chosen: '172.21.112.1', chosen_found: true });
+      expect(again.json<ConnectInfo>().addresses[0]!.address).toBe('172.21.112.1');
+    } finally {
+      await restarted.close();
+    }
 
     expect((await patch(cookie, { tv_address: null })).status).toBe(200);
     const automatic = await connect(cookie);
@@ -151,28 +163,7 @@ describe('the TV address chosen in Settings', () => {
     expect(anonymous.status).toBe(401);
     expect((await connect(cookie)).chosen).toBeNull();
   });
-
-  it('never reaches a player view: the players room hears nothing of a change, and its snapshot holds no address', async () => {
-    const cookie = await setUpPin(app, PIN);
-    const tv = connectSocket(`http://127.0.0.1:${port()}`, {
-      path: SOCKET_PATH,
-      transports: ['websocket'],
-      extraHeaders: { origin: `http://127.0.0.1:${port()}` },
-    });
-    const heard: string[] = [];
-    tv.onAny((...args: unknown[]) => heard.push(JSON.stringify(args)));
-    await new Promise<void>((resolve, reject) => {
-      tv.once('connect', resolve);
-      tv.once('connect_error', reject);
-    });
-    try {
-      expect((await patch(cookie, { tv_address: '172.21.112.1' })).status).toBe(200);
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      expect(heard.join('\n')).not.toMatch(/tv_address|172\.21\.112\.1|192\.168\.1\.20/);
-    } finally {
-      tv.disconnect();
-    }
-  });
+  // That the players room hears nothing of it, with a scene live, is server/src/ws/settings.test.ts.
 });
 
 describe('GET /api/screens (UIX-01, specs/08-ux-journeys.md §11)', () => {
