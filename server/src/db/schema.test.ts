@@ -109,6 +109,7 @@ const SETTINGS_PROSE: Record<string, string> = {
   'ruler rule': 'ruler_rule',
   'upload limit': 'upload_limit_bytes',
   'display variant size': 'display_variant_size',
+  'TV address': 'tv_address',
   'PIN hash': 'pin_hash',
 };
 
@@ -256,6 +257,8 @@ describe('migration 0001 on a fresh database', () => {
         'upload_limit_bytes INTEGER NOT NULL DEFAULT 52428800',
         'display_variant_size INTEGER NOT NULL DEFAULT 4096',
         'pin_hash TEXT NULL',
+        // Migration 0009 (PKG-01, Q-110).
+        'tv_address TEXT NULL',
       ],
     });
   });
@@ -1022,6 +1025,33 @@ describe('migrations on the generated fixture database (specs/14-agent-playbook.
     db.prepare('UPDATE settings SET live_scene_id = NULL').run();
     db.prepare('DELETE FROM scene WHERE id = ?').run(scene);
     expect(db.prepare('SELECT count(*) FROM encounter').pluck().get()).toBe(0);
+  });
+
+  it('adds the TV address at migration 0009, Automatic on existing data, refusing what is not four dotted numbers (Q-110)', () => {
+    createFixtureDatabase(dataDir);
+    migrateDataDirectory(dataDir, MIGRATIONS_DIR, new Date(), 8);
+    db = openDatabase(dataDir);
+    const columns = () => (db!.prepare('PRAGMA table_info(settings)').all() as { name: string }[]).map((c) => c.name);
+    expect(columns()).not.toContain('tv_address');
+    const before = db.prepare('SELECT live_scene_id, ruler_rule FROM settings').get();
+    db.close();
+
+    const result = migrateDataDirectory(dataDir, MIGRATIONS_DIR);
+
+    expect(result).toMatchObject({ from: 8, to: LATEST });
+    expect(result.backup).not.toBeNull();
+    db = openDatabase(dataDir);
+    expect(columns()).toContain('tv_address');
+    expect(db.prepare('SELECT tv_address FROM settings').pluck().get()).toBeNull();
+    expect(db.prepare('SELECT live_scene_id, ruler_rule FROM settings').get()).toEqual(before);
+    const set = db.prepare('UPDATE settings SET tv_address = ?');
+    for (const ok of ['192.168.1.133', '10.0.0.2', '255.255.255.255', null]) {
+      set.run(ok);
+      expect(db.prepare('SELECT tv_address FROM settings').pluck().get()).toBe(ok);
+    }
+    for (const bad of ['192.168.1', '192.168.1.1.1', 'emberglass.local', '192.168.1.13a', '1.2.3.4 ', '', 'a.b.c.d']) {
+      expect(() => set.run(bad), bad).toThrow(/CHECK constraint failed/);
+    }
   });
 
   it('migrates the fixture to the latest version, keeping every row and every reference', () => {

@@ -2,7 +2,7 @@ import { loadConfig } from './config.js';
 import { connectBanner, connectInfo, systemInterfaces } from './connect.js';
 import { openDatabase } from './db/database.js';
 import { migrateDataDirectory } from './db/migrate.js';
-import { readPinHash } from './db/settings.js';
+import { readPinHash, readSettings } from './db/settings.js';
 import { buildApp } from './http/app.js';
 import { createLogger } from './log/logger.js';
 import { CLIENT_DIST, CLIENT_ROOT, MIGRATIONS_DIR } from './paths.js';
@@ -34,7 +34,7 @@ export async function start({ dev }: { dev: boolean }): Promise<void> {
     });
     // The player view's URL and QR code for the TV, straight to the console: a QR code is not a
     // log line (specs/09-operations.md §2, §4, specs/08-ux-journeys.md §5); the URLs are logged too.
-    const connect = connectInfo(systemInterfaces(), config.port);
+    const connect = connectInfo(systemInterfaces(), config.port, readSettings(db).tv_address);
     logger.info(
       'server.addresses',
       `Player view: ${connect.addresses.map((entry) => entry.url).join(' ') || 'no network address'}`,

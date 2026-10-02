@@ -122,7 +122,7 @@ Each bullet below is an owner decision: stated in the requirements (`[input]`) o
 - No formal accessibility target; keyboard-operable core actions and readable contrast (`08` §8). [Q-030]
 - Visible tokens' labels are shown on the TV (`04` §4). [Q-032, recommendation accepted]
 - The player view is at `/` and the DM view at `/dm` (`02` §2). [Q-052, recommendation accepted]
-- The connect panel lists every LAN address and highlights the first private-range one (`08` §5). [Q-053, recommendation accepted]
+- The connect panel lists every LAN address with its adapter and highlights one chosen with no step by the DM, virtual adapters' addresses last and private-range ones first; a TV address chosen in Settings is the emergency correction, falling back to automatic when gone (`08` §5). [Q-110]
 - Hidden tokens are semi-transparent with a marker in the DM view; the player view has no controls (`08` §9). [Q-054, recommendation accepted]
 - Token numbers are per scene, never reused; a lone token keeps the bare name (`05` §3). [Q-063, recommendation accepted]
 - Tag filters narrow (all selected tags match); results sorted by name (`05` §1). [Q-064, recommendation accepted]

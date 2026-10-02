@@ -19,10 +19,10 @@ npm start
 - To update, run `git pull` and `npm install`, then `npm run build` before `npm start`. `npm start` builds only when no build exists, so without this step it would start the old build.
 - Stop the server with Ctrl+C.
 
-On start the console prints the player view's address and a QR code for it, for example `http://192.168.1.20:3000/`, followed by the PC's other addresses.
+On start the console prints the player view's address and a QR code for it, for example `http://192.168.1.20:3000/`, followed by the PC's other addresses, each with the name of its network adapter. Emberglass picks the address itself: the Wi-Fi's or the Ethernet's, before those of virtual adapters that WSL, Hyper-V, VMware, VirtualBox, Docker or a VPN add.
 
 - **First run.** While no PIN is set, the console says so and prints the address to open. Open `http://localhost:3000/dm` (or your port, if you set `EMBERGLASS_PORT`) in a browser **on this PC** and choose the DM PIN (4 to 8 digits; 6 to 8 are much harder to guess). Setup is refused from any other device, and from this PC through its network address: use `localhost`.
-- **The TV.** Open the printed address in the TV's browser, or use Connect a screen in the DM view (the screens counter in its header), which shows the same address and code. The player view needs no PIN.
+- **The TV.** Open the printed address in the TV's browser, or use Connect a screen in the DM view (the screens counter in its header), which shows the same address and code. The player view needs no PIN. If neither the TV nor a phone opens it, check that Windows calls your Wi-Fi a private network (see Firewall below), then choose the TV address in Settings.
 - **The DM view.** On any browser on the Wi-Fi, open the same address followed by `/dm`, then enter the PIN. A browser stays signed in until the server restarts, the PIN changes or it signs out.
 - **Forgotten PIN.** Run `npm run reset-pin` in the Emberglass folder on this PC, then set a new one from `http://localhost:3000/dm` (or your port).
 
@@ -42,6 +42,7 @@ The DM view's Settings (the button at the right of its header; Sign out is in th
 - **The upload limit:** 50 MB by default, from 1 to 1,024 MB. The next upload is checked against it.
 - **The display size:** the longest side, in pixels, of the version of each map and token image that screens show. It is 4,096 by default, from 512 to 16,383. Choose a smaller size if the TV is slow or runs out of memory. After a change, every display version is made again in the background, and the TV shows each map at the new size once it is done. Originals, which calibration uses, never change.
 - **Diagonals on the ruler:** every diagonal square counts 5 ft (PHB, the default), or diagonals alternate 5 ft and 10 ft (DMG). The distance on the TV follows at once.
+- **TV address:** Automatic, the default, needs nothing from you. Change it only if the TV or a phone cannot open the address Connect a screen shows: choose your PC's Wi-Fi or Ethernet address from the list, where each is named with its adapter. In Windows Settings, open Network & internet, then your network: the one to choose is its **IPv4 address** (not the default gateway or a DNS server, which are your router). Connect a screen, its QR code and the console at the next start then use it. If the PC no longer has that address, on another Wi-Fi for example, Emberglass goes back to Automatic and says so.
 - **Change the PIN:** give the current PIN and the new one. Every other browser signed in to the DM view is signed out.
 
 Two environment variables set what the Settings cannot, and are read when the server starts:

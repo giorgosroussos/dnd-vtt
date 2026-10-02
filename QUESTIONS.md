@@ -75,7 +75,7 @@ Every card opens `Blocking` and is answered before the specification proceeds. `
 - Q-050 — Undo for setup edits on the live scene — scope — Resolved
 - Q-051 — Where settings are changed — scope — Resolved
 - Q-052 — Which view sits at the server root — ux — Resolved
-- Q-053 — Which LAN address the connect panel highlights — ux — Resolved
+- Q-053 — Which LAN address the connect panel highlights — ux — Resolved — superseded by Q-110
 - Q-054 — How hidden tokens look to the DM and whether the TV view has controls — ux — Resolved
 - Q-055 — Who creates entity identifiers — data — Resolved
 - Q-056 — Live version counter after a restart — data — Resolved
@@ -132,6 +132,7 @@ Every card opens `Blocking` and is answered before the specification proceeds. `
 - Q-107 — A Windows package before the release — scope — Resolved
 - Q-108 — Installing for every user with a firewall rule, or for one user without administrator rights — security — Resolved
 - Q-109 — Signing the Windows package — external — Resolved
+- Q-110 — Which LAN address the connect panel and the QR code use on a PC with virtual adapters — ux — Resolved
 
 ## Blocking
 
@@ -747,6 +748,7 @@ None.
 - Recommendation: A, because it needs no setup step and still shows the alternatives; can be deferred to LIV-03.
 - Blocks: specification
 - Answer: A (2026-09-23; recommendation accepted)
+- Superseded by: Q-110
 
 ### Q-054 — How hidden tokens look to the DM and whether the TV view has controls
 - Surface: ux
@@ -1379,3 +1381,15 @@ None.
 - Recommendation: A, because the project is free and self-hosted for a known table, and signing can be added later without changing the package.
 - Blocks: specification
 - Answer: A (2026-10-02; recommendation accepted)
+
+### Q-110 — Which LAN address the connect panel and the QR code use on a PC with virtual adapters
+- Surface: ux
+- Source: The owner's first run of the Windows package (PKG-01, CI run 36982005130's zip) on 2026-10-02: on a Windows PC with WSL and VMware, the Connect a screen panel and the console highlighted and QR-encoded http://172.21.112.1:3000/ (vEthernet), listing 172.20.48.1, 192.168.186.1 and 192.168.36.1 (virtual adapters) before the Wi-Fi's 192.168.1.133; the phone could not open the highlighted address or scan the code, and worked once the owner typed the Wi-Fi address. `08` §5 [Q-053] highlights the first private-range address in the system's order; G-031 (deferred since LIV-03) predicted this. Preferring 192.168/16 would not help here: the VMware adapters are in it too.
+- Question: How should the server choose the address it highlights and encodes in the QR code when the PC has virtual network adapters?
+- Options:
+  - A) Rank by adapter: addresses of adapters whose names mark them as virtual (vEthernet, Hyper-V, WSL, VMware, VirtualBox, Docker, docker0, br-, veth, virbr, vmnet, utun, tailscale, ZeroTier) go after the others, private-range first within each group; everything is still listed, and today's rule applies when only virtual adapters are left → effect on ux: the Wi-Fi or Ethernet address is highlighted on the owner's PC and on most PCs with WSL, Hyper-V, Docker or a VM, with no setup step; an adapter named in a way the list does not know can still win, and the DM then types one from the list as today. No stored data, no contract change.
+  - B) A, plus the DM can pick the highlighted address in the Connect a screen panel, the choice stored as a setting and used by the panel, the QR code and the console while that address exists → effect on ux and data: the DM can always correct a wrong guess in one click and the TV's address stays put between sessions; adds a settings field (a migration), a field in the settings contract and a control in the panel.
+  - C) Keep Q-053 and document it: the console, the panel and both READMEs tell the DM that with WSL, a VM or a VPN the highlighted address may be wrong and to try the Wi-Fi one from the list → effect on ux: no code change; every DM with such a PC meets a QR code that does not open, as the owner did, and has to work out which address is the Wi-Fi.
+- Recommendation: A, because it fixes the case the owner hit and the common ones with no stored setting and no contract change, and B's picker can be added later if a DM still meets a wrong guess.
+- Blocks: specification
+- Answer: B, with A as the way it works by default: the server ranks the addresses by adapter so that the right one is highlighted with no chore for the DM, and a TV address chosen in Settings from the detected addresses, with their adapter names, is the emergency correction for a PC where the ranking guesses wrong, falling back to the automatic choice when the chosen address is gone (2026-10-02)

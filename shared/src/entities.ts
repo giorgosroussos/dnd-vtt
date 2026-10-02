@@ -23,16 +23,23 @@ export const GRID_TYPES = ['square'] as const;
 export const RULES_VERSION = '5e-2014';
 
 // Defaults the schema applies (specs/03-domain-model.md §6, specs/06-grid-and-measurement.md §5,
-// specs/05-assets-and-images.md §6, §7).
+// specs/05-assets-and-images.md §6, §7, specs/08-ux-journeys.md §5).
 export const DEFAULT_GRID_EXTENT = { columns: 30, rows: 20 } as const;
 export const DEFAULT_FEET_PER_SQUARE = 5;
 export const DEFAULT_SETTINGS = {
   ruler_rule: 'phb',
   upload_limit_bytes: 50 * 1024 * 1024,
   display_variant_size: 4096,
+  // Automatic: the connect panel ranks the addresses itself (specs/08-ux-journeys.md §5, Q-110).
+  tv_address: null,
 } as const;
 
 const strict = { additionalProperties: false } as const;
+
+// A dotted IPv4 address, each part 0 to 255: the TV address of the connect panel (specs/08-ux-journeys.md §5, Q-110).
+export const IPV4_PATTERN =
+  '^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$';
+export const Ipv4Schema = Type.String({ pattern: IPV4_PATTERN });
 
 // Size and offsets are in the original image's pixels (specs/06-grid-and-measurement.md §2).
 // `size` is null until a square size is calibrated; a scene without a map has none.
@@ -160,6 +167,8 @@ export const SettingsSchema = Type.Object(
     ruler_rule: Type.Enum(RULER_RULES),
     upload_limit_bytes: Type.Integer({ minimum: 1 }),
     display_variant_size: Type.Integer({ minimum: 1 }),
+    // The TV address the DM chose in Settings, or null for Automatic (specs/08-ux-journeys.md §5, Q-110).
+    tv_address: Type.Union([Ipv4Schema, Type.Null()]),
   },
   strict,
 );

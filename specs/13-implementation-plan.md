@@ -355,10 +355,10 @@ Goal: a DM installs Emberglass on a Windows PC without Node, Git or a terminal, 
 
 `PKG-01` Portable build
 
-- The server bundled into one module with the native modules external; a staged folder with the Node runtime renamed for Emberglass, the bundle, the migrations, the client build, the production native modules for win32-x64, the licence, third-party notices and source tag; a launcher that opens the DM view on loopback and starts the server only if none answers; a real version shown in About & credits; a release workflow on version tags attaching the zip and its SHA-256 to a GitHub Release (`09` §1, `09` §3, `02` §8, `07` §1, `02` §6).
-- Surfaces: security, scope, external
+- The server bundled into one module with the native modules external; a staged folder with the Node runtime renamed for Emberglass, the bundle, the migrations, the client build, the production native modules for win32-x64, the licence, third-party notices and source tag; a launcher that opens the DM view on loopback and starts the server only if none answers; a real version shown in About & credits; a release workflow on version tags attaching the zip and its SHA-256 to a GitHub Release (`09` §1, `09` §3, `02` §8, `07` §1, `02` §6); the TV address ranked by adapter, so that the QR code works on a PC with virtual adapters, and the TV address chosen in Settings as its correction (`08` §5, `09` §7, `03` §1, Q-110).
+- Surfaces: data, security, scope, external, ux
 - Touches red line: yes
-- Contract change: no
+- Contract change: yes
 
 `PKG-02` Installer
 

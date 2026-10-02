@@ -44,6 +44,7 @@ How a DM installs, starts, configures and backs up Emberglass.
 ## 7. Configuration
 
 - The upload size limit (`05` §6), the display-version size (`05` §7) and the ruler rule (`06` §5) MUST be settings the DM changes from the DM view without restarting. [Q-051]
+- The TV address of the connect panel (`08` §5) MUST be a setting the DM changes from the DM view without restarting, Automatic by default. [Q-110]
 - Port and data directory are set with `EMBERGLASS_PORT` and `EMBERGLASS_DATA_DIR`. [D-034]
 
 ## 8. Repository documents

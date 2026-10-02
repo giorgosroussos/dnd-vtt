@@ -3,19 +3,21 @@ import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   API_CONNECT_PATH,
+  API_PATHS,
   API_SCREENS_PATH,
   ConnectInfoSchema,
   PLAYER_VIEW_AUTH,
   PUBLIC_API_ROUTES,
   SOCKET_PATH,
   type ConnectInfo,
+  type Settings,
 } from '@emberglass/shared';
 import { io as connectSocket, type Socket } from 'socket.io-client';
 import { compileSchema } from '../validation.js';
 import { buildTestApp, createTestData, setUpPin, type TestData } from './testing/app.js';
 
-// GET /api/connect, what the "Connect a screen" panel shows (LIV-03, specs/08-ux-journeys.md §5,
-// specs/02-architecture.md §5, D-112), against a real SQLite file and a real port.
+// GET /api/connect, what the "Connect a screen" panel shows (LIV-03, PKG-01, specs/08-ux-journeys.md §5,
+// specs/02-architecture.md §5, D-112, Q-110), against a real SQLite file and a real port.
 
 const PIN = '73019264';
 let data: TestData;
@@ -27,7 +29,12 @@ const ipv4 = (address: string, internal = false) =>
 
 beforeEach(async () => {
   data = createTestData('emberglass-connect-');
-  interfaces = { lo: [ipv4('127.0.0.1', true)], vpn: [ipv4('100.64.3.4')], wlan: [ipv4('192.168.1.20')] };
+  interfaces = {
+    lo: [ipv4('127.0.0.1', true)],
+    vpn: [ipv4('100.64.3.4')],
+    'vEthernet (WSL)': [ipv4('172.21.112.1')],
+    wlan: [ipv4('192.168.1.20')],
+  };
   app = await buildTestApp(data, { networkInterfaces: () => interfaces });
   await app.listen({ port: 0, host: '127.0.0.1' });
 });
@@ -47,16 +54,30 @@ describe('GET /api/connect', () => {
     expect(await response.text()).not.toContain('192.168');
   });
 
-  it('gives a DM the player view on every LAN address at the port it listens on, the private one first, with its QR code', async () => {
+  it('gives a DM the player view on every LAN address at the port it listens on, ranked by adapter, with its QR code', async () => {
     const cookie = await setUpPin(app, PIN);
     const response = await fetch(`http://127.0.0.1:${port()}${API_CONNECT_PATH}`, { headers: { cookie } });
     expect(response.status).toBe(200);
     const body = (await response.json()) as ConnectInfo;
     expect(compileSchema(ConnectInfoSchema)(body)).toBe(true);
     expect(body.addresses).toEqual([
-      { address: '192.168.1.20', url: `http://192.168.1.20:${port()}/`, private: true },
-      { address: '100.64.3.4', url: `http://100.64.3.4:${port()}/`, private: false },
+      {
+        address: '192.168.1.20',
+        url: `http://192.168.1.20:${port()}/`,
+        private: true,
+        adapter: 'wlan',
+        virtual: false,
+      },
+      {
+        address: '172.21.112.1',
+        url: `http://172.21.112.1:${port()}/`,
+        private: true,
+        adapter: 'vEthernet (WSL)',
+        virtual: true,
+      },
+      { address: '100.64.3.4', url: `http://100.64.3.4:${port()}/`, private: false, adapter: 'vpn', virtual: true },
     ]);
+    expect(body).toMatchObject({ chosen: null, chosen_found: false });
     expect(body.qr?.size).toBe(body.qr?.rows.length);
     expect(JSON.stringify(body)).not.toContain('/dm');
   });
@@ -67,13 +88,90 @@ describe('GET /api/connect', () => {
     const before = (await (
       await fetch(`http://127.0.0.1:${port()}${API_CONNECT_PATH}`, { headers: { cookie } })
     ).json()) as ConnectInfo;
-    expect(before).toEqual({ addresses: [], qr: null });
+    expect(before).toEqual({ addresses: [], qr: null, chosen: null, chosen_found: false, automatic: null });
     interfaces = { wlan: [ipv4('10.0.0.8')] };
     const after = (await (
       await fetch(`http://127.0.0.1:${port()}${API_CONNECT_PATH}`, { headers: { cookie } })
     ).json()) as ConnectInfo;
     expect(after.addresses.map((entry) => entry.url)).toEqual([`http://10.0.0.8:${port()}/`]);
     expect(after.qr).not.toBeNull();
+  });
+});
+
+// The TV address chosen in Settings, the emergency correction of the ranking (specs/08-ux-journeys.md §5,
+// specs/09-operations.md §7, Q-110): stored, read at each request, and dropped back to Automatic when gone.
+describe('the TV address chosen in Settings', () => {
+  const connect = async (cookie: string) =>
+    (await (
+      await fetch(`http://127.0.0.1:${port()}${API_CONNECT_PATH}`, { headers: { cookie } })
+    ).json()) as ConnectInfo;
+  const patch = (cookie: string, body: object) =>
+    fetch(`http://127.0.0.1:${port()}${API_PATHS.settings}`, {
+      method: 'PATCH',
+      headers: { cookie, origin: `http://127.0.0.1:${port()}`, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+  it('puts the chosen address first and in the QR code, kept across a restart, and back to Automatic with null', async () => {
+    const cookie = await setUpPin(app, PIN);
+    const saved = await patch(cookie, { tv_address: '172.21.112.1' });
+    expect(saved.status).toBe(200);
+    expect(((await saved.json()) as Settings).tv_address).toBe('172.21.112.1');
+    const chosen = await connect(cookie);
+    expect(chosen.addresses.map((entry) => entry.address)).toEqual(['172.21.112.1', '192.168.1.20', '100.64.3.4']);
+    expect(chosen).toMatchObject({ chosen: '172.21.112.1', chosen_found: true, automatic: '192.168.1.20' });
+    // Stored in the database, not in memory: a restarted server keeps it.
+    expect(data.reopen().prepare('SELECT tv_address FROM settings').pluck().get()).toBe('172.21.112.1');
+
+    expect((await patch(cookie, { tv_address: null })).status).toBe(200);
+    const automatic = await connect(cookie);
+    expect(automatic.addresses[0]!.address).toBe('192.168.1.20');
+    expect(automatic).toMatchObject({ chosen: null, chosen_found: false });
+  });
+
+  it('falls back to the automatic order when the PC no longer has the chosen address, and says so', async () => {
+    const cookie = await setUpPin(app, PIN);
+    expect((await patch(cookie, { tv_address: '192.168.1.20' })).status).toBe(200);
+    interfaces = { 'vEthernet (WSL)': [ipv4('172.21.112.1')], wlan: [ipv4('192.168.1.77')] };
+    const info = await connect(cookie);
+    expect(info.addresses[0]!.address).toBe('192.168.1.77');
+    expect(info).toMatchObject({ chosen: '192.168.1.20', chosen_found: false });
+  });
+
+  it('refuses what is not an IPv4 address, and a browser without a DM session, changing nothing', async () => {
+    const cookie = await setUpPin(app, PIN);
+    for (const tv_address of ['192.168.1.256', 'emberglass.local', 'http://192.168.1.20:3000/', '', 7]) {
+      expect((await patch(cookie, { tv_address })).status, String(tv_address)).toBe(400);
+    }
+    const anonymous = await fetch(`http://127.0.0.1:${port()}${API_PATHS.settings}`, {
+      method: 'PATCH',
+      headers: { origin: `http://127.0.0.1:${port()}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ tv_address: '100.64.3.4' }),
+    });
+    expect(anonymous.status).toBe(401);
+    expect((await connect(cookie)).chosen).toBeNull();
+  });
+
+  it('never reaches a player view: the players room hears nothing of a change, and its snapshot holds no address', async () => {
+    const cookie = await setUpPin(app, PIN);
+    const tv = connectSocket(`http://127.0.0.1:${port()}`, {
+      path: SOCKET_PATH,
+      transports: ['websocket'],
+      extraHeaders: { origin: `http://127.0.0.1:${port()}` },
+    });
+    const heard: string[] = [];
+    tv.onAny((...args: unknown[]) => heard.push(JSON.stringify(args)));
+    await new Promise<void>((resolve, reject) => {
+      tv.once('connect', resolve);
+      tv.once('connect_error', reject);
+    });
+    try {
+      expect((await patch(cookie, { tv_address: '172.21.112.1' })).status).toBe(200);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(heard.join('\n')).not.toMatch(/tv_address|172\.21\.112\.1|192\.168\.1\.20/);
+    } finally {
+      tv.disconnect();
+    }
   });
 });
 

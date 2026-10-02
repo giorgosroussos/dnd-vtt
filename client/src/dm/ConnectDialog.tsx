@@ -7,11 +7,13 @@ import { errorMessage } from '../ui/errorMessage.js';
 import { t } from '../ui/messages.js';
 import { errorCode, request } from './api.js';
 
-// The "Connect a screen" panel (LIV-03, specs/08-ux-journeys.md §5, Q-026, Q-053, D-112): the
-// player view's short URL to type into the TV's browser and its QR code, for the first
-// private-range address of the server PC, then every other address in case the TV is on another
-// network. The server lists them and encodes the code (GET /api/connect); nothing is fetched from
-// outside the LAN, and the DM view's address never appears (specs/02-architecture.md §6).
+// The "Connect a screen" panel (LIV-03, PKG-01, specs/08-ux-journeys.md §5, Q-026, Q-110, D-112, D-169):
+// the player view's short URL to type into the TV's browser and its QR code, for the TV address, with
+// its adapter's name, then every other address with its adapter in case the TV is on another network.
+// The server ranks them, the TV address chosen in Settings first while the PC has it, and encodes the
+// code (GET /api/connect); a chosen address the PC no longer has is named, the automatic one shown
+// instead. Nothing is fetched from outside the LAN, and the DM view's address never appears
+// (specs/02-architecture.md §6).
 
 // The quiet zone around the code, in modules, that a scanner needs.
 const QUIET = 4;
@@ -61,8 +63,15 @@ export function ConnectDialog({ onClose }: { onClose: () => void }) {
       {first ? (
         <div className="eg-dialog__body eg-connect">
           <p>{t('connect.intro')}</p>
+          {info?.chosen !== null && info?.chosen_found === false ? (
+            <Notice>{t('connect.chosenMissing', { address: info.chosen })}</Notice>
+          ) : null}
           <p className="eg-connect__url" data-testid="connect-url">
             {first.url}
+          </p>
+          <p className="eg-dm__status eg-connect__adapter">
+            {t('connect.adapter', { adapter: first.adapter })}
+            {info?.chosen_found ? ` ${t('connect.chosen')}` : ''}
           </p>
           {info?.qr ? <QrImage qr={info.qr} label={t('connect.qrLabel', { url: first.url })} /> : null}
           {others.length > 0 ? (
@@ -71,7 +80,7 @@ export function ConnectDialog({ onClose }: { onClose: () => void }) {
               <p className="eg-dm__status">{t('connect.othersHint')}</p>
               <ul className="eg-connect__others">
                 {others.map((entry) => (
-                  <li key={entry.address}>{entry.url}</li>
+                  <li key={entry.address}>{t('connect.otherEntry', { url: entry.url, adapter: entry.adapter })}</li>
                 ))}
               </ul>
             </>

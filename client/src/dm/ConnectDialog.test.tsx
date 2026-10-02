@@ -7,7 +7,7 @@ import { button, click, FakeServer, installDialog, settle, type Reply } from '..
 import { render, type Rendered } from '../ui/testing/render.js';
 import { DmView } from './DmView.js';
 
-// The "Connect a screen" panel of the DM view (LIV-03, specs/08-ux-journeys.md §5, Q-026, Q-053, D-112).
+// The "Connect a screen" panel of the DM view (LIV-03, PKG-01, specs/08-ux-journeys.md §5, Q-026, Q-110, D-112).
 
 let server: FakeServer;
 let rendered: Rendered | undefined;
@@ -49,11 +49,34 @@ describe('Connect a screen', () => {
       .split('')
       .filter((module) => module === '1').length;
     expect(qr.querySelector('path')!.getAttribute('d')!.match(/M/g)).toHaveLength(dark);
+    // Each address named with its adapter, so the DM can tell the Wi-Fi from a virtual adapter (Q-110).
+    expect(dialog.querySelector('.eg-connect__adapter')!.textContent).toBe(t('connect.adapter', { adapter: 'Wi-Fi' }));
     expect([...dialog.querySelectorAll('.eg-connect__others li')].map((li) => li.textContent)).toEqual([
-      'http://100.64.3.4:3000/',
+      t('connect.otherEntry', { url: 'http://100.64.3.4:3000/', adapter: 'vEthernet (WSL)' }),
     ]);
+    expect(dialog.textContent).not.toContain(t('connect.chosen'));
     expect(dialog.textContent).not.toContain('/dm');
     expect(server.calls.filter((call) => call.path === '/api/connect')).toHaveLength(1);
+  });
+
+  it('shows the TV address chosen in Settings first, its QR code included, and says it was chosen (Q-110)', async () => {
+    server.tvAddress = '100.64.3.4';
+    const dialog = await openPanel();
+    expect(dialog.querySelector('.eg-connect__url')!.textContent).toBe('http://100.64.3.4:3000/');
+    expect(dialog.querySelector('svg[role="img"]')!.getAttribute('aria-label')).toBe(
+      t('connect.qrLabel', { url: 'http://100.64.3.4:3000/' }),
+    );
+    expect(dialog.querySelector('.eg-connect__adapter')!.textContent).toBe(
+      `${t('connect.adapter', { adapter: 'vEthernet (WSL)' })} ${t('connect.chosen')}`,
+    );
+    expect(dialog.textContent).not.toContain(t('connect.chosenMissing', { address: '100.64.3.4' }));
+  });
+
+  it('says so when the chosen TV address is not an address of this PC now, and shows the automatic one', async () => {
+    server.tvAddress = '10.0.0.40';
+    const dialog = await openPanel();
+    expect(dialog.textContent).toContain(t('connect.chosenMissing', { address: '10.0.0.40' }));
+    expect(dialog.querySelector('.eg-connect__url')!.textContent).toBe('http://192.168.1.20:3000/');
   });
 
   it('closes with its Close button, and gives focus back to the button that opened it', async () => {
