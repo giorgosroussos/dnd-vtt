@@ -85,4 +85,6 @@ Every `/api` route except `/api/auth` (PIN entry) and `/api/setup` MUST require 
 
 Phase 3 wraps the same server and client in Tauri or Electron without changing this architecture (`01` §5). [input] 
 
-The MVP MUST NOT assume a browser-only deployment in a way that such a wrapper could not host; no packaging work is done now. [Q-049]
+The MVP MUST NOT assume a browser-only deployment in a way that such a wrapper could not host; no packaging work is done in the MVP. [Q-049]
+
+The Windows package built after the MVP, before the release (`09` §1), runs the same process with a bundled Node runtime and the same client in the DM's browser; it changes neither the server, the contract, the schema nor the data directory, and a later wrapper can reuse its staged folder. [Q-107]

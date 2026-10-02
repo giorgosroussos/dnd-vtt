@@ -17,9 +17,12 @@ flowchart LR
   P3 --> P4["Phase 4<br/>Release"]
   P3 --> P5["Phase 5<br/>Redesign and table tools"]
   P5 --> P4
+  P4 --> P6["Phase 6<br/>Windows package"]
 ```
 
 Phase 5 was added after Phases 0 to 3 and REL-01, REL-02 were done (Q-099, Q-100): it runs before REL-03, so the owner's TV run accepts what ships.
+
+Phase 6 was added after every earlier package was done (Q-107): it packages what Phase 4 accepted, and its exit criteria join the release gate.
 
 ## 3. Phase 0 — Foundations
 
@@ -343,3 +346,34 @@ Goal: both views in the 2026-09-30 redesign, and the three table tools the owner
 ### Exit criteria
 
 The hidden-information suite of `10` §3 passes with painted fog in its script; the run journey of `10` §5 passes in the new layout; screenshots of the three redesigned screens are compared with the design's boards.
+
+## 11. Phase 6 — Windows package
+
+Goal: a DM installs Emberglass on a Windows PC without Node, Git or a terminal, from an installer or a portable zip, and the package passes the same gates as the source install (`09` §1, Q-107).
+
+### Work packages
+
+`PKG-01` Portable build
+
+- The server bundled into one module with the native modules external; a staged folder with the Node runtime renamed for Emberglass, the bundle, the migrations, the client build, the production native modules for win32-x64, the licence, third-party notices and source tag; a launcher that opens the DM view on loopback and starts the server only if none answers; a real version shown in About & credits; a release workflow on version tags attaching the zip and its SHA-256 to a GitHub Release (`09` §1, `09` §3, `02` §8, `07` §1, `02` §6).
+- Surfaces: security, scope, external
+- Touches red line: yes
+- Contract change: no
+
+`PKG-02` Installer
+
+- An installer over the PKG-01 folder: per-machine, Start Menu and optional desktop shortcuts, a private-profile inbound rule for the executable removed on uninstall, upgrade in place, the data directory never deleted; unsigned, with the SmartScreen steps and the checksums in the README and the release notes (`09` §1, `09` §4, `09` §5, `01` §8).
+- Surfaces: data, security, scope, external
+- Touches red line: yes
+- Contract change: no
+
+`PKG-03` Package gates
+
+- The acceptance journeys, the hidden-information suite and the offline run against the installed package on the Windows runner, a job that must pass before the release is published; a manual install on a Windows with no Node installed, recorded under `docs/acceptance/` (`10` §3, `10` §4, `10` §5, `10` §6).
+- Surfaces: security, scope, external
+- Touches red line: yes
+- Contract change: no
+
+### Exit criteria
+
+The release workflow on a release-candidate tag publishes the installer and the zip only after the package gates pass; the manual install record is handed back by the owner.
