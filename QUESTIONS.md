@@ -129,10 +129,42 @@ Every card opens `Blocking` and is answered before the specification proceeds. `
 - Q-104 — An initiative tracker before the release — scope — Resolved
 - Q-105 — Where an encounter is kept — data — Resolved
 - Q-106 — An empty Enemies entry on Next — ux — Resolved
+- Q-107 — A Windows package before the release — scope — Blocking
+- Q-108 — Installing for every user with a firewall rule, or for one user without administrator rights — security — Blocking
+- Q-109 — Signing the Windows package — external — Blocking
 
 ## Blocking
 
-None. Phase 0 can proceed.
+### Q-107 — A Windows package before the release
+- Surface: scope
+- Source: The owner, in chat on 2026-10-02: «How i could prepare it for shiping and deploying it in windows operational system as a package (in order to be as simple the installation). We are talking for self-hosting in a laptop or pc.» and «I wouldn't wanted to be hard to install to make it easy for the DM.» `09` §1 and `12` say the MVP is installed from source with Node and nothing is published (Q-017); `02` §8 and `12` say no packaging work is done in the MVP (Q-049); `01` §5 places a desktop wrapper in Phase 3.
+- Question: Is a Windows package that needs no Node or Git on the DM's PC built before the release, overriding Q-017 and Q-049?
+- Options:
+  - A) A Windows x64 installer and a portable zip, each carrying its own Node runtime, the built server and client and the Windows binaries of better-sqlite3 and sharp, built by CI on a version tag and attached to a GitHub Release; started from a Start Menu shortcut that opens the DM view in the default browser; no Electron or Tauri window, no auto-update → effect on scope: a new Phase 6 with three packages; installation from source stays supported; Linux and macOS stay source-only.
+  - B) The portable zip only, no installer → effect on scope: one package; the DM unzips and double-clicks, and allows the firewall prompt by hand.
+  - C) Keep installation from source only → effect on scope: no change; a DM installs Node 24 and runs `npm install` and `npm start` as `09` §1 says.
+- Recommendation: A, because the owner asked for an installation as simple as possible for a DM who is not a developer, and the zip falls out of the same build as a first step.
+- Blocks: specification
+
+### Q-108 — Installing for every user with a firewall rule, or for one user without administrator rights
+- Surface: security
+- Source: `09` §4: on Windows the firewall asks on first start, and the README explains allowing Node on private networks only (Q-076). An installer can instead add the rule itself, which needs administrator rights. The TV reaches the server only through that rule (`02` §2).
+- Question: Does the Windows installer run with administrator rights to install for every user and add a private-profile firewall rule for the bundled runtime?
+- Options:
+  - A) Yes: per-machine install under Program Files; the installer adds an inbound rule for the bundled executable on the private profile only, and the uninstaller removes it → effect on security: one UAC prompt at install; no firewall dialog at first start; never open on public networks; the data directory stays per user (`09` §5).
+  - B) No: per-user install under the user's programs folder, no administrator rights; Windows shows its firewall dialog at first start and the README tells the DM to tick private networks only → effect on security: no elevated step at all; the DM can still allow public networks by mistake, as with a source install today.
+- Recommendation: A, because the firewall dialog is the step a DM most often gets wrong, and a private-only rule the installer writes is narrower than what a hurried click allows.
+- Blocks: specification
+
+### Q-109 — Signing the Windows package
+- Surface: external
+- Source: An unsigned Windows installer or executable downloaded from the web is stopped by Microsoft Defender SmartScreen («Windows protected your PC») until the DM chooses More info, then Run anyway. Signing needs a certificate from a paid service, such as Azure Trusted Signing (a monthly fee) or an OV certificate.
+- Question: Is the Windows package signed for the release?
+- Options:
+  - A) Unsigned for the first release; the README and the release notes show the SmartScreen screen and the two clicks past it, and give the SHA-256 of each file → effect on external: no cost and no account; the DM sees a warning once per downloaded file.
+  - B) Signed through a paid signing service from CI → effect on external: a recurring cost, an identity verification of the owner and a secret in CI; no SmartScreen block once the publisher has reputation.
+- Recommendation: A, because the project is free and self-hosted for a known table, and signing can be added later without changing the package.
+- Blocks: specification
 
 ## Open
 
