@@ -225,6 +225,8 @@ async function installerChecks(setup, cleanEnvironment) {
     if (result.status !== 0 && existsSync(logFile)) console.log(readFileSync(logFile, 'utf8'));
     return result.status;
   };
+  // Windows PowerShell 5.1, the runner's powershell.exe, has no ConvertTo-Json -AsArray: -InputObject with an
+  // array keeps one rule a list. A query that fails is a failure, never "no rules" (review of CI run 37002551643).
   const rules = () => {
     const shown = spawnSync(
       'powershell.exe',
@@ -232,16 +234,21 @@ async function installerChecks(setup, cleanEnvironment) {
         '-NoProfile',
         '-NonInteractive',
         '-Command',
-        "@(Get-NetFirewallRule -DisplayName 'Emberglass' -ErrorAction SilentlyContinue | ForEach-Object { [pscustomobject]@{ direction = $_.Direction.ToString(); action = $_.Action.ToString(); profile = $_.Profile.ToString(); enabled = $_.Enabled.ToString(); program = ($_ | Get-NetFirewallApplicationFilter).Program } }) | ConvertTo-Json -Compress -AsArray",
+        "$ErrorActionPreference = 'Stop'; $found = @(Get-NetFirewallRule -All | Where-Object { $_.DisplayName -eq 'Emberglass' } | ForEach-Object { [pscustomobject]@{ direction = $_.Direction.ToString(); action = $_.Action.ToString(); profile = $_.Profile.ToString(); enabled = $_.Enabled.ToString(); program = ($_ | Get-NetFirewallApplicationFilter).Program } }); ConvertTo-Json -Compress -InputObject $found",
       ],
       { encoding: 'utf8' },
     );
+    if (shown.status !== 0) {
+      expect(false, `the firewall rules can be read (powershell exit ${shown.status}: ${shown.stderr.trim()})`);
+      return null;
+    }
     const text = shown.stdout.trim();
-    return text === '' ? [] : JSON.parse(text);
+    const parsed = text === '' ? [] : JSON.parse(text);
+    return Array.isArray(parsed) ? parsed : [parsed];
   };
   const oneRule = (when) => {
-    const found = rules();
-    expect(
+    const found = rules() ?? [];
+    return expect(
       found.length === 1 &&
         found[0].direction === 'Inbound' &&
         found[0].action === 'Allow' &&
@@ -262,7 +269,17 @@ async function installerChecks(setup, cleanEnvironment) {
   expect(existsSync(path.join(startMenu, 'Reset the Emberglass PIN.lnk')), 'it adds the PIN reset to the Start Menu');
   const desktop = path.join(process.env.PUBLIC ?? 'C:\\Users\\Public', 'Desktop', 'Emberglass.lnk');
   expect(!existsSync(desktop), 'it adds no desktop shortcut unless asked');
-  oneRule('after installing');
+  if (!oneRule('after installing')) {
+    // Inno Setup's log records each netsh call and its exit code.
+    const logFile = path.join(logs, 'first.log');
+    if (existsSync(logFile))
+      console.log(
+        readFileSync(logFile, 'utf8')
+          .split('\n')
+          .filter((line) => /netsh|exit code|firewall/i.test(line))
+          .join('\n'),
+      );
+  }
 
   // The DM's data as an older Emberglass left it: schema version 8, a setting changed, and a file of the
   // older app's that the new one does not have.
@@ -287,7 +304,17 @@ async function installerChecks(setup, cleanEnvironment) {
 
   // The installer again, over the install: an upgrade in place.
   expect(install('upgrade') === 0, 'the installer upgrades an install in place, silently');
-  oneRule('after upgrading');
+  if (!oneRule('after upgrading')) {
+    // Inno Setup's log records each netsh call and its exit code.
+    const logFile = path.join(logs, 'upgrade.log');
+    if (existsSync(logFile))
+      console.log(
+        readFileSync(logFile, 'utf8')
+          .split('\n')
+          .filter((line) => /netsh|exit code|firewall/i.test(line))
+          .join('\n'),
+      );
+  }
   expect(
     !existsSync(path.join(app, 'app', 'left-by-an-older-version.txt')),
     "the upgrade leaves nothing of the older app's folder",
@@ -330,8 +357,9 @@ async function installerChecks(setup, cleanEnvironment) {
     'the uninstaller removes the program',
   );
   expect(!existsSync(path.join(startMenu, 'Emberglass.lnk')), 'it removes the Start Menu shortcuts');
-  await waitFor(() => rules().length === 0, 30_000);
-  expect(rules().length === 0, 'it removes the firewall rule');
+  await waitFor(() => rules()?.length === 0, 30_000);
+  const left = rules();
+  expect(left !== null && left.length === 0, `it removes the firewall rule (${JSON.stringify(left)})`);
   expect(existsSync(path.join(data, 'emberglass.db')), `it leaves the data directory, ${data}`);
   rmSync(logs, { recursive: true, force: true });
 }
