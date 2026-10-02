@@ -134,7 +134,8 @@ jobs:
   package:
     name: package · windows
     runs-on: windows-latest
-    timeout-minutes: 30
+    # The installer is installed twice and uninstalled on the runner (PKG-02): more than the zip alone.
+    timeout-minutes: 45
     env:
       SETUP_BROWSERS: ''
       # The runner is thrown away after the job, so the check may install, upgrade and uninstall the

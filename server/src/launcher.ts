@@ -156,6 +156,6 @@ export function portInUseAdvice(port: number, platform: NodeJS.Platform, folder:
       ]
     : [
         `Port ${port} is used by another program, so Emberglass cannot start on it.`,
-        `Close that program and start Emberglass again, or start it on another port: EMBERGLASS_PORT=${next} ${path.join(folder, 'emberglass.sh')}`,
+        `Close that program and start Emberglass again, or start it on another port: EMBERGLASS_PORT=${next} ${path.posix.join(folder, 'emberglass.sh')}`,
       ];
 }

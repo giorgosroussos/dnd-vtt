@@ -219,21 +219,29 @@ async function installerChecks(setup, older, cleanEnvironment) {
     return;
   }
   const logs = mkdtempSync(path.join(os.tmpdir(), 'emberglass-setup-'));
-  const powershell = (command) =>
-    spawnSync(
+  // Each query has its own limit: one that hangs fails the check by name instead of the whole job.
+  const powershell = (command, what = 'a PowerShell query') => {
+    const started = Date.now();
+    const result = spawnSync(
       'powershell.exe',
       ['-NoProfile', '-NonInteractive', '-Command', `$ErrorActionPreference = 'Stop'; ${command}`],
-      {
-        encoding: 'utf8',
-      },
+      { encoding: 'utf8', timeout: 90_000 },
     );
+    if (result.error || result.status === null) {
+      expect(
+        false,
+        `${what} answers within 90 s (${result.error?.message ?? 'killed'}, after ${Date.now() - started} ms)`,
+      );
+    }
+    return result;
+  };
   const install = (file, name, extra = []) => {
     const logFile = path.join(logs, `${name}.log`);
     const result = spawnSync(
       file,
       ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', `/LOG=${logFile}`, ...extra],
       {
-        timeout: 300_000,
+        timeout: 180_000,
       },
     );
     if (result.status !== 0 && existsSync(logFile)) console.log(readFileSync(logFile, 'utf8'));
@@ -321,6 +329,7 @@ async function installerChecks(setup, older, cleanEnvironment) {
       ).stdout.trim(),
     );
 
+  log('installer: installing the older-labelled version');
   // An older version first, for every user (Q-108).
   const olderLabel = path.basename(older).replace(/^Emberglass-(.+)-win-x64-setup\.exe$/, '$1');
   expect(install(older, 'older') === 0, `an older installer (${olderLabel}) installs silently`);
@@ -343,6 +352,7 @@ async function installerChecks(setup, older, cleanEnvironment) {
   if (!twoRules('after installing')) printLog('older');
   oneInstall(olderLabel, 'after installing the older version');
 
+  log('installer: writing a version 8 database');
   // The DM's data as an older Emberglass left it: schema version 8, a setting changed, and a file of the
   // older app's that the new one does not have.
   const { default: Database } = await import('better-sqlite3');
@@ -367,6 +377,7 @@ async function installerChecks(setup, older, cleanEnvironment) {
   const before = sha256(readFileSync(path.join(data, 'emberglass.db')));
   writeFileSync(path.join(app, 'app', 'left-by-an-older-version.txt'), 'old');
 
+  log('installer: upgrading while the older version runs');
   // The newer installer over it, as an upgrade, while the older Emberglass runs, with the desktop shortcut
   // asked for this time (review C-M1, T-M5, T-M6).
   const running = startInstalled();
@@ -398,6 +409,7 @@ async function installerChecks(setup, older, cleanEnvironment) {
     'the desktop shortcut is added when asked',
   );
 
+  log('installer: starting the upgraded version');
   // The first start after the upgrade migrates the data, after a dated backup (specs/09-operations.md §2).
   const started = startInstalled();
   await waitFor(async () => started.child.exitCode !== null || (await answersAuth(port)), 60_000);
@@ -413,13 +425,14 @@ async function installerChecks(setup, older, cleanEnvironment) {
     `the upgraded install keeps the data and migrates it to version ${migrations.length} (got ${schema})`,
   );
 
+  log('installer: uninstalling while it runs');
   // A silent uninstall while Emberglass runs: it stops, the program, its shortcuts and its rules go, and the
   // data stays (specs/09-operations.md §5).
   const uninstallLog = path.join(logs, 'uninstall.log');
   const uninstalled = spawnSync(
     path.join(app, 'unins000.exe'),
     ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', `/LOG=${uninstallLog}`],
-    { timeout: 300_000 },
+    { timeout: 180_000 },
   );
   expect(uninstalled.status === 0, `the uninstaller starts and returns 0 (got ${uninstalled.status})`);
   // It runs a copy of itself from a temporary folder and returns at once: done once the folder is gone.
