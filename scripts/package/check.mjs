@@ -262,7 +262,7 @@ async function installerChecks(setup, older, cleanEnvironment) {
   // under another name), as Windows PowerShell 5.1 can list them. A query that fails is a failure.
   const rules = () => {
     const shown = powershell(
-      `$found = @(Get-NetFirewallApplicationFilter -Program '${exe.replaceAll("'", "''")}' | Get-NetFirewallRule | Where-Object { $_.Direction -eq 'Inbound' } | ForEach-Object { [pscustomobject]@{ name = $_.DisplayName; action = $_.Action.ToString(); profile = $_.Profile.ToString(); enabled = $_.Enabled.ToString(); protocol = ($_ | Get-NetFirewallPortFilter).Protocol } }); ConvertTo-Json -Compress -InputObject $found`,
+      `$found = @(Get-NetFirewallApplicationFilter -Program '${exe.replaceAll("'", "''")}' -ErrorAction SilentlyContinue | Get-NetFirewallRule | Where-Object { $_.Direction -eq 'Inbound' } | ForEach-Object { [pscustomobject]@{ name = $_.DisplayName; action = $_.Action.ToString(); profile = $_.Profile.ToString(); enabled = $_.Enabled.ToString(); protocol = ($_ | Get-NetFirewallPortFilter).Protocol } }); ConvertTo-Json -Compress -InputObject $found`,
     );
     if (shown.status !== 0) {
       expect(false, `the firewall rules can be read (powershell exit ${shown.status}: ${shown.stderr.trim()})`);
@@ -352,9 +352,35 @@ async function installerChecks(setup, older, cleanEnvironment) {
   if (!twoRules('after installing')) printLog('older');
   oneInstall(olderLabel, 'after installing the older version');
 
-  log('installer: writing a version 8 database');
+  // The newer installer over the older one while it runs, with the desktop shortcut asked for this time
+  // (review C-M1, T-M5, T-M6). Both carry the same folder, so their files are alike byte for byte: the
+  // upgrade shows in the version Windows lists, not in a file's bytes.
+  log('installer: upgrading while the older version runs');
+  const running = startInstalled();
+  await waitFor(async () => running.child.exitCode !== null || (await answersAuth(port)), 60_000);
+  expect(await answersAuth(port), 'the older Emberglass runs before the upgrade');
+  expect(
+    install(setup, 'upgrade', ['/TASKS=desktopicon']) === 0,
+    'the newer installer upgrades it in place, silently, while it runs',
+  );
+  await within(30_000, running.exit);
+  expect(
+    serverProcesses() === 0 && !(await portTaken(port)),
+    'the upgrade stopped the running Emberglass, freeing its port',
+  );
+  const newer = path.basename(setup).replace(/^Emberglass-(.+)-win-x64-setup\.exe$/, '$1');
+  oneInstall(newer, 'after upgrading');
+  if (!twoRules('after upgrading')) printLog('upgrade');
+  expect(
+    existsSync(desktop) && shortcutTarget(desktop).toLowerCase() === path.join(app, 'Emberglass.cmd').toLowerCase(),
+    'the desktop shortcut is added when asked',
+  );
+
   // The DM's data as an older Emberglass left it: schema version 8, a setting changed, and a file of the
-  // older app's that the new one does not have.
+  // older app's that the new one does not have. The start above made the data at the latest version; it
+  // goes, so that what follows starts from version 8.
+  log('installer: writing a version 8 database');
+  rmSync(data, { recursive: true, force: true });
   const { default: Database } = await import('better-sqlite3');
   mkdirSync(data, { recursive: true });
   const old = new Database(path.join(data, 'emberglass.db'));
@@ -377,36 +403,18 @@ async function installerChecks(setup, older, cleanEnvironment) {
   const before = sha256(readFileSync(path.join(data, 'emberglass.db')));
   writeFileSync(path.join(app, 'app', 'left-by-an-older-version.txt'), 'old');
 
-  log('installer: upgrading while the older version runs');
-  // The newer installer over it, as an upgrade, while the older Emberglass runs, with the desktop shortcut
-  // asked for this time (review C-M1, T-M5, T-M6).
-  const running = startInstalled();
-  await waitFor(async () => running.child.exitCode !== null || (await answersAuth(port)), 60_000);
-  expect(await answersAuth(port), 'the older Emberglass runs before the upgrade');
-  const exeBefore = sha256(readFileSync(exe));
-  expect(
-    install(setup, 'upgrade', ['/TASKS=desktopicon']) === 0,
-    'the newer installer upgrades it in place, silently, while it runs',
-  );
-  await within(30_000, running.exit);
-  expect(
-    serverProcesses() === 0 && !(await portTaken(port)),
-    'the upgrade stopped the running Emberglass, freeing its port',
-  );
-  expect(
-    sha256(readFileSync(exe)) !== exeBefore,
-    'the upgrade replaced emberglass.exe (its version information names the new version)',
-  );
-  oneInstall(path.basename(setup).replace(/^Emberglass-(.+)-win-x64-setup\.exe$/, '$1'), 'after upgrading');
-  if (!twoRules('after upgrading')) printLog('upgrade');
+  // The installer over an install with nothing running: the files are replaced, the data is not touched.
+  log('installer: installing over the data of an older schema');
+  expect(install(setup, 'over-data') === 0, 'the installer installs over an existing install, silently');
+  oneInstall(newer, 'after installing over it');
+  if (!twoRules('after installing over it')) printLog('over-data');
   expect(
     !existsSync(path.join(app, 'app', 'left-by-an-older-version.txt')),
-    "the upgrade leaves nothing of the older app's folder",
+    "installing over an install leaves nothing of the older app's folder",
   );
-  expect(sha256(readFileSync(path.join(data, 'emberglass.db'))) === before, 'the upgrade leaves the data untouched');
   expect(
-    existsSync(desktop) && shortcutTarget(desktop).toLowerCase() === path.join(app, 'Emberglass.cmd').toLowerCase(),
-    'the desktop shortcut is added when asked',
+    sha256(readFileSync(path.join(data, 'emberglass.db'))) === before,
+    'installing over an install leaves the data untouched',
   );
 
   log('installer: starting the upgraded version');
