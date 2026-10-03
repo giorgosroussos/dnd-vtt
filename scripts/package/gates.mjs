@@ -66,6 +66,20 @@ function built(ending) {
   return file;
 }
 
+/**
+ * Removes a temporary folder of the run's own, waiting out a process that still holds a file in it: the
+ * uninstaller's copy of itself writes its log after the program folder is gone (EPERM on the Windows runner,
+ * release run 37052169914, attempt 3). A folder that still cannot go is left to the throwaway runner's
+ * temporary directory with a warning; it is no check of the package, so it fails nothing.
+ */
+function removeTemporary(folder) {
+  try {
+    rmSync(folder, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 });
+  } catch (error) {
+    log(`could not remove ${folder} (${error.code ?? error}); it stays in the temporary directory`);
+  }
+}
+
 /** Installs the installer silently for every user; answers the installed folder and how to uninstall it. */
 function install(setup) {
   const app = path.join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Emberglass');
@@ -97,7 +111,7 @@ function install(setup) {
     const deadline = Date.now() + 120_000;
     while (existsSync(app) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 500));
     expect(removed.status === 0 && !existsSync(app), `the package is uninstalled afterwards (exit ${removed.status})`);
-    rmSync(logs, { recursive: true, force: true });
+    removeTemporary(logs);
   };
   return { folder: app, uninstall };
 }
@@ -110,7 +124,7 @@ function unzip(zip) {
   const folder = path.join(work, 'Emberglass');
   // Python's zipfile drops the Unix modes the zip records; a DM's unzip keeps them.
   for (const file of ['emberglass', 'emberglass.sh', 'reset-pin.sh']) chmodSync(path.join(folder, file), 0o755);
-  return { folder, uninstall: async () => rmSync(work, { recursive: true, force: true }) };
+  return { folder, uninstall: async () => removeTemporary(work) };
 }
 
 function run(what, args, cwd, env) {
@@ -224,7 +238,7 @@ try {
   journeys(target.folder, reports);
 } finally {
   await target.uninstall();
-  rmSync(reports, { recursive: true, force: true });
+  removeTemporary(reports);
 }
 
 if (failures.length > 0) {

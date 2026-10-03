@@ -157,6 +157,9 @@ describe('CI and the command contract agree', () => {
       expect(download).toBeGreaterThan(-1);
       expect(job.indexOf('run: make package-gates')).toBeGreaterThan(download);
       expect(job).not.toContain('make package\n');
+      // A failed gate keeps its traces, in a release as in CI (release run 37052169914 kept nothing).
+      expect(job).toMatch(/if: failure\(\)\n {8}uses: actions\/upload-artifact@[0-9a-f]{40}/);
+      expect(job).toContain('path: e2e/test-results/');
       expect(job).not.toContain('contents: write');
     }
     expect(/^package-gates:[^#\n]*##/m.test(makefile)).toBe(true);

@@ -117,6 +117,14 @@ jobs:
           path: dist/package
       - name: make package-gates
         run: make package-gates
+      - name: Keep Playwright output of a failed run
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: package-gates-results
+          path: e2e/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
 
   release:
     name: release
