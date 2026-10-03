@@ -127,3 +127,108 @@ jobs:
           path: e2e/test-results/
           if-no-files-found: ignore
           retention-days: 7
+
+  # The portable package (PKG-01, D-164, D-166): built on Windows from this commit and checked as a DM
+  # would use it, with no Node on PATH and an empty data directory. Not a matrix entry: only Windows
+  # x64 is packaged (specs/09-operations.md §3). The release workflow runs the same target on a tag.
+  package:
+    name: package · windows
+    runs-on: windows-latest
+    # The installer is installed twice and uninstalled on the runner (PKG-02): more than the zip alone.
+    timeout-minutes: 45
+    env:
+      SETUP_BROWSERS: ''
+      # The runner is thrown away after the job, so the check may install, upgrade and uninstall the
+      # installer on it (PKG-02, D-172); nowhere else does it.
+      EMBERGLASS_PACKAGE_SYSTEM_TESTS: '1'
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
+        with:
+          msystem: MSYS
+          release: false
+          update: false
+          path-type: inherit
+          # make alone: the package build and its check run no Python on Windows (review S-L3).
+          install: make
+      - name: make setup
+        run: make setup
+      - name: make package
+        run: make package
+      - name: Keep the package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: package-windows
+          path: |
+            dist/package/*.zip
+            dist/package/*.zip.sha256
+            dist/package/*-setup.exe
+            dist/package/*-setup.exe.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  # The package gates (PKG-03, D-176): the package the job above built, downloaded as it was kept, installed on a
+  # fresh Windows runner and put through the hidden-information suite, the five journeys in Chromium and Edge, and
+  # the offline run (specs/10-testing-acceptance.md §3–§6). The release workflow runs the same before it publishes.
+  package-gates:
+    name: package gates · windows
+    needs: package
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      # Edge is on the image already; Playwright drives it through its channel (D-127).
+      SETUP_BROWSERS: chromium
+      EMBERGLASS_E2E_BROWSERS: chromium,msedge
+      # The gates install the package into Program Files on the runner, which is thrown away after the job.
+      EMBERGLASS_PACKAGE_SYSTEM_TESTS: '1'
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
+        with:
+          msystem: MSYS
+          release: false
+          update: false
+          path-type: inherit
+          install: make
+      - name: Playwright browser cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~\AppData\Local\ms-playwright
+          key: playwright-${{ runner.os }}-chromium-${{ hashFiles('package-lock.json') }}
+      - name: make setup
+        run: make setup
+      - name: The package the package job built
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: package-windows
+          path: dist/package
+      - name: make package-gates
+        run: make package-gates
+      - name: Keep Playwright output of a failed run
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: package-gates-results
+          path: e2e/test-results/
+          if-no-files-found: ignore
+          retention-days: 7

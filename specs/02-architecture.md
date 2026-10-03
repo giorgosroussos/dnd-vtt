@@ -54,7 +54,7 @@ flowchart LR
 
 The REST API MUST be served under `/api`, with JSON bodies validated against schemas derived from the `shared` contract types. [D-015]
 
-The REST API MUST offer these resources and operations: [input, Q-001, Q-007, Q-051, Q-058, Q-085, Q-100]
+The REST API MUST offer these resources and operations: [input, Q-001, Q-007, Q-051, Q-058, Q-085, Q-100, Q-110]
 
 | Resource | Operations |
 | --- | --- |
@@ -65,7 +65,7 @@ The REST API MUST offer these resources and operations: [input, Q-001, Q-007, Q-
 | `/api/campaigns`, `/api/campaigns/:id/sessions` | CRUD, ordering |
 | `/api/sessions/:id/scenes` | CRUD, ordering, duplicate, each scene's token and hidden-token counts |
 | `/api/scenes/:id` | setup (map, grid), tokens and painted fog while not live |
-| `/api/settings` | ruler rule, upload limit, display variant size, PIN change |
+| `/api/settings` | ruler rule, upload limit, display variant size, TV address (`08` §5), PIN change |
 | `/api/screens` | how many player views are connected now (`08` §11) |
 
 Every `/api` route except `/api/auth` (PIN entry) and `/api/setup` MUST require a DM session (`07` §2). [Q-046]
@@ -85,4 +85,6 @@ Every `/api` route except `/api/auth` (PIN entry) and `/api/setup` MUST require 
 
 Phase 3 wraps the same server and client in Tauri or Electron without changing this architecture (`01` §5). [input] 
 
-The MVP MUST NOT assume a browser-only deployment in a way that such a wrapper could not host; no packaging work is done now. [Q-049]
+The MVP MUST NOT assume a browser-only deployment in a way that such a wrapper could not host; no packaging work is done in the MVP. [Q-049]
+
+The Windows package built after the MVP, before the release (`09` §1), runs the same process with a bundled Node runtime and the same client in the DM's browser; it changes neither the server, the contract, the schema nor the data directory, and a later wrapper can reuse its staged folder. [Q-107]

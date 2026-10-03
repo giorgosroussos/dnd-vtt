@@ -72,8 +72,14 @@ describe('entity contract (specs/03-domain-model.md §1, D-075)', () => {
     expect([...IMAGE_MIME_TYPES]).toEqual(['image/png', 'image/jpeg', 'image/webp']);
   });
 
-  it('defaults the settings as specs/05-assets-and-images.md §6–§7 and specs/06-grid-and-measurement.md §5 do', () => {
-    expect(DEFAULT_SETTINGS).toEqual({ ruler_rule: 'phb', upload_limit_bytes: 52_428_800, display_variant_size: 4096 });
+  it('defaults the settings as specs/05-assets-and-images.md §6–§7, specs/06-grid-and-measurement.md §5 and specs/08-ux-journeys.md §5 do', () => {
+    expect(DEFAULT_SETTINGS).toEqual({
+      ruler_rule: 'phb',
+      upload_limit_bytes: 52_428_800,
+      display_variant_size: 4096,
+      // The TV address is Automatic until the DM chooses one (Q-110).
+      tv_address: null,
+    });
   });
 
   it('keeps token positions as decimal grid units and character_id empty', () => {

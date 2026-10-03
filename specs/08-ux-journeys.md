@@ -30,7 +30,8 @@ How the DM prepares and runs a session, what the TV shows, and how screens get c
 
 - The server MUST find its LAN address and show a QR code. [input]
 - The QR code and a short URL to type MUST be shown in the server console at start and in a "Connect a screen" panel of the DM view, and MUST open the player view; the DM view's address MUST NOT be put in a QR code. [Q-026]
-- All non-internal IPv4 addresses MUST be listed, the first private-range one shown prominently. [Q-053]
+- All non-internal IPv4 addresses MUST be listed, each with the name of its network adapter. The one shown prominently, which the QR code encodes, MUST be chosen with no step by the DM: addresses of adapters named as virtual ones (WSL, Hyper-V, VMware, VirtualBox, Docker, VPNs and the like) come after the others, and within each group a private-range address comes first. [Q-110]
+- As an emergency correction for a PC where that ranking guesses wrong, the DM MUST be able to choose in Settings, from the detected addresses with their adapter names, the TV address the panel, the QR code and the console use; Automatic, the ranking above, is the default. A chosen address the PC no longer has MUST fall back to the automatic one, and the panel and the console MUST say so. [Q-110]
 - On Windows the first start triggers a firewall prompt; the console and README MUST tell the DM to allow private networks only (`09` §4). [input, Q-076]
 
 ## 6. Language

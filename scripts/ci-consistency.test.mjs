@@ -18,6 +18,7 @@ const list = (text) =>
 
 const makefile = read('Makefile');
 const workflow = read('.github/workflows/ci.yml');
+const release = read('.github/workflows/release.yml');
 const readme = read('README.md');
 
 const verifyGates = list(/^verify:([^#\n]*)##/m.exec(makefile)[1].replace(/\s+/g, ','));
@@ -94,5 +95,91 @@ describe('CI and the command contract agree', () => {
     for (const id of tripwireMatrix) {
       expect(readme).toContain(`| \`tripwire · ${id} (absent)\` | \`ubuntu-latest\` | \`make tripwire GATE=${id}\` |`);
     }
+  });
+
+  // The package is built and checked by one target on the Windows runner, in CI and on a tag, so a
+  // release is the package CI already checked (PKG-01, D-164, D-166).
+  it('builds the package with make package, on Windows, in CI and in the release workflow', () => {
+    for (const text of [workflow, release]) {
+      const job = /^ {2}package:\n([\s\S]*?)(?=^ {2}\S|(?![\s\S]))/m.exec(text)?.[1] ?? '';
+      expect(job).toContain('name: package · windows');
+      expect(job).toContain('runs-on: windows-latest');
+      expect(job).toContain('run: make package');
+      expect(job).not.toContain('contents: write');
+    }
+    expect(/^package:[^#\n]*##/m.test(makefile)).toBe(true);
+    expect(readme).toContain('| `package · windows` | `windows-latest` | `make package` |');
+  });
+
+  // The installer is installed, upgraded and uninstalled only where the variable says the machine may be
+  // changed; a job that lost it would skip that silently (review T-H1). Both jobs keep both files.
+  it('runs the installer checks in both package jobs, and keeps and releases the installer beside the zip', () => {
+    for (const text of [workflow, release]) {
+      const job = /^ {2}package:\n([\s\S]*?)(?=^ {2}\S|(?![\s\S]))/m.exec(text)?.[1] ?? '';
+      expect(job).toContain("EMBERGLASS_PACKAGE_SYSTEM_TESTS: '1'");
+      for (const glob of [
+        'dist/package/*.zip',
+        'dist/package/*.zip.sha256',
+        'dist/package/*-setup.exe',
+        'dist/package/*-setup.exe.sha256',
+      ]) {
+        expect(job).toContain(glob);
+      }
+    }
+    const publish = /^ {2}release:\n([\s\S]*)/m.exec(release)?.[1] ?? '';
+    expect(publish).toContain('sha256sum --check --strict "$(basename "$setup").sha256" "$(basename "$zip").sha256"');
+    expect(publish).toContain(
+      'gh release create "$GITHUB_REF_NAME" package/*-setup.exe package/*-setup.exe.sha256 package/*.zip package/*.zip.sha256',
+    );
+  });
+
+  it('checks that the tag names this version, and builds with it, before make package (review T-L10)', () => {
+    const job = /^ {2}package:\n([\s\S]*?)(?=^ {2}\S)/m.exec(release)?.[1] ?? '';
+    const check = job.indexOf('- name: The tag names this version');
+    expect(check).toBeGreaterThan(-1);
+    expect(job.indexOf('run: make package')).toBeGreaterThan(check);
+    expect(job).toContain('"v$version" | "v$version"-*) ;;');
+    expect(job).toContain('echo "EMBERGLASS_BUILD_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"');
+  });
+
+  // The package gates (PKG-03, D-176): the package the package job built, installed on a fresh Windows runner and
+  // put through the hidden-information suite, the journeys and the offline run, in CI and before every release.
+  it("runs the package gates on the package job's own package, on Windows, in CI and in the release workflow", () => {
+    for (const text of [workflow, release]) {
+      const job = /^ {2}package-gates:\n([\s\S]*?)(?=^ {2}\S|(?![\s\S]))/m.exec(text)?.[1] ?? '';
+      expect(job).toContain('name: package gates · windows');
+      expect(job).toContain('needs: package');
+      expect(job).toContain('runs-on: windows-latest');
+      expect(job).toContain("EMBERGLASS_PACKAGE_SYSTEM_TESTS: '1'");
+      expect(job).toContain('EMBERGLASS_E2E_BROWSERS: chromium,msedge');
+      expect(job).toMatch(/name: package-windows\n {10}path: dist\/package\n/);
+      const download = job.indexOf('name: package-windows');
+      expect(download).toBeGreaterThan(-1);
+      expect(job.indexOf('run: make package-gates')).toBeGreaterThan(download);
+      expect(job).not.toContain('make package\n');
+      // A failed gate keeps its traces, in a release as in CI (release run 37052169914 kept nothing).
+      expect(job).toMatch(/if: failure\(\)\n {8}uses: actions\/upload-artifact@[0-9a-f]{40}/);
+      expect(job).toContain('path: e2e/test-results/');
+      expect(job).not.toContain('contents: write');
+    }
+    expect(/^package-gates:[^#\n]*##/m.test(makefile)).toBe(true);
+    expect(readme).toContain('| `package gates · windows` | `windows-latest` | `make package-gates` |');
+  });
+
+  it('publishes only from a version tag, after the package gates, with provenance, from the job that runs no project code', () => {
+    expect(release).toMatch(/^on:\n {2}push:\n {4}tags: \['v\*'\]\n/m);
+    expect(release).toMatch(/^permissions:\n {2}contents: read\n/m);
+    const publish = /^ {2}release:\n([\s\S]*)/m.exec(release)?.[1] ?? '';
+    expect(publish).toContain('needs: [package, package-gates]');
+    expect(publish).toContain('contents: write');
+    expect(publish).toContain('id-token: write');
+    expect(publish).toContain('attestations: write');
+    expect(publish).toMatch(/uses: actions\/attest@[0-9a-f]{40} # v\d/);
+    // Published, not drafted; a draft an earlier attempt left is completed, a published release never replaced.
+    expect(publish).not.toContain('--draft ');
+    expect(publish).toContain('--clobber');
+    expect(publish).toContain('--draft=false');
+    expect(publish).toContain('is already published');
+    expect(publish).not.toMatch(/make |npm |node /);
   });
 });

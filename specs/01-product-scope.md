@@ -77,7 +77,7 @@ Phase 3 MUST NOT be implemented in the MVP; it covers: [input]
 
 - guided level-up from SRD data;
 - a personal screen per player with hidden messages;
-- packaging as a Tauri or Electron desktop app, without changing the architecture.
+- packaging as a Tauri or Electron desktop app, without changing the architecture; the Windows package of `09` §1, which opens the DM view in the browser, is built before the release instead. [input, Q-107]
 
 ## 6. Nice-to-have (Future, unscheduled)
 
@@ -110,6 +110,7 @@ Emberglass MUST NOT implement: [input]
 - The product name, UI title and package names MUST NOT contain "D&D" or "Dungeons & Dragons"; the product MAY describe itself as compatible with 5th edition (SRD 5.1). [Q-022]
 - The source is licensed under AGPL-3.0, with the licence text at the repository root. [Q-021]
 - The MVP is installed from source (`09` §1). [Q-017, recommendation accepted]
+- Before the release, a Windows x64 installer and a portable zip carrying their own Node runtime are built from a version tag and attached to a GitHub Release, beside installation from source; the package is unsigned, and the README gives the SmartScreen steps and each file's SHA-256 (`09` §1). [Q-107, Q-109, recommendation accepted]
 - SRD 5.1 content (CC-BY-4.0) enters from Phase 2 on, except the conditions' rule text, shown with the condition markers before the release (§9) and credited in the DM view's About & credits. [input, Q-103]
 
 ## 9. After the MVP, before the release

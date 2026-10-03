@@ -19,8 +19,9 @@ import { render, type Rendered } from '../ui/testing/render.js';
 import { DmView } from './DmView.js';
 
 // The Settings dialog of the DM view (REL-01, specs/09-operations.md §7, specs/07-security-and-access.md
-// §1, Q-051): the upload limit, the display size and the ruler's rule, saved without a restart, and the
-// PIN change. The server's checks are server/src/http/settings.test.ts and auth.test.ts.
+// §1, Q-051): the upload limit, the display size and the ruler's rule, saved without a restart, the TV
+// address (PKG-01, Q-110), and the PIN change. The server's checks are server/src/http/settings.test.ts,
+// connect.test.ts and auth.test.ts.
 
 const MB = 1024 * 1024;
 let server: FakeServer;
@@ -268,6 +269,69 @@ describe('Settings', () => {
     });
     await settle();
     expect(form.textContent).toContain(t('assetForm.tooLarge', { size: '1.5', limit: '1' }));
+  });
+});
+
+// The TV address, the emergency correction of the address Connect a screen finds (specs/08-ux-journeys.md §5,
+// specs/09-operations.md §7, Q-110).
+describe('the TV address', () => {
+  const select = (dialog: HTMLDialogElement) => field(dialog, t('settings.tvAddress')) as unknown as HTMLSelectElement;
+  const choose = (element: HTMLSelectElement, value: string) =>
+    act(() => {
+      element.value = value;
+      element.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  const options = (element: HTMLSelectElement) => [...element.options].map((option) => [option.value, option.text]);
+
+  it('is Automatic by default, naming the address it picks, and offers this PC’s addresses with their adapters', async () => {
+    const dialog = await openDialog();
+    const tv = select(dialog);
+    expect(tv.value).toBe('');
+    expect(options(tv)).toEqual([
+      ['', t('settings.tvAddressAutomaticNow', { address: '192.168.1.20', adapter: 'Wi-Fi' })],
+      ['192.168.1.20', t('settings.tvAddressOption', { address: '192.168.1.20', adapter: 'Wi-Fi' })],
+      ['100.64.3.4', t('settings.tvAddressOption', { address: '100.64.3.4', adapter: 'vEthernet (WSL)' })],
+    ]);
+    expect(described(tv as unknown as HTMLInputElement)).toContain(t('settings.tvAddressHint'));
+  });
+
+  it('saves a chosen address alone, and Automatic again as null', async () => {
+    const dialog = await openDialog();
+    choose(select(dialog), '100.64.3.4');
+    await submit(settingsForm(dialog));
+    expect(patches().at(-1)!.body).toEqual({ tv_address: '100.64.3.4' });
+    expect(server.tvAddress).toBe('100.64.3.4');
+    expect(select(dialog).value).toBe('100.64.3.4');
+    choose(select(dialog), '');
+    await submit(settingsForm(dialog));
+    expect(patches().at(-1)!.body).toEqual({ tv_address: null });
+    expect(server.tvAddress).toBeNull();
+  });
+
+  it('keeps a saved address the PC no longer has, marked, until the DM changes it', async () => {
+    server.tvAddress = '10.0.0.40';
+    const dialog = await openDialog();
+    const tv = select(dialog);
+    expect(tv.value).toBe('10.0.0.40');
+    expect(options(tv).at(-1)).toEqual(['10.0.0.40', t('settings.tvAddressMissing', { address: '10.0.0.40' })]);
+    // Saving another setting leaves it as it is.
+    await type(field(dialog, t('settings.displaySize')), '2048');
+    await submit(settingsForm(dialog));
+    expect(patches().at(-1)!.body).toEqual({ display_variant_size: 2048 });
+    expect(server.tvAddress).toBe('10.0.0.40');
+  });
+
+  it('still offers Automatic and the saved address when the addresses cannot be read', async () => {
+    server.tvAddress = '192.168.1.20';
+    server.before = (call) =>
+      call.path === '/api/connect'
+        ? { status: 500, body: { error: { code: 'internal_error', message: 'x' } } }
+        : undefined;
+    const dialog = await openDialog();
+    expect(options(select(dialog))).toEqual([
+      ['', t('settings.tvAddressAutomatic')],
+      ['192.168.1.20', t('settings.tvAddressSaved', { address: '192.168.1.20' })],
+    ]);
   });
 });
 

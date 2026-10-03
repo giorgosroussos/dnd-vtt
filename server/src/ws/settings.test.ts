@@ -66,6 +66,41 @@ describe('a new ruler rule (specs/06-grid-and-measurement.md §5, G-036)', () =>
   });
 });
 
+// The TV address of the connect panel is the DM's alone (specs/08-ux-journeys.md §5, specs/04-live-sync.md §4,
+// Q-110): a change reaches no room, and a snapshot a settings change does send carries none of it (PKG-01
+// review T-M1).
+describe('a new TV address (Q-110)', () => {
+  it('reaches neither room alone, and is in no snapshot that another setting sends', async () => {
+    h = await startLive();
+    const scene = await h.scene('The gatehouse', (await h.image('settings map C', 96)).id);
+    const dm = await h.connect({ cookie: h.cookie });
+    const tv = await h.connect();
+    expect(await h.command(dm, 'scene.activate', { scene_id: scene.id })).toEqual({ ok: true });
+    const path = { from: { column: 1, row: 1 }, to: { column: 7, row: 3 } };
+    expect(await h.command(dm, 'ruler.update', { scene_id: scene.id, ...path })).toEqual({ ok: true });
+    await dm.settle();
+    // The players room is live and hears the scene: its snapshot and the measurement have arrived.
+    expect(types(await tv.settle())).toEqual(['scene.snapshot', 'ruler.shown']);
+    const leak = /tv_address|192\.168\.77\.5|10\.9\.8\.7|adapter/;
+
+    // Alone, a TV address changes no room's view: nobody hears of it.
+    ok<Settings>(await patch({ tv_address: '192.168.77.5' }));
+    expect(await dm.settle()).toEqual([]);
+    expect(await tv.settle()).toEqual([]);
+
+    // With a new rule, the players room is sent a fresh snapshot, which holds no address.
+    ok<Settings>(await patch({ tv_address: '10.9.8.7', ruler_rule: 'dmg' }));
+    const tvEvents = await tv.settle();
+    expect(types(tvEvents)).toEqual(['scene.snapshot']);
+    expect((tvEvents[0]!.payload as PlayerSnapshot).scene?.ruler).toEqual({ ...path, feet: 35 });
+    // Nothing the TV received since it connected names the address, the setting or an adapter.
+    expect(JSON.stringify(tv.events)).not.toMatch(leak);
+    ok<Settings>(await patch({ tv_address: null }));
+    expect(await tv.settle()).toEqual([]);
+    expect(JSON.stringify(tv.events)).not.toMatch(leak);
+  });
+});
+
 describe('a new display size (specs/05-assets-and-images.md §7, G-015)', () => {
   it('sends both rooms the live map at the size of its regenerated display version', async () => {
     h = await startLive();

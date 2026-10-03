@@ -33,7 +33,7 @@ The MVP is done when the DM can prepare a session in advance and run it on a TV 
 - **Hidden information never leaves the server.** The `players` room receives only visible content, filtered on the server; nothing reveals a hidden token's existence, ID, asset, image or count, and players fetch only the display version of the live map and visible tokens' images (`04` §4, `07` §5, `12` §2).
 - **The server decides, from the session only.** The server is the only source of truth, derives every role from the DM session and never from a client claim, validates every command and REST body, and rejects every command from the `players` room (`02` §3, `07` §3, `07` §7).
 - **PIN and sessions.** PIN setup only from the server machine's loopback address; PIN stored as a salted hash; DM sessions in memory until restart; a PIN change ends every other session; logs never contain a PIN, session identifier or cookie (`07` §1, `07` §2, `07` §8).
-- **Scope is fixed.** No player devices, character sheets, rules beyond the size table and the ruler, remote play, map creation, automatic fog, campaign export/import or area templates; Phase 2, Phase 3 and nice-to-have items are not built. The only additions after the MVP are the redesign and the ping, the condition markers (eighteen since Q-103, with their SRD 5.1 rule text) the painted fog and the initiative tracker, with no dice (Q-104), owner-approved (Q-099, Q-100, Q-101, Q-103, Q-104) (`01` §1, `01` §4, `01` §5, `01` §6, `01` §7, `01` §9).
+- **Scope is fixed.** No player devices, character sheets, rules beyond the size table and the ruler, remote play, map creation, automatic fog, campaign export/import or area templates; Phase 2, Phase 3 and nice-to-have items are not built. The only additions after the MVP are the redesign and the ping, the condition markers (eighteen since Q-103, with their SRD 5.1 rule text) the painted fog, the initiative tracker, with no dice (Q-104), and the Windows package (Q-107), owner-approved (Q-099, Q-100, Q-101, Q-103, Q-104, Q-107) (`01` §1, `01` §4, `01` §5, `01` §6, `01` §7, `01` §9).
 - **LAN only, offline.** The running app sends nothing outside the LAN: no telemetry, update check or CDN; every asset is bundled (`02` §6, `10` §6).
 - **Identifiers and positions.** UUIDs for every entity except Image, which is its sha256; token positions in decimal grid units; grid values in original-image dimensions (`03` §3, `03` §4, `06` §2).
 - **Deletion rules.** Cascades as specified with confirmation, assets in use are never deleted, deletions are permanent, unreferenced images are removed, deleting the live scene blanks the TV (`03` §7).
@@ -91,6 +91,8 @@ make e2e            # end-to-end tests: a DM view and a player view against a ru
 make build          # production builds
 make verify         # lint + format-check + typecheck + test + e2e + build + check-docs
 make smoke          # health of the running system through its public entry points
+make package        # portable package of this machine's build, then its acceptance check (PKG-01)
+make package-gates  # hidden-information suite, journeys and offline run against the installed package (PKG-03)
 make audit          # dependency advisories
 make scan-secrets   # secret scan of everything Git tracks
 make tripwire       # failing-forward tripwires for missing gates: GATE=<id>, or all
@@ -104,7 +106,7 @@ make unlock         # ceremonial unlock of one hard-locked path: PATH=<path> REA
 make clean-start    # fresh isolated environment: setup, infra-up, migrate, verify, smoke, teardown
 ```
 
-The tooling behind the targets is recorded in D-051 to D-057; the pipeline and the tripwires in D-060 and D-061.
+The tooling behind the targets is recorded in D-051 to D-057; the pipeline and the tripwires in D-060 and D-061; `make package`, the CI job `package · windows` and the release workflow in D-164 and D-166; `make package-gates` and the job `package gates · windows`, which the release waits for, in D-176.
 
 CI (FND-02) runs on every merge request and every push to the default branch. Each job runs exactly one of the targets above, so a gate cannot pass in CI and fail locally; `README.md` maps job to command. Gates the testing specification requires that nothing implements yet run as failing-forward tripwires (`make tripwire`) that pass only while the gate is provably absent (`13` §3): a gate's implementing test carries the marker `@gate:<id>`, and the first one turns its tripwire red with promotion steps.
 

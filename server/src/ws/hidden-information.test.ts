@@ -7,7 +7,7 @@ import {
   type SceneToken,
   type TokenChange,
 } from '@emberglass/shared';
-import { applyPlayerEvent, startLive, type LiveHarness, type PlayerState } from './testing/harness.js';
+import { applyPlayerEvent, PACKAGE_DIR, startLive, type LiveHarness, type PlayerState } from './testing/harness.js';
 
 // The recorded-traffic test of specs/10-testing-acceptance.md §3 (Q-067, D-042), and the gate of the
 // same name: everything a player socket receives, every message and every image response, across a
@@ -25,7 +25,8 @@ import { applyPlayerEvent, startLive, type LiveHarness, type PlayerState } from 
 // recent command, so an undo whose command was hidden-only is itself a hidden-only step: in the session
 // without hidden tokens neither happens, and every other undo takes back the same visible command in both.
 
-vi.setConfig({ testTimeout: 120_000, hookTimeout: 60_000 });
+// Against a package (PKG-03) the harness sets longer limits: a real server answers one snapshot a second.
+if (!PACKAGE_DIR) vi.setConfig({ testTimeout: 120_000, hookTimeout: 60_000 });
 
 let h: LiveHarness | undefined;
 
@@ -112,7 +113,7 @@ async function record(hidden: boolean): Promise<Recording> {
       : [];
     const responses = [];
     for (const id of [...new Set(ids)]) {
-      const response = await live.app.inject({ method: 'GET', url: `/images/${id}/display` });
+      const response = await live.request({ method: 'GET', url: `/images/${id}/display` });
       const headers: Record<string, unknown> = { ...response.headers };
       delete headers.date;
       responses.push({

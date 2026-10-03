@@ -7,6 +7,10 @@ How a DM installs, starts, configures and backs up Emberglass.
 - The MVP MUST be installable from source: install Node, clone the repository, run one install command and one start command, all documented in the README; nothing is published to a package registry. [Q-017, recommendation accepted]
 - The install command is `npm install` and the start command `npm start`, which builds the client if needed, applies pending migrations and starts the server; `npm run dev` is the development mode. [D-033]
 - The server refuses to start on a Node major older than 24. [D-012]
+- Before the release, Windows x64 MUST also be installable without Node, Git or a terminal, from an installer or a portable zip that carry the Node runtime, the built server and client and the Windows binaries of the native modules; both are built by CI on a version tag and attached to a GitHub Release, which is not a package registry, and the source install above stays supported. [Q-107, recommendation accepted]
+- The package's launcher MUST open the DM view at `http://127.0.0.1:<port>/dm`, the loopback address it asks whether a server answers on, in the default browser, starting the server first only if none answers on the port, so that the PIN is set from the loopback address on first run (`07` §1); its console shows the start-up output of §2, and closing it stops the server. [Q-107, recommendation accepted]
+- The package MUST ship the AGPL-3.0 licence, the notices of every bundled third-party component, and the source tag it was built from. [Q-107, recommendation accepted]
+- The package MUST NOT update itself or check for updates (`02` §6); a DM updates by installing a newer package. [Q-107, recommendation accepted]
 
 ## 2. Start-up
 
@@ -17,10 +21,14 @@ How a DM installs, starts, configures and backs up Emberglass.
 ## 3. Supported systems
 
 - The server MUST be verified on Windows and on Linux; macOS is best-effort, with no acceptance run. [Q-018, recommendation accepted]
+- Only Windows x64 is packaged (§1); Linux and macOS install from source. [Q-107, recommendation accepted]
 
 ## 4. Firewall
 
 - On Windows the firewall asks for permission on first start; the README MUST explain allowing Node on private networks only. [input, Q-076]
+- The Windows installer MUST add an inbound firewall rule for the package's executable on the private profile only and remove it when it uninstalls; the README MUST say that a network Windows classes as Public keeps the TV out. [Q-108, recommendation accepted]
+- Beside it, the installer MUST add an inbound rule blocking the executable on the public and domain profiles, so that Windows asks nothing there and a hurried "Allow" on a network classed as Public cannot expose the server, and MUST remove both rules when it uninstalls. [Q-108, recommendation accepted]
+- The installer MUST install for every user with one administrator prompt, add Start Menu shortcuts, upgrade an older version in place, and never delete the data directory (§5) when it uninstalls. [Q-108, recommendation accepted]
 - The README MUST also explain opening the port on Linux with a common host firewall. [Q-018, recommendation accepted]
 
 ## 5. Data directory and backup
@@ -37,6 +45,7 @@ How a DM installs, starts, configures and backs up Emberglass.
 ## 7. Configuration
 
 - The upload size limit (`05` §6), the display-version size (`05` §7) and the ruler rule (`06` §5) MUST be settings the DM changes from the DM view without restarting. [Q-051]
+- The TV address of the connect panel (`08` §5) MUST be a setting the DM changes from the DM view without restarting, Automatic by default. [Q-110]
 - Port and data directory are set with `EMBERGLASS_PORT` and `EMBERGLASS_DATA_DIR`. [D-034]
 
 ## 8. Repository documents

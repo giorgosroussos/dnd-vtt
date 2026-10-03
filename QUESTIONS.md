@@ -75,7 +75,7 @@ Every card opens `Blocking` and is answered before the specification proceeds. `
 - Q-050 — Undo for setup edits on the live scene — scope — Resolved
 - Q-051 — Where settings are changed — scope — Resolved
 - Q-052 — Which view sits at the server root — ux — Resolved
-- Q-053 — Which LAN address the connect panel highlights — ux — Resolved
+- Q-053 — Which LAN address the connect panel highlights — ux — Resolved — superseded by Q-110
 - Q-054 — How hidden tokens look to the DM and whether the TV view has controls — ux — Resolved
 - Q-055 — Who creates entity identifiers — data — Resolved
 - Q-056 — Live version counter after a restart — data — Resolved
@@ -129,6 +129,10 @@ Every card opens `Blocking` and is answered before the specification proceeds. `
 - Q-104 — An initiative tracker before the release — scope — Resolved
 - Q-105 — Where an encounter is kept — data — Resolved
 - Q-106 — An empty Enemies entry on Next — ux — Resolved
+- Q-107 — A Windows package before the release — scope — Resolved
+- Q-108 — Installing for every user with a firewall rule, or for one user without administrator rights — security — Resolved
+- Q-109 — Signing the Windows package — external — Resolved
+- Q-110 — Which LAN address the connect panel and the QR code use on a PC with virtual adapters — ux — Resolved
 
 ## Blocking
 
@@ -744,6 +748,7 @@ None.
 - Recommendation: A, because it needs no setup step and still shows the alternatives; can be deferred to LIV-03.
 - Blocks: specification
 - Answer: A (2026-09-23; recommendation accepted)
+- Superseded by: Q-110
 
 ### Q-054 — How hidden tokens look to the DM and whether the TV view has controls
 - Surface: ux
@@ -1342,3 +1347,49 @@ None.
 - Recommendation: A, because it keeps both of the owner's sentences: the prompt when the enemies are gone, the skip while none has appeared.
 - Blocks: specification
 - Answer: A (2026-10-01; recommendation accepted)
+
+### Q-107 — A Windows package before the release
+- Surface: scope
+- Source: The owner, in chat on 2026-10-02: «How i could prepare it for shiping and deploying it in windows operational system as a package (in order to be as simple the installation). We are talking for self-hosting in a laptop or pc.» and «I wouldn't wanted to be hard to install to make it easy for the DM.» `09` §1 and `12` say the MVP is installed from source with Node and nothing is published (Q-017); `02` §8 and `12` say no packaging work is done in the MVP (Q-049); `01` §5 places a desktop wrapper in Phase 3.
+- Question: Is a Windows package that needs no Node or Git on the DM's PC built before the release, overriding Q-017 and Q-049?
+- Options:
+  - A) A Windows x64 installer and a portable zip, each carrying its own Node runtime, the built server and client and the Windows binaries of better-sqlite3 and sharp, built by CI on a version tag and attached to a GitHub Release; started from a Start Menu shortcut that opens the DM view in the default browser; no Electron or Tauri window, no auto-update → effect on scope: a new Phase 6 with three packages; installation from source stays supported; Linux and macOS stay source-only.
+  - B) The portable zip only, no installer → effect on scope: one package; the DM unzips and double-clicks, and allows the firewall prompt by hand.
+  - C) Keep installation from source only → effect on scope: no change; a DM installs Node 24 and runs `npm install` and `npm start` as `09` §1 says.
+- Recommendation: A, because the owner asked for an installation as simple as possible for a DM who is not a developer, and the zip falls out of the same build as a first step.
+- Blocks: specification
+- Answer: A (2026-10-02; recommendation accepted)
+
+### Q-108 — Installing for every user with a firewall rule, or for one user without administrator rights
+- Surface: security
+- Source: `09` §4: on Windows the firewall asks on first start, and the README explains allowing Node on private networks only (Q-076). An installer can instead add the rule itself, which needs administrator rights. The TV reaches the server only through that rule (`02` §2).
+- Question: Does the Windows installer run with administrator rights to install for every user and add a private-profile firewall rule for the bundled runtime?
+- Options:
+  - A) Yes: per-machine install under Program Files; the installer adds an inbound rule for the bundled executable on the private profile only, and the uninstaller removes it → effect on security: one UAC prompt at install; no firewall dialog at first start; never open on public networks; the data directory stays per user (`09` §5).
+  - B) No: per-user install under the user's programs folder, no administrator rights; Windows shows its firewall dialog at first start and the README tells the DM to tick private networks only → effect on security: no elevated step at all; the DM can still allow public networks by mistake, as with a source install today.
+- Recommendation: A, because the firewall dialog is the step a DM most often gets wrong, and a private-only rule the installer writes is narrower than what a hurried click allows.
+- Blocks: specification
+- Answer: A (2026-10-02; recommendation accepted)
+
+### Q-109 — Signing the Windows package
+- Surface: external
+- Source: An unsigned Windows installer or executable downloaded from the web is stopped by Microsoft Defender SmartScreen («Windows protected your PC») until the DM chooses More info, then Run anyway. Signing needs a certificate from a paid service, such as Azure Trusted Signing (a monthly fee) or an OV certificate.
+- Question: Is the Windows package signed for the release?
+- Options:
+  - A) Unsigned for the first release; the README and the release notes show the SmartScreen screen and the two clicks past it, and give the SHA-256 of each file → effect on external: no cost and no account; the DM sees a warning once per downloaded file.
+  - B) Signed through a paid signing service from CI → effect on external: a recurring cost, an identity verification of the owner and a secret in CI; no SmartScreen block once the publisher has reputation.
+- Recommendation: A, because the project is free and self-hosted for a known table, and signing can be added later without changing the package.
+- Blocks: specification
+- Answer: A (2026-10-02; recommendation accepted)
+
+### Q-110 — Which LAN address the connect panel and the QR code use on a PC with virtual adapters
+- Surface: ux
+- Source: The owner's first run of the Windows package (PKG-01, CI run 36982005130's zip) on 2026-10-02: on a Windows PC with WSL and VMware, the Connect a screen panel and the console highlighted and QR-encoded http://172.21.112.1:3000/ (vEthernet), listing 172.20.48.1, 192.168.186.1 and 192.168.36.1 (virtual adapters) before the Wi-Fi's 192.168.1.133; the phone could not open the highlighted address or scan the code, and worked once the owner typed the Wi-Fi address. `08` §5 [Q-053] highlights the first private-range address in the system's order; G-031 (deferred since LIV-03) predicted this. Preferring 192.168/16 would not help here: the VMware adapters are in it too.
+- Question: How should the server choose the address it highlights and encodes in the QR code when the PC has virtual network adapters?
+- Options:
+  - A) Rank by adapter: addresses of adapters whose names mark them as virtual (vEthernet, Hyper-V, WSL, VMware, VirtualBox, Docker, docker0, br-, veth, virbr, vmnet, utun, tailscale, ZeroTier) go after the others, private-range first within each group; everything is still listed, and today's rule applies when only virtual adapters are left → effect on ux: the Wi-Fi or Ethernet address is highlighted on the owner's PC and on most PCs with WSL, Hyper-V, Docker or a VM, with no setup step; an adapter named in a way the list does not know can still win, and the DM then types one from the list as today. No stored data, no contract change.
+  - B) A, plus the DM can pick the highlighted address in the Connect a screen panel, the choice stored as a setting and used by the panel, the QR code and the console while that address exists → effect on ux and data: the DM can always correct a wrong guess in one click and the TV's address stays put between sessions; adds a settings field (a migration), a field in the settings contract and a control in the panel.
+  - C) Keep Q-053 and document it: the console, the panel and both READMEs tell the DM that with WSL, a VM or a VPN the highlighted address may be wrong and to try the Wi-Fi one from the list → effect on ux: no code change; every DM with such a PC meets a QR code that does not open, as the owner did, and has to work out which address is the Wi-Fi.
+- Recommendation: A, because it fixes the case the owner hit and the common ones with no stored setting and no contract change, and B's picker can be added later if a DM still meets a wrong guess.
+- Blocks: specification
+- Answer: B, with A as the way it works by default: the server ranks the addresses by adapter so that the right one is highlighted with no chore for the DM, and a TV address chosen in Settings from the detected addresses, with their adapter names, is the emergency correction for a PC where the ranking guesses wrong, falling back to the automatic choice when the chosen address is gone (2026-10-02)

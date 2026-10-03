@@ -44,6 +44,8 @@ Each row's status restates the tagged statement it cites in `01`. [input, Q-013,
 | Character sheet with derived values; data-driven rules, SRD 5.1 import | `01` §4 | Future (Phase 2) |
 | Guided level-up; personal screen per player | `01` §5 | Future (Phase 3) |
 | Tauri or Electron packaging | `01` §5, `02` §8 | Future (Phase 3) |
+| Windows installer and portable zip with a bundled Node runtime | `09` §1, `09` §4 | Before the release (Q-107, Q-108, Q-109) |
+| The TV address ranked by adapter, with a TV address chosen in Settings as the correction | `08` §5, `09` §7 | Before the release (Q-110) |
 | 2024 rules; homebrew; AI assistant; auto grid detection; physical scale; live drag preview | `01` §6 | Future (nice-to-have) |
 | Custom map creation; remote play; full effects engine; dynamic lighting; hex grids | `01` §7 | Out of Scope |
 

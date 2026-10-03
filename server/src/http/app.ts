@@ -19,6 +19,7 @@ import { imageFileRemover, registerImages } from './images.js';
 import { createDisplayRegenerator, type DisplayRegenerator } from '../images/regenerator.js';
 import { imagesDirOf, prepareImagesDir } from '../images/store.js';
 import { registerSettings } from './settings.js';
+import { readSettings } from '../db/settings.js';
 import type { VersionCounters } from '../domain/version.js';
 import { attachLiveSocket, isViteUpgrade, type LiveSocket, type LiveSocketOptions } from '../ws/live.js';
 import { createFailureLog, installErrorHandling, sendFailure, type RejectedLineLimits } from './errors.js';
@@ -131,7 +132,12 @@ export async function buildApp({
   registerAssets(app, db, removeImages, live.refresh);
   registerTokens(app, db);
   registerFog(app, db);
-  registerConnect(app, networkInterfaces, () => live.count('players'));
+  registerConnect(
+    app,
+    networkInterfaces,
+    () => live.count('players'),
+    () => readSettings(db).tv_address,
+  );
   const regenerator = createDisplayRegenerator({ db, imagesDir, logger, commit: live.refresh });
   // Before any onClose hook: the server closes the database in one registered after this (review C-M2).
   app.addHook('preClose', () => regenerator.stop());

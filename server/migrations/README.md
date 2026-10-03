@@ -27,3 +27,5 @@ Numbered SQL migrations, applied in order by `src/db/migrate.ts` before the serv
 `0007_marker_objects.sql` turns every stored condition marker name into an object, `{"id": name}`, in the same order, so a marker can carry Exhaustion's level; lossless, the four names of 0004 being among the eighteen conditions (TBL-05, Q-103, D-157).
 
 `0008_encounter.sql` adds `encounter`, the initiative tracker of a scene, at most one per scene and deleted with it, its entries a JSON array; additive (TBL-06, Q-104, Q-105, D-160).
+
+`0009_settings_tv_address.sql` adds `settings.tv_address`, the TV address the DM chose in Settings for the connect panel, or NULL for Automatic, which every existing database keeps; additive (PKG-01, Q-110, D-169).
