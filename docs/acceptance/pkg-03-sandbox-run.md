@@ -6,7 +6,7 @@ Allow about 30 minutes. You need a Windows 10 or 11 Pro, Enterprise or Education
 
 ## 0. Before you start
 
-1. If Windows Sandbox is not on yet: Start, type "Turn Windows features on or off", tick **Windows Sandbox**, OK, restart.
+1. If Windows Sandbox is not on yet: Start, type "Turn Windows features on or off", tick **Windows Sandbox**, OK, restart. It also needs virtualisation turned on in the PC's BIOS or UEFI settings; Windows says so if it is off.
 2. Start **Windows Sandbox** from the Start Menu. It is a clean Windows that forgets everything when you close it. Do every step below inside it.
 3. In the Sandbox, open Command Prompt and run `where node`. It must say that it could not find the file: this Windows has no Node.
 
@@ -19,7 +19,8 @@ Allow about 30 minutes. You need a Windows 10 or 11 Pro, Enterprise or Education
 
 1. In the Sandbox, open Edge and go to the release's page: `https://github.com/giorgosroussos/dnd-vtt/releases`.
 2. Download the four files: `Emberglass-<version>-win-x64-setup.exe`, `Emberglass-<version>-win-x64.zip` and their two `.sha256` files.
-3. In Command Prompt, in the Downloads folder: `certutil -hashfile Emberglass-<version>-win-x64-setup.exe SHA256`, and the same for the zip. Compare each with its `.sha256` file (open it in Notepad).
+3. In Command Prompt: `cd %USERPROFILE%\Downloads`, then `certutil -hashfile Emberglass-<version>-win-x64-setup.exe SHA256`, and the same for the zip. Compare each with its `.sha256` file (open it in Notepad).
+4. **If either checksum does not match, stop**: do not open the file, and report it.
 
 **Record:**
 - Did Edge warn about any download? Its exact words, and what you clicked:
@@ -36,9 +37,12 @@ Allow about 30 minutes. You need a Windows 10 or 11 Pro, Enterprise or Education
 - Each warning before Emberglass started, in order, with its exact title and words (for example "Windows protected your PC", or "Open File - Security Warning", "The publisher could not be verified"), and what you clicked on each:
 - Did the console window open and show the TV address and the QR code (yes / no)?
 - Did the DM view open in Edge at `http://127.0.0.1:3000/dm`, offering to set the PIN (yes / no)?
-- Did Windows ask about the firewall? Its exact words and the choice you made:
+- Did Windows ask about the firewall? Its exact words, which boxes it had ticked, and the network's profile in the Sandbox (Settings, Network & internet). Tick **Private networks** only, as the README says:
 
 4. Set a PIN, then close the console window. The DM view stops answering.
+
+**Record:**
+- The PIN was set and the workspace opened (yes / no):
 
 ## 3. The installer
 
@@ -47,7 +51,7 @@ Allow about 30 minutes. You need a Windows 10 or 11 Pro, Enterprise or Education
 
 **Record:**
 - Each warning before the installer's first page, in order, with its exact title and words, and what you clicked:
-- The administrator prompt (UAC): the publisher it names:
+- The administrator prompt (UAC), if one appeared: the publisher it names (an unsigned file shows "Unknown"). If none appeared, write "none": Windows Sandbox may run as administrator without asking:
 - Did Emberglass start at the end, with its console window and the DM view in Edge (yes / no)?
 - Did Windows ask about the firewall this time (yes / no)? The installer adds its rules, so it should not.
 - The DM view asks for the PIN you set in step 2 (yes / no): the zip and the installer share the data in `%APPDATA%\Emberglass`.
@@ -65,7 +69,7 @@ Allow about 30 minutes. You need a Windows 10 or 11 Pro, Enterprise or Education
 ## 5. Uninstall
 
 1. Close the Emberglass console window.
-2. Start, **Emberglass**, **Uninstall Emberglass**, and confirm.
+2. Start, **All apps** (on Windows 11), **Emberglass**, **Uninstall Emberglass**, and confirm. Typing "Uninstall Emberglass" in Start finds it too.
 3. In File Explorer, open `%APPDATA%\Emberglass`.
 
 **Record:**

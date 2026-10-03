@@ -157,10 +157,23 @@ describe('CI and the command contract agree', () => {
       expect(download).toBeGreaterThan(-1);
       expect(job.indexOf('run: make package-gates')).toBeGreaterThan(download);
       expect(job).not.toContain('make package\n');
+      // Never skipped or allowed to fail while the run stays green (review T-M3).
+      expect(job).not.toMatch(/continue-on-error|^ {4}if:/m);
+      // The files tested are the files the package job built (review S-M1).
+      const check = job.indexOf('name: The package is the one the package job built');
+      expect(check).toBeGreaterThan(download);
+      expect(job.indexOf('run: make package-gates')).toBeGreaterThan(check);
+      expect(job).toContain('SETUP_SHA256: ${{ needs.package.outputs.setup }}');
       // A failed gate keeps its traces, in a release as in CI (release run 37052169914 kept nothing).
       expect(job).toMatch(/if: failure\(\)\n {8}uses: actions\/upload-artifact@[0-9a-f]{40}/);
       expect(job).toContain('path: e2e/test-results/');
       expect(job).not.toContain('contents: write');
+    }
+    for (const text of [workflow, release]) {
+      const job = /^ {2}package:\n([\s\S]*?)(?=^ {2}\S)/m.exec(text)?.[1] ?? '';
+      expect(job).toContain('setup: ${{ steps.digests.outputs.setup }}');
+      expect(job).toContain('zip: ${{ steps.digests.outputs.zip }}');
+      expect(job.indexOf('id: digests')).toBeGreaterThan(job.indexOf('run: make package'));
     }
     expect(/^package-gates:[^#\n]*##/m.test(makefile)).toBe(true);
     expect(readme).toContain('| `package gates · windows` | `windows-latest` | `make package-gates` |');
@@ -175,11 +188,25 @@ describe('CI and the command contract agree', () => {
     expect(publish).toContain('id-token: write');
     expect(publish).toContain('attestations: write');
     expect(publish).toMatch(/uses: actions\/attest@[0-9a-f]{40} # v\d/);
-    // Published, not drafted; a draft an earlier attempt left is completed, a published release never replaced.
-    expect(publish).not.toContain('--draft ');
-    expect(publish).toContain('--clobber');
-    expect(publish).toContain('--draft=false');
-    expect(publish).toContain('is already published');
+    // Only once the owner approves it, never skipped or soft-failed (review S-M2, T-M3).
+    expect(publish).toMatch(/^ {4}environment: release$/m);
+    expect(publish).not.toMatch(/continue-on-error|^ {4}if:/m);
+    // The files are the ones built and gated; the release is read, and a published one refused, before anything is
+    // attested; only "release not found" counts as none; a leftover draft is deleted, not published (review S-M1,
+    // S-L2, C-M3, C-L1).
+    const verified = publish.indexOf('SETUP_SHA256: ${{ needs.package.outputs.setup }}');
+    const refused = publish.indexOf('is already published');
+    const attested = publish.indexOf('uses: actions/attest@');
+    const created = publish.indexOf('gh release create');
+    expect(verified).toBeGreaterThan(-1);
+    expect(refused).toBeGreaterThan(verified);
+    expect(attested).toBeGreaterThan(refused);
+    expect(created).toBeGreaterThan(attested);
+    expect(publish).toContain("grep -q 'release not found'");
+    expect(publish).not.toContain('2>/dev/null');
+    expect(publish).toContain('gh release delete "$GITHUB_REF_NAME"');
+    expect(publish).not.toMatch(/--draft|--clobber/);
+    expect(publish).toContain('--signer-workflow');
     expect(publish).not.toMatch(/make |npm |node /);
   });
 });

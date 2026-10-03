@@ -1,5 +1,5 @@
 // `make package-gates`: the package gates (PKG-03, specs/13-implementation-plan.md §11; specs/10-testing-acceptance.md
-// §3, §4, §5, §6; D-176). The package `make package` built, in dist/package/, passes the same gates as the source
+// §3, §4, §5, §6; D-176, D-177). The package `make package` built, in dist/package/, passes these gates of the source
 // install once installed:
 //
 //   - the hidden-information suite: the three `@gate:` tests of server/src/ws/ (recorded traffic, player
@@ -11,31 +11,26 @@
 // program on PATH. On Windows the package is the installer's: installed silently into Program Files, which only
 // a throwaway machine may allow (EMBERGLASS_PACKAGE_SYSTEM_TESTS=1, the CI runner, D-172), and uninstalled at the
 // end. Elsewhere it is the zip, unzipped into a temporary folder, to try the gates locally. A gate test that did
-// not run, or ran against something else, fails the target as surely as one that failed.
+// not run, or ran against something else, fails the target as surely as one that failed: the verdicts are
+// scripts/package/lib.mjs's, tested in lib.test.mjs.
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { sha256 } from './lib.mjs';
+import {
+  browsersOf,
+  journeySpecs,
+  packagedServersVerdict,
+  playwrightVerdicts,
+  sha256,
+  vitestVerdicts,
+} from './lib.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const out = path.join(root, 'dist', 'package');
 const windows = process.platform === 'win32';
 const failures = [];
-
-/** The `@gate:` tests of specs/10-testing-acceptance.md §3, which must each run and pass against the package. */
-const HIDDEN_INFORMATION_GATES = ['hidden-information', 'player-command-rejection', 'image-revocation'];
-/** The journeys of specs/10-testing-acceptance.md §5 and the per-browser offline probe, in every browser. */
-const JOURNEYS = [
-  'first-run.spec.ts',
-  'prepare.spec.ts',
-  'connect.spec.ts',
-  'run.spec.ts',
-  'recover.spec.ts',
-  'large-scene.spec.ts',
-  'offline-probe.spec.ts',
-];
 
 function log(line) {
   console.log(`package-gates: ${line}`);
@@ -61,7 +56,7 @@ function built(ending) {
   const sum = existsSync(`${file}.sha256`) ? readFileSync(`${file}.sha256`, 'utf8') : '';
   expect(
     sum === `${sha256(readFileSync(file))}  ${path.basename(file)}\n`,
-    `${path.basename(file)} matches its .sha256`,
+    `${path.basename(file)} matches its .sha256 (if not, build it again with make package)`,
   );
   return file;
 }
@@ -99,8 +94,14 @@ function install(setup) {
   if (installed.status !== 0 && existsSync(path.join(logs, 'install.log'))) {
     console.log(readFileSync(path.join(logs, 'install.log'), 'utf8'));
   }
-  expect(installed.status === 0, `the installer installs silently (exit ${installed.status})`);
-  expect(existsSync(path.join(app, 'emberglass.exe')), `the package is installed in ${app}`);
+  const ok =
+    expect(installed.status === 0, `the installer installs silently (exit ${installed.status})`) &&
+    expect(existsSync(path.join(app, 'emberglass.exe')), `the package is installed in ${app}`);
+  if (!ok) {
+    // Nothing to test: the gates would only fail again, slowly, on a folder that is not there (review U-L8).
+    console.error('package-gates: the installer failed; its log is above. No gate ran.');
+    process.exit(1);
+  }
   const uninstall = async () => {
     const removed = spawnSync(
       path.join(app, 'unins000.exe'),
@@ -111,6 +112,8 @@ function install(setup) {
     const deadline = Date.now() + 120_000;
     while (existsSync(app) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 500));
     expect(removed.status === 0 && !existsSync(app), `the package is uninstalled afterwards (exit ${removed.status})`);
+    // Every server of the gates had a data directory of its own: none may have used the DM's (review T-L2).
+    expect(!existsSync(data), `the gates left nothing in ${data}`);
     removeTemporary(logs);
   };
   return { folder: app, uninstall };
@@ -133,9 +136,11 @@ function run(what, args, cwd, env) {
   expect(result.status === 0, `${what} passes (exit ${result.status})`);
 }
 
-/** The hidden-information gates, each of which must have run and passed. */
+/** The hidden-information gates, each of which must have run against the package and passed. */
 function hiddenInformation(folder, reports) {
   const report = path.join(reports, 'vitest.json');
+  const servers = path.join(reports, 'servers.jsonl');
+  const files = ['src/ws/hidden-information.test.ts', 'src/ws/commands.test.ts'];
   run(
     'the hidden-information suite against the package',
     [
@@ -148,37 +153,23 @@ function hiddenInformation(folder, reports) {
       '--reporter=default',
       '--reporter=json',
       `--outputFile.json=${report}`,
-      'src/ws/hidden-information.test.ts',
-      'src/ws/commands.test.ts',
+      ...files,
     ],
     root,
-    { EMBERGLASS_TEST_PACKAGE: folder },
+    // The harness writes one line per packaged server it starts, so that the gates show where they ran.
+    { EMBERGLASS_TEST_PACKAGE: folder, EMBERGLASS_TEST_PACKAGE_LOG: servers },
   );
-  const results = existsSync(report)
-    ? JSON.parse(readFileSync(report, 'utf8')).testResults.flatMap((file) => file.assertionResults)
-    : [];
-  for (const id of HIDDEN_INFORMATION_GATES) {
-    const found = results.filter((test) => test.title.startsWith(`@gate:${id} `));
-    expect(
-      found.length === 1 && found[0].status === 'passed',
-      `@gate:${id} ran against the package and passed (${found.map((test) => test.status).join(', ') || 'not run'})`,
-    );
+  const parsed = existsSync(report) ? JSON.parse(readFileSync(report, 'utf8')) : null;
+  const sources = files.map((file) => readFileSync(path.join(root, 'server', file), 'utf8'));
+  for (const verdict of vitestVerdicts(parsed, sources)) expect(verdict.ok, verdict.message);
+  const started = existsSync(servers) ? readFileSync(servers, 'utf8').split('\n') : [];
+  const verdict = packagedServersVerdict(started, folder);
+  expect(verdict.ok, verdict.message);
+  // How long each took, so that a slowdown shows in the log long before a limit is reached (review T-L3).
+  for (const test of (parsed?.testResults ?? []).flatMap((file) => file.assertionResults ?? [])) {
+    if (test.status === 'passed')
+      log(`${test.title.split(' ', 1)[0]} took ${Math.round((test.duration ?? 0) / 1000)} s`);
   }
-}
-
-/** Every test of a Playwright JSON report, with its file, project and outcome. */
-function playwrightTests(suite, file = suite.file) {
-  return [
-    ...(suite.specs ?? []).flatMap((spec) =>
-      spec.tests.map((test) => ({
-        file: spec.file ?? file,
-        title: spec.title,
-        project: test.projectName,
-        status: test.status,
-      })),
-    ),
-    ...(suite.suites ?? []).flatMap((child) => playwrightTests(child, child.file ?? file)),
-  ];
 }
 
 /** The journeys in every browser and the offline gate, each of which must have run and passed. */
@@ -190,35 +181,11 @@ function journeys(folder, reports) {
     path.join(root, 'e2e'),
     { EMBERGLASS_E2E_PACKAGE: folder, PLAYWRIGHT_JSON_OUTPUT_FILE: report },
   );
-  const tests = existsSync(report)
-    ? JSON.parse(readFileSync(report, 'utf8')).suites.flatMap((suite) => playwrightTests(suite))
-    : [];
-  const browsers = [
-    ...new Set([
-      'chromium',
-      ...(process.env.EMBERGLASS_E2E_BROWSERS ?? 'chromium')
-        .split(',')
-        .map((name) => name.trim())
-        .filter(Boolean),
-    ]),
-  ];
-  for (const browser of browsers) {
-    for (const journey of JOURNEYS) {
-      const found = tests.filter(
-        (test) => test.project === browser && test.file.replaceAll('\\', '/').endsWith(`journeys/${journey}`),
-      );
-      expect(
-        found.length > 0 && found.every((test) => test.status === 'expected'),
-        `${journey} ran in ${browser} against the package and passed (${found.map((test) => test.status).join(', ') || 'not run'})`,
-      );
-    }
+  const parsed = existsSync(report) ? JSON.parse(readFileSync(report, 'utf8')) : null;
+  const specs = journeySpecs(path.join(root, 'e2e', 'tests', 'journeys'));
+  for (const verdict of playwrightVerdicts(parsed, specs, browsersOf(process.env.EMBERGLASS_E2E_BROWSERS))) {
+    expect(verdict.ok, verdict.message);
   }
-  // The run's own offline check, last; each browser's probe above carries the same marker.
-  const offline = tests.filter((test) => test.project === 'offline' && test.title.startsWith('@gate:offline-e2e '));
-  expect(
-    offline.length === 1 && offline[0].status === 'expected',
-    `@gate:offline-e2e ran after them and passed (${offline.map((test) => test.status).join(', ') || 'not run'})`,
-  );
 }
 
 if (windows && process.env.EMBERGLASS_PACKAGE_SYSTEM_TESTS !== '1') {
@@ -230,19 +197,22 @@ if (windows && process.env.EMBERGLASS_PACKAGE_SYSTEM_TESTS !== '1') {
 }
 
 const zip = built('.zip');
-const target = windows ? install(built('-setup.exe')) : unzip(zip);
+const setup = windows ? built('-setup.exe') : undefined;
 const reports = mkdtempSync(path.join(os.tmpdir(), 'emberglass-gates-reports-'));
+let target;
 try {
+  target = setup ? install(setup) : unzip(zip);
   log(`the package under test: ${target.folder}`);
   hiddenInformation(target.folder, reports);
   journeys(target.folder, reports);
 } finally {
-  await target.uninstall();
+  await target?.uninstall();
   removeTemporary(reports);
 }
 
 if (failures.length > 0) {
-  console.error(`package-gates: ${failures.length} check(s) failed.`);
+  console.error(`package-gates: ${failures.length} check(s) failed:`);
+  for (const failure of failures) console.error(`  - ${failure}`);
   process.exit(1);
 }
 log(`${path.basename(zip, '.zip')} passes the package gates.`);

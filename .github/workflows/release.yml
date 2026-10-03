@@ -5,10 +5,11 @@
 # the Windows runner builds and checks the package with `make package`, exactly as CI's
 # `package · windows` job does; a second Windows runner installs that very package and runs the package
 # gates on it with `make package-gates` (the hidden-information suite, the journeys, the offline run), as
-# CI's `package gates · windows` does; and only then a third job attaches the installer, the zip and their
-# SHA-256 to a published GitHub Release for the tag (a pre-release for a tag with a suffix), with build
-# provenance attested for both. The build and gate jobs run every install script of `npm ci`, so they hold
-# no token that can write; only the last job, which runs no project code, may write the release.
+# CI's `package gates · windows` does; and only then, once the owner approves it in the `release` environment,
+# a third job checks that the files are still the ones built and gated, and attaches the installer, the zip and
+# their SHA-256 to a published GitHub Release for the tag (a pre-release for a tag with a suffix), with build
+# provenance attested for both (D-177). The build and gate jobs run every install script of `npm ci`, so they
+# hold no token that can write; only the last job, which runs no project code, may write the release.
 
 name: Release
 
@@ -29,6 +30,11 @@ env:
 jobs:
   package:
     name: package · windows
+    # The digests of what this job built (review S-M1, D-177): the gates and the release check that what they
+    # download is still exactly that, so a later job's code cannot swap the artifact unnoticed.
+    outputs:
+      setup: ${{ steps.digests.outputs.setup }}
+      zip: ${{ steps.digests.outputs.zip }}
     runs-on: windows-latest
     # The installer is installed twice and uninstalled on the runner (PKG-02): more than the zip alone.
     timeout-minutes: 45
@@ -68,6 +74,12 @@ jobs:
         run: make setup
       - name: make package
         run: make package
+      - name: The digests the later jobs check
+        id: digests
+        run: |
+          set -euo pipefail
+          echo "setup=$(sha256sum dist/package/*-setup.exe | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "zip=$(sha256sum dist/package/*.zip | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: package-windows
@@ -115,6 +127,15 @@ jobs:
         with:
           name: package-windows
           path: dist/package
+      - name: The package is the one the package job built
+        env:
+          SETUP_SHA256: ${{ needs.package.outputs.setup }}
+          ZIP_SHA256: ${{ needs.package.outputs.zip }}
+        run: |
+          set -euo pipefail
+          test -n "$SETUP_SHA256" && test -n "$ZIP_SHA256"
+          echo "$SETUP_SHA256  $(ls dist/package/*-setup.exe)" | sha256sum --check --strict
+          echo "$ZIP_SHA256  $(ls dist/package/*.zip)" | sha256sum --check --strict
       - name: make package-gates
         run: make package-gates
       - name: Keep Playwright output of a failed run
@@ -131,9 +152,12 @@ jobs:
     needs: [package, package-gates]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Nothing is published until the owner approves this job in the `release` environment (review S-M2, D-177):
+    # a pushed tag alone builds and gates the package, then waits.
+    environment: release
     permissions:
       contents: write
-      # Build provenance (G-048): a signed statement that this workflow, at the tag's commit, made these files.
+      # Build provenance: a signed statement that this workflow, at the tag's commit, made these files.
       id-token: write
       attestations: write
     steps:
@@ -141,12 +165,38 @@ jobs:
         with:
           name: package-windows
           path: package
-      - name: The checksums match the files
+      - name: The files are the ones the package job built and the gates passed
+        env:
+          SETUP_SHA256: ${{ needs.package.outputs.setup }}
+          ZIP_SHA256: ${{ needs.package.outputs.zip }}
         run: |
           set -euo pipefail
+          test -n "$SETUP_SHA256" && test -n "$ZIP_SHA256"
           setup="$(ls package/*-setup.exe)"
           zip="$(ls package/*.zip)"
+          echo "$SETUP_SHA256  $setup" | sha256sum --check --strict
+          echo "$ZIP_SHA256  $zip" | sha256sum --check --strict
           (cd package && sha256sum --check --strict "$(basename "$setup").sha256" "$(basename "$zip").sha256")
+      - name: No release of this tag is published yet
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Only "release not found" means there is none: any other failure stops the job, rather than
+          # creating a release beside one that could not be read (review S-L2, C-M3).
+          if found="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>&1)"; then
+            if [ "$found" != "true" ]; then
+              echo "::error::The release $GITHUB_REF_NAME is already published; tag a new version instead."
+              exit 1
+            fi
+            echo "draft=true" >> "$GITHUB_OUTPUT"
+          elif printf '%s' "$found" | grep -q 'release not found'; then
+            echo "draft=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Could not read the release $GITHUB_REF_NAME: $found"
+            exit 1
+          fi
       - name: Attest the build provenance of the installer and the zip
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
@@ -156,6 +206,7 @@ jobs:
       - name: Publish the GitHub Release with the installer, the zip and their SHA-256
         env:
           GH_TOKEN: ${{ github.token }}
+          DRAFT: ${{ steps.existing.outputs.draft }}
         run: |
           set -euo pipefail
           setup="$(ls package/*-setup.exe)"
@@ -166,9 +217,13 @@ jobs:
             echo "- **Installer (recommended)**: \`$(basename "$setup")\`. Installs for every user with one administrator prompt, adds the Start Menu shortcuts, allows Emberglass on private networks only and blocks it on public ones, and upgrades an older version in place. Uninstalling keeps your data in %APPDATA%\\Emberglass."
             echo "- **Portable zip**: \`$(basename "$zip")\`. For a PC where you cannot or do not want to install: unzip it into a folder of its own and double-click Emberglass.cmd; README.txt inside says the rest."
             echo
-            echo "Neither is signed. Windows SmartScreen may show \"Windows protected your PC\": choose More info, then Run anyway, once the file matches its SHA-256 below. To check one, run \`certutil -hashfile $(basename "$setup") SHA256\` in Command Prompt (or the zip's name for the zip). A match shows the file is the one published here, intact."
+            echo "**Before opening either file, check it.** In Command Prompt, in the folder you downloaded it to, run \`certutil -hashfile $(basename "$setup") SHA256\` (or the zip's name for the zip) and compare the result with its SHA-256 below. If they differ, do not open the file. A match shows the download is intact; it does not show who built it."
             echo
-            echo "Both were built by this repository's release workflow from the tag's commit, and installed and tested on a clean Windows runner before this release was published. With the GitHub CLI signed in, \`gh attestation verify $(basename "$setup") --repo $GITHUB_REPOSITORY\` checks the signed build provenance of a downloaded file."
+            echo "Neither file is signed, so Windows SmartScreen may then show \"Windows protected your PC\": choose More info, then Run anyway."
+            echo
+            echo "Before this release was published, the installer was installed on a fresh Windows build machine and passed the hidden-information tests, the five DM journeys in Chrome and Edge, and the offline check; the zip holds the same program and passed a start-up check. These tests vouch for the program the workflow built, not for the third-party packages it was built from."
+            echo
+            echo "Optional, for those who use the GitHub CLI (https://cli.github.com, signed in with \`gh auth login\`): \`gh attestation verify $(basename "$setup") --repo $GITHUB_REPOSITORY --signer-workflow $GITHUB_REPOSITORY/.github/workflows/release.yml\` confirms the file was built by this repository's release workflow."
             echo
             echo "SHA-256:"
             echo
@@ -178,19 +233,11 @@ jobs:
           } > notes.md
           prerelease=false
           case "$GITHUB_REF_NAME" in *-*) prerelease=true ;; esac
-          # A re-run of this job finds the release an earlier attempt left as a draft and completes it (G-048);
-          # a release already published is never replaced, since its checksums are already out.
-          if state="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null)"; then
-            if [ "$state" != "true" ]; then
-              echo "::error::The release $GITHUB_REF_NAME is already published; tag a new version instead."
-              exit 1
-            fi
-            gh release upload "$GITHUB_REF_NAME" package/*-setup.exe package/*-setup.exe.sha256 package/*.zip package/*.zip.sha256 \
-              --repo "$GITHUB_REPOSITORY" --clobber
-            gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease="$prerelease" \
-              --title "Emberglass ${GITHUB_REF_NAME#v}" --notes-file notes.md
-          else
-            gh release create "$GITHUB_REF_NAME" package/*-setup.exe package/*-setup.exe.sha256 package/*.zip package/*.zip.sha256 \
-              --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease="$prerelease" \
-              --title "Emberglass ${GITHUB_REF_NAME#v}" --notes-file notes.md
+          # A draft an earlier attempt left for the tag is deleted, never published as it is, so that none of its
+          # files rides along; nobody has downloaded a draft (G-050).
+          if [ "$DRAFT" = "true" ]; then
+            gh release delete "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --yes
           fi
+          gh release create "$GITHUB_REF_NAME" package/*-setup.exe package/*-setup.exe.sha256 package/*.zip package/*.zip.sha256 \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease="$prerelease" \
+            --title "Emberglass ${GITHUB_REF_NAME#v}" --notes-file notes.md

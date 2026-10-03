@@ -133,6 +133,11 @@ jobs:
   # x64 is packaged (specs/09-operations.md §3). The release workflow runs the same target on a tag.
   package:
     name: package · windows
+    # The digests of what this job built (review S-M1, D-177): the gates and the release check that what they
+    # download is still exactly that, so a later job's code cannot swap the artifact unnoticed.
+    outputs:
+      setup: ${{ steps.digests.outputs.setup }}
+      zip: ${{ steps.digests.outputs.zip }}
     runs-on: windows-latest
     # The installer is installed twice and uninstalled on the runner (PKG-02): more than the zip alone.
     timeout-minutes: 45
@@ -165,6 +170,12 @@ jobs:
         run: make setup
       - name: make package
         run: make package
+      - name: The digests the later jobs check
+        id: digests
+        run: |
+          set -euo pipefail
+          echo "setup=$(sha256sum dist/package/*-setup.exe | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "zip=$(sha256sum dist/package/*.zip | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - name: Keep the package
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -222,6 +233,15 @@ jobs:
         with:
           name: package-windows
           path: dist/package
+      - name: The package is the one the package job built
+        env:
+          SETUP_SHA256: ${{ needs.package.outputs.setup }}
+          ZIP_SHA256: ${{ needs.package.outputs.zip }}
+        run: |
+          set -euo pipefail
+          test -n "$SETUP_SHA256" && test -n "$ZIP_SHA256"
+          echo "$SETUP_SHA256  $(ls dist/package/*-setup.exe)" | sha256sum --check --strict
+          echo "$ZIP_SHA256  $(ls dist/package/*.zip)" | sha256sum --check --strict
       - name: make package-gates
         run: make package-gates
       - name: Keep Playwright output of a failed run

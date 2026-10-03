@@ -405,3 +405,111 @@ export function innoScript({ version, stage, outDir, outName, icon, info }) {
     '',
   ].join('\r\n');
 }
+
+// The package gates' verdicts (PKG-03, `make package-gates`, D-176, D-177): what `gates.mjs` requires of the Vitest
+// and Playwright JSON reports, kept here so that each way a gate can be missed is tested (scripts/package/lib.test.mjs).
+
+/** The `@gate:` tests of specs/10-testing-acceptance.md §3 that must each run and pass against the package. */
+export const HIDDEN_INFORMATION_GATES = ['hidden-information', 'player-command-rejection', 'image-revocation'];
+
+/** The journey specs of e2e/tests/journeys/, read from disk so that a journey added later is required too. */
+export function journeySpecs(dir) {
+  return readdirSync(dir)
+    .filter((name) => name.endsWith('.spec.ts'))
+    .sort();
+}
+
+/** The browsers of a run: Chromium always, then those EMBERGLASS_E2E_BROWSERS names (e2e/playwright.config.ts). */
+export function browsersOf(list) {
+  return [
+    ...new Set([
+      'chromium',
+      ...(list ?? '')
+        .split(',')
+        .map((name) => name.trim())
+        .filter(Boolean),
+    ]),
+  ];
+}
+
+/**
+ * One verdict per hidden-information gate from a Vitest JSON report (null when none was written): exactly one test
+ * of that marker, passed. `sources` are the texts of the files the gates live in: an inverted test (`it.fails`)
+ * reports `passed` when its body fails, so a file that has one judges nothing.
+ * @returns {{ ok: boolean, message: string }[]}
+ */
+export function vitestVerdicts(report, sources = []) {
+  const results = (report?.testResults ?? []).flatMap((file) => file.assertionResults ?? []);
+  const inverted = sources.some((text) => /\.fails\s*\(/.test(text));
+  return HIDDEN_INFORMATION_GATES.map((id) => {
+    const found = results.filter((test) => test.title.startsWith(`@gate:${id} `));
+    return {
+      ok: !inverted && found.length === 1 && found[0].status === 'passed',
+      message: `@gate:${id} ran against the package and passed (${
+        inverted ? 'an inverted test in its file' : found.map((test) => test.status).join(', ') || 'not run'
+      })`,
+    };
+  });
+}
+
+/** Every test of a Playwright JSON report, with its file, project, outcome and the outcome it was meant to have. */
+export function playwrightTests(report) {
+  const walk = (suite, file) => [
+    ...(suite.specs ?? []).flatMap((spec) =>
+      spec.tests.map((test) => ({
+        file: (spec.file ?? file ?? '').replaceAll('\\', '/'),
+        title: spec.title,
+        project: test.projectName,
+        status: test.status,
+        expectedStatus: test.expectedStatus,
+      })),
+    ),
+    ...(suite.suites ?? []).flatMap((child) => walk(child, child.file ?? file)),
+  ];
+  return (report?.suites ?? []).flatMap((suite) => walk(suite, suite.file));
+}
+
+/**
+ * One verdict per journey per browser, then one for the run's offline gate, from a Playwright JSON report (null when
+ * none was written). A journey passes in a browser when it ran there and every test of it passed as a passing test
+ * (`expectedStatus` 'passed': a `test.fail()` that fails is 'expected' too). The offline gate is the `offline`
+ * project's; each browser's probe carries the same marker and is a journey.
+ * @returns {{ ok: boolean, message: string }[]}
+ */
+export function playwrightVerdicts(report, journeys, browsers) {
+  const tests = playwrightTests(report);
+  const passed = (test) => test.status === 'expected' && test.expectedStatus === 'passed';
+  const verdicts = [];
+  for (const browser of browsers) {
+    for (const journey of journeys) {
+      const found = tests.filter((test) => test.project === browser && test.file.endsWith(`journeys/${journey}`));
+      verdicts.push({
+        ok: found.length > 0 && found.every(passed),
+        message: `${journey} ran in ${browser} against the package and passed (${
+          found.map((test) => test.status).join(', ') || 'not run'
+        })`,
+      });
+    }
+  }
+  const offline = tests.filter((test) => test.project === 'offline' && test.title.startsWith('@gate:offline-e2e '));
+  verdicts.push({
+    ok: offline.length === 1 && passed(offline[0]),
+    message: `@gate:offline-e2e ran after them and passed (${offline.map((test) => test.status).join(', ') || 'not run'})`,
+  });
+  return verdicts;
+}
+
+/**
+ * Whether the hidden-information gates ran against the package: one line per server the test harness started in
+ * package mode (server/src/ws/testing/harness.ts), each naming the package's folder. The recorded-traffic gate
+ * starts two servers and each of the other two gates one, so fewer than four means some gate ran elsewhere.
+ * @returns {{ ok: boolean, message: string }}
+ */
+export function packagedServersVerdict(lines, folder) {
+  const servers = lines.filter((line) => line.trim() !== '').map((line) => JSON.parse(line));
+  const ours = servers.filter((server) => server.folder === folder);
+  return {
+    ok: ours.length >= 4 && ours.length === servers.length,
+    message: `every hidden-information server was the package in ${folder} (${ours.length} of ${servers.length}, at least 4 needed)`,
+  };
+}

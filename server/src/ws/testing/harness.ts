@@ -1,6 +1,6 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { createServer, type AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -219,10 +219,15 @@ async function packaged(folder: string): Promise<Backend> {
       async () => {
         if (child.exitCode !== null) throw new Error(`the package's launcher exited:\n${output}`);
         expect(output).toContain(`Emberglass is running on port ${port}`);
+        // With nothing on PATH the launcher finds no browser to open, so none runs outside the test's control.
+        expect(output).toContain('Could not open a browser.');
         expect((await fetch(`${url}/api/auth`)).status).toBe(200);
       },
       { timeout: 60_000, interval: 200 },
     );
+    // `make package-gates` counts these lines to know that the gates ran here, against the package (D-177).
+    const log = process.env.EMBERGLASS_TEST_PACKAGE_LOG;
+    if (log) appendFileSync(log, `${JSON.stringify({ folder, pid: child.pid })}\n`);
     const setup = await overHttp(url, { method: 'POST', url: '/api/setup', payload: { pin: PIN } });
     const cookie = [setup.headers['set-cookie'] ?? []].flat().find((value) => value.startsWith('emberglass_dm='));
     if (setup.statusCode !== 200 || !cookie) throw new Error(`setup answered ${setup.statusCode}: ${setup.body}`);

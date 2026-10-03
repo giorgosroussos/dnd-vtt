@@ -136,6 +136,8 @@ export async function startOwnServer(): Promise<OwnServer> {
         { timeout: 30_000 },
       )
       .toBe(200);
+    // The package's launcher, with nothing on PATH, opens no browser outside the offline proxy (PKG-03).
+    if (PACKAGE_DIR) await expect.poll(() => printed).toContain('Could not open a browser.');
   } catch (error) {
     await stop();
     throw error;

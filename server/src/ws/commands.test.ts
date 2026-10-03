@@ -677,12 +677,12 @@ describe('player commands (specs/10-testing-acceptance.md §3, specs/07-security
     };
     expect(Object.keys(valid).sort()).toEqual([...COMMAND_TYPES].sort());
     const before = dump();
-    // The version each room is at: the in-process counters, and what the snapshots say, which is all a
-    // package shows (PKG-03).
-    const counters = () => (PACKAGE_DIR ? [] : [h.versions.dm.current(), h.versions.players.current()]);
+    // The version each room is at, as the snapshots each socket just asked for say: all a package shows (PKG-03). In
+    // process they are checked against the counters themselves, so that they are known to measure the same thing.
     const shown = () => [dm, tv, laptopTv].map((client) => client.events.at(-1)!.version);
-    const versions = counters();
+    const counted = () => [h.versions.dm.current(), h.versions.players.current(), h.versions.players.current()];
     const snapshotted = shown();
+    if (!PACKAGE_DIR) expect(snapshotted).toEqual(counted());
     for (const player of [tv, laptopTv]) {
       for (const type of COMMAND_TYPES) await refused(player, type, valid[type], 'forbidden');
       for (const raw of [null, 'scene.deactivate', { type: 'scene.deactivate' }, [valid['scene.deactivate']]]) {
@@ -691,7 +691,7 @@ describe('player commands (specs/10-testing-acceptance.md §3, specs/07-security
       }
     }
     expect(dump()).toEqual(before);
-    expect(counters()).toEqual(versions);
+    if (!PACKAGE_DIR) expect(counted()).toEqual(snapshotted);
     for (const client of [dm, tv, laptopTv]) expect(await client.settle()).toEqual([]);
     expect(shown()).toEqual(snapshotted);
     // The player camera, held in memory rather than the database, is still fitted to the map (LIV-06).
@@ -709,7 +709,7 @@ describe('image entitlement follows the live scene (specs/07-security-and-access
     h.request({ method: 'GET', url: `/images/${id}/${variant}`, headers: cookie ? { cookie } : {} });
   const status = async (id: string, variant = 'display') => (await fetchAs(id, variant)).statusCode;
 
-  it('@gate:image-revocation refuses an image a player fetched once its token is hidden, the scene deactivated or replaced, or the map replaced', async () => {
+  it('@gate:image-revocation refuses an image a player fetched once its token is hidden or fogged, the scene deactivated or replaced, or the map replaced', async () => {
     const mapA = await h.image('revocation map A', 96);
     const mapB = await h.image('revocation map B', 80);
     const sceneA = await h.scene('A', mapA.id);
@@ -767,6 +767,16 @@ describe('image entitlement follows the live scene (specs/07-security-and-access
     // Deleting the visible token revokes its image too.
     await acknowledged(dm, 'token.delete', { token_id: knightToken.id });
     expect(await status(knight.image_id)).toBe(404);
+
+    // Painted fog over a visible token revokes its image as hiding does, and erasing it grants it again (10 §3,
+    // TBL-04): the shade, revealed above, stands at (2, 2), its centre (2.5, 2.5).
+    expect(await status(shade.image_id)).toBe(200);
+    const stroke = { radius: 1, points: [{ x: 2.5, y: 2.5 }] };
+    await acknowledged(dm, 'fog.paint', { scene_id: sceneA.id, stroke: { ...stroke, mode: 'paint' } });
+    expect(await status(shade.image_id)).toBe(404);
+    expect(await status(mapB.id)).toBe(200);
+    await acknowledged(dm, 'fog.paint', { scene_id: sceneA.id, stroke: { ...stroke, mode: 'erase' } });
+    expect(await status(shade.image_id)).toBe(200);
   });
 
   it('answers a revoked image exactly as an image that never existed', async () => {

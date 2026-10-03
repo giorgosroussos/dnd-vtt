@@ -24,6 +24,12 @@ export function packageLauncher(folder: string, guard: string): { program: strin
  * neither a Node nor a browser opener is found, and no option meant for the test runner's Node.
  */
 export function packageEnv(): Record<string, string> {
-  process.env.EMBERGLASS_E2E_NO_PROGRAMS ??= mkdtempSync(path.join(os.tmpdir(), 'emberglass-no-programs-'));
-  return { PATH: process.env.EMBERGLASS_E2E_NO_PROGRAMS, NODE_OPTIONS: '' };
+  const noPrograms = (process.env.EMBERGLASS_E2E_NO_PROGRAMS ??= mkdtempSync(
+    path.join(os.tmpdir(), 'emberglass-no-programs-'),
+  ));
+  // Every spelling this process has (Windows calls it Path) is replaced, since the result is spread over this
+  // process's environment and which of two spellings a child sees depends on how its spawn orders them.
+  const env: Record<string, string> = { PATH: noPrograms, NODE_OPTIONS: '' };
+  for (const key of Object.keys(process.env)) if (/^path$/i.test(key)) env[key] = noPrograms;
+  return env;
 }

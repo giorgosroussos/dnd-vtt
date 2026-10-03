@@ -1,19 +1,27 @@
 import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { inflateRawSync, crc32 } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import {
+  browsersOf,
   createIco,
   createZip,
   FIREWALL_BLOCK_RULE,
   FIREWALL_RULE,
+  HIDDEN_INFORMATION_GATES,
   INSTALLER_APP_ID,
   innoScript,
   installerInfo,
+  journeySpecs,
   nameOfKey,
   packageDirOf,
+  packagedServersVerdict,
+  playwrightVerdicts,
   productionClosure,
   resolveLockKey,
   runsOn,
+  vitestVerdicts,
 } from './lib.mjs';
 
 // The helpers of the Windows package build (PKG-01, D-164, D-166). `make package` runs the build
@@ -325,5 +333,142 @@ describe('innoScript', () => {
     expect(() => innoScript({ version: 'next', stage: 's', outDir: 'o', outName: 'n', icon: 'i', info: 'f' })).toThrow(
       /major\.minor\.patch/,
     );
+  });
+});
+
+// The package gates' verdicts (PKG-03, D-176, D-177): `make package-gates` passes only on these, so every way a gate
+// can go missing must fail one (review T-H1).
+describe("the package gates' verdicts", () => {
+  const failed = (verdicts) => verdicts.filter((verdict) => !verdict.ok).map((verdict) => verdict.message);
+  const gate = (id, status = 'passed', title = `@gate:${id} does what it says`) => ({ title, status });
+  const vitest = (...tests) => ({ testResults: [{ assertionResults: tests }] });
+  const all = () => HIDDEN_INFORMATION_GATES.map((id) => gate(id));
+
+  it('passes the three hidden-information gates when each ran once and passed', () => {
+    expect(failed(vitestVerdicts(vitest(...all(), { title: 'another test', status: 'skipped' })))).toEqual([]);
+  });
+
+  it('fails a hidden-information gate that is missing, skipped, failed, duplicated or renamed, and a missing report', () => {
+    const [first, second, third] = HIDDEN_INFORMATION_GATES;
+    expect(failed(vitestVerdicts(vitest(gate(first), gate(second))))).toEqual([
+      `@gate:${third} ran against the package and passed (not run)`,
+    ]);
+    expect(failed(vitestVerdicts(vitest(gate(first), gate(second), gate(third, 'skipped'))))).toHaveLength(1);
+    expect(failed(vitestVerdicts(vitest(gate(first), gate(second), gate(third, 'failed'))))).toHaveLength(1);
+    expect(failed(vitestVerdicts(vitest(...all(), gate(third))))).toHaveLength(1);
+    expect(
+      failed(vitestVerdicts(vitest(gate(first), gate(second), gate(third, 'passed', `@gate:${third}-x renamed`)))),
+    ).toHaveLength(1);
+    expect(failed(vitestVerdicts(null))).toHaveLength(3);
+    expect(failed(vitestVerdicts({ testResults: [] }))).toHaveLength(3);
+  });
+
+  it('fails every hidden-information gate when a file they live in holds an inverted test', () => {
+    expect(failed(vitestVerdicts(vitest(...all()), ["it.fails('passes when it fails', () => {})"]))).toHaveLength(3);
+    expect(failed(vitestVerdicts(vitest(...all()), ["it('fails nothing', () => {})"]))).toEqual([]);
+  });
+
+  const journeys = ['first-run.spec.ts', 'run.spec.ts'];
+  const spec = (file, project, status = 'expected', expectedStatus = 'passed', title = 'a journey') => ({
+    file,
+    title,
+    tests: [{ projectName: project, status, expectedStatus }],
+  });
+  const offlineGate = (status = 'expected') =>
+    spec('offline.spec.ts', 'offline', status, 'passed', '@gate:offline-e2e the run sent nothing');
+  const playwright = (...specs) => ({ suites: [{ file: 'x', specs }] });
+  const everything = (browsers) => [
+    ...browsers.flatMap((browser) => journeys.map((journey) => spec(`journeys/${journey}`, browser))),
+    offlineGate(),
+  ];
+
+  it('passes every journey in every browser and the offline gate when each ran and passed', () => {
+    expect(
+      failed(playwrightVerdicts(playwright(...everything(['chromium', 'msedge'])), journeys, ['chromium', 'msedge'])),
+    ).toEqual([]);
+  });
+
+  it('fails a journey missing in one browser, failed, flaky, skipped, or passing only as an expected failure', () => {
+    const browsers = ['chromium', 'msedge'];
+    const without = everything(browsers).filter(
+      (each) => !(each.file === 'journeys/run.spec.ts' && each.tests[0].projectName === 'msedge'),
+    );
+    expect(failed(playwrightVerdicts(playwright(...without), journeys, browsers))).toEqual([
+      'run.spec.ts ran in msedge against the package and passed (not run)',
+    ]);
+    for (const [status, expectedStatus] of [
+      ['unexpected', 'passed'],
+      ['flaky', 'passed'],
+      ['skipped', 'passed'],
+      ['expected', 'failed'],
+    ]) {
+      const specs = everything(browsers).map((each) =>
+        each.file === 'journeys/run.spec.ts' && each.tests[0].projectName === 'chromium'
+          ? spec('journeys/run.spec.ts', 'chromium', status, expectedStatus)
+          : each,
+      );
+      expect(failed(playwrightVerdicts(playwright(...specs), journeys, browsers)), status).toHaveLength(1);
+    }
+  });
+
+  it('finds journeys in nested suites and by Windows paths, and counts only the offline project as the offline gate', () => {
+    const report = {
+      suites: [
+        {
+          file: 'journeys\\first-run.spec.ts',
+          suites: [
+            {
+              specs: [
+                { title: 'nested', tests: [{ projectName: 'chromium', status: 'expected', expectedStatus: 'passed' }] },
+              ],
+            },
+          ],
+        },
+        { file: 'x', specs: [spec('journeys\\run.spec.ts', 'chromium')] },
+        // Each browser's probe carries the offline marker; it is not the run's offline gate.
+        {
+          file: 'x',
+          specs: [
+            spec('journeys/offline-probe.spec.ts', 'chromium', 'expected', 'passed', '@gate:offline-e2e a probe'),
+          ],
+        },
+      ],
+    };
+    expect(failed(playwrightVerdicts(report, journeys, ['chromium']))).toEqual([
+      '@gate:offline-e2e ran after them and passed (not run)',
+    ]);
+    expect(
+      failed(
+        playwrightVerdicts(playwright(...everything(['chromium']).slice(0, -1), offlineGate('skipped')), journeys, [
+          'chromium',
+        ]),
+      ),
+    ).toHaveLength(1);
+    expect(failed(playwrightVerdicts(null, journeys, ['chromium']))).toHaveLength(3);
+  });
+
+  it('runs in Chromium always, whatever EMBERGLASS_E2E_BROWSERS says', () => {
+    expect(browsersOf(undefined)).toEqual(['chromium']);
+    expect(browsersOf(' , ')).toEqual(['chromium']);
+    expect(browsersOf('chromium,msedge')).toEqual(['chromium', 'msedge']);
+    expect(browsersOf('msedge, firefox')).toEqual(['chromium', 'msedge', 'firefox']);
+  });
+
+  it('requires every journey spec on disk, so a journey added later is required too', () => {
+    const dir = path.join(fileURLToPath(new URL('../../', import.meta.url)), 'e2e', 'tests', 'journeys');
+    const specs = journeySpecs(dir);
+    for (const name of ['first-run', 'prepare', 'connect', 'run', 'recover', 'large-scene', 'offline-probe']) {
+      expect(specs).toContain(`${name}.spec.ts`);
+    }
+    expect(specs.every((name) => name.endsWith('.spec.ts'))).toBe(true);
+  });
+
+  it('requires at least four packaged servers for the hidden-information gates, every one of the package', () => {
+    const line = (folder) => JSON.stringify({ folder, pid: 1 });
+    const four = ['a', 'a', 'a', 'a'].map(line);
+    expect(packagedServersVerdict(four, 'a').ok).toBe(true);
+    expect(packagedServersVerdict(four.slice(1), 'a').ok).toBe(false);
+    expect(packagedServersVerdict([...four, line('elsewhere')], 'a').ok).toBe(false);
+    expect(packagedServersVerdict([], 'a').ok).toBe(false);
   });
 });
