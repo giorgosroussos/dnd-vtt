@@ -168,7 +168,7 @@ jobs:
             echo
             echo "Neither is signed. Windows SmartScreen may show \"Windows protected your PC\": choose More info, then Run anyway, once the file matches its SHA-256 below. To check one, run \`certutil -hashfile $(basename "$setup") SHA256\` in Command Prompt (or the zip's name for the zip). A match shows the file is the one published here, intact."
             echo
-            echo "Both were built by this repository's release workflow from the tag's commit, and installed and tested on a clean Windows runner before this release was published. With the GitHub CLI, \`gh attestation verify $(basename "$setup") --repo $GITHUB_REPOSITORY\` checks the signed build provenance of a downloaded file."
+            echo "Both were built by this repository's release workflow from the tag's commit, and installed and tested on a clean Windows runner before this release was published. With the GitHub CLI signed in, \`gh attestation verify $(basename "$setup") --repo $GITHUB_REPOSITORY\` checks the signed build provenance of a downloaded file."
             echo
             echo "SHA-256:"
             echo
