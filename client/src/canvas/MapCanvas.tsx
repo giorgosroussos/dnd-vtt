@@ -36,7 +36,9 @@ import { t } from '../ui/messages.js';
 import {
   boundFrame,
   cameraForKey,
+  cameraBetween,
   coverBox,
+  followRect,
   fitBox,
   fitCamera,
   frameLimits,
@@ -94,7 +96,10 @@ import './canvas.css';
 // shape, and the camera is sent on the drop. The DM's own camera never moves with it. The scene's TV
 // camera buttons (UIX-01, specs/08-ux-journeys.md §11) act through the canvas's handle: Send my view
 // frames what the DM's view shows, TV zoom scales the frame, Fit map fits it; while the TV camera is
-// locked the frame does not move and the handle sends nothing.
+// locked the frame does not move and the handle sends nothing. While Follow my view is on (DMT-03,
+// specs/04-live-sync.md §9, Q-113), the frame and the dimming are not drawn, the canvas edge is ringed in the
+// accent colour instead, and every change of the DM's view or of the TV's shape reports the camera that
+// shows the whole view on the TV (`followRect`); how often it is sent is the caller's.
 //
 // The DM mode's chrome (UIX-01): a floating tool rail (Select, Ruler, Ping, Fog regions, Add token,
 // Undo, Redo), the grid and diagonal rule bottom left, and the DM's own zoom bottom right. Space held
@@ -154,6 +159,47 @@ type Mode = 'dm' | 'player';
 export function overlayOpacity(mode: Mode, visible: boolean): number {
   if (visible) return GRID_OPACITY.shown;
   return mode === 'dm' ? GRID_OPACITY.faint : 0;
+}
+
+/** How long the player view takes to glide to a new camera (DMT-03): short, so Send my view stays immediate. */
+export const GLIDE_MS = 120;
+
+const reducedMotion = () =>
+  typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/**
+ * `target`, reached by a short glide from the camera drawn before it (DMT-03): Follow my view sends the
+ * DM's view about ten times a second, and a TV that jumped to each would step. A new world or viewport
+ * (`key`), the first camera and reduced motion take the target at once.
+ */
+function useGlide(target: Camera, viewport: Size, key: string, enabled: boolean): Camera {
+  const [drawn, setDrawn] = useState<{ key: string; camera: Camera }>({ key, camera: target });
+  const latest = useRef(drawn);
+  latest.current = drawn;
+  const targetKey = `${target.x}:${target.y}:${target.scale}`;
+  const to = useRef({ target, viewport });
+  to.current = { target, viewport };
+  useEffect(() => {
+    const { target: goal, viewport: within } = to.current;
+    const start = latest.current;
+    const same = start.camera.x === goal.x && start.camera.y === goal.y && start.camera.scale === goal.scale;
+    if (same && start.key === key) return;
+    if (!enabled || start.key !== key || reducedMotion() || typeof requestAnimationFrame !== 'function') {
+      setDrawn({ key, camera: goal });
+      return;
+    }
+    let began: number | undefined;
+    let frame = requestAnimationFrame(function step(now) {
+      began ??= now;
+      const progress = Math.min(1, (now - began) / GLIDE_MS);
+      // Ease out: quick to leave, gentle to arrive.
+      const eased = 1 - (1 - progress) ** 3;
+      setDrawn({ key, camera: progress >= 1 ? goal : cameraBetween(start.camera, goal, eased, within) });
+      if (progress < 1) frame = requestAnimationFrame(step);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [key, targetKey, enabled]);
+  return enabled && drawn.key === key ? drawn.camera : target;
 }
 
 function useViewport(): [React.RefObject<HTMLDivElement | null>, Size] {
@@ -239,6 +285,11 @@ export interface TvFrame {
   locked: boolean;
   /** A new player camera: on a drop or one of the TV camera buttons. */
   onChange: (camera: PlayerCamera) => void;
+  /**
+   * Follow my view (DMT-03): while set, the frame is not drawn, since the TV shows the DM's whole view, and
+   * the canvas reports the camera that shows all of it, widened to the TV's shape, whenever it changes.
+   */
+  follow?: ((camera: PlayerCamera) => void) | undefined;
 }
 
 /** What the scene's controls outside the canvas ask of it (UIX-01). */
@@ -448,14 +499,14 @@ export function MapCanvas({
   const fittedInArea =
     liveAspect === undefined ? fitCamera(world, fitArea) : fitBox(liveFitBox(world, liveAspect), fitArea);
   const fitted = { ...fittedInArea, x: fittedInArea.x + inset };
-  const camera =
-    mode === 'dm'
-      ? manual?.key === worldKey
-        ? manual.camera
-        : fitted
-      : playerCamera
-        ? viewOf(playerCamera, world, viewport)
-        : fitted;
+  // The player mode glides to each new camera (DMT-03), so a TV following the DM's view moves smoothly.
+  const glided = useGlide(
+    playerCamera ? viewOf(playerCamera, world, viewport) : fitted,
+    viewport,
+    `${worldKey}:${viewport.width}x${viewport.height}`,
+    mode === 'player',
+  );
+  const camera = mode === 'dm' ? (manual?.key === worldKey ? manual.camera : fitted) : glided;
   // From the latest camera, not this render's: wheel and drag events arrive outside React's
   // synchronous updates, and several can land before the next render (D-093).
   const changeCamera = (change: (current: Camera) => Camera) =>
@@ -514,9 +565,12 @@ export function MapCanvas({
   // The frame is never narrower than the TV can zoom to, nor wider than it can show (review C-M1, C-M2).
   const limits = tv ? frameLimits(world, aspect, tv.screen) : undefined;
   const frameBox = tv && limits ? boundFrame(frameOf(tv.camera, world, aspect), aspect, limits) : undefined;
-  const shownFrame = tv ? (frameDraft ?? frameBox) : undefined;
+  // Follow my view (DMT-03): the TV shows the DM's whole view, so there is no frame to show or move.
+  const following = tv?.follow !== undefined;
+  const shownFrame = tv && !following ? (frameDraft ?? frameBox) : undefined;
   const frameMovable =
     tv !== undefined &&
+    !following &&
     !tv.offline &&
     !tv.locked &&
     !measuring &&
@@ -533,6 +587,18 @@ export function MapCanvas({
     const next = cameraFor(box);
     if (!sameRect(next, tv.camera)) tv.onChange(next);
   };
+
+  // Follow my view (DMT-03): the camera that shows the DM's whole view on the TV, reported when it changes.
+  const followed =
+    following && viewport.width > 0 && viewport.height > 0
+      ? followRect(visibleBox(camera, viewport), world, aspect)
+      : undefined;
+  const followKey = followed && `${followed.centre_x}:${followed.centre_y}:${followed.width}:${followed.height}`;
+  const toFollow = useRef<{ camera: PlayerCamera; report: (camera: PlayerCamera) => void }>(undefined);
+  toFollow.current = followed && tv?.follow ? { camera: followed, report: tv.follow } : undefined;
+  useEffect(() => {
+    if (followKey !== undefined) toFollow.current?.report(toFollow.current.camera);
+  }, [followKey]);
 
   // The scene's TV camera buttons and token list (UIX-01).
   useImperativeHandle(ref, () => ({
@@ -1359,7 +1425,9 @@ export function MapCanvas({
         }),
         'data-tv-locked': tv?.locked ? 'on' : 'off',
       }
-    : {};
+    : following
+      ? { 'data-tv-follow': 'on' }
+      : {};
   // The measurement drawn, its squares, distance and ends in screen pixels, for the end-to-end tests (LIV-07).
   const rulerState =
     shownRuler && rulerEnds.length === 2

@@ -11,7 +11,8 @@ import type { DmScene } from './live/dmScene.js';
 // scene in one click. While the live connection is down it says so instead, since what it would name may
 // no longer be true (specs/04-live-sync.md §6, LIV-01): only after CONNECTION_NOTICE_DELAY_MS, so a blip is
 // not announced twice, as connecting until a first connection succeeds and as lost after one did, in the
-// warning style (D-106).
+// warning style (D-106). While Follow my view is on (DMT-03, Q-113, Q-120) a small note says the TV follows
+// the DM, or that following is paused while another scene is open.
 export const CONNECTION_NOTICE_DELAY_MS = 1_000;
 
 export function LiveBar({
@@ -23,6 +24,7 @@ export function LiveBar({
   goLive,
   goLiveRef,
   showingLive,
+  following = false,
 }: {
   /** The live scene: undefined until the first snapshot, null while nothing is live. */
   scene: DmScene | undefined;
@@ -37,6 +39,8 @@ export function LiveBar({
   goLiveRef?: Ref<HTMLButtonElement> | undefined;
   /** Whether the canvas shows the live scene already. */
   showingLive?: boolean;
+  /** Follow my view is on: paused while the canvas shows another scene. */
+  following?: boolean | undefined;
 }) {
   const down = connection !== undefined && connection !== 'connected';
   // The down period that has lasted long enough to be told, counted from each connection change.
@@ -122,6 +126,12 @@ export function LiveBar({
           </button>
         )}
       </p>
+      {following ? (
+        <span className={showingLive ? 'eg-live__follow' : 'eg-live__follow eg-live__follow--paused'}>
+          <Icon name="follow" size={12} strokeWidth={2} />
+          {t(showingLive ? 'liveBar.follows' : 'liveBar.followPaused')}
+        </span>
+      ) : null}
       {goLive ? goLiveButton : null}
       {goIdle ? (
         <button

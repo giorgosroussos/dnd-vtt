@@ -31,7 +31,8 @@ type IconName =
   | 'grip'
   | 'info'
   | 'swords'
-  | 'shield';
+  | 'shield'
+  | 'follow';
 
 const STROKED: Record<Exclude<IconName, 'stop' | 'more' | 'drop'>, readonly string[]> = {
   logo: ['M12 2l6 8-6 12-6-12z', 'M12 2v20M6 10h12'],
@@ -60,6 +61,12 @@ const STROKED: Record<Exclude<IconName, 'stop' | 'more' | 'drop'>, readonly stri
   setup: ['M4 6h16M4 12h16M4 18h16', 'M9 4v4M15 10v4M7 16v4'],
   grip: ['M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01'],
   info: ['M3 12a9 9 0 1 0 18 0a9 9 0 1 0-18 0', 'M12 11v5M12 8h.01'],
+  // A crosshair: Follow my view, the TV keeping on the DM's view (DMT-03).
+  follow: [
+    'M12 2v4M12 18v4M2 12h4M18 12h4',
+    'M6 12a6 6 0 1 0 12 0a6 6 0 1 0-12 0',
+    'M11 12a1 1 0 1 0 2 0a1 1 0 1 0-2 0',
+  ],
   // A shield: a token's armour class (DMT-01).
   shield: ['M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6z'],
   // Two crossed blades: the Enemies entry of the initiative order (TBL-06).

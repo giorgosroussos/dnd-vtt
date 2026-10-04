@@ -14,6 +14,7 @@ import {
 } from '@emberglass/shared';
 import { t } from '../ui/messages.js';
 import { fitCamera } from '../canvas/geometry.js';
+import { GLIDE_MS } from '../canvas/MapCanvas.js';
 import { images, installCanvas2d, installImageLoading, installResizeObserver } from '../ui/testing/canvas2d.js';
 import { settle } from '../ui/testing/fakeServer.js';
 import { installFakeSockets } from '../ui/testing/fakeSocket.js';
@@ -368,12 +369,45 @@ describe('the player camera (LIV-06; specs/04-live-sync.md §5, §9, Q-038, D-11
     // 1000 × 750 world pixels in 1280 × 720: scaled to fit the height, centred on (500, 750).
     expect(drawnCamera().scale).toBeCloseTo(720 / 750, 9);
     expect(drawnCamera().x).toBeCloseTo(640 - 500 * (720 / 750), 6);
-    await deliver('camera.player', 2, { camera: { centre_x: 0.5, centre_y: 0.5, width: 0.25, height: 0.25 } });
-    expect(drawnCamera().scale).toBeCloseTo(720 / 375, 9);
-    expect(drawnCamera().x).toBeCloseTo(640 - 1000 * (720 / 375), 6);
-    // An activation's snapshot is fitted to the map (Q-038).
-    await deliver('scene.snapshot', 3, snapshot([]));
-    expect(drawnCamera()).toEqual(fitCamera(MAP.variants.display, VIEWPORT));
+    const from = drawnCamera();
+    vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame', 'performance'] });
+    const frames = (ms: number) =>
+      act(() => {
+        vi.advanceTimersByTime(ms);
+      });
+    try {
+      await deliver('camera.player', 2, { camera: { centre_x: 0.5, centre_y: 0.5, width: 0.25, height: 0.25 } });
+      // It glides there in GLIDE_MS (DMT-03), so a TV following the DM's view does not step.
+      expect(drawnCamera()).toEqual(from);
+      frames(GLIDE_MS / 2);
+      expect(drawnCamera().scale).toBeGreaterThan(from.scale);
+      expect(drawnCamera().scale).toBeLessThan(720 / 375);
+      frames(GLIDE_MS);
+      expect(drawnCamera().scale).toBeCloseTo(720 / 375, 9);
+      expect(drawnCamera().x).toBeCloseTo(640 - 1000 * (720 / 375), 6);
+      // An activation's snapshot is fitted to the map (Q-038).
+      await deliver('scene.snapshot', 3, snapshot([]));
+      frames(GLIDE_MS * 2);
+      expect(drawnCamera()).toEqual(fitCamera(MAP.variants.display, VIEWPORT));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('takes a new camera at once when the viewer asks for reduced motion (DMT-03)', async () => {
+    const original = Object.getOwnPropertyDescriptor(window, 'matchMedia');
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: (query: string) => ({ matches: query.includes('reduce'), media: query }),
+    });
+    try {
+      await open({ role: 'players', scene: { ...snapshot([token(1, 'Goblin', 0)]).scene!, camera: steered } });
+      await deliver('camera.player', 2, { camera: { centre_x: 0.5, centre_y: 0.5, width: 0.25, height: 0.25 } });
+      expect(drawnCamera().scale).toBeCloseTo(720 / 375, 9);
+    } finally {
+      if (original) Object.defineProperty(window, 'matchMedia', original);
+      else Reflect.deleteProperty(window, 'matchMedia');
+    }
   });
 
   it('reports its window’s size once connected, and again once a resize has settled', async () => {

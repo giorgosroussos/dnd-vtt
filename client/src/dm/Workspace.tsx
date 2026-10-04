@@ -191,6 +191,17 @@ export function Workspace({
   const liveId = liveScene?.scene.id;
   const showingLive = liveScene != null && selected?.id === liveScene.scene.id;
   const connected = live.status === 'connected';
+  // Follow my view (DMT-03, specs/04-live-sync.md §9, Q-113, Q-120), for this DM view only: the live scene it
+  // was turned on for. Another scene going live or the TV going idle turns it off, so every activation starts
+  // with it off; a snapshot of the same live scene (a reconnection, a setup change) leaves it on. On while
+  // another scene is open to prepare, it is paused: only the live scene's panel sends the view.
+  const [followScene, setFollowScene] = useState<string | null>(null);
+  if (followScene !== null && liveScene !== undefined && followScene !== liveId) setFollowScene(null);
+  const following = followScene !== null && followScene === liveId;
+  const lockTv = (locked: boolean) => {
+    setTvLocked(locked);
+    if (locked) setFollowScene(null);
+  };
 
   // The first snapshot shows the live scene and its session, when nothing was chosen yet.
   const [placed, setPlaced] = useState(false);
@@ -344,6 +355,7 @@ export function Workspace({
                 : undefined
             }
             goLiveRef={goLiveButton}
+            following={following}
           />
         }
         screens={screens}
@@ -449,7 +461,9 @@ export function Workspace({
             onSideTab={setSideTab}
             library={library}
             tvLocked={tvLocked}
-            onTvLocked={setTvLocked}
+            onTvLocked={lockTv}
+            tvFollow={following}
+            onTvFollow={(on) => setFollowScene(on && liveId !== undefined ? liveId : null)}
             setupOpen={setupOpen}
             onSetupOpen={setSetupOpen}
             onTokensChanged={bumpScenes}

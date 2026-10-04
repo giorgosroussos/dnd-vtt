@@ -106,6 +106,7 @@ Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-02
 - The player camera MUST be held in server memory and reset to fit-to-map on every activation. [Q-038]
 - The DM view MUST offer Follow my view on the live scene, off at every activation: while it is on, the player camera continuously mirrors the DM's camera, sent as `camera.setPlayer` and throttled, the DM's whole visible area widened to the TV's aspect ratio so that nothing the DM sees is cropped. [Q-113]
 - Follow my view MUST turn off when Lock TV camera is turned on, when any other TV camera control is used (Send my view, Fit map, TV zoom, the TV frame), and when another scene goes live or the TV goes idle. [Q-113]
+- While Follow my view is on and the DM view shows a scene that is not live, it MUST pause: nothing is sent and the TV stays where it was; on returning to the live scene it MUST resume, sending the DM's view at once. [Q-120]
 
 ## 10. Editing the live scene's setup
 

@@ -40,6 +40,7 @@ import {
   type RulerTool,
   type TvFrame,
 } from '../canvas/MapCanvas.js';
+import { sameRect } from '../canvas/geometry.js';
 import { samePath, type RulerPath } from '../canvas/ruler.js';
 import { Button } from '../ui/Button.js';
 import { Dialog } from '../ui/Dialog.js';
@@ -58,6 +59,7 @@ import { startDraft, withRect, type Draft } from './calibration/draft.js';
 import { megabytes } from './library/labels.js';
 import type { DmScene } from './live/dmScene.js';
 import type { DmLive } from './live/useDmLive.js';
+import { FOLLOW_INTERVAL_MS, throttle, type Throttle } from './live/throttle.js';
 import { entityPath } from './tree/paths.js';
 import { DeleteTokenDialog, RenameDialog } from './tokens/TokenBar.js';
 import { TokenList } from './tokens/TokenList.js';
@@ -122,6 +124,15 @@ import { InitiativePanel } from './initiative/InitiativePanel.js';
 // stays where it was put until the server answers, and a refusal says why above the canvas. The DM's own
 // view does not move. Setting the TV camera is not undoable (specs/04-live-sync.md §2). Lock TV camera,
 // kept by the workspace for this DM view only (D-140), refuses the buttons and the frame.
+//
+// Follow my view (DMT-03, specs/04-live-sync.md §9, specs/08-ux-journeys.md §13, Q-113, Q-120): a toggle among
+// the TV camera controls, or C. The workspace keeps whether it is on, for the live scene it was turned on
+// for. While it is on, the canvas reports the DM's whole view widened to the TV's shape, and it goes out as
+// `camera.setPlayer` through a throttle (FOLLOW_INTERVAL_MS), the first change at once and the last one a
+// pan or zoom ends on always; the frame is not drawn. Send my view, Fit map, TV zoom and Lock TV camera turn
+// it off, and the workspace turns it off when another scene goes live or the TV goes idle; the TV camera's
+// own events never do. Another scene opened to prepare pauses it: this panel is not the live scene's, so
+// nothing is sent, and the live scene's panel, opened again, sends its view at once. Nothing is undoable.
 //
 // The ruler (LIV-07, specs/06-grid-and-measurement.md §5, specs/04-live-sync.md §11, Q-027, Q-086, D-121):
 // the canvas's Ruler measures between square centres by the server-wide diagonal rule and the scene's feet
@@ -221,6 +232,8 @@ export function ScenePanel({
   library,
   tvLocked = false,
   onTvLocked = () => {},
+  tvFollow = false,
+  onTvFollow = () => {},
   setupOpen: setupOpenProp,
   onSetupOpen,
   onTokensChanged,
@@ -238,6 +251,9 @@ export function ScenePanel({
   /** Lock TV camera, kept by the workspace for this DM view (D-140). */
   tvLocked?: boolean | undefined;
   onTvLocked?: ((locked: boolean) => void) | undefined;
+  /** Follow my view (DMT-03), kept by the workspace: on for the live scene, off at every activation. */
+  tvFollow?: boolean | undefined;
+  onTvFollow?: ((on: boolean) => void) | undefined;
   /** Whether the Scene setup is open, kept by the workspace across scenes; the panel keeps its own without. */
   setupOpen?: boolean | undefined;
   onSetupOpen?: ((open: boolean) => void) | undefined;
@@ -649,6 +665,43 @@ export function ScenePanel({
     if (ok && updated) announce(done(updated));
   }
 
+  // Follow my view (DMT-03): sent while it is on for this, the live scene, unlocked, connected and not
+  // calibrating; the throttle drops what waits as soon as it stops, so nothing follows a manual control.
+  const followOn = isLive && tvFollow && !tvLocked && !offline && !draft;
+  const followNow = useRef(followOn);
+  followNow.current = followOn;
+  const sendFollowed = async (camera: PlayerCamera) => {
+    if (!live || !followNow.current) return;
+    const outcome = await live.command('camera.setPlayer', { scene_id: sceneId, camera });
+    if (!outcome.ok && followNow.current) setLiveFailure(t('scene.tvFailed', { reason: errorMessage(outcome.code) }));
+  };
+  const latestSend = useRef(sendFollowed);
+  latestSend.current = sendFollowed;
+  const follower = useRef<Throttle<PlayerCamera>>(undefined);
+  follower.current ??= throttle((camera) => void latestSend.current(camera), FOLLOW_INTERVAL_MS, sameRect);
+  useEffect(() => {
+    if (!followOn) follower.current?.cancel();
+  }, [followOn]);
+  useEffect(() => () => follower.current?.cancel(), []);
+  /** Turns Follow my view off before a manual TV camera control acts, so nothing waiting follows it. */
+  const stopFollowing = () => {
+    if (!tvFollow) return;
+    followNow.current = false;
+    follower.current?.cancel();
+    onTvFollow(false);
+  };
+  const toggleFollow = () => {
+    if (tvLocked) return;
+    if (tvFollow) {
+      stopFollowing();
+      return announce(t('tvCamera.followOff'));
+    }
+    if (offline) return announce(t('scene.tvOffline'));
+    follower.current?.cancel();
+    onTvFollow(true);
+    announce(t('tvCamera.followOn'));
+  };
+
   // The TV camera from the frame: shown at once, settled by the answer, whose event brought the live
   // scene's camera in step (D-111), or whose refusal leaves the frame where it was.
   async function steerTv(camera: PlayerCamera) {
@@ -670,7 +723,11 @@ export function ScenePanel({
           // The frame locks at once: a drag while down would reach no TV.
           offline,
           locked: tvLocked,
-          onChange: (camera) => void steerTv(camera),
+          onChange: (camera) => {
+            stopFollowing();
+            void steerTv(camera);
+          },
+          follow: followOn ? (camera) => follower.current?.push(camera) : undefined,
         }
       : undefined;
 
@@ -988,6 +1045,10 @@ export function ScenePanel({
       event.preventDefault();
       const step = key === '[' ? -FOG_BRUSH_RADIUS.step : FOG_BRUSH_RADIUS.step;
       fogTool.onRadius(Math.min(FOG_BRUSH_RADIUS.max, Math.max(FOG_BRUSH_RADIUS.min, fogRadius + step)));
+    } else if (key === 'c' && liveScene && !draft) {
+      // Follow my view (DMT-03), on the live scene only, and not while the TV camera is locked.
+      event.preventDefault();
+      toggleFollow();
     } else if (key === 't' && canAddToken) {
       event.preventDefault();
       openPicker();
@@ -1312,7 +1373,10 @@ export function ScenePanel({
           className="eg-button eg-button--small"
           aria-label={t('tvCamera.sendView')}
           aria-disabled={tvLocked || undefined}
-          onClick={() => canvas.current?.sendView()}
+          onClick={() => {
+            stopFollowing();
+            canvas.current?.sendView();
+          }}
         >
           {t('tvCamera.sendViewShort')}
         </button>
@@ -1321,7 +1385,10 @@ export function ScenePanel({
           className="eg-button eg-button--small"
           aria-label={t('canvas.tvFit')}
           aria-disabled={tvLocked || undefined}
-          onClick={() => canvas.current?.tvFit()}
+          onClick={() => {
+            stopFollowing();
+            canvas.current?.tvFit();
+          }}
         >
           {t('canvas.fit')}
         </button>
@@ -1330,7 +1397,10 @@ export function ScenePanel({
           className="eg-icon-button eg-icon-button--bordered"
           aria-label={t('canvas.tvZoomOut')}
           aria-disabled={tvLocked || undefined}
-          onClick={() => canvas.current?.tvZoom('out')}
+          onClick={() => {
+            stopFollowing();
+            canvas.current?.tvZoom('out');
+          }}
         >
           <Icon name="minus" size={14} strokeWidth={2} />
         </button>
@@ -1339,9 +1409,24 @@ export function ScenePanel({
           className="eg-icon-button eg-icon-button--bordered"
           aria-label={t('canvas.tvZoomIn')}
           aria-disabled={tvLocked || undefined}
-          onClick={() => canvas.current?.tvZoom('in')}
+          onClick={() => {
+            stopFollowing();
+            canvas.current?.tvZoom('in');
+          }}
         >
           <Icon name="plus" size={14} strokeWidth={2} />
+        </button>
+        <button
+          type="button"
+          className="eg-button eg-button--small eg-tv__follow"
+          aria-pressed={tvFollow}
+          aria-disabled={tvLocked || undefined}
+          aria-keyshortcuts="C"
+          title={t(tvLocked ? 'tvCamera.followLocked' : 'tvCamera.followHint')}
+          onClick={toggleFollow}
+        >
+          <Icon name="follow" size={14} strokeWidth={2} />
+          {t('tvCamera.follow')}
         </button>
         <button
           type="button"
@@ -1493,7 +1578,7 @@ export function ScenePanel({
             ) : failure ? null : (
               loading
             )}
-            <ShortcutBar live={isLive} combat={combat} />
+            <ShortcutBar live={isLive} combat={combat} following={followOn} />
             {picking ? (
               <TokenPicker
                 onPick={pick}
@@ -1604,7 +1689,15 @@ export function ScenePanel({
 }
 
 /** The shortcut bar along the bottom of the map area (UIX-01, specs/08-ux-journeys.md §11). */
-function ShortcutBar({ live, combat = false }: { live: boolean; combat?: boolean }) {
+function ShortcutBar({
+  live,
+  combat = false,
+  following = false,
+}: {
+  live: boolean;
+  combat?: boolean;
+  following?: boolean;
+}) {
   const keys: [MessageKey, MessageKey][] = [
     ['shortcuts.keyV', 'shortcuts.select'],
     ['shortcuts.keyM', 'shortcuts.ruler'],
@@ -1612,6 +1705,7 @@ function ShortcutBar({ live, combat = false }: { live: boolean; combat?: boolean
     ['shortcuts.keyH', 'shortcuts.hide'],
     ['shortcuts.keyD', 'shortcuts.hp'],
     ['shortcuts.keyUndo', 'shortcuts.undo'],
+    ...(live ? ([['shortcuts.keyC', 'shortcuts.follow']] as [MessageKey, MessageKey][]) : []),
     ...(combat ? ([['shortcuts.keyEnter', 'shortcuts.nextTurn']] as [MessageKey, MessageKey][]) : []),
     ['shortcuts.keySpace', 'shortcuts.pan'],
   ];
@@ -1623,7 +1717,9 @@ function ShortcutBar({ live, combat = false }: { live: boolean; combat?: boolean
           {t(action)}
         </span>
       ))}
-      <span className="eg-shortcuts__note">{t(live ? 'shortcuts.noteLive' : 'shortcuts.notePrep')}</span>
+      <span className="eg-shortcuts__note">
+        {t(following ? 'shortcuts.noteFollow' : live ? 'shortcuts.noteLive' : 'shortcuts.notePrep')}
+      </span>
     </div>
   );
 }

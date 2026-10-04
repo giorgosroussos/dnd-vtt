@@ -651,6 +651,39 @@
   color: var(--color-accent);
 }
 
+/* Follow my view (DMT-03): on, it is filled in the accent colour, as an active tool is. */
+.eg-tv__follow[aria-pressed='true'] {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+.eg-tv__follow[aria-pressed='true']:hover {
+  background: var(--color-accent);
+  filter: brightness(1.08);
+}
+
+/* The live indicator's note while the TV follows the DM's view (DMT-03). */
+.eg-live__follow {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--color-accent);
+  color: var(--color-accent);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.eg-live__follow--paused {
+  border-style: dashed;
+  color: var(--color-text-muted);
+  border-color: var(--color-text-muted);
+}
+
 .eg-scene__progress {
   display: flex;
   align-items: center;

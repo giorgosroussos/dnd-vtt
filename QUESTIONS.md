@@ -142,6 +142,7 @@ Every card opens `Blocking` and is answered before the specification proceeds. `
 - Q-117 — A monster or npc that players first see after combat started — ux — Resolved
 - Q-118 — A monster or npc entry whose token is Dead or unseen — ux — Resolved
 - Q-119 — The size limit of an import archive — security — Resolved
+- Q-120 — Follow my view while the DM opens another scene to prepare — ux — Resolved
 
 ## Blocking
 
@@ -1507,3 +1508,15 @@ None.
 - Recommendation: A, because the DM can raise it without a new release, and the unpacked total is what protects the disk.
 - Blocks: specification
 - Answer: A (2026-10-04; recommendation accepted)
+
+### Q-120 — Follow my view while the DM opens another scene to prepare
+- Surface: ux
+- Source: Asked on 2026-10-05 while implementing DMT-03: `04` §9 and `08` §13 (Q-113) say what turns Follow my view off (Lock TV camera, another TV camera control, another scene going live, the TV going idle) but not what it does while the DM view shows a scene that is not live, where the DM's camera is not on the live scene's world.
+- Question: While Follow my view is on and the DM opens a non-live scene to prepare, what happens to it?
+- Options:
+  - A) It pauses: nothing is sent and the TV stays where it was; on returning to the live scene it resumes and sends the DM's view at once; the live indicator says it is paused → effect on ux: the DM can prepare the next scene mid-session without the TV moving, and following picks up again without a click.
+  - B) It turns off, like a manual TV camera control → effect on ux: the DM turns it on again after every look at another scene.
+  - C) It keeps sending the last view of the live scene → effect on ux: nothing changes on the TV, but the toggle looks on while nothing follows.
+- Recommendation: A, because preparing the next scene is not a decision about the TV, and the TV should neither jump nor stop following because of it.
+- Blocks: specification
+- Answer: A (2026-10-05; recommendation accepted)
