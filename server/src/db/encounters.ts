@@ -4,7 +4,6 @@ import { Value } from 'typebox/value';
 import {
   changeOf,
   EncounterEntrySchema,
-  membersOf,
   notingEnemies,
   turnView,
   withoutEntry,
@@ -17,12 +16,12 @@ import { readFog } from './fog.js';
 import { refusal } from './scope.js';
 import { listTokens } from './tokens.js';
 
-// The initiative tracker in SQLite (TBL-06; specs/03-domain-model.md §1, §7, specs/04-live-sync.md §14,
-// Q-104, Q-105, Q-106, D-160): at most one encounter per scene, in the `encounter` table, deleted with its
+// The initiative tracker in SQLite (TBL-06, DMT-02; specs/03-domain-model.md §1, §7, specs/04-live-sync.md
+// §14, Q-111, Q-118, D-180): at most one encounter per scene, in the `encounter` table, deleted with its
 // scene. The encounter commands change it on the live scene only; each change is read, decided and written
-// in one transaction, from the scene's tokens and fog at that moment, so the Enemies entry's members, which
-// are never stored, are those players can see now. A change answers the encounter before and after it, which
-// undo puts back.
+// in one transaction, from the scene's tokens and fog at that moment, so which entries take their turn, which
+// is never stored, follows from what players can see now. A change answers the encounter before and after
+// it, which undo puts back.
 
 interface Row {
   id: string;
@@ -106,8 +105,8 @@ export function changeEncounter(db: Database.Database, sceneId: string, change: 
 }
 
 /**
- * After any live command: marks the live scene's encounter as having had a member once the Enemies entry has
- * one (Q-106). Not a step of the undo history; the encounter before and after when it changed.
+ * After any live command: marks the live scene's encounter as having had an enemy once a monster or npc entry
+ * can take its turn (Q-118). Not a step of the undo history; the encounter before and after when it changed.
  */
 export function noteEnemies(
   db: Database.Database,
@@ -117,7 +116,7 @@ export function noteEnemies(
     const before = readEncounter(db, sceneId);
     if (before === null || !before.active || before.enemies_seen) return undefined;
     const tokens = listTokens(db, sceneId) ?? [];
-    const after = notingEnemies(before, membersOf(tokens, readFog(db, sceneId)).length);
+    const after = notingEnemies(before, turnView(tokens, readFog(db, sceneId)));
     if (after === null || same(before, after)) return undefined;
     store(db, sceneId, after);
     return { before, encounter: after };
@@ -135,7 +134,7 @@ export function dropEntriesOf(
 ): { before: Encounter; encounter: Encounter } | undefined {
   const before = readEncounter(db, sceneId);
   if (before === null) return undefined;
-  const at = before.entries.findIndex((entry) => entry.kind === 'pc' && entry.token_id === tokenId);
+  const at = before.entries.findIndex((entry) => entry.token_id === tokenId);
   if (at === -1) return undefined;
   const after = withoutEntry(before, at, turnView(listTokens(db, sceneId) ?? [], readFog(db, sceneId)));
   store(db, sceneId, after);

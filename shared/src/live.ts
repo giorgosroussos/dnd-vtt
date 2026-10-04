@@ -369,7 +369,12 @@ export const EncounterSetInitiativePayloadSchema = Type.Object(
   { scene_id: UuidSchema, entry_id: UuidSchema, initiative: InitiativeSchema },
   strict,
 );
-export const EncounterAddEntryPayloadSchema = Type.Object({ scene_id: UuidSchema, token_id: UuidSchema }, strict);
+// `encounter.addEntry` may carry the number the table rolled for the token (DMT-02): the entry then goes in
+// by it, before the first entry with a lower number or none; without one, at the end.
+export const EncounterAddEntryPayloadSchema = Type.Object(
+  { scene_id: UuidSchema, token_id: UuidSchema, initiative: Type.Optional(InitiativeSchema) },
+  strict,
+);
 export const EncounterRemoveEntryPayloadSchema = Type.Object({ scene_id: UuidSchema, entry_id: UuidSchema }, strict);
 
 /** The payload schema of every live command implemented so far; the server registers exactly these. */

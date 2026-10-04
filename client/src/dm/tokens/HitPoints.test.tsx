@@ -221,10 +221,9 @@ describe('preparation, lists and the asset editor (specs/08-ux-journeys.md §13)
     await click(button(view, t('initiative.start')));
     const hero = [...view.querySelectorAll('.eg-initiative__row')].find((row) => row.textContent.includes('Hero'))!;
     expect(hero.querySelector('.eg-stats')!.textContent).toContain('9/12');
-    // The Enemies entry opens on its turn to its members, each with its hit points.
-    await click(view.querySelector('.eg-initiative__turns button[aria-keyshortcuts="Enter"]'));
-    const member = view.querySelector('.eg-initiative__member')!;
-    expect(member.querySelector('.eg-stats')!.textContent).toContain('27/27');
+    // A monster's row shows its own (DMT-02).
+    const monster = view.querySelector('.eg-initiative__row[data-kind="monster"]')!;
+    expect(monster.querySelector('.eg-stats')!.textContent).toContain('27/27');
   });
 
   it('saves an asset’s default maximum and armour class, refusing values out of bounds', async () => {

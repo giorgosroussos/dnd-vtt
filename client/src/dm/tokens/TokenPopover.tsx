@@ -36,7 +36,9 @@ function placement(anchor: TokenAnchor): { left: number; top: number; side: 'lef
 // Below, the condition markers (TBL-05, D-157): the pinned ones as toggle chips, then any other one the token
 // carries, pressed, so it comes off without the list; More… opens a searchable list of the others. Exhaustion's
 // chip, while on, carries a stepper for its level. Each chip's hover text is its rule text (D-158).
-// Between them, the token's hit points and armour class (DMT-01, HitPoints.tsx).
+// Between them, the token's hit points and armour class (DMT-01, HitPoints.tsx). While combat runs, the menu
+// adds a player character, monster or npc without an entry to the initiative order, or says why it cannot
+// (DMT-02).
 export function TokenPopover({
   token,
   anchor,
@@ -50,6 +52,7 @@ export function TokenPopover({
   onExhaustion,
   onHpEntry,
   onStats,
+  initiative,
   focusHp = 0,
 }: {
   token: SceneToken;
@@ -64,6 +67,8 @@ export function TokenPopover({
   onExhaustion: (level: number) => void;
   onHpEntry: (entry: HpEntry) => void;
   onStats: (stats: Partial<TokenStats>) => void;
+  /** Add to initiative, while combat runs and the token has no entry: why it cannot, or how it is added. */
+  initiative?: { disabledReason?: string | undefined; onAdd: () => void } | undefined;
   /** Raised each time D asks for the hit-point field. */
   focusHp?: number;
 }) {
@@ -111,6 +116,15 @@ export function TokenPopover({
           icon={<Icon name="more" />}
           className="eg-icon-button eg-icon-button--bordered"
           items={[
+            ...(initiative
+              ? [
+                  {
+                    label: t('initiative.addToOrder'),
+                    disabledReason: initiative.disabledReason,
+                    onSelect: initiative.onAdd,
+                  },
+                ]
+              : []),
             { label: t('tokens.duplicate'), onSelect: onDuplicate },
             { label: t('tokens.front'), disabledReason: prepOnly, onSelect: () => onStack('front') },
             { label: t('tokens.back'), disabledReason: prepOnly, onSelect: () => onStack('back') },

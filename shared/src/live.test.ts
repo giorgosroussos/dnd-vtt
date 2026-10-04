@@ -161,11 +161,13 @@ describe('snapshot payloads (specs/04-live-sync.md §4, LIV-01)', () => {
       'tokens',
     ]);
     // The players' encounter is the round, the entries they may see and whose turn it is: no number, no
-    // member, no count, no scene (TBL-06, specs/04-live-sync.md §4).
+    // scene (TBL-06, DMT-02, specs/04-live-sync.md §4).
     expect(Object.keys(PlayerEncounterSchema.properties).sort()).toEqual(['current', 'entries', 'next', 'round']);
-    for (const entry of PlayerEncounterSchema.properties.entries.items.anyOf) {
-      expect(Object.keys(entry.properties).every((key) => ['id', 'kind', 'token_id'].includes(key))).toBe(true);
-    }
+    expect(Object.keys(PlayerEncounterSchema.properties.entries.items.properties).sort()).toEqual([
+      'id',
+      'kind',
+      'token_id',
+    ]);
     // A measurement is two squares and a distance: no scene, no token (LIV-07).
     expect(Object.keys(MeasurementSchema.properties).sort()).toEqual(['feet', 'from', 'to']);
     // The players' camera is the rectangle alone: no screen of another viewer (D-119).

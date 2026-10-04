@@ -10,10 +10,11 @@ import {
 } from '@emberglass/shared';
 import { startLive, type Client, type LiveHarness } from './testing/harness.js';
 
-// TBL-06 over a real port and real Socket.io clients, against a real SQLite file (specs/03-domain-model.md §1,
-// §7, specs/04-live-sync.md §2, §3, §4, §8, §14, Q-104, Q-105, Q-106, D-160): the encounter commands on the
-// live scene, what each room hears of them, undo and redo, a token's deletion taking its entry, the Enemies
-// entry's members following reveals and Dead, and what players' snapshots and events carry of it.
+// TBL-06 and DMT-02 over a real port and real Socket.io clients, against a real SQLite file
+// (specs/03-domain-model.md §1, §7, specs/04-live-sync.md §2, §3, §4, §8, §14, Q-111, Q-117, Q-118, D-180):
+// the encounter commands on the live scene, what each room hears of them, undo and redo, a token's deletion
+// taking its entry, monster entries passed over while Dead or unseen, and what players' snapshots and events
+// carry of it.
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
@@ -98,13 +99,12 @@ async function started(live: Live): Promise<Encounter> {
   return stored(live.scene.id)!;
 }
 const entryOf = (encounter: Encounter, tokenId: string) =>
-  encounter.entries.find((entry) => entry.kind === 'pc' && entry.token_id === tokenId)!;
-const dmEntryOf = (encounter: Encounter) => encounter.entries.find((entry) => entry.kind === 'dm')!;
+  encounter.entries.find((entry) => entry.token_id === tokenId)!;
 
 describe('encounter.start and encounter.end (specs/04-live-sync.md §14)', () => {
-  it('starts from the visible player characters in list order and one Enemies entry, for both rooms', async () => {
+  it('starts from the visible player characters and monsters in list order, for both rooms', async () => {
     const live = await liveScene();
-    const { scene, dm, tv, tamsin, wren } = live;
+    const { scene, dm, tv, tamsin, wren, goblin } = live;
     const versions = [h.versions.dm.current(), h.versions.players.current()];
     expect(await send(dm, 'encounter.start', { scene_id: scene.id })).toEqual(ok);
     const [dmEvents, tvEvents] = [await dm.settle(), await tv.settle()];
@@ -116,17 +116,18 @@ describe('encounter.start and encounter.end (specs/04-live-sync.md §14)', () =>
     const encounter = dmEncounter(dmEvents)!;
     expect(encounter).toEqual(stored(scene.id));
     expect(encounter).toMatchObject({ active: true, round: 1, current_index: 0, enemies_seen: true });
-    expect(encounter.entries.map((entry) => (entry.kind === 'pc' ? entry.token_id : 'dm'))).toEqual([
-      tamsin.id,
-      wren.id,
-      'dm',
+    // The hidden lurker takes no entry.
+    expect(encounter.entries.map((entry) => [entry.kind, entry.token_id, entry.initiative])).toEqual([
+      ['pc', tamsin.id, null],
+      ['pc', wren.id, null],
+      ['monster', goblin.id, null],
     ]);
     expect(tvEncounter(tvEvents)).toEqual({
       round: 1,
       entries: [
         { id: encounter.entries[0]!.id, kind: 'pc', token_id: tamsin.id },
         { id: encounter.entries[1]!.id, kind: 'pc', token_id: wren.id },
-        { id: encounter.entries[2]!.id, kind: 'dm' },
+        { id: encounter.entries[2]!.id, kind: 'monster', token_id: goblin.id },
       ],
       current: 0,
       next: 1,
@@ -160,9 +161,9 @@ describe('encounter.start and encounter.end (specs/04-live-sync.md §14)', () =>
 describe('order, initiative and turns (specs/04-live-sync.md §14)', () => {
   it('sorts by the numbers set, keeps a drag until a number is set again, and the turn follows its entry', async () => {
     const live = await liveScene();
-    const { scene, dm, tv, tamsin, wren } = live;
+    const { scene, dm, tv, tamsin, wren, goblin } = live;
     let encounter = await started(live);
-    const enemies = dmEntryOf(encounter);
+    const enemies = entryOf(encounter, goblin.id);
     expect(
       await send(dm, 'encounter.setInitiative', {
         scene_id: scene.id,
@@ -180,7 +181,7 @@ describe('order, initiative and turns (specs/04-live-sync.md §14)', () => {
     expect(encounter.current_index).toBe(1);
     // Players hear the new order without the number.
     expect(JSON.stringify(await tv.settle())).not.toContain('"initiative"');
-    // A drag puts the Enemies first; the order stands as dragged.
+    // A drag puts the goblin first; the order stands as dragged.
     const dragged = [enemies.id, entryOf(encounter, tamsin.id).id, entryOf(encounter, wren.id).id];
     expect(await send(dm, 'encounter.reorder', { scene_id: scene.id, entry_ids: dragged })).toEqual(ok);
     expect(stored(scene.id)!.entries.map((entry) => entry.id)).toEqual(dragged);
@@ -246,7 +247,7 @@ describe('order, initiative and turns (specs/04-live-sync.md §14)', () => {
     await started(live);
     expect(await h.command(dm, 'token.setVisibility', { token_id: wren.id, hidden: true })).toEqual(ok);
     const strip = tvEncounter(await tv.settle())!;
-    expect(strip.entries.map((entry) => entry.kind)).toEqual(['pc', 'dm']);
+    expect(strip.entries.map((entry) => entry.kind)).toEqual(['pc', 'monster']);
     expect(JSON.stringify(strip)).not.toContain(wren.id);
     expect(await send(dm, 'encounter.next', { scene_id: scene.id })).toEqual(ok);
     expect(stored(scene.id)!.current_index).toBe(2);
@@ -283,64 +284,126 @@ describe('a player character hidden on its own turn (TBL-06 review)', () => {
     await started(live);
     expect(await send(dm, 'encounter.next', { scene_id: scene.id })).toEqual(ok);
     expect(await h.command(dm, 'token.delete', { token_id: wren.id })).toEqual(ok);
-    // Wren had the turn; the Enemies, whose goblin is up, take it.
+    // Wren had the turn; the goblin takes it.
     expect(stored(scene.id)).toMatchObject({ current_index: 1, round: 1 });
     await dm.settle();
   });
 });
 
-describe('the Enemies entry (specs/04-live-sync.md §14, Q-106)', () => {
-  it('is passed over while the encounter never had an enemy, and becomes a stop when one is revealed', async () => {
+describe('monster entries (specs/04-live-sync.md §14, Q-117, Q-118)', () => {
+  it('passes over a Dead monster, which stays in the order and greyed for players, until removed', async () => {
     const live = await liveScene();
-    const { scene, dm, tv, goblin, lurker } = live;
-    // Only the lurker, hidden, is left: no member yet.
-    expect(await h.command(dm, 'token.delete', { token_id: goblin.id })).toEqual(ok);
+    const { scene, dm, tv, goblin } = live;
     const encounter = await started(live);
-    expect(encounter.enemies_seen).toBe(false);
     expect(await send(dm, 'encounter.next', { scene_id: scene.id })).toEqual(ok);
-    expect(await send(dm, 'encounter.next', { scene_id: scene.id })).toEqual(ok);
-    // Tamsin, Wren, then Tamsin again in round 2: the empty Enemies entry was passed over.
-    expect(stored(scene.id)).toMatchObject({ current_index: 0, round: 2 });
     await tv.settle();
-    // The reveal makes the Enemies entry next for players, and the encounter remembers it had an enemy.
-    expect(await h.command(dm, 'token.setVisibility', { token_id: lurker.id, hidden: false })).toEqual(ok);
-    expect(stored(scene.id)!.enemies_seen).toBe(true);
+    // The goblin dies on Wren's turn: Next now passes over it, back to Tamsin in round 2.
+    expect(await h.command(dm, 'token.setMarkers', { token_id: goblin.id, markers: [{ id: 'dead' }] })).toEqual(ok);
     const tvEvents = await tv.settle();
-    expect(types(tvEvents)).toEqual(['token.added']);
-    // Next stays Wren (index 1), so players hear nothing of the encounter yet.
+    expect(tvEncounter(tvEvents)).toMatchObject({ current: 1, next: 0 });
+    // Players still see its card: the marker they see on the token greys it.
+    expect(tvEncounter(tvEvents)!.entries.map((entry) => entry.token_id)).toContain(goblin.id);
     expect(await send(dm, 'encounter.next', { scene_id: scene.id })).toEqual(ok);
-    expect(tvEncounter(await tv.settle())).toMatchObject({ current: 1, next: 2 });
-    // The lurker dies: the Enemies entry still takes its turn, so that the DM is asked to end combat.
-    expect(await h.command(dm, 'token.setMarkers', { token_id: lurker.id, markers: [{ id: 'dead' }] })).toEqual(ok);
-    expect(await send(dm, 'encounter.next', { scene_id: scene.id })).toEqual(ok);
-    expect(stored(scene.id)).toMatchObject({ current_index: 2, enemies_seen: true });
+    expect(stored(scene.id)).toMatchObject({ current_index: 0, round: 2, enemies_seen: true });
+    expect(stored(scene.id)!.entries.map((entry) => entry.id)).toEqual(encounter.entries.map((entry) => entry.id));
+    // Removed, it is gone for both rooms.
+    expect(
+      await send(dm, 'encounter.removeEntry', { scene_id: scene.id, entry_id: entryOf(encounter, goblin.id).id }),
+    ).toEqual(ok);
+    expect(tvEncounter(await tv.settle())!.entries.map((entry) => entry.kind)).toEqual(['pc', 'pc']);
     await dm.settle();
   });
 
-  it('tells players of a change to Next that a reveal causes, and nothing of a hidden enemy', async () => {
+  it('never adds a monster revealed mid-combat by itself, and adds it by the number the DM gives', async () => {
     const live = await liveScene();
-    const { scene, dm, tv, goblin, lurker } = live;
-    expect(await h.command(dm, 'token.delete', { token_id: goblin.id })).toEqual(ok);
+    const { scene, dm, tv, tamsin, wren, goblin, lurker } = live;
+    await started(live);
+    for (const [token, initiative] of [
+      [tamsin, 18],
+      [wren, 12],
+      [goblin, 7],
+    ] as const) {
+      const entry = entryOf(stored(scene.id)!, token.id).id;
+      expect(await send(dm, 'encounter.setInitiative', { scene_id: scene.id, entry_id: entry, initiative })).toEqual(
+        ok,
+      );
+    }
+    await tv.settle();
+    // A hidden token cannot enter.
+    expect(code(await send(dm, 'encounter.addEntry', { scene_id: scene.id, token_id: lurker.id }))).toBe('bad_request');
+    expect(await h.command(dm, 'token.setVisibility', { token_id: lurker.id, hidden: false })).toEqual(ok);
+    // The reveal adds no entry: the DM is offered it (Q-117).
+    expect(stored(scene.id)!.entries).toHaveLength(3);
+    expect(types(await tv.settle())).toEqual(['token.added']);
+    expect(await send(dm, 'encounter.addEntry', { scene_id: scene.id, token_id: lurker.id, initiative: 12 })).toEqual(
+      ok,
+    );
+    // In by its number, after Wren's equal 12, and the turn stays with Tamsin.
+    const encounter = stored(scene.id)!;
+    expect(encounter.entries.map((entry) => [entry.token_id, entry.initiative])).toEqual([
+      [tamsin.id, 18],
+      [wren.id, 12],
+      [lurker.id, 12],
+      [goblin.id, 7],
+    ]);
+    expect(encounter.current_index).toBe(0);
+    expect(tvEncounter(await tv.settle())!.entries.map((entry) => entry.token_id)).toEqual([
+      tamsin.id,
+      wren.id,
+      lurker.id,
+      goblin.id,
+    ]);
+    // Once it has an entry, adding it again is refused; so is an object or a Dead monster.
+    expect(code(await send(dm, 'encounter.addEntry', { scene_id: scene.id, token_id: lurker.id }))).toBe('bad_request');
+    await dm.settle();
+  });
+
+  it('passes over a monster hidden again, and tells players nothing of it while hidden', async () => {
+    const live = await liveScene();
+    const { scene, dm, tv, goblin } = live;
     await started(live);
     expect(await send(dm, 'encounter.next', { scene_id: scene.id })).toEqual(ok);
-    // Wren's turn; next is Tamsin, the Enemies entry being empty and never seen.
-    expect(tvEncounter(await tv.settle())).toMatchObject({ current: 1, next: 0 });
-    // A hidden enemy moving, gaining markers or being deleted tells players nothing.
+    expect(tvEncounter(await tv.settle())).toMatchObject({ current: 1, next: 2 });
+    expect(await h.command(dm, 'token.setVisibility', { token_id: goblin.id, hidden: true })).toEqual(ok);
+    const events = await tv.settle();
+    expect(types(events)).toEqual(['token.removed', 'encounter.updated']);
+    expect(tvEncounter(events)).toMatchObject({ current: 1, next: 0 });
+    expect(JSON.stringify(tvEncounter(events))).not.toContain(goblin.id);
+    // Hidden, the goblin moving, gaining markers or having its number set tells players nothing.
     const players = h.versions.players.current();
-    expect(await h.command(dm, 'token.move', { token_id: lurker.id, x: 3, y: 3 })).toEqual(ok);
-    expect(await h.command(dm, 'token.setMarkers', { token_id: lurker.id, markers: [{ id: 'prone' }] })).toEqual(ok);
+    expect(await h.command(dm, 'token.move', { token_id: goblin.id, x: 3, y: 3 })).toEqual(ok);
+    expect(await h.command(dm, 'token.setMarkers', { token_id: goblin.id, markers: [{ id: 'prone' }] })).toEqual(ok);
+    const entry = entryOf(stored(scene.id)!, goblin.id).id;
+    expect(await send(dm, 'encounter.setInitiative', { scene_id: scene.id, entry_id: entry, initiative: 30 })).toEqual(
+      ok,
+    );
     expect(await tv.settle()).toEqual([]);
     expect(h.versions.players.current()).toBe(players);
-    // Revealed, the Enemies entry has a member and is next.
+    expect(await send(dm, 'encounter.next', { scene_id: scene.id })).toEqual(ok);
+    // The goblin, now first by its 30, is passed over: Tamsin, round 2.
+    expect(stored(scene.id)).toMatchObject({ current_index: 1, round: 2 });
+    await dm.settle();
+  });
+
+  it('remembers having had an enemy only once a monster entry could act (Q-118)', async () => {
+    const live = await liveScene();
+    const { scene, dm, goblin, lurker } = live;
+    expect(await h.command(dm, 'token.delete', { token_id: goblin.id })).toEqual(ok);
+    expect((await started(live)).enemies_seen).toBe(false);
     expect(await h.command(dm, 'token.setVisibility', { token_id: lurker.id, hidden: false })).toEqual(ok);
-    const events = await tv.settle();
-    expect(types(events)).toEqual(['token.added', 'encounter.updated']);
-    expect(tvEncounter(events)).toMatchObject({ current: 1, next: 2 });
+    // Seen, but with no entry yet: still no enemy in the encounter.
+    expect(stored(scene.id)!.enemies_seen).toBe(false);
+    expect(await send(dm, 'encounter.addEntry', { scene_id: scene.id, token_id: lurker.id })).toEqual(ok);
+    expect(stored(scene.id)!.enemies_seen).toBe(true);
+    // Dead, it stays remembered.
+    expect(await h.command(dm, 'token.setMarkers', { token_id: lurker.id, markers: [{ id: 'dead' }] })).toEqual(ok);
+    expect(stored(scene.id)!.enemies_seen).toBe(true);
+    await dm.settle();
   });
 });
 
 describe('entries, deletion and undo (specs/04-live-sync.md §8, §14, specs/03-domain-model.md §7)', () => {
-  it('adds a visible player character at the end and removes one, refusing the Enemies entry', async () => {
+  it('adds a visible player character or monster at the end and removes one, refusing what may not enter', async () => {
     const live = await liveScene();
     const { scene, dm, goblin } = live;
     expect(
@@ -360,10 +423,27 @@ describe('entries, deletion and undo (specs/04-live-sync.md §8, §14, specs/03-
     expect(await send(dm, 'encounter.addEntry', { scene_id: scene.id, token_id: brann })).toEqual(ok);
     encounter = stored(scene.id)!;
     expect(encounter.entries.at(-1)).toMatchObject({ kind: 'pc', token_id: brann, initiative: null });
+    // The goblin has an entry already; removed, it can be added back.
     expect(code(await send(dm, 'encounter.addEntry', { scene_id: scene.id, token_id: goblin.id }))).toBe('bad_request');
     expect(
-      code(await send(dm, 'encounter.removeEntry', { scene_id: scene.id, entry_id: dmEntryOf(encounter).id })),
-    ).toBe('bad_request');
+      await send(dm, 'encounter.removeEntry', { scene_id: scene.id, entry_id: entryOf(encounter, goblin.id).id }),
+    ).toEqual(ok);
+    // Dead, it may not enter; an object never does.
+    expect(await h.command(dm, 'token.setMarkers', { token_id: goblin.id, markers: [{ id: 'dead' }] })).toEqual(ok);
+    expect(code(await send(dm, 'encounter.addEntry', { scene_id: scene.id, token_id: goblin.id }))).toBe('bad_request');
+    expect(await h.command(dm, 'token.setMarkers', { token_id: goblin.id, markers: [] })).toEqual(ok);
+    expect(await send(dm, 'encounter.addEntry', { scene_id: scene.id, token_id: goblin.id })).toEqual(ok);
+    expect(stored(scene.id)!.entries.at(-1)).toMatchObject({ kind: 'monster', token_id: goblin.id });
+    expect(
+      await h.command(dm, 'token.add', {
+        scene_id: scene.id,
+        asset_id: (await h.asset('Chest', { category: 'object' })).id,
+        x: 5,
+        y: 1,
+      }),
+    ).toEqual(ok);
+    const chest = h.data.db.prepare("SELECT id FROM token WHERE label = 'Chest'").pluck().get() as string;
+    expect(code(await send(dm, 'encounter.addEntry', { scene_id: scene.id, token_id: chest }))).toBe('bad_request');
     await dm.settle();
   });
 
@@ -387,6 +467,18 @@ describe('entries, deletion and undo (specs/04-live-sync.md §8, §14, specs/03-
     expect(await h.command(dm, 'undo', {})).toEqual(ok);
     expect(stored(scene.id)!.active).toBe(true);
     expect(tvEncounter(await tv.settle())).not.toBeNull();
+  });
+
+  it('takes a deleted monster’s entry with it', async () => {
+    const live = await liveScene();
+    const { scene, dm, tv, goblin } = live;
+    const before = await started(live);
+    expect(await h.command(dm, 'token.delete', { token_id: goblin.id })).toEqual(ok);
+    expect(stored(scene.id)!.entries.map((entry) => entry.id)).toEqual(
+      before.entries.slice(0, 2).map((entry) => entry.id),
+    );
+    expect(types(await tv.settle())).toEqual(['token.removed', 'encounter.updated']);
+    await dm.settle();
   });
 
   it('takes a deleted token’s entry with it, and undoing the delete puts the entry back where it was', async () => {
@@ -431,23 +523,28 @@ describe('entries, deletion and undo (specs/04-live-sync.md §8, §14, specs/03-
 });
 
 describe('snapshots (specs/04-live-sync.md §5, §6, §14)', () => {
-  it('gives a reconnecting TV the strip and the DM the whole encounter, and players nothing of an enemy', async () => {
+  it('gives a reconnecting TV the strip and the DM the whole encounter, and players nothing of a hidden enemy', async () => {
     const live = await liveScene();
     const { scene, dm, lurker, goblin } = live;
     const encounter = await started(live);
     expect(
       await send(dm, 'encounter.setInitiative', {
         scene_id: scene.id,
-        entry_id: dmEntryOf(encounter).id,
+        entry_id: entryOf(encounter, goblin.id).id,
         initiative: 21,
       }),
     ).toEqual(ok);
     const late = await h.connect();
     const snapshot = (late.first.payload as PlayerSnapshot).scene!;
     expect(snapshot.encounter).toMatchObject({ round: 1, current: 1, next: 2 });
-    expect(snapshot.encounter!.entries.map((entry) => entry.kind)).toEqual(['dm', 'pc', 'pc']);
+    expect(snapshot.encounter!.entries.map((entry) => entry.kind)).toEqual(['monster', 'pc', 'pc']);
+    expect(snapshot.encounter!.entries[0]).toEqual({
+      id: entryOf(encounter, goblin.id).id,
+      kind: 'monster',
+      token_id: goblin.id,
+    });
     const text = JSON.stringify(snapshot.encounter);
-    for (const secret of [lurker.id, goblin.id, '"initiative"', 'enemies_seen', 'Lurker', 'Goblin', 'members']) {
+    for (const secret of [lurker.id, '"initiative"', 'enemies_seen', 'Lurker', 'members']) {
       expect(text, secret).not.toContain(secret);
     }
     const dmLate = await h.connect({ cookie: h.cookie });

@@ -832,7 +832,7 @@ export class FakeServer {
         this.deliver('token.removed', { id: token.id });
         // Its initiative entry goes with it (TBL-06).
         const encounter = this.encounters[token.scene_id];
-        const at = encounter?.entries.findIndex((entry) => entry.kind === 'pc' && entry.token_id === token.id) ?? -1;
+        const at = encounter?.entries.findIndex((entry) => entry.token_id === token.id) ?? -1;
         if (encounter && at !== -1)
           this.storeEncounter(
             token.scene_id,

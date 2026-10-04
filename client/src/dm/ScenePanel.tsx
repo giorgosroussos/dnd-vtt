@@ -3,7 +3,6 @@ import {
   EXHAUSTION,
   EXHAUSTION_LEVELS,
   hasMarker,
-  membersOf,
   API_IMAGE_PATHS,
   FEET_PER_SQUARE_BOUNDS,
   FIT_CAMERA,
@@ -19,7 +18,10 @@ import {
   type SceneToken,
   FOG_BRUSH_RADIUS,
   applyHp,
+  canEnter,
   compactHp,
+  entryKindOf,
+  seenByPlayers,
   type HpEntry,
   type TokenMarker,
   type TokenStats,
@@ -824,17 +826,28 @@ export function ScenePanel({
   });
   const fog = sceneFog.fog ?? [];
 
-  // The initiative tracker (TBL-06, specs/08-ux-journeys.md §12): the live scene's encounter, whose turn it is
-  // and, on the Enemies turn, its members, ringed on the map.
+  // The initiative tracker (TBL-06, DMT-02, specs/08-ux-journeys.md §12): the live scene's encounter and the
+  // token whose turn it is, a player character or a monster, ringed on the map.
   const encounter = liveScene?.encounter ?? null;
   const combat = isLive && encounter !== null && encounter.active;
-  const turnEntry = combat ? encounter.entries[encounter.current_index] : undefined;
-  const turnTokenId = turnEntry?.kind === 'pc' ? turnEntry.token_id : undefined;
-  const turnMembers = new Set(turnEntry?.kind === 'dm' ? membersOf(tokens ?? [], fog).map((member) => member.id) : []);
-  const turnOf = (token: SceneToken): 'current' | 'member' | undefined =>
-    token.id === turnTokenId ? 'current' : turnMembers.has(token.id) ? 'member' : undefined;
-  // The DM's camera centres on the player character whose turn comes up, not on one already shown when the
-  // view opened.
+  const turnTokenId = combat ? encounter.entries[encounter.current_index]?.token_id : undefined;
+  const turnOf = (token: SceneToken): 'current' | undefined => (token.id === turnTokenId ? 'current' : undefined);
+  // The popover's Add to initiative (DMT-02): while combat runs, for a player character, monster or npc without
+  // an entry; refused with its reason when players cannot see it or a monster carries Dead (Q-117).
+  const initiativeAction = (token: SceneToken) => {
+    if (!combat || entryKindOf(token) === undefined) return undefined;
+    if (encounter.entries.some((entry) => entry.token_id === token.id)) return undefined;
+    const reason = !seenByPlayers(token, token.asset.size, fog)
+      ? t('initiative.addUnseen')
+      : canEnter(token, fog)
+        ? undefined
+        : t('initiative.addDead');
+    return {
+      disabledReason: reason,
+      onAdd: () => void command('encounter.addEntry', { scene_id: sceneId, token_id: token.id }, 'initiative.failed'),
+    };
+  };
+  // The DM's camera centres on the token whose turn comes up, not on one already shown when the view opened.
   const turnShown = useRef(turnTokenId);
   useEffect(() => {
     if (turnShown.current === turnTokenId) return;
@@ -1167,6 +1180,7 @@ export function ScenePanel({
               onExhaustion={(level) => setExhaustion(selected, level)}
               onHpEntry={(entry) => void enterHp(selected, entry)}
               onStats={(stats) => void changeStats(selected, stats)}
+              initiative={initiativeAction(selected)}
               focusHp={focusHp}
             />
           ) : null
@@ -1580,10 +1594,6 @@ export function ScenePanel({
             tokens={tokens ?? []}
             fog={fog}
             onCommand={(type, payload) => command(type, payload, 'initiative.failed')}
-            onShowToken={(token) => {
-              selectToken(token.id);
-              canvas.current?.centreOn(token.id);
-            }}
           />
         }
         round={combat ? encounter.round : undefined}

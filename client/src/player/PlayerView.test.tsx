@@ -495,7 +495,7 @@ describe('pings on the TV (TBL-01, specs/04-live-sync.md §12)', () => {
   });
 });
 
-describe('the initiative strip (TBL-06, specs/08-ux-journeys.md §12)', () => {
+describe('the initiative strip (TBL-06, DMT-02, specs/08-ux-journeys.md §12)', () => {
   const pc = (n: number, label: string, z: number): PlayerToken => ({ ...token(n, label, z), category: 'pc' });
   const strip = () => main().querySelector<HTMLElement>('.eg-player__initiative');
   const cards = () =>
@@ -511,7 +511,7 @@ describe('the initiative strip (TBL-06, specs/08-ux-journeys.md §12)', () => {
     round,
     entries: [
       { id: id(101), kind: 'pc', token_id: id(1) },
-      { id: id(199), kind: 'dm' },
+      { id: id(103), kind: 'monster', token_id: id(3) },
       { id: id(102), kind: 'pc', token_id: id(2) },
     ],
     current,
@@ -525,27 +525,35 @@ describe('the initiative strip (TBL-06, specs/08-ux-journeys.md §12)', () => {
     await deliver('encounter.updated', 2, { encounter: encounter(0, 1) });
     expect(cards()).toEqual([
       ['Tamsin', 'now'],
-      [t('initiative.enemies'), 'next'],
+      ['Goblin', 'next'],
       ['Wren', ''],
     ]);
     expect(strip()!.textContent).toContain(t('initiative.tvRound', { round: 1 }));
     // Portraits are the display version players may fetch of tokens they see.
     expect(strip()!.querySelector('img')!.getAttribute('src')).toBe(imageFileUrl(IMAGE, 'display'));
-    // The Enemies card names no monster and gives no count.
-    expect(strip()!.textContent).not.toContain('Goblin');
-    expect(strip()!.querySelectorAll('[data-kind="dm"]')).toHaveLength(1);
+    // The monster's card is its token's label, in the monster ring colour (Q-111).
+    expect(strip()!.querySelectorAll('.eg-player__initiative-card--monster')).toHaveLength(1);
+    expect(strip()!.querySelectorAll('.eg-player__initiative-card--pc')).toHaveLength(2);
     // Nothing on the strip takes focus: the TV has no controls.
     expect(strip()!.querySelectorAll(FOCUSABLE)).toHaveLength(0);
     await deliver('encounter.updated', 3, { encounter: encounter(2, 0, 3) });
     expect(cards()).toEqual([
       ['Tamsin', 'next'],
-      [t('initiative.enemies'), ''],
+      ['Goblin', ''],
       ['Wren', 'now'],
     ]);
     expect(strip()!.textContent).toContain(t('initiative.tvRound', { round: 3 }));
+    // A Dead goblin stays on the strip, greyed (Q-118).
+    expect(strip()!.querySelector('[data-dead]')).toBeNull();
+    await deliver('token.updated', 4, {
+      token: { ...token(3, 'Goblin', 2), markers: [{ id: 'dead' }] },
+      relabelled: [],
+    });
+    expect(strip()!.querySelector('[data-dead]')?.textContent).toContain('Goblin');
+    expect(strip()!.querySelector('[data-dead]')!.classList).toContain('eg-player__initiative-card--dead');
     vi.useFakeTimers();
     await act(async () => {
-      fake.sockets[0]!.deliver({ type: 'encounter.updated', version: 4, payload: { encounter: null } });
+      fake.sockets[0]!.deliver({ type: 'encounter.updated', version: 5, payload: { encounter: null } });
       await Promise.resolve();
     });
     expect(strip()!.dataset.initiative).toBe('leaving');
@@ -557,11 +565,11 @@ describe('the initiative strip (TBL-06, specs/08-ux-journeys.md §12)', () => {
   });
 
   it('comes back with a reconnecting TV’s snapshot, and skips a malformed event', async () => {
-    const tokens = [pc(1, 'Tamsin', 0), pc(2, 'Wren', 1)];
+    const tokens = [pc(1, 'Tamsin', 0), pc(2, 'Wren', 1), token(3, 'Goblin', 2)];
     await open({ ...snapshot(tokens), scene: { ...snapshot(tokens).scene!, encounter: encounter(1, 2) as never } });
     expect(cards()).toEqual([
       ['Tamsin', ''],
-      [t('initiative.enemies'), 'now'],
+      ['Goblin', 'now'],
       ['Wren', 'next'],
     ]);
     await deliver('encounter.updated', 2, { encounter: { round: 0, entries: 'many' } });

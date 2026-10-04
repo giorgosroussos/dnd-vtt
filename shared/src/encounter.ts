@@ -4,12 +4,12 @@ import { UuidSchema } from './entities.js';
 import { seenByPlayers, type FogMask } from './fog.js';
 import type { SceneToken } from './tokens.js';
 
-// The initiative tracker (TBL-06; specs/04-live-sync.md §14, specs/03-domain-model.md §1, Q-104, Q-105,
-// Q-106, D-160). A scene holds at most one encounter: the order the table rolled with physical dice, one
-// entry per player character and one Enemies entry the DM plays as a single turn. Nothing here rolls,
-// computes or suggests a number. The Enemies entry's members are never stored: they are the scene's
-// monster and npc tokens players can see that do not carry Dead, computed whenever needed by the
-// functions below, which the server, the DM view and the players' projection share.
+// The initiative tracker (TBL-06, DMT-02; specs/04-live-sync.md §14, specs/03-domain-model.md §1, Q-111,
+// Q-117, Q-118, D-180). A scene holds at most one encounter: the order the table rolled with physical dice,
+// one entry per player character and one per monster or npc, each naming its token. Nothing here rolls,
+// computes or suggests a number. Whether an entry takes its turn is never stored: it follows from what players
+// can see of its token and whether a monster carries Dead, computed whenever needed by the functions below,
+// which the server, the DM view and the players' projection share.
 
 const strict = { additionalProperties: false } as const;
 
@@ -23,17 +23,17 @@ export const InitiativeSchema = Type.Union([
 /** More entries than any table holds; a bound so that no command or row is unbounded. */
 export const MAX_ENCOUNTER_ENTRIES = 200;
 
-// An entry is a player character's or the one Enemies entry; `kind` leaves room for a later `monster`
-// entry, which is not built (D-160).
+// An entry is a player character's (`pc`) or a monster's or npc's (`monster`); both name their token. The one
+// Enemies entry of TBL-06 (`kind: 'dm'`) is gone: migration 0011 expanded every stored one (DMT-02).
 export const PcEntrySchema = Type.Object(
   { id: UuidSchema, kind: Type.Literal('pc'), token_id: UuidSchema, initiative: InitiativeSchema },
   strict,
 );
-export const DmEntrySchema = Type.Object(
-  { id: UuidSchema, kind: Type.Literal('dm'), initiative: InitiativeSchema },
+export const MonsterEntrySchema = Type.Object(
+  { id: UuidSchema, kind: Type.Literal('monster'), token_id: UuidSchema, initiative: InitiativeSchema },
   strict,
 );
-export const EncounterEntrySchema = Type.Union([PcEntrySchema, DmEntrySchema]);
+export const EncounterEntrySchema = Type.Union([PcEntrySchema, MonsterEntrySchema]);
 
 /** The encounter as it is stored and as the DM receives it. */
 export const EncounterSchema = Type.Object(
@@ -43,20 +43,21 @@ export const EncounterSchema = Type.Object(
     active: Type.Boolean(),
     round: Type.Integer({ minimum: 1 }),
     current_index: Type.Integer({ minimum: 0 }),
-    // Whether the Enemies entry has had a member during this encounter (Q-106); never sent to players.
+    // Whether a monster or npc entry could take its turn at some point of this encounter (Q-118): what
+    // "No enemies left. End combat?" waits for. Never sent to players.
     enemies_seen: Type.Boolean(),
     entries: Type.Array(EncounterEntrySchema, { maxItems: MAX_ENCOUNTER_ENTRIES }),
   },
   strict,
 );
 
-// What players receive (specs/04-live-sync.md §4): the round, the entries of the player characters they
-// can see and the Enemies entry, in order, and which has the turn and which is next. No initiative number,
-// no member, no count of them, nothing of a monster or npc token.
-export const PlayerEncounterEntrySchema = Type.Union([
-  Type.Object({ id: UuidSchema, kind: Type.Literal('pc'), token_id: UuidSchema }, strict),
-  Type.Object({ id: UuidSchema, kind: Type.Literal('dm') }, strict),
-]);
+// What players receive (specs/04-live-sync.md §4): the round, the entries whose token they can see, in order,
+// and which has the turn and which is next. No initiative number, nothing of a token they cannot see. A Dead
+// monster they see stays, its token's marker greying its card (Q-118).
+export const PlayerEncounterEntrySchema = Type.Object(
+  { id: UuidSchema, kind: Type.Union([Type.Literal('pc'), Type.Literal('monster')]), token_id: UuidSchema },
+  strict,
+);
 const EntryIndex = Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]);
 export const PlayerEncounterSchema = Type.Object(
   {
@@ -69,7 +70,7 @@ export const PlayerEncounterSchema = Type.Object(
 );
 
 export type PcEntry = Static<typeof PcEntrySchema>;
-export type DmEntry = Static<typeof DmEntrySchema>;
+export type MonsterEntry = Static<typeof MonsterEntrySchema>;
 export type EncounterEntry = Static<typeof EncounterEntrySchema>;
 export type Encounter = Static<typeof EncounterSchema>;
 export type PlayerEncounterEntry = Static<typeof PlayerEncounterEntrySchema>;
@@ -84,39 +85,52 @@ export type EncounterToken = Pick<SceneToken, 'id' | 'x' | 'y' | 'hidden' | 'z_o
 export interface TurnView {
   /** The ids of the tokens players can see. */
   seen: ReadonlySet<string>;
-  /** How many members the Enemies entry has. */
-  members: number;
+  /** The ids of the tokens carrying Dead. */
+  dead: ReadonlySet<string>;
 }
 
 const seenBy = (fog: FogMask) => (token: EncounterToken) => seenByPlayers(token, token.asset.size, fog);
 
-/** The Enemies entry's members: monster and npc tokens players can see that do not carry Dead. */
-export function membersOf<T extends EncounterToken>(tokens: readonly T[], fog: FogMask): T[] {
-  const seen = seenBy(fog);
-  return tokens.filter(
-    (token) =>
-      (token.asset.category === 'monster' || token.asset.category === 'npc') &&
-      seen(token) &&
-      !hasMarker(token.markers, 'dead'),
-  );
+/** The entry kind a token takes: `pc` for a player character, `monster` for a monster or npc, none for an object. */
+export function entryKindOf(token: Pick<EncounterToken, 'asset'>): EncounterEntry['kind'] | undefined {
+  const { category } = token.asset;
+  if (category === 'pc') return 'pc';
+  return category === 'monster' || category === 'npc' ? 'monster' : undefined;
 }
 
 export function turnView(tokens: readonly EncounterToken[], fog: FogMask): TurnView {
   const seen = seenBy(fog);
-  return { seen: new Set(tokens.filter(seen).map((token) => token.id)), members: membersOf(tokens, fog).length };
+  return {
+    seen: new Set(tokens.filter(seen).map((token) => token.id)),
+    dead: new Set(tokens.filter((token) => hasMarker(token.markers, 'dead')).map((token) => token.id)),
+  };
 }
 
 /**
- * Whether an entry takes its turn (Q-104, Q-106): a player character's while players can see its token,
- * whatever it carries, Unconscious and Dead included; the Enemies entry while it has members, or once the
- * encounter has had one, so that the DM is asked whether to end combat.
+ * Whether an entry takes its turn (Q-111, Q-118): a player character's while players can see its token,
+ * whatever it carries, Unconscious and Dead included; a monster's or npc's while players can see its token and
+ * it does not carry Dead.
  */
-export function takesTurn(entry: EncounterEntry, view: TurnView, enemiesSeen: boolean): boolean {
-  return entry.kind === 'pc' ? view.seen.has(entry.token_id) : view.members > 0 || enemiesSeen;
+export function takesTurn(entry: EncounterEntry, view: TurnView): boolean {
+  if (!view.seen.has(entry.token_id)) return false;
+  return entry.kind === 'pc' || !view.dead.has(entry.token_id);
+}
+
+/** Whether some monster or npc entry can take its turn now. */
+export function enemiesCanAct(encounter: Pick<Encounter, 'entries'>, view: TurnView): boolean {
+  return encounter.entries.some((entry) => entry.kind === 'monster' && takesTurn(entry, view));
+}
+
+/**
+ * Whether the DM is to be asked "No enemies left. End combat?" (Q-118): combat runs, the encounter has had a
+ * monster or npc entry that could act, and none can now.
+ */
+export function noEnemiesLeft(encounter: Encounter | null, view: TurnView): boolean {
+  return encounter !== null && encounter.active && encounter.enemies_seen && !enemiesCanAct(encounter, view);
 }
 
 type Turn = Pick<Encounter, 'current_index' | 'round'>;
-type TurnState = Pick<Encounter, 'current_index' | 'round' | 'enemies_seen' | 'entries'>;
+type TurnState = Pick<Encounter, 'current_index' | 'round' | 'entries'>;
 
 /**
  * The turn after `encounter.next` (+1) or `encounter.previous` (-1): the nearest entry that takes its turn,
@@ -139,7 +153,7 @@ export function stepTurn(encounter: TurnState, view: TurnView, direction: 1 | -1
       index = count - 1;
       round -= 1;
     }
-    if (takesTurn(entries[index]!, view, encounter.enemies_seen)) return { current_index: index, round };
+    if (takesTurn(entries[index]!, view)) return { current_index: index, round };
   }
   return undefined;
 }
@@ -151,13 +165,13 @@ export function nextIndex(encounter: TurnState, view: TurnView): number | null {
 }
 
 /** The first entry that takes its turn, or the first entry when none does. */
-export function firstTurn(encounter: Pick<Encounter, 'enemies_seen' | 'entries'>, view: TurnView): number {
-  const index = encounter.entries.findIndex((entry) => takesTurn(entry, view, encounter.enemies_seen));
+export function firstTurn(encounter: Pick<Encounter, 'entries'>, view: TurnView): number {
+  const index = encounter.entries.findIndex((entry) => takesTurn(entry, view));
   return Math.max(index, 0);
 }
 
 /**
- * The order after an initiative number was set (Q-104): numbered entries first, highest first, then those
+ * The order after an initiative number was set (Q-111): numbered entries first, highest first, then those
  * without one; a stable sort, so ties and the unnumbered keep the order they had, a dragged one included.
  */
 export function sortByInitiative<T extends { initiative: number | null }>(entries: readonly T[]): T[] {
@@ -182,27 +196,50 @@ export function followTurn(before: readonly EncounterEntry[], after: readonly En
 }
 
 /**
+ * Whether a token may take an entry (Q-111, Q-117): players can see it, and it is a player character, or a
+ * monster or npc not carrying Dead. Objects never do.
+ */
+export function canEnter(token: EncounterToken, fog: FogMask): boolean {
+  const kind = entryKindOf(token);
+  if (kind === undefined || !seenByPlayers(token, token.asset.size, fog)) return false;
+  return kind === 'pc' || !hasMarker(token.markers, 'dead');
+}
+
+/**
  * The tokens `encounter.start` builds entries for, in the order of the DM's token list (stacking order):
- * player characters players can see.
+ * those that may take an entry.
  */
 export function startTokens<T extends EncounterToken>(tokens: readonly T[], fog: FogMask): T[] {
-  const seen = seenBy(fog);
   return tokens
-    .filter((token) => token.asset.category === 'pc' && seen(token))
+    .filter((token) => canEnter(token, fog))
     .sort((a, b) => a.z_order - b.z_order || a.id.localeCompare(b.id));
 }
 
-/** The player character tokens players can see that have no entry: those the DM is offered to add. */
-export function missingTokens<T extends EncounterToken>(encounter: Encounter, tokens: readonly T[], fog: FogMask): T[] {
-  const entered = new Set(encounter.entries.flatMap((entry) => (entry.kind === 'pc' ? [entry.token_id] : [])));
+/** The tokens that may take an entry and have none: those the DM is offered to add (Q-117). */
+export function missingTokens<T extends EncounterToken>(
+  encounter: Pick<Encounter, 'entries'>,
+  tokens: readonly T[],
+  fog: FogMask,
+): T[] {
+  const entered = new Set(encounter.entries.map((entry) => entry.token_id));
   return startTokens(tokens, fog).filter((token) => !entered.has(token.id));
 }
 
 /**
+ * Where an entry added with `initiative` goes (DMT-02): before the first entry with a lower number or none,
+ * so after those with the same number, and the order the DM dragged stays as it is; at the end without one.
+ */
+export function insertionIndex(entries: readonly EncounterEntry[], initiative: number | null): number {
+  if (initiative === null) return entries.length;
+  const at = entries.findIndex((entry) => entry.initiative === null || entry.initiative < initiative);
+  return at === -1 ? entries.length : at;
+}
+
+/**
  * What players receive of an encounter (specs/04-live-sync.md §4, §14): null unless combat runs; the entries
- * of the player characters they can see and the Enemies entry, without numbers; which of them has the turn,
- * null when it is an entry they do not see; and which is next. Everything here follows from what players
- * already see, so a hidden token changes nothing in it.
+ * whose token they can see, a Dead monster's included, without numbers; which of them has the turn, null when
+ * it is an entry they do not see; and which is next. Everything here follows from what players already see, so
+ * a hidden token changes nothing in it.
  */
 export function playerEncounter(
   encounter: Encounter | null,
@@ -214,11 +251,9 @@ export function playerEncounter(
   const shown: number[] = [];
   const entries: PlayerEncounterEntry[] = [];
   encounter.entries.forEach((entry, index) => {
-    if (entry.kind === 'pc' && !view.seen.has(entry.token_id)) return;
+    if (!view.seen.has(entry.token_id)) return;
     shown.push(index);
-    entries.push(
-      entry.kind === 'pc' ? { id: entry.id, kind: 'pc', token_id: entry.token_id } : { id: entry.id, kind: 'dm' },
-    );
+    entries.push({ id: entry.id, kind: entry.kind, token_id: entry.token_id });
   });
   const at = (index: number | null): number | null => {
     if (index === null) return null;
@@ -226,7 +261,7 @@ export function playerEncounter(
     return found === -1 ? null : found;
   };
   const current = at(encounter.current_index);
-  // While the turn is a player character players cannot see, Next is not named either: it would follow from
+  // While the turn is an entry players cannot see, Next is not named either: it would follow from
   // where that unseen entry stands, which players must not learn (TBL-06 review).
   return { round: encounter.round, entries, current, next: current === null ? null : at(nextIndex(encounter, view)) };
 }
@@ -249,16 +284,27 @@ const isInitiative = (value: unknown): boolean =>
   value === null || isWhole(value, INITIATIVE_BOUNDS.min, INITIATIVE_BOUNDS.max);
 const isIndex = (value: unknown): boolean => value === null || isWhole(value, 0);
 
+const isKind = (value: unknown): boolean => value === 'pc' || value === 'monster';
+
 function isEntry(value: unknown): value is EncounterEntry {
-  if (!isObject(value) || !isUuid(value.id) || !isInitiative(value.initiative)) return false;
-  if (value.kind === 'pc') return hasOnly(value, ['id', 'kind', 'token_id', 'initiative']) && isUuid(value.token_id);
-  return value.kind === 'dm' && hasOnly(value, ['id', 'kind', 'initiative']);
+  return (
+    isObject(value) &&
+    hasOnly(value, ['id', 'kind', 'token_id', 'initiative']) &&
+    isUuid(value.id) &&
+    isKind(value.kind) &&
+    isUuid(value.token_id) &&
+    isInitiative(value.initiative)
+  );
 }
 
 function isPlayerEntry(value: unknown): value is PlayerEncounterEntry {
-  if (!isObject(value) || !isUuid(value.id)) return false;
-  if (value.kind === 'pc') return hasOnly(value, ['id', 'kind', 'token_id']) && isUuid(value.token_id);
-  return value.kind === 'dm' && hasOnly(value, ['id', 'kind']);
+  return (
+    isObject(value) &&
+    hasOnly(value, ['id', 'kind', 'token_id']) &&
+    isUuid(value.id) &&
+    isKind(value.kind) &&
+    isUuid(value.token_id)
+  );
 }
 
 const ENCOUNTER_KEYS = ['id', 'scene_id', 'active', 'round', 'current_index', 'enemies_seen', 'entries'] as const;
@@ -309,7 +355,7 @@ export type EncounterChange =
   | { type: 'setInitiative'; entry_id: string; initiative: number | null }
   | { type: 'next' }
   | { type: 'previous' }
-  | { type: 'addEntry'; token_id: string }
+  | { type: 'addEntry'; token_id: string; initiative?: number | null }
   | { type: 'removeEntry'; entry_id: string }
   | { type: 'restore'; encounter: Encounter | null };
 
@@ -349,9 +395,9 @@ export function withoutEntry(encounter: Encounter, at: number, view: TurnView): 
   return { ...encounter, entries, current_index: index, round: passed.round };
 }
 
-/** The encounter marked as having had a member, once the Enemies entry has one (Q-106). */
-export function notingEnemies(encounter: Encounter | null, members: number): Encounter | null {
-  return encounter !== null && encounter.active && !encounter.enemies_seen && members > 0
+/** The encounter marked as having had an enemy, once a monster or npc entry can take its turn (Q-118). */
+export function notingEnemies(encounter: Encounter | null, view: TurnView): Encounter | null {
+  return encounter !== null && encounter.active && !encounter.enemies_seen && enemiesCanAct(encounter, view)
     ? { ...encounter, enemies_seen: true }
     : encounter;
 }
@@ -362,23 +408,19 @@ function decided(current: Encounter | null, change: EncounterChange, scene: Enco
   if (change.type === 'restore') return { encounter: change.encounter };
   if (change.type === 'start') {
     if (current?.active) return refusal('bad_request', 'Combat is already running on this scene.');
-    const entries: EncounterEntry[] = [
-      ...startTokens(tokens, fog).map((token): EncounterEntry => ({
-        id: newId(),
-        kind: 'pc',
-        token_id: token.id,
-        initiative: null,
-      })),
-      { id: newId(), kind: 'dm', initiative: null },
-    ];
-    const enemiesSeen = view.members > 0;
+    const entries = startTokens(tokens, fog).map((token): EncounterEntry => ({
+      id: newId(),
+      kind: entryKindOf(token)!,
+      token_id: token.id,
+      initiative: null,
+    }));
     const encounter: Encounter = {
       id: current?.id ?? newId(),
       scene_id: sceneId,
       active: true,
       round: 1,
-      current_index: firstTurn({ entries, enemies_seen: enemiesSeen }, view),
-      enemies_seen: enemiesSeen,
+      current_index: firstTurn({ entries }, view),
+      enemies_seen: false,
       entries,
     };
     return { encounter };
@@ -415,23 +457,23 @@ function decided(current: Encounter | null, change: EncounterChange, scene: Enco
     case 'addEntry': {
       const token = tokens.find((candidate) => candidate.id === change.token_id);
       if (token === undefined) return refusal('not_found', 'No such token.');
-      if (token.asset.category !== 'pc' || !view.seen.has(token.id)) {
-        return refusal('bad_request', 'Only a player character players can see takes an entry.');
+      if (!canEnter(token, fog)) {
+        return refusal(
+          'bad_request',
+          'Only a player character, or a monster or npc not carrying Dead, that players can see takes an entry.',
+        );
       }
-      if (entries.some((entry) => entry.kind === 'pc' && entry.token_id === token.id)) {
+      if (entries.some((entry) => entry.token_id === token.id)) {
         return refusal('bad_request', 'This token already has an entry.');
       }
-      return {
-        encounter: {
-          ...current,
-          entries: [...entries, { id: newId(), kind: 'pc', token_id: token.id, initiative: null }],
-        },
-      };
+      const initiative = change.initiative ?? null;
+      const added: EncounterEntry = { id: newId(), kind: entryKindOf(token)!, token_id: token.id, initiative };
+      const at = insertionIndex(entries, initiative);
+      return reordered([...entries.slice(0, at), added, ...entries.slice(at)]);
     }
     case 'removeEntry': {
       const at = entries.findIndex((entry) => entry.id === change.entry_id);
       if (at === -1) return refusal('not_found', 'No such entry.');
-      if (entries[at]!.kind === 'dm') return refusal('bad_request', 'The Enemies entry cannot be removed.');
       return { encounter: withoutEntry(current, at, view) };
     }
   }
@@ -439,8 +481,8 @@ function decided(current: Encounter | null, change: EncounterChange, scene: Enco
 
 /**
  * What an encounter command does to the scene's encounter (specs/04-live-sync.md §14): the encounter after it,
- * marked as having had an enemy once the Enemies entry has a member, or why it is refused; undefined when it
- * changes nothing, which tells nobody and is not undoable.
+ * marked as having had an enemy once a monster or npc entry can take its turn, or why it is refused; undefined
+ * when it changes nothing, which tells nobody and is not undoable.
  */
 export function changeOf(current: Encounter | null, change: EncounterChange, scene: EncounterScene): EncounterDecision {
   const decision = decided(current, change, scene);
@@ -448,6 +490,6 @@ export function changeOf(current: Encounter | null, change: EncounterChange, sce
   const after =
     change.type === 'restore'
       ? decision.encounter
-      : notingEnemies(decision.encounter, membersOf(scene.tokens, scene.fog).length);
+      : notingEnemies(decision.encounter, turnView(scene.tokens, scene.fog));
   return JSON.stringify(after) === JSON.stringify(current) ? undefined : { encounter: after };
 }

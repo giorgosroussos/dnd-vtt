@@ -377,10 +377,11 @@ async function record(hidden: boolean): Promise<Recording> {
     await send('fog.fill', { scene_id: sceneA.id, fogged: false });
   });
   await step('paint the vault once more', () => fog(vault));
-  // The initiative tracker (TBL-06, specs/04-live-sync.md §4, §14): players see the round, the player
-  // characters they see and one Enemies entry, whose turn it is and which is next; never a number, a member
-  // or a count. A hidden enemy added, moved, marked Dead or deleted mid-combat changes nothing they receive,
-  // and the Enemies entry takes or skips its turn by what they can see alone.
+  // The initiative tracker (TBL-06, DMT-02, specs/04-live-sync.md §4, §14): players see the round, the entries
+  // whose token they see, whose turn it is and which is next; never a number. A hidden monster takes no entry
+  // at the start and cannot be given one; added, moved, marked Dead or deleted mid-combat it changes nothing
+  // they receive. A monster with an entry hidden again leaves the strip, and its number, place and markers
+  // then change nothing they receive either.
   const wren = await live.asset('Wren', { category: 'pc', default_hidden: false });
   const ghoul = await live.asset('Ghoul', { category: 'monster', default_hidden: true });
   secrets.push(wren.id, ghoul.id);
@@ -405,8 +406,12 @@ async function record(hidden: boolean): Promise<Recording> {
   );
   await step(
     'add a hidden lurker mid-fight',
-    async () =>
-      secrets.push(tokenOf(await send('token.add', { scene_id: sceneA.id, asset_id: lurker!.id, x: 6, y: 8 })).id),
+    async () => {
+      const id = tokenOf(await send('token.add', { scene_id: sceneA.id, asset_id: lurker!.id, x: 6, y: 8 })).id;
+      secrets.push(id);
+      const ack = await live.command(dm, 'encounter.addEntry', { scene_id: sceneA.id, token_id: id, initiative: 30 });
+      expect((ack as { error: { code: string } }).error.code).toBe('bad_request');
+    },
     true,
   );
   await step('pass several turns', async () => {
@@ -422,11 +427,25 @@ async function record(hidden: boolean): Promise<Recording> {
     true,
   );
   await step('reveal the ghoul mid-fight', () => send('token.setVisibility', { token_id: ghoulToken, hidden: false }));
+  await step('add the ghoul to initiative by its number', () =>
+    send('encounter.addEntry', { scene_id: sceneA.id, token_id: ghoulToken, initiative: 12 }),
+  );
   await step('pass a turn with the ghoul up', () => send('encounter.next', { scene_id: sceneA.id }));
-  await step('mark the ghoul dead and pass turns until the Enemies', async () => {
+  await step('mark the ghoul dead and pass turns over it', async () => {
     await send('token.setMarkers', { token_id: ghoulToken, markers: [{ id: 'dead' }] });
     for (let turn = 0; turn < 3; turn += 1) await send('encounter.next', { scene_id: sceneA.id });
   });
+  await step('hide the dead ghoul', () => send('token.setVisibility', { token_id: ghoulToken, hidden: true }));
+  await step(
+    'number, move and heal the hidden ghoul',
+    async () => {
+      const entry = encounterEntries().find((each) => each.token_id === ghoulToken)!.id;
+      await send('encounter.setInitiative', { scene_id: sceneA.id, entry_id: entry, initiative: 25 });
+      await send('token.move', { token_id: ghoulToken, x: 4, y: 7 });
+      await send('token.setMarkers', { token_id: ghoulToken, markers: [] });
+    },
+    true,
+  );
   await step('hide Wren', () => send('token.setVisibility', { token_id: wrenToken, hidden: true }));
   await step('reveal Wren', () => send('token.setVisibility', { token_id: wrenToken, hidden: false }));
   await step('delete the hidden lurker', () => send('token.delete', { token_id: secrets.at(-1)! }), true);
@@ -584,7 +603,14 @@ describe('what a player view receives across a live session (specs/10-testing-ac
     expect(eventsOf('add a hidden lurker mid-fight')).toEqual(['scene.snapshot']);
     expect(eventsOf('mark the hidden lurker dead and move it')).toEqual(['scene.snapshot']);
     expect(eventsOf('delete the hidden lurker')).toEqual(['scene.snapshot']);
-    expect(eventsOf('reveal the ghoul mid-fight')[0]).toBe('token.added');
+    // Revealed, the ghoul is offered to the DM, never added by itself (Q-117): the strip does not change.
+    expect(eventsOf('reveal the ghoul mid-fight')).toEqual(['token.added', 'scene.snapshot']);
+    expect(eventsOf('add the ghoul to initiative by its number')).toEqual(['encounter.updated', 'scene.snapshot']);
+    // Dead, it stays on the strip (Q-118); hidden, it leaves it.
+    const ghoulToken = withHidden.shownFrom.find((each) => each.step === 'reveal the ghoul mid-fight')!.id;
+    const deadGhoul = withHidden.steps.find((each) => each.step === 'mark the ghoul dead and pass turns over it');
+    expect(JSON.stringify(deadGhoul)).toContain(`"kind":"monster","token_id":"${ghoulToken}"`);
+    expect(eventsOf('hide the dead ghoul')).toEqual(['token.removed', 'encounter.updated', 'scene.snapshot']);
     expect(eventsOf('hide Wren')).toEqual(['token.removed', 'encounter.updated', 'scene.snapshot']);
     expect(eventsOf('end combat')).toEqual(['encounter.updated', 'scene.snapshot']);
     const combat = during('start combat', 'end combat');

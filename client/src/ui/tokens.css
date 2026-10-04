@@ -649,10 +649,28 @@ main[data-cursor='hidden'] * {
   font-size: clamp(12px, 1.8vh, 26px);
 }
 
-.eg-player__initiative-card--enemies .eg-player__initiative-portrait {
+/* Each card in its side's ring colour, as the tokens on the map (DMT-02): monsters red, npcs neutral. */
+.eg-player__initiative-card--monster .eg-player__initiative-portrait {
   border-color: var(--color-token-monster);
   background: var(--color-token-monster-fill);
   color: var(--color-player-text);
+}
+
+.eg-player__initiative-card--npc .eg-player__initiative-portrait,
+.eg-player__initiative-card--object .eg-player__initiative-portrait {
+  border-color: var(--color-token-other);
+  background: var(--color-token-other-fill);
+  color: var(--color-player-text);
+}
+
+/* A Dead enemy stays on the strip, greyed and passed over (Q-118). */
+.eg-player__initiative-card--dead {
+  opacity: 0.45;
+  filter: grayscale(1);
+}
+
+.eg-player__initiative-card--dead .eg-player__initiative-name {
+  text-decoration: line-through;
 }
 
 .eg-player__initiative-portrait img {

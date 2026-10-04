@@ -155,11 +155,10 @@ function encounterChange(command: CommandEnvelope): { sceneId: string; change: E
       const { entry_id, initiative } = command.payload as EncounterSetInitiativePayload;
       return { sceneId, change: { type: 'setInitiative', entry_id, initiative } };
     }
-    case 'encounter.addEntry':
-      return {
-        sceneId,
-        change: { type: 'addEntry', token_id: (command.payload as EncounterAddEntryPayload).token_id },
-      };
+    case 'encounter.addEntry': {
+      const { token_id, initiative } = command.payload as EncounterAddEntryPayload;
+      return { sceneId, change: { type: 'addEntry', token_id, ...(initiative === undefined ? {} : { initiative }) } };
+    }
     case 'encounter.removeEntry':
       return {
         sceneId,
@@ -424,7 +423,7 @@ export function createLiveCommands(
     }
   };
   // After every command that changed something: the live scene's encounter remembers that it has had an
-  // enemy once the Enemies entry has a member (TBL-06, Q-106). Not a step of the undo history.
+  // enemy once a monster or npc entry can take its turn (DMT-02, Q-118). Not a step of the undo history.
   const applyNoting = (command: CommandEnvelope, sender?: string): LiveResult => {
     const result = apply(command, sender);
     const live = liveSceneId();
