@@ -4,7 +4,7 @@ Each bullet below is an owner decision: stated in the requirements (`[input]`) o
 
 ## 1. Data
 
-- Nine entities in SQLite: Image, Asset, AssetTag, Campaign, Session, Scene, Token, Encounter, Settings (`03` §1). [input, Q-105, recommendation accepted]
+- Nine entities in SQLite: Image, Asset, AssetTag, Campaign, Session, Scene, Token, Encounter, Settings (`03` §1). [input, Q-111, recommendation accepted]
 - UUIDs for every entity except Image, which is identified by the sha256 of its original; duplicate uploads reuse the stored image (`03` §3). [input]
 - Token positions are decimal grid units; recalibration or a new map resolution never moves a token (`03` §4). [input]
 - Grid size and offsets are stored in original-image dimensions (`06` §2). [input]
@@ -31,6 +31,9 @@ Each bullet below is an owner decision: stated in the requirements (`[input]`) o
 - Schema changes are additive first; destructive steps need an approved plan (`14` §8). [Q-081, recommendation accepted]
 - Migrations are tested on a generated fixture database; no real campaign data enters the repository or CI (`14` §8). [Q-082, recommendation accepted]
 - UUIDs (sha256 for Image) are the only keys; no internal sequential key exists (`14` §8). [Q-084, recommendation accepted]
+- Every token carries optional hit points, maximum, temporary hit points and armour class, and an asset optional defaults of maximum hit points and armour class copied to its new tokens (`03` §9). [Q-112, recommendation accepted]
+- Every scene and every token carries DM notes; a token shows its asset's notes read-only (`03` §10). [Q-114, recommendation accepted]
+- A campaign or library assets export as a zip with a versioned `manifest.json`, JSON data and images named by sha256; a campaign imports as a new copy with new identifiers, images reused by hash and assets by identifier (`09` §9). [Q-115, recommendation accepted]
 
 ## 2. Security
 
@@ -60,21 +63,25 @@ Each bullet below is an owner decision: stated in the requirements (`[input]`) o
 - Hiding and deleting a token reach players as the same event (`04` §3). [Q-083, recommendation accepted]
 - `/api/auth` tells a browser only whether it itself holds a DM session (`02` §5). [Q-085, recommendation accepted]
 - Measurements on a scene that is not live never leave the DM view (`04` §11). [Q-086, recommendation accepted]
+- Hit points, armour class and DM notes never reach players; a change of hit points reaches them only as the markers it sets on a token they can see (`04` §4). [Q-112, Q-114, recommendation accepted]
+- An import with a newer format version, a path escaping its target, or an archive or unpacked total over the import limit (a setting, 2 GB by default) is refused and stores nothing (`07` §9). [Q-115, Q-119, recommendation accepted]
 
 ## 3. Scope
 
 - The MVP covers preparation and display for in-person play by a DM alone; players and rules come in Phase 2 (`01` §1, `01` §4). [input]
 - No player devices, character sheets, remote play or map creation in the MVP (`01` §2, `01` §7). [input]
-- No game rules in code (`01` §1). [input]
+- No game rules in code beyond the size table, the ruler and the hit-point automation (`01` §1). [input, Q-112]
 - The MVP capability list of `01` §3 is the release content. [input]
-- Campaign export/import is Phase 2 (`01` §4). [Q-013, recommendation accepted]
-- Live token commands are add, move, visibility and delete (`04` §2). [input, Q-014, recommendation accepted]
+- Campaign and library export and import as a zip are built in the DM toolkit; copying the data folder stays the backup (`01` §4, `01` §10). [Q-115, recommendation accepted]
+- Live token commands are add, move, visibility, markers, hit points and armour class, and delete (`04` §2). [input, Q-014, Q-099, Q-112, recommendation accepted]
 - The live scene's setup can be edited while live and is pushed as a snapshot (`04` §10). [Q-015, recommendation accepted]
 - No area-of-effect templates (`01` §6). [Q-099, recommendation accepted]
 - Ping, four condition markers and manual fog regions are built after the MVP's features, before the release (`01` §9). [Q-099, recommendation accepted]
 - The condition markers are eighteen, with their SRD 5.1 rule text and bundled icons credited in the DM view, none applying another (`01` §9). [Q-103, recommendation accepted]
-- An initiative tracker, one encounter per scene with an entry per player character and one Enemies entry, its order recorded from physical dice, is built before the release; players see no enemy in it; dice, hit points and per-monster initiative stay Phase 2 (`01` §9, `04` §14). [Q-104, recommendation accepted]
-- An empty Enemies entry takes its turn, with an offer to end combat, once the encounter has had an enemy, and is passed over before (`04` §14). [Q-106, recommendation accepted]
+- An initiative tracker, one encounter per scene stored in SQLite with an entry per visible player character, monster and npc, its order recorded from physical dice; the TV shows the entries of tokens players can see by their labels; dice stay Phase 2 (`01` §9, `04` §14). [Q-111, recommendation accepted]
+- With `hp_max` set, Bloodied follows half the hit points, and 0 makes a monster or npc Dead and a player character Unconscious; rising above 0 removes neither (`04` §15). [Q-112, Q-116]
+- A monster or npc players first see during combat is offered to the DM for an entry, never added by itself (`04` §14). [Q-117, recommendation accepted]
+- A monster's or npc's entry stays while its token is Dead or unseen, its turns passed over, and the DM is asked to end combat once no such entry can act (`04` §14). [Q-118, recommendation accepted]
 - Installed from source with Node; nothing published to a registry (`09` §1). [Q-017, recommendation accepted]
 - Before the release, also a Windows x64 installer and portable zip with their own Node runtime, attached to a GitHub Release from a version tag (`09` §1). [Q-107, recommendation accepted]
 - The installer installs for every user and adds a private-profile firewall rule (`09` §4). [Q-108, recommendation accepted]
@@ -129,6 +136,7 @@ Each bullet below is an owner decision: stated in the requirements (`[input]`) o
 - The critical journeys are First run, Prepare, Connect TV, Run and Recover (`08` §10). [Q-065, recommendation accepted]
 - The DM steers the TV camera by dragging and resizing the TV frame (`08` §2). [Q-080, recommendation accepted]
 - Sessions and scenes are reordered by dragging in the sidebar, with a keyboard alternative (`08` §1). [Q-089, recommendation accepted]
+- Follow my view keeps the TV camera on the DM's whole view, never cropped, until Lock TV camera, another TV camera control or a change of live scene turns it off; it is off at every activation (`04` §9). [Q-113, recommendation accepted]
 
 ## 6. Change control
 

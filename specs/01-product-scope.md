@@ -11,6 +11,7 @@ What Emberglass is for, who uses it, and what each release contains.
 - Rules baseline: D&D 5e, 2014 edition (SRD 5.1); every campaign carries `rules_version = 5e-2014` (`03` §8). [input]
 - The MVP MUST NOT put game rules in code. [input]
 - The input itself specifies the token size table (`05` §2) and the ruler's diagonal rules (`06` §5). [input]
+- The hit-point automation of the DM toolkit (§10, `04` §15) MUST be the only other game rule in code: Bloodied, Dead and Unconscious set from a token's hit points, temporary hit points taking damage first. [Q-112]
 - One server hosts one game at a time; Settings hold a single live scene (`03` §1). [input]
 
 ## 2. Actors
@@ -67,9 +68,9 @@ Phase 2 MUST NOT be implemented in the MVP; it covers: [input]
 - data-driven rules in JSON, importing SRD 5.1;
 - campaign export and import as a zip.
 
-Manual fog painted by the DM, condition markers on tokens and the initiative tracker (`13` §10) MUST be built after the MVP's features, before the release (§9); automatic fog, hit points, DM-defined markers, condition durations, dice and per-monster initiative stay Phase 2. [Q-099, Q-101, Q-103, Q-104]
+Manual fog painted by the DM, condition markers on tokens and the initiative tracker (`13` §10) MUST be built after the MVP's features, before the release (§9); hit points, per-enemy initiative and DM notes per scene are built in the DM toolkit (§10); automatic fog, DM-defined markers, condition durations and dice stay Phase 2. [Q-099, Q-101, Q-103, Q-111, Q-112, Q-114]
 
-Campaign export/import is Phase 2; in the MVP a campaign moves to another PC only by copying the whole data folder (`09` §5). [Q-013, recommendation accepted]
+Campaign export and import as a zip is built in the DM toolkit (§10), beside copying the whole data folder, which stays the backup (`09` §5). [Q-115]
 
 ## 5. Phase 3 (Future)
 
@@ -115,11 +116,21 @@ Emberglass MUST NOT implement: [input]
 
 ## 9. After the MVP, before the release
 
-After the MVP's features and before the owner's TV run (`10` §4), Emberglass MUST add: [Q-099, Q-101, Q-103, Q-104]
+After the MVP's features and before the owner's TV run (`10` §4), Emberglass MUST add: [Q-099, Q-101, Q-103, Q-111]
 
 - a ping the DM places on the live scene, shown on every view (`13` §10);
 - eighteen condition markers on tokens, shown on every view: Bloodied, Unconscious, Dead, Concentrating, Prone and Poisoned pinned, and Blinded, Charmed, Deafened, Exhaustion with its level, Frightened, Grappled, Incapacitated, Invisible, Paralyzed, Petrified, Restrained and Stunned in a searchable list, each with its rule text and none applied by another (`13` §10); [Q-103]
 - manual fog the DM paints with a brush and reveals with an eraser, with tokens under the fog filtered for players (`13` §10);
-- an initiative tracker: one encounter per scene holding one entry per player character and one Enemies entry the DM plays as a single turn, ordered by the numbers the table rolled with physical dice or by dragging, its turns and rounds advanced by the DM, shown in the DM view and as a strip along the top of the TV that names no enemy and gives no count of them (`04` §14, `08` §12, `13` §10). [Q-104]
+- an initiative tracker: one encounter per scene holding one entry per player character and, since the DM toolkit, one per visible monster or npc, ordered by the numbers the table rolled with physical dice or by dragging, its turns and rounds advanced by the DM, shown in the DM view and as a strip along the top of the TV that names only tokens players can see, by their labels (`04` §14, `08` §12, `13` §10). [Q-111]
 
 The DM view and the player view MUST follow the 2026-09-30 redesign: palette, typography, layout, token visuals and the DM's controls of `08` §11. [input, Q-100]
+
+## 10. The DM toolkit
+
+After the Windows package (`13` §11), Emberglass MUST add: [Q-111, Q-112, Q-113, Q-114, Q-115]
+
+- hit points and armour class on every token, optional and seen only by the DM, with defaults on the asset and Bloodied, Dead and Unconscious set from them (`03` §9, `04` §15, `08` §13); [Q-112, Q-116]
+- an initiative entry per visible monster or npc in place of the one Enemies entry, each shown on the TV by its token's label (§9, `04` §14); [Q-111, Q-117, Q-118]
+- Follow my view, which keeps the TV camera on the DM's view of the live scene (`04` §9, `08` §13); [Q-113]
+- DM notes per scene and per token, seen only by the DM (`03` §10, `04` §16); [Q-114]
+- export of a campaign or of library assets as a zip, and its import on any Emberglass (`09` §9, `07` §9). [Q-115, Q-119]

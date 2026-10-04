@@ -89,14 +89,24 @@ The player view MUST show the live scene with a subtle vignette, labels sized to
 
 ## 12. Initiative
 
-The DM view MUST add, on the live scene (`04` §14): [Q-104]
+The DM view MUST add, on the live scene (`04` §14): [Q-111]
 
 - an Initiative tab in the right panel, its header showing the round while combat runs, and Start combat while it does not;
 - one row per entry in turn order, each with a drag handle, the token's avatar, its name and an optional initiative number field; typing a number sorts the rows, a drag sets the order and stands until a number is typed again, and Move up and Move down do what a drag does from the keyboard;
-- the entry whose turn it is highlighted, and the next one marked; on a player character's turn its token ringed on the map and the DM's camera centred on it; on the Enemies turn the row opened to list its members with their conditions, each member's token lightly ringed on the map, and a member chosen selecting and centring its token;
+- the entry whose turn it is highlighted, and the next one marked; on each entry's turn its token ringed on the map and the DM's camera centred on it; an entry passed over (`04` §14) shown dimmed; [Q-111, Q-118]
 - Next turn (Enter) and Previous turn (Shift+Enter), the round counted when the turn passes the last entry; neither acting while a field, a button or a dialog has focus;
-- when the Enemies turn starts with no members left, "No enemies left. End combat?" with End combat and Continue; [Q-106]
-- an offer to add a player character token that players can now see and that has no entry ("Add {name} to initiative?"), at the end of the order;
+- when Next finds no monster or npc entry that can take its turn, once the encounter has had one, "No enemies left. End combat?" with End combat and Continue; [Q-111, Q-118]
+- an offer to add a token that players can now see and that has no entry, a player character, or a monster or npc not carrying Dead ("Add {name} to initiative?"), at the end of the order; [Q-111, Q-117]
 - End combat asked first, saying that it cannot be undone once another scene goes live or the server restarts.
 
-While combat runs, the player view MUST show a strip along its top edge, readable from 2–3 m and no taller than it must be: each player character's portrait and name and one "Enemies" card in turn order, the turn's entry highlighted, the next one marked, and the round at one end; it MUST name no monster or npc and give no count of them, and fades in and out as scene changes do. [Q-104]
+While combat runs, the player view MUST show a strip along its top edge, readable from 2–3 m and no taller than it must be: in turn order, a card for each entry whose token players can see, player characters and enemies alike, with its portrait and its token's label as the map shows it ("Bandit 1"), a Dead one greyed, the turn's entry highlighted, the next one marked, and the round at one end; it shows no entry players cannot see, and fades in and out as scene changes do. [Q-111, Q-118]
+
+## 13. The DM toolkit
+
+The DM view MUST add (`01` §10): [Q-112, Q-113, Q-114, Q-115]
+
+- a token's hit points, current, maximum and temporary, and its armour class, each optional, read and set wherever the token is edited, on every scene, and on the live scene damage or healing applied by an amount (`04` §15); none of it ever drawn on the player view; [Q-112]
+- an asset's default maximum hit points and armour class in the asset's editor (`03` §9); [Q-112]
+- Follow my view among the TV camera controls of the live scene (§11), a toggle whose state is plain to see, off whenever another TV camera control is used or the TV camera is locked (`04` §9); [Q-113]
+- the scene's notes, and a token's notes with its asset's notes beside them, read-only, each readable and editable on every scene (`03` §10); [Q-114]
+- Export of a campaign and of library assets, the selected ones or all, and Import of either, an import saying what it added and what it reused, or why it was refused (`09` §9). [Q-115]
