@@ -20,7 +20,7 @@ Commands flow from a DM socket to the server; the server MUST reject any command
 | `token.setVisibility` | hide or reveal a token | yes |
 | `token.setMarkers` | set the condition markers a token carries (`03` §1) | yes |
 | `token.setStats` | set or clear a token's hit points, maximum, temporary hit points and armour class (§15) | yes |
-| `token.adjustHp` | apply an amount of damage or of healing to a token's hit points (§15) | yes |
+| `token.applyHp` | apply a signed amount to a token's hit points, negative for damage and positive for healing (§15) | yes |
 | `fog.paint` | one stroke of the brush on the live scene, painting fog or erasing it (§13) | yes |
 | `fog.fill` | fog the live scene's whole map, or clear all its fog | yes |
 | `scene.activate` | make a scene the live scene | no |
@@ -35,7 +35,7 @@ Commands flow from a DM socket to the server; the server MUST reject any command
 | `undo` | apply the most recent inverse command | — |
 | `redo` | apply again the most recently undone command | — |
 
-- The token commands on the live scene MUST be exactly `token.add`, `token.move`, `token.setVisibility`, `token.setMarkers`, `token.setStats`, `token.adjustHp` and `token.delete`; label and stacking order are edited only on scenes that are not live, notes at any time over REST (§16); deleting a token also removes its initiative entry, and undoing the delete puts the entry back (§14). [input, Q-014, Q-099, Q-111, Q-112, Q-114]
+- The token commands on the live scene MUST be exactly `token.add`, `token.move`, `token.setVisibility`, `token.setMarkers`, `token.setStats`, `token.applyHp` and `token.delete`; label and stacking order are edited only on scenes that are not live, notes at any time over REST (§16); deleting a token also removes its initiative entry, and undoing the delete puts the entry back (§14). [input, Q-014, Q-099, Q-111, Q-112, Q-114]
 - Clearing the live scene MUST be possible at any time with `scene.deactivate`. [Q-025]
 - Conflicting commands MUST resolve last-write-wins. [input]
 - Several DM sockets MAY be connected at once, each receiving every `dm` event. [Q-008, recommendation accepted]
@@ -147,7 +147,7 @@ Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-02
 
 ## 15. Hit points
 
-- `token.setStats` MUST set or clear any of a token's `hp_current`, `hp_max`, `hp_temp` and `ac` (`03` §9); `token.adjustHp` MUST apply an amount of damage or of healing, damage taking the temporary hit points first. [Q-112]
+- `token.setStats` MUST set or clear any of a token's `hp_current`, `hp_max`, `hp_temp` and `ac` (`03` §9); `token.applyHp` MUST apply a signed amount, negative for damage and positive for healing, damage taking the temporary hit points first. [Q-112, D-182]
 - Damage MUST stop `hp_current` at 0, and healing MUST stop it at `hp_max` when one is set; healing never adds temporary hit points. [D-181]
 - While a token has `hp_max`, every change of its hit points, live, in preparation, undone or redone, MUST set Bloodied when `hp_current` is at most `hp_max` / 2 rounded down and remove it above that; at 0 a monster or npc token MUST gain Dead and a player character token Unconscious. Without `hp_max`, nothing is set. [Q-112]
 - Hit points rising above 0 MUST NOT remove Dead or Unconscious; the DM removes them. [Q-116]

@@ -11,6 +11,7 @@ import {
 import { EncounterSchema, InitiativeSchema, MAX_ENCOUNTER_ENTRIES, PlayerEncounterSchema } from './encounter.js';
 import type { ErrorEnvelope } from './errors.js';
 import { FogMaskSchema, FogStrokeSchema } from './fog.js';
+import { HpDeltaSchema } from './hp.js';
 import { SceneTokenSchema, TokenChangeSchema, TokenCreateBodySchema } from './tokens.js';
 
 // WebSocket envelopes (specs/04-live-sync.md §2, §3, §5; D-047, D-064).
@@ -67,6 +68,8 @@ export const COMMAND_TYPES = [
   'token.delete',
   'token.setVisibility',
   'token.setMarkers',
+  'token.setStats',
+  'token.applyHp',
   'fog.paint',
   'fog.fill',
   'scene.activate',
@@ -324,6 +327,19 @@ export const TokenSetMarkersPayloadSchema = Type.Object(
   { token_id: UuidSchema, markers: TokenSchema.properties.markers },
   strict,
 );
+// `token.setStats` and `token.applyHp` (DMT-01, specs/04-live-sync.md §2, §15): set or clear any of the four fields,
+// or apply a signed amount, negative for damage; each one undoable step with the markers the hit points set.
+export const TokenSetStatsPayloadSchema = Type.Object(
+  {
+    token_id: UuidSchema,
+    hp_current: Type.Optional(TokenSchema.properties.hp_current),
+    hp_max: Type.Optional(TokenSchema.properties.hp_max),
+    hp_temp: Type.Optional(TokenSchema.properties.hp_temp),
+    ac: Type.Optional(TokenSchema.properties.ac),
+  },
+  { ...strict, minProperties: 2 },
+);
+export const TokenApplyHpPayloadSchema = Type.Object({ token_id: UuidSchema, delta: HpDeltaSchema }, strict);
 export const SceneActivatePayloadSchema = Type.Object({ scene_id: UuidSchema }, strict);
 export const SceneDeactivatePayloadSchema = Type.Object({}, strict);
 export const UndoPayloadSchema = Type.Object({}, strict);
@@ -363,6 +379,8 @@ export const LIVE_COMMAND_PAYLOAD_SCHEMAS = {
   'token.setVisibility': TokenSetVisibilityPayloadSchema,
   'token.delete': TokenDeletePayloadSchema,
   'token.setMarkers': TokenSetMarkersPayloadSchema,
+  'token.setStats': TokenSetStatsPayloadSchema,
+  'token.applyHp': TokenApplyHpPayloadSchema,
   'scene.activate': SceneActivatePayloadSchema,
   'scene.deactivate': SceneDeactivatePayloadSchema,
   'camera.setPlayer': CameraSetPlayerPayloadSchema,
@@ -388,6 +406,8 @@ export type TokenMovePayload = Static<typeof TokenMovePayloadSchema>;
 export type TokenSetVisibilityPayload = Static<typeof TokenSetVisibilityPayloadSchema>;
 export type TokenDeletePayload = Static<typeof TokenDeletePayloadSchema>;
 export type TokenSetMarkersPayload = Static<typeof TokenSetMarkersPayloadSchema>;
+export type TokenSetStatsPayload = Static<typeof TokenSetStatsPayloadSchema>;
+export type TokenApplyHpPayload = Static<typeof TokenApplyHpPayloadSchema>;
 export type SceneActivatePayload = Static<typeof SceneActivatePayloadSchema>;
 export type SceneDeactivatePayload = Static<typeof SceneDeactivatePayloadSchema>;
 export type UndoPayload = Static<typeof UndoPayloadSchema>;

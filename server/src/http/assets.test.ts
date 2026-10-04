@@ -126,6 +126,8 @@ interface AssetInput {
   tags?: string[];
   notes?: string;
   default_hidden?: boolean;
+  hp_max?: number;
+  ac?: number;
   image_id?: string;
 }
 
@@ -200,6 +202,8 @@ describe('create, read, update and list (specs/02-architecture.md §5, specs/05-
       size: 'medium',
       default_hidden: true,
       notes: 'Leads the cave ambush.',
+      hp_max: null,
+      ac: null,
       tags: ['boss', 'goblinoid'],
     });
     const plain = await newAsset({ name: 'Chest', category: 'object', size: 'tiny' });
@@ -212,6 +216,25 @@ describe('create, read, update and list (specs/02-architecture.md §5, specs/05-
     expect(updated).toEqual({ ...created, name: 'Goblin chief', size: 'large', notes: '', tags: ['chief'] });
     expect(ok<LibraryAsset>(await get(`/api/assets/${created.id}`))).toEqual(updated);
     expect(await list()).toEqual([plain, updated]);
+  });
+
+  it('keeps optional hit-point and armour-class defaults, set, changed and cleared, within bounds (DMT-01)', async () => {
+    const image = await uploadImage();
+    const ogre = await newAsset({ name: 'Ogre', image_id: image.id, hp_max: 59, ac: 11 });
+    expect(ogre).toMatchObject({ hp_max: 59, ac: 11 });
+    expect(ok<LibraryAsset>(await patch(`/api/assets/${ogre.id}`, { hp_max: 60 }))).toMatchObject({
+      hp_max: 60,
+      ac: 11,
+    });
+    expect(ok<LibraryAsset>(await patch(`/api/assets/${ogre.id}`, { ac: null }))).toMatchObject({
+      hp_max: 60,
+      ac: null,
+    });
+    // Another field changed leaves them as they are.
+    expect(ok<LibraryAsset>(await patch(`/api/assets/${ogre.id}`, { notes: 'big' }))).toMatchObject({ hp_max: 60 });
+    for (const body of [{ hp_max: 0 }, { hp_max: 10_000 }, { ac: -1 }, { ac: 100 }, { hp_max: 2.5 }]) {
+      expect((await patch(`/api/assets/${ogre.id}`, body)).statusCode, JSON.stringify(body)).toBe(400);
+    }
   });
 
   it('stores every size of the size table and every category', async () => {

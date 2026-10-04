@@ -1,5 +1,6 @@
 import { Type, type Static } from 'typebox';
 import { MarkersSchema } from './conditions.js';
+import { AcSchema, HpMaxSchema, HpSchema } from './hp.js';
 
 // The eight stored entities of specs/03-domain-model.md §1, as the server reads
 // them from SQLite (server/migrations/0001_initial_schema.sql, D-075). Field
@@ -96,6 +97,9 @@ export const AssetSchema = Type.Object(
     size: Type.Enum(TOKEN_SIZES),
     default_hidden: Type.Boolean(),
     notes: Type.String(),
+    // Defaults copied to its new tokens, or none (DMT-01, specs/03-domain-model.md §9); the DM's only.
+    hp_max: HpMaxSchema,
+    ac: AcSchema,
   },
   strict,
 );
@@ -154,6 +158,12 @@ export const TokenSchema = Type.Object(
     markers: MarkersSchema,
     // Always empty in the MVP; Phase 2 links characters through it.
     character_id: Type.Null(),
+    // Hit points and armour class, each optional (DMT-01, specs/03-domain-model.md §9): the DM's only, never in
+    // a players' token (specs/04-live-sync.md §4).
+    hp_current: HpSchema,
+    hp_max: HpMaxSchema,
+    hp_temp: HpSchema,
+    ac: AcSchema,
   },
   strict,
 );

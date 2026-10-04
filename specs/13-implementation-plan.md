@@ -390,7 +390,7 @@ Goal: the DM tracks hit points and armour class, runs initiative per enemy, lets
 `DMT-01` Hit points and armour class
 
 - An additive migration: nullable `hp_current`, `hp_max`, `hp_temp` and `ac` on tokens, `hp_max` and `ac` defaults on assets, copied to new tokens (`03` §1, `03` §9, `05` §1, `05` §3).
-- `token.setStats` and `token.adjustHp` on the live scene, undoable, temporary hit points first; REST edits in preparation; Bloodied, Dead and Unconscious set from the hit points in the same step, never removed by rising above 0 (`01` §1, `04` §2, `04` §3, `04` §8, `04` §15).
+- `token.setStats` and `token.applyHp` on the live scene, undoable, temporary hit points first; REST edits in preparation; Bloodied, Dead and Unconscious set from the hit points in the same step, never removed by rising above 0 (`01` §1, `04` §2, `04` §3, `04` §8, `04` §15).
 - Hit points and armour class filtered from every players' snapshot and event; the hidden-information script extended with them (`04` §4, `10` §3).
 - The token's hit points, armour class and damage or healing, and the asset editor's defaults, in the DM view (`08` §13).
 - Exit: integration tests on a real SQLite file cover the commands, their undo and redo, the automation at each threshold with and without `hp_max`, temporary hit points and the asset defaults; the hidden-information suite passes with hit points in its script and finds none in any player message.

@@ -16,6 +16,10 @@ const token = (id: string, z_order: number, fields: Partial<SceneToken> = {}): S
   z_order,
   markers: [],
   character_id: null,
+  hp_current: null,
+  hp_max: null,
+  hp_temp: null,
+  ac: null,
   asset: { name: 'Goblin', image_id: 'f'.repeat(64), size: 'medium', category: 'monster' },
   ...fields,
 });

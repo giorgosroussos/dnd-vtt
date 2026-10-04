@@ -1,13 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import {
+  hpChanged,
+  markersForHp,
   nextLabel,
   normaliseMarkers,
+  statsFromAsset,
+  withStats,
   numberingPeers,
   type AssetCategory,
   type SceneToken,
   type TokenMarker,
   type TokenSize,
+  type TokenStats,
   type Encounter,
   type TokenStack,
 } from '@emberglass/shared';
@@ -21,6 +26,10 @@ import { refusal, type TokenScope } from './scope.js';
 // label, stacking order, condition markers); its name, image, size and category are its asset's and are
 // read by joining it. Markers are stored as a JSON array of objects, each condition once, in the order the DM
 // applied them (TBL-05, D-157).
+// Hit points and armour class (DMT-01, specs/03-domain-model.md §9, specs/04-live-sync.md §15): a token placed
+// from an asset starts with the asset's defaults, at full hit points; every write that changes a token's hit
+// points sets the markers they drive (`markersForHp`) in the same transaction, unless it gives the markers itself,
+// as an undo that puts both back does.
 // Positions are decimal grid units and are stored exactly as sent. Every write names the scope it
 // is for, checked inside the transaction that would change the token: preparation (REST) is refused
 // on the live scene, whose tokens change only by the live commands, and a live command is refused
@@ -32,7 +41,8 @@ import { refusal, type TokenScope } from './scope.js';
 // placed visible inside the fog renames no sibling players see until they can see it too.
 
 const COLUMNS = `token.id, token.scene_id, token.asset_id, token.label, token.x, token.y, token.hidden,
-  token.z_order, token.markers, token.character_id, asset.name AS asset_name, asset.image_id AS asset_image_id,
+  token.z_order, token.markers, token.character_id, token.hp_current, token.hp_max, token.hp_temp, token.ac,
+  asset.name AS asset_name, asset.image_id AS asset_image_id,
   asset.size AS asset_size, asset.category AS asset_category`;
 const FROM = 'FROM token JOIN asset ON asset.id = token.asset_id';
 
@@ -47,6 +57,10 @@ interface Row {
   z_order: number;
   markers: string;
   character_id: null;
+  hp_current: number | null;
+  hp_max: number | null;
+  hp_temp: number | null;
+  ac: number | null;
   asset_name: string;
   asset_image_id: string;
   asset_size: TokenSize;
@@ -67,6 +81,10 @@ const toToken = (row: Row): SceneToken => ({
   z_order: row.z_order,
   markers: markersOf(JSON.parse(row.markers) as unknown[]),
   character_id: row.character_id,
+  hp_current: row.hp_current,
+  hp_max: row.hp_max,
+  hp_temp: row.hp_temp,
+  ac: row.ac,
   asset: { name: row.asset_name, image_id: row.asset_image_id, size: row.asset_size, category: row.asset_category },
 });
 
@@ -181,12 +199,15 @@ export function createToken(
     if (numbers === undefined) return { outcome: 'not_found' };
     const refused = refusal(db, sceneId, scope);
     if (refused) return { outcome: refused };
-    const asset = db.prepare('SELECT name, default_hidden FROM asset WHERE id = ?').get(fields.asset_id) as
-      { name: string; default_hidden: 0 | 1 } | undefined;
+    const asset = db.prepare('SELECT name, default_hidden, hp_max, ac FROM asset WHERE id = ?').get(fields.asset_id) as
+      { name: string; default_hidden: 0 | 1; hp_max: number | null; ac: number | null } | undefined;
     if (asset === undefined) return { outcome: 'asset_not_found' };
     const top = db.prepare('SELECT max(z_order) FROM token WHERE scene_id = ?').pluck().get(sceneId) as number | null;
+    // The asset's defaults, copied: a later change of them changes no token (D-181).
+    const stats = statsFromAsset(asset);
     db.prepare(
-      'INSERT INTO token (id, scene_id, asset_id, label, x, y, hidden, z_order, shown) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      `INSERT INTO token (id, scene_id, asset_id, label, x, y, hidden, z_order, shown, hp_current, hp_max, hp_temp, ac)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id,
       sceneId,
@@ -198,6 +219,10 @@ export function createToken(
       (top ?? -1) + 1,
       // Shown, and numbered, by the pass below when players can see it (Q-096, TBL-03).
       0,
+      stats.hp_current,
+      stats.hp_max,
+      stats.hp_temp,
+      stats.ac,
     );
     // Numbered first, then read: the token's own label may be the one that changes.
     const renamed = renamedBy(showNewlySeen(db, sceneId), id);
@@ -222,9 +247,9 @@ export type TokenChangeOutcome =
   | { outcome: 'not_live' };
 
 /**
- * Moves, hides or reveals, relabels, restacks or marks a token; in preparation, of a scene that is
- * not live, and by a live command (only a move, a visibility change or the markers,
- * specs/04-live-sync.md §2), of the live scene. `stack`
+ * Moves, hides or reveals, relabels, restacks, marks a token or sets its hit points and armour class; in
+ * preparation, of a scene that is not live, and by a live command (only a move, a visibility change, the
+ * markers or the hit points and armour class, specs/04-live-sync.md §2), of the live scene. `stack`
  * puts it above (`front`) or below (`back`) every other token of the scene, unless it already is.
  * Revealing a token that still carries its asset's bare name numbers it (Q-092), unless the same
  * change gives it a label or players have seen it before (Q-096); hiding one keeps its label.
@@ -239,7 +264,7 @@ export function updateToken(
     label?: string;
     stack?: TokenStack;
     markers?: readonly TokenMarker[];
-  },
+  } & Partial<TokenStats>,
   scope: TokenScope = 'prep',
 ): TokenChangeOutcome {
   return db.transaction((): TokenChangeOutcome => {
@@ -259,13 +284,31 @@ export function updateToken(
         z = fields.stack === 'front' ? others + 1 : others - 1;
       }
     }
-    db.prepare('UPDATE token SET x = ?, y = ?, hidden = ?, label = ?, z_order = ?, markers = ? WHERE id = ?').run(
+    // Hit points and armour class given set over the token's; a change of hit points sets the markers they drive,
+    // unless the same change gives the markers (DMT-01, specs/04-live-sync.md §15).
+    const stats = withStats(before, {
+      ...(fields.hp_current === undefined ? {} : { hp_current: fields.hp_current }),
+      ...(fields.hp_max === undefined ? {} : { hp_max: fields.hp_max }),
+      ...(fields.hp_temp === undefined ? {} : { hp_temp: fields.hp_temp }),
+      ...(fields.ac === undefined ? {} : { ac: fields.ac }),
+    });
+    const markers =
+      fields.markers ??
+      (hpChanged(before, stats) ? markersForHp(before.asset.category, stats, before.markers) : before.markers);
+    db.prepare(
+      `UPDATE token SET x = ?, y = ?, hidden = ?, label = ?, z_order = ?, markers = ?,
+         hp_current = ?, hp_max = ?, hp_temp = ?, ac = ? WHERE id = ?`,
+    ).run(
       fields.x ?? before.x,
       fields.y ?? before.y,
       (fields.hidden ?? before.hidden) ? 1 : 0,
       fields.label ?? before.label,
       z,
-      JSON.stringify(markersOf(fields.markers ?? before.markers)),
+      JSON.stringify(markersOf(markers)),
+      stats.hp_current,
+      stats.hp_max,
+      stats.hp_temp,
+      stats.ac,
       id,
     );
     // Numbered only at its first showing (Q-096): a token players saw is revealed with the label
@@ -342,8 +385,9 @@ export function restoreToken(
     // numbering would then take for a label the DM typed (Q-094, LIV-05 review C2).
     const label = token.label === token.asset.name ? name : token.label;
     db.prepare(
-      `INSERT INTO token (id, scene_id, asset_id, label, x, y, hidden, z_order, markers, character_id, shown)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO token (id, scene_id, asset_id, label, x, y, hidden, z_order, markers, character_id, shown,
+         hp_current, hp_max, hp_temp, ac)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       token.id,
       token.scene_id,
@@ -356,6 +400,10 @@ export function restoreToken(
       JSON.stringify(markersOf(token.markers)),
       token.character_id,
       shown ? 1 : 0,
+      token.hp_current,
+      token.hp_max,
+      token.hp_temp,
+      token.ac,
     );
     // Put back where players can see it though they never did (the fog lifted meanwhile): numbered as at
     // a first showing (TBL-03).

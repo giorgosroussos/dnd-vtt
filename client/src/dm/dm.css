@@ -1933,3 +1933,184 @@ textarea.eg-field__input {
   justify-content: center;
   gap: var(--space-1);
 }
+
+/* Hit points and armour class (DMT-01, specs/08-ux-journeys.md §13): the DM's only. In the popover the hit points as
+   current / maximum with a thin bar, the armour class on a shield, and the field for damage or healing; in a list
+   row a compact "12/27" and the shield. The bar's colour is backed by the numbers, never colour alone. */
+.eg-popover__hp {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-divider);
+}
+
+.eg-hp {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-2);
+}
+
+.eg-hp__value,
+.eg-hp__ac {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.eg-hp__value {
+  flex-grow: 1;
+}
+
+.eg-hp__value:hover,
+.eg-hp__ac:hover,
+.eg-hp__value[aria-expanded='true'],
+.eg-hp__ac[aria-expanded='true'] {
+  border-color: var(--color-border);
+  background: var(--color-hover);
+}
+
+.eg-hp__numbers {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.eg-hp__temp {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.eg-hp__ac {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.eg-hp__bar {
+  display: block;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--color-divider);
+  overflow: hidden;
+}
+
+.eg-hp__fill {
+  display: block;
+  height: 100%;
+  background: var(--color-connected);
+}
+
+.eg-hp__fill[data-low] {
+  background: var(--color-bloodied);
+}
+
+.eg-hp__entry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.eg-hp__field {
+  flex-grow: 1;
+  min-width: 0;
+  min-height: 30px;
+  padding: 2px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.eg-hp__field[aria-invalid='true'] {
+  border-color: var(--color-danger);
+}
+
+.eg-hp__key {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-caption);
+}
+
+.eg-hp__hint {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-caption);
+}
+
+.eg-hp__hint--invalid {
+  color: var(--color-danger);
+}
+
+.eg-hp__edit {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.eg-hp__edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.eg-hp__edit-field input {
+  min-width: 0;
+  min-height: 28px;
+  padding: 2px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.eg-hp__edit-actions,
+.eg-hp__edit .eg-hp__hint {
+  grid-column: 1 / -1;
+}
+
+.eg-hp__edit-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.eg-stats {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+}
+
+.eg-stats__ac {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* The asset editor's two defaults, side by side. */
+.eg-form__pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+
+.eg-field__hint {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-caption);
+}

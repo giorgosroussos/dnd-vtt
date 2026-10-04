@@ -1,10 +1,20 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
-import { CONDITIONS, EXHAUSTION, EXHAUSTION_LEVELS, hasMarker, markerLevel, type SceneToken } from '@emberglass/shared';
+import {
+  CONDITIONS,
+  EXHAUSTION,
+  EXHAUSTION_LEVELS,
+  hasMarker,
+  markerLevel,
+  type HpEntry,
+  type SceneToken,
+  type TokenStats,
+} from '@emberglass/shared';
 import type { TokenAnchor } from '../../canvas/MapCanvas.js';
 import { ConditionIcon, conditionHelp } from '../../ui/conditions.js';
 import { Icon } from '../../ui/icons.js';
 import { Menu } from '../../ui/Menu.js';
 import { t } from '../../ui/messages.js';
+import { HitPoints } from './HitPoints.js';
 
 const WIDTH = 272;
 const GAP = 14;
@@ -26,6 +36,7 @@ function placement(anchor: TokenAnchor): { left: number; top: number; side: 'lef
 // Below, the condition markers (TBL-05, D-157): the pinned ones as toggle chips, then any other one the token
 // carries, pressed, so it comes off without the list; More… opens a searchable list of the others. Exhaustion's
 // chip, while on, carries a stepper for its level. Each chip's hover text is its rule text (D-158).
+// Between them, the token's hit points and armour class (DMT-01, HitPoints.tsx).
 export function TokenPopover({
   token,
   anchor,
@@ -37,6 +48,9 @@ export function TokenPopover({
   onDelete,
   onToggleMarker,
   onExhaustion,
+  onHpEntry,
+  onStats,
+  focusHp = 0,
 }: {
   token: SceneToken;
   anchor: TokenAnchor;
@@ -48,6 +62,10 @@ export function TokenPopover({
   onDelete: () => void;
   onToggleMarker: (id: string) => void;
   onExhaustion: (level: number) => void;
+  onHpEntry: (entry: HpEntry) => void;
+  onStats: (stats: Partial<TokenStats>) => void;
+  /** Raised each time D asks for the hit-point field. */
+  focusHp?: number;
 }) {
   const { left, top, side } = placement(anchor);
   const prepOnly = live ? t('tokens.prepOnly') : undefined;
@@ -100,6 +118,7 @@ export function TokenPopover({
           ]}
         />
       </div>
+      <HitPoints token={token} focus={focusHp} onEntry={onHpEntry} onStats={onStats} />
       <div className="eg-popover__conditions" role="group" aria-labelledby={`${token.id}-conditions`}>
         <h3 id={`${token.id}-conditions`} className="eg-popover__label">
           {t('tokens.conditions')}

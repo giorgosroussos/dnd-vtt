@@ -1,7 +1,9 @@
 import { useId, useState, type FormEvent } from 'react';
 import {
+  AC_BOUNDS,
   API_ASSET_PATHS,
   ASSET_CATEGORIES,
+  HP_BOUNDS,
   TOKEN_SIZES,
   type AssetCategory,
   type LibraryAsset,
@@ -14,6 +16,7 @@ import { TextField } from '../../ui/TextField.js';
 import { errorMessage } from '../../ui/errorMessage.js';
 import { t } from '../../ui/messages.js';
 import { errorCode, request, upload } from '../api.js';
+import { fieldValue } from '../tokens/HitPoints.js';
 import { assetPath, categoryLabel, megabytes, sizeLabel } from './labels.js';
 
 // Create or edit an asset (specs/05-assets-and-images.md §1, §4, §5, §6, D-083, D-088).
@@ -51,12 +54,20 @@ export function AssetDialog({
   const [size, setSize] = useState<TokenSize>(asset?.size ?? 'medium');
   const [tags, setTags] = useState(asset?.tags.join(', ') ?? '');
   const [notes, setNotes] = useState(asset?.notes ?? '');
+  // Optional hit-point and armour-class defaults, copied to each new token (DMT-01, specs/03-domain-model.md §9).
+  const [hpMax, setHpMax] = useState(asset?.hp_max?.toString() ?? '');
+  const [ac, setAc] = useState(asset?.ac?.toString() ?? '');
+  const statsHintId = useId();
   // For a new asset the flag follows the category until the DM sets it, and is then
   // left out so the server applies the category's default (D-020); an existing
   // asset keeps its own flag whatever its category becomes (D-083).
   const [hidden, setHidden] = useState<boolean | undefined>(asset?.default_hidden);
   const shownHidden = hidden ?? category === 'monster';
-  const [errors, setErrors] = useState<{ file?: string | undefined; name?: string | undefined }>({});
+  const [errors, setErrors] = useState<{
+    file?: string | undefined;
+    name?: string | undefined;
+    stats?: string | undefined;
+  }>({});
   const [failure, setFailure] = useState<string>();
   const [pending, setPending] = useState(false);
 
@@ -74,19 +85,27 @@ export function AssetDialog({
   async function save(event: FormEvent) {
     event.preventDefault();
     if (pending) return;
-    const found: { file?: string | undefined; name?: string | undefined } = {};
+    const found: { file?: string | undefined; name?: string | undefined; stats?: string | undefined } = {};
     if (!asset && !file) found.file = t('assetForm.imageRequired');
     if (file && file.size > uploadLimit) {
       found.file = t('assetForm.tooLarge', { size: megabytes(file.size), limit: megabytes(uploadLimit) });
     }
     if (name.trim() === '') found.name = t('assetForm.nameRequired');
+    const defaults = { hp_max: fieldValue(hpMax, 1, HP_BOUNDS.max), ac: fieldValue(ac, AC_BOUNDS.min, AC_BOUNDS.max) };
+    if (defaults.hp_max === undefined || defaults.ac === undefined) found.stats = t('assets.statsInvalid');
     setErrors(found);
-    if (found.file || found.name) return;
+    if (found.file || found.name || found.stats) return;
+    // Sent only when set (a new asset) or changed (an edit), so that an asset without them is saved as before.
+    const stats = Object.fromEntries(
+      Object.entries(defaults).filter(([key, value]) =>
+        asset ? asset[key as 'hp_max' | 'ac'] !== value : value !== null,
+      ),
+    );
     setFailure(undefined);
     setPending(true);
     try {
       const image = file ? await upload(file) : undefined;
-      const fields = { name, category, size, tags: parseTags(tags), notes };
+      const fields = { name, category, size, tags: parseTags(tags), notes, ...stats };
       const saved = asset
         ? await request<LibraryAsset>('PATCH', assetPath(asset.id), {
             ...fields,
@@ -166,6 +185,26 @@ export function AssetDialog({
             onChange={(event) => setNotes(event.target.value)}
           />
         </div>
+        <div className="eg-form__pair">
+          <TextField
+            label={t('assets.hpMax')}
+            inputMode="numeric"
+            value={hpMax}
+            aria-describedby={statsHintId}
+            error={errors.stats}
+            onChange={(event) => setHpMax(event.target.value)}
+          />
+          <TextField
+            label={t('assets.ac')}
+            inputMode="numeric"
+            value={ac}
+            aria-describedby={statsHintId}
+            onChange={(event) => setAc(event.target.value)}
+          />
+        </div>
+        <p id={statsHintId} className="eg-field__hint">
+          {t('assets.statsHint')}
+        </p>
         <div className="eg-check">
           <input
             id={hiddenId}

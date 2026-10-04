@@ -184,7 +184,13 @@ export function readEntities(db: Database.Database): Entities {
       variants: JSON.parse(row.variants as string) as unknown,
       grid_preset: row.grid_preset_type === null ? null : grid(row, 'grid_preset_'),
     })) as Image[],
-    asset: all('asset').map((row) => ({ ...row, default_hidden: row.default_hidden === 1 })) as Asset[],
+    // Hit-point and armour-class defaults (migration 0010, DMT-01) are none on a database before it.
+    asset: all('asset').map((row) => ({
+      hp_max: null,
+      ac: null,
+      ...row,
+      default_hidden: row.default_hidden === 1,
+    })) as Asset[],
     asset_tag: all('asset_tag') as AssetTag[],
     campaign: all('campaign') as Campaign[],
     session: all('session') as Session[],
@@ -196,7 +202,12 @@ export function readEntities(db: Database.Database): Entities {
     })) as Scene[],
     // Whether players have seen a token is the server's own too (Q-096).
     // Markers (migration 0004, TBL-02) read as the array they are; a database before it carries none.
+    // Hit points and armour class (migration 0010, DMT-01) are none on a database before it.
     token: all('token').map((row) => ({
+      hp_current: null,
+      hp_max: null,
+      hp_temp: null,
+      ac: null,
       ...without(row, 'shown'),
       hidden: row.hidden === 1,
       markers: row.markers === undefined ? [] : (JSON.parse(row.markers as string) as unknown),

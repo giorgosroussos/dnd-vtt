@@ -77,6 +77,12 @@ export const TokenUpdateBodySchema = Type.Object(
     stack: Type.Optional(Type.Enum(TOKEN_STACK)),
     // The whole set of condition markers after the change (TBL-02).
     markers: Type.Optional(TokenSchema.properties.markers),
+    // Hit points and armour class, each set or cleared with null (DMT-01, specs/04-live-sync.md §15); a change of
+    // hit points sets the markers they drive, unless the body also gives the markers.
+    hp_current: Type.Optional(TokenSchema.properties.hp_current),
+    hp_max: Type.Optional(TokenSchema.properties.hp_max),
+    hp_temp: Type.Optional(TokenSchema.properties.hp_temp),
+    ac: Type.Optional(TokenSchema.properties.ac),
   },
   { ...strict, minProperties: 1 },
 );

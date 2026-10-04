@@ -18,7 +18,11 @@ import {
   type SceneGridUpdate,
   type SceneToken,
   FOG_BRUSH_RADIUS,
+  applyHp,
+  compactHp,
+  type HpEntry,
   type TokenMarker,
+  type TokenStats,
   type TokenUpdateBody,
 } from '@emberglass/shared';
 import { formatDecimal, formatNumber } from '../canvas/calibration.js';
@@ -341,6 +345,8 @@ export function ScenePanel({
   // Whether the selected token's popover is open: a click on the token, a choice in the list or a token
   // just placed opens it; a drag of the token or a pan closes it, and the token stays selected (D-156).
   const [popoverOpen, setPopoverOpen] = useState(false);
+  // Raised by D: the popover's hit-point field takes focus (DMT-01).
+  const [focusHp, setFocusHp] = useState(0);
   // Choosing a token gives the arrow keys back to it and ends measuring.
   const selectToken = (id: string | undefined) => {
     setSelectedToken(id);
@@ -975,6 +981,11 @@ export function ScenePanel({
     } else if (key === 'h' && selected && tokenControls) {
       event.preventDefault();
       toggleHidden(selected);
+    } else if (key === 'd' && selected && tokenControls && !placingAsset) {
+      // Damage or healing (DMT-01): the selected token's popover, its hit-point field focused.
+      event.preventDefault();
+      setPopoverOpen(true);
+      setFocusHp((n) => n + 1);
     }
   };
   useEffect(() => {
@@ -1056,6 +1067,35 @@ export function ScenePanel({
     );
   }
 
+  // Hit points and armour class (DMT-01, specs/04-live-sync.md §15): on the live scene `token.setStats` and
+  // `token.applyHp`, each one undoable step with the markers they set; in preparation the same fields over REST, the
+  // server setting the same markers. The event or the answer brings the token in step; nothing is shown before it.
+  const hpSaid = (token: SceneToken) => {
+    const hp = compactHp(token);
+    return hp === undefined
+      ? t('hp.changedNone', { label: token.label })
+      : t('hp.changed', { label: token.label, hp: t('hp.compact', { hp }) });
+  };
+  async function changeStats(token: SceneToken, stats: Partial<TokenStats>) {
+    if (isLive) {
+      const ok = await command('token.setStats', { token_id: token.id, ...stats }, 'hp.failed');
+      const updated = live?.current()?.tokens.find((each) => each.id === token.id);
+      if (ok && updated) announce(hpSaid(updated));
+      return;
+    }
+    const result = await sceneTokens.change(token.id, stats);
+    if (result.ok) announce(hpSaid(result.token));
+  }
+  async function enterHp(token: SceneToken, entry: HpEntry) {
+    if (entry.kind === 'set') return changeStats(token, { hp_current: entry.hp_current });
+    const next = applyHp(token, entry.delta);
+    if (next === undefined) return announce(t('hp.noCurrent', { label: token.label }));
+    if (!isLive) return changeStats(token, { hp_current: next.hp_current, hp_temp: next.hp_temp });
+    const ok = await command('token.applyHp', { token_id: token.id, delta: entry.delta }, 'hp.failed');
+    const updated = live?.current()?.tokens.find((each) => each.id === token.id);
+    if (ok && updated) announce(hpSaid(updated));
+  }
+
   // Exhaustion's level, stepped from its chip: 0 takes it off, any other level replaces it where it stands.
   function setExhaustion(token: SceneToken, level: number) {
     if (level < EXHAUSTION_LEVELS.min) return toggleMarker(token, EXHAUSTION);
@@ -1125,6 +1165,9 @@ export function ScenePanel({
               onDelete={() => openDialog(() => setDeleting(selected))}
               onToggleMarker={(id) => toggleMarker(selected, id)}
               onExhaustion={(level) => setExhaustion(selected, level)}
+              onHpEntry={(entry) => void enterHp(selected, entry)}
+              onStats={(stats) => void changeStats(selected, stats)}
+              focusHp={focusHp}
             />
           ) : null
       : undefined;
@@ -1557,6 +1600,7 @@ function ShortcutBar({ live, combat = false }: { live: boolean; combat?: boolean
     ['shortcuts.keyM', 'shortcuts.ruler'],
     ['shortcuts.keyP', 'shortcuts.ping'],
     ['shortcuts.keyH', 'shortcuts.hide'],
+    ['shortcuts.keyD', 'shortcuts.hp'],
     ['shortcuts.keyUndo', 'shortcuts.undo'],
     ...(combat ? ([['shortcuts.keyEnter', 'shortcuts.nextTurn']] as [MessageKey, MessageKey][]) : []),
     ['shortcuts.keySpace', 'shortcuts.pan'],

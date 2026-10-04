@@ -32,6 +32,10 @@ const token: Token = {
   z_order: 0,
   markers: [],
   character_id: null,
+  hp_current: null,
+  hp_max: null,
+  hp_temp: null,
+  ac: null,
 };
 
 const scene: Scene = {

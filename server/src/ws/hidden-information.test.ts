@@ -244,6 +244,28 @@ async function record(hidden: boolean): Promise<Recording> {
   await step('undo the mark of the goblin', undo);
   await step('undo the second mark of the hidden boss', undo, true);
   await step('undo the mark of the hidden boss', undo, true);
+  // Hit points and armour class (DMT-01, specs/04-live-sync.md §4, §15): never sent to players. A hidden token's
+  // reach them not at all, nor the markers they set; a visible token's reach them only as the markers they set.
+  await step(
+    'give the hidden boss hit points and armour class',
+    () => send('token.setStats', { token_id: boss!.id, hp_current: 7, hp_max: 7, ac: 13 }),
+    true,
+  );
+  await step(
+    'bring the hidden boss to 0 hit points',
+    () => send('token.applyHp', { token_id: boss!.id, delta: -7 }),
+    true,
+  );
+  await step('give the visible goblin hit points and armour class', () =>
+    send('token.setStats', { token_id: firstGoblin.id, hp_current: 12, hp_max: 12, hp_temp: 3, ac: 15 }),
+  );
+  await step('damage the visible goblin to bloodied', () =>
+    send('token.applyHp', { token_id: firstGoblin.id, delta: -9 }),
+  );
+  await step('undo the damage of the goblin', undo);
+  await step('undo the hit points of the goblin', undo);
+  await step('undo the 0 hit points of the hidden boss', undo, true);
+  await step('undo the hit points of the hidden boss', undo, true);
   await step('activate B', () => send('scene.activate', { scene_id: sceneB.id }));
   await step('a second screen reports its viewport and the DM steers the TV on B', async () => {
     const second = await live.connect();
@@ -481,7 +503,18 @@ describe('what a player view receives across a live session (specs/10-testing-ac
     expect(during('activate B', 'deactivate')).not.toContain('The crypt');
     expect(during('deactivate', 'activate A again')).not.toMatch(/The crypt|The bridge/);
     expect(during('activate A again')).not.toContain('The bridge');
-    for (const forbidden of ['"hidden"', '"notes"', '"asset', '"scene_id"', '"session_id"', 'thumbnail', 'original']) {
+    // Nor any hit points or armour class (DMT-01).
+    for (const forbidden of [
+      '"hidden"',
+      '"notes"',
+      '"asset',
+      '"scene_id"',
+      '"session_id"',
+      'thumbnail',
+      'original',
+      '"hp_',
+      '"ac"',
+    ]) {
       expect(text, forbidden).not.toContain(forbidden);
     }
     // A token placed hidden is unknown to players until the step that reveals it.
@@ -510,6 +543,12 @@ describe('what a player view receives across a live session (specs/10-testing-ac
     expect(eventsOf('the DM clears the measurement')).toEqual(['ruler.cleared', 'scene.snapshot']);
     expect(eventsOf('the DM pings the live scene')).toEqual(['ping', 'scene.snapshot']);
     expect(eventsOf('mark the hidden boss dead')).toEqual(['scene.snapshot']);
+    // Hit points alone send players nothing; the Bloodied they set on a visible token reaches them (DMT-01).
+    expect(eventsOf('bring the hidden boss to 0 hit points')).toEqual(['scene.snapshot']);
+    expect(eventsOf('give the visible goblin hit points and armour class')).toEqual(['scene.snapshot']);
+    expect(eventsOf('damage the visible goblin to bloodied')).toEqual(['token.updated', 'scene.snapshot']);
+    expect(eventsOf('undo the damage of the goblin')).toEqual(['token.updated', 'scene.snapshot']);
+    expect(eventsOf('undo the hit points of the goblin')).toEqual(['scene.snapshot']);
     expect(eventsOf('paint the vault')).toEqual(['fog.updated', 'scene.snapshot']);
     expect(eventsOf('place a lone sentry')).toEqual(['token.added', 'scene.snapshot']);
     expect(eventsOf('place a second sentry under the fog and delete it there')).toEqual(['scene.snapshot']);

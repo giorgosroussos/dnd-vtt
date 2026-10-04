@@ -295,7 +295,7 @@ describe('condition markers in the popover (TBL-02, TBL-05, specs/08-ux-journeys
     server.liveSceneId = tavern.id;
     const view = await open();
     await selectTokenRow(view, 'Hero');
-    const group = popover(view)!.querySelector('[role="group"]')!;
+    const group = popover(view)!.querySelector('.eg-popover__conditions[role="group"]')!;
     expect(document.getElementById(group.getAttribute('aria-labelledby')!)!.textContent).toBe(t('tokens.conditions'));
     expect([...group.querySelectorAll('.eg-chip')].map((each) => each.textContent)).toEqual([
       ...PINNED,

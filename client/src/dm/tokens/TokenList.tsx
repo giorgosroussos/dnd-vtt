@@ -4,6 +4,7 @@ import { Icon } from '../../ui/icons.js';
 import { t, type MessageKey } from '../../ui/messages.js';
 import { initialsOf } from '../../canvas/TokenLayer.js';
 import { markerName } from '../../ui/conditions.js';
+import { TokenStatsBadge } from './TokenStats.js';
 
 const CATEGORY_NAMES: Record<AssetCategory, MessageKey> = {
   pc: 'asset.category.pc',
@@ -112,6 +113,7 @@ export function TokenList({
                       <span className="eg-token-row__name">{token.label}</span>
                       <span className="eg-token-row__status">{statusOf(token, fog)}</span>
                     </span>
+                    <TokenStatsBadge stats={token} />
                   </button>
                   <button
                     type="button"

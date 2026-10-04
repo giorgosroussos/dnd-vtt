@@ -22,6 +22,15 @@ import {
   type FogStroke,
   type FogWriteBody,
   normaliseMarkers,
+  applyHp,
+  hpChanged,
+  markersForHp,
+  sameStats,
+  statsFromAsset,
+  statsOf,
+  withStats,
+  type TokenMarker,
+  type TokenStats,
   TokenUpdateBodySchema,
   type CommandAck,
   type CommandEnvelope,
@@ -103,7 +112,9 @@ type Undoable =
   | CommandEnvelope
   | { type: 'restore'; token: SceneToken; encounter?: Encounter }
   | { type: 'restoreFog'; sceneId: string; fog: FogMask }
-  | { type: 'restoreEncounter'; sceneId: string; encounter: Encounter | null };
+  | { type: 'restoreEncounter'; sceneId: string; encounter: Encounter | null }
+  // Hit points, armour class and the markers they set, put back together (DMT-01), as the server's inverse.
+  | { type: 'restoreStats'; tokenId: string; stats: TokenStats; markers: TokenMarker[] };
 
 const uuid = (): string => `00000000-0000-4000-8000-${String(++counter).padStart(12, '0')}`;
 
@@ -228,6 +239,8 @@ export class FakeServer {
       size: 'medium',
       default_hidden: fields.category === undefined || fields.category === 'monster',
       notes: '',
+      hp_max: null,
+      ac: null,
       tags: [],
       ...fields,
     };
@@ -252,6 +265,8 @@ export class FakeServer {
       z_order: top + 1,
       markers: [],
       character_id: null,
+      // The asset's defaults, at full hit points, as the server copies them (DMT-01).
+      ...statsFromAsset(asset),
       asset: { name: asset.name, image_id: asset.image_id, size: asset.size, category: asset.category },
       ...fields,
     };
@@ -336,11 +351,17 @@ export class FakeServer {
       return json(204);
     }
     const { stack, ...fields } = b as Partial<SceneToken> & { stack?: 'front' | 'back' };
+    const statsBefore = statsOf(token);
     const revealed =
       token.hidden && fields.hidden === false && fields.label === undefined && token.label === token.asset.name;
     Object.assign(token, fields, typeof fields.label === 'string' ? { label: fields.label.trim() } : {});
     // Each condition once, in the order sent, as the server stores them (TBL-05).
     if (fields.markers) token.markers = normaliseMarkers(fields.markers);
+    // Hit points as the server keeps them, setting the markers they drive unless the body gives them (DMT-01).
+    Object.assign(token, withStats(statsBefore, statsOf(token)));
+    if (!fields.markers && hpChanged(statsBefore, token)) {
+      token.markers = markersForHp(token.asset.category, token, token.markers);
+    }
     const renamed = revealed ? this.numberAs(token) : undefined;
     if (stack) {
       const others = this.tokensOf(token.scene_id)
@@ -582,9 +603,15 @@ export class FakeServer {
               ? { type: 'token.setVisibility' as const, payload: { token_id: was.id, hidden: was.hidden } }
               : envelope.type === 'token.setMarkers' && was
                 ? { type: 'token.setMarkers' as const, payload: { token_id: was.id, markers: [...was.markers] } }
-                : envelope.type === 'token.delete' && was
-                  ? { type: 'restore' as const, token: was, ...(encounterBefore ? { encounter: encounterBefore } : {}) }
-                  : fogInverse);
+                : (envelope.type === 'token.setStats' || envelope.type === 'token.applyHp') && was
+                  ? { type: 'restoreStats' as const, tokenId: was.id, stats: statsOf(was), markers: [...was.markers] }
+                  : envelope.type === 'token.delete' && was
+                    ? {
+                        type: 'restore' as const,
+                        token: was,
+                        ...(encounterBefore ? { encounter: encounterBefore } : {}),
+                      }
+                    : fogInverse);
       if (inverse && live !== null) {
         if (this.undoScene !== live) this.undoHistory = [];
         this.undoScene = live;
@@ -602,6 +629,10 @@ export class FakeServer {
     if (inverse.type === 'restore') return { type: 'token.delete', payload: { token_id: inverse.token.id } };
     if (inverse.type === 'restoreFog')
       return { type: 'restoreFog', sceneId: inverse.sceneId, fog: this.fogOf(inverse.sceneId) };
+    if (inverse.type === 'restoreStats') {
+      const token = this.sceneTokens.find((each) => each.id === inverse.tokenId);
+      return token && { type: 'restoreStats', tokenId: token.id, stats: statsOf(token), markers: [...token.markers] };
+    }
     if (inverse.type === 'restoreEncounter') {
       return {
         type: 'restoreEncounter',
@@ -648,6 +679,14 @@ export class FakeServer {
   }
 
   private applyInverse(inverse: Undoable): CommandAck {
+    if (inverse.type === 'restoreStats') {
+      const token = this.sceneTokens.find((each) => each.id === inverse.tokenId);
+      if (!token) return { error: { code: 'not_found', message: 'test' } };
+      if (token.scene_id !== this.liveSceneId) return { error: { code: 'scene_not_live', message: 'test' } };
+      Object.assign(token, statsOf(inverse.stats), { markers: [...inverse.markers] });
+      this.deliver('token.updated', { token: this.withAsset(token), relabelled: [] });
+      return { ok: true };
+    }
     if (inverse.type === 'restoreEncounter') {
       if (inverse.sceneId !== this.liveSceneId) return { error: { code: 'scene_not_live', message: 'test' } };
       this.storeEncounter(inverse.sceneId, inverse.encounter);
@@ -751,6 +790,25 @@ export class FakeServer {
         const markers = normaliseMarkers(p.markers as unknown[]);
         if (JSON.stringify(markers) === JSON.stringify(token.markers)) return { ok: true };
         token.markers = markers;
+        this.deliver('token.updated', { token: this.withAsset(token), relabelled: [] });
+        return { ok: true };
+      }
+      case 'token.setStats':
+      case 'token.applyHp': {
+        // DMT-01, as the server applies them: the markers the hit points drive set in the same step.
+        const token = liveToken();
+        if (token === undefined) return refuse('not_found');
+        if (token === 'not_live') return refuse('scene_not_live');
+        const before = statsOf(token);
+        const { token_id: _id, delta, ...patch } = p as Partial<TokenStats> & { token_id: string; delta?: number };
+        void _id;
+        const next = type === 'token.applyHp' ? (delta ? applyHp(before, delta) : before) : withStats(before, patch);
+        if (next === undefined) return refuse('bad_request');
+        const markers = hpChanged(before, next)
+          ? markersForHp(token.asset.category, next, token.markers)
+          : token.markers;
+        if (sameStats(before, next) && JSON.stringify(markers) === JSON.stringify(token.markers)) return { ok: true };
+        Object.assign(token, statsOf(next), { markers });
         this.deliver('token.updated', { token: this.withAsset(token), relabelled: [] });
         return { ok: true };
       }
@@ -1003,6 +1061,8 @@ export class FakeServer {
         size: b.size as LibraryAsset['size'],
         default_hidden: typeof b.default_hidden === 'boolean' ? b.default_hidden : category === 'monster',
         notes: typeof b.notes === 'string' ? b.notes : '',
+        hp_max: typeof b.hp_max === 'number' ? b.hp_max : null,
+        ac: typeof b.ac === 'number' ? b.ac : null,
         tags: tags(b.tags),
       });
       return json(201, asset);

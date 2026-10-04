@@ -17,7 +17,7 @@ import { forgetTokenNumbers, showNewlySeen } from './tokens.js';
 // asset. A token holds no image of its own: its image is its asset's, so changing
 // the asset's image changes every token of it.
 
-const ASSET_COLUMNS = 'id, name, category, image_id, size, default_hidden, notes';
+const ASSET_COLUMNS = 'id, name, category, image_id, size, default_hidden, notes, hp_max, ac';
 
 interface AssetRow {
   id: string;
@@ -27,6 +27,8 @@ interface AssetRow {
   size: TokenSize;
   default_hidden: 0 | 1;
   notes: string;
+  hp_max: number | null;
+  ac: number | null;
 }
 
 const toAsset = (row: AssetRow, tags: string[]): LibraryAsset => ({
@@ -37,6 +39,8 @@ const toAsset = (row: AssetRow, tags: string[]): LibraryAsset => ({
   size: row.size,
   default_hidden: row.default_hidden === 1,
   notes: row.notes,
+  hp_max: row.hp_max,
+  ac: row.ac,
   tags,
 });
 
@@ -103,6 +107,9 @@ export interface AssetFields {
   default_hidden?: boolean | undefined;
   tags: readonly string[];
   notes?: string | undefined;
+  // Defaults copied to new tokens (DMT-01); undefined or null for none.
+  hp_max?: number | null | undefined;
+  ac?: number | null | undefined;
 }
 
 /**
@@ -114,7 +121,7 @@ export function createAsset(db: Database.Database, fields: AssetFields): Library
   const id = randomUUID();
   const created = db.transaction(() => {
     if (!imageExists(db, fields.image_id)) return false;
-    db.prepare(`INSERT INTO asset (${ASSET_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
+    db.prepare(`INSERT INTO asset (${ASSET_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       id,
       fields.name,
       fields.category,
@@ -122,6 +129,8 @@ export function createAsset(db: Database.Database, fields: AssetFields): Library
       fields.size,
       (fields.default_hidden ?? fields.category === 'monster') ? 1 : 0,
       fields.notes ?? '',
+      fields.hp_max ?? null,
+      fields.ac ?? null,
     );
     writeTags(db, id, fields.tags);
     return true;
@@ -165,6 +174,10 @@ export function updateAsset(
       fields.notes ?? null,
       id,
     );
+    // The hit-point and armour-class defaults, each set or cleared with null; tokens already placed keep theirs
+    // (DMT-01, D-181).
+    if (fields.hp_max !== undefined) db.prepare('UPDATE asset SET hp_max = ? WHERE id = ?').run(fields.hp_max, id);
+    if (fields.ac !== undefined) db.prepare('UPDATE asset SET ac = ? WHERE id = ?').run(fields.ac, id);
     // A token carrying the bare name follows the asset's new name, so that numbering, which knows a
     // never-numbered token by its bare name, still tells it from a label the DM typed and never
     // counts a hidden one (Q-094). Numbered and typed labels are the DM's and stay.

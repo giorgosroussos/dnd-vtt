@@ -1,7 +1,10 @@
 import type Database from 'better-sqlite3';
 import {
+  applyHp,
   repeatsCondition,
   sameMarkers,
+  sameStats,
+  statsOf,
   errorEnvelope,
   type CameraSetPlayerPayload,
   type CommandEnvelope,
@@ -24,12 +27,15 @@ import {
   type TokenAddPayload,
   type TokenDeletePayload,
   type TokenMovePayload,
+  type TokenApplyHpPayload,
   type TokenSetMarkersPayload,
+  type TokenSetStatsPayload,
   type TokenSetVisibilityPayload,
 } from '@emberglass/shared';
 import { changeEncounter, noteEnemies, type EncounterOutcome } from '../db/encounters.js';
 import { writeFog, type FogWriteOutcome } from '../db/fog.js';
 import { readSettings, setLiveScene } from '../db/settings.js';
+import { refusal } from '../db/scope.js';
 import { createToken, deleteToken, readToken, restoreToken, updateToken } from '../db/tokens.js';
 import { PlayerCameraState, sameCamera } from './camera.js';
 import { RulerState, samePath } from './ruler.js';
@@ -202,6 +208,24 @@ export function applyLiveCommand(db: Database.Database, command: CommandEnvelope
       if (result.outcome === 'updated' && sameMarkers(result.before.markers, result.token.markers)) return [];
       return changed(result);
     }
+    case 'token.setStats': {
+      // DMT-01: any of the four fields set or cleared; a change of hit points sets the markers they drive in the
+      // same write (specs/04-live-sync.md §15). Values the token already has change nothing, so nobody is told.
+      const { token_id, ...stats } = command.payload as TokenSetStatsPayload;
+      return statsChanged(updateToken(db, token_id, stats, 'live'));
+    }
+    case 'token.applyHp': {
+      // DMT-01: a signed amount, damage taking the temporary hit points first, healing never past the maximum.
+      const { token_id, delta } = command.payload as TokenApplyHpPayload;
+      const token = readToken(db, token_id);
+      if (token === undefined) return tokenNotFound();
+      const refused = refusal(db, token.scene_id, 'live');
+      if (refused) return notLive();
+      if (delta === 0) return [];
+      const next = applyHp(token, delta);
+      if (next === undefined) return errorEnvelope('bad_request', 'The token has no hit points.');
+      return statsChanged(updateToken(db, token_id, next, 'live'));
+    }
     case 'fog.paint': {
       // TBL-04: one stroke of the brush, painting or erasing; one that changes nothing tells nobody.
       const { scene_id, stroke } = command.payload as FogPaintPayload;
@@ -256,6 +280,11 @@ export function applyInverse(db: Database.Database, inverse: Inverse): LiveResul
     const result = updateToken(db, current.id, { hidden: false, label: current.label }, 'live');
     if (result.outcome === 'updated' && !result.before.hidden) return [];
     return changed(result);
+  }
+  if (inverse.type === 'token.restoreStats') {
+    // Hit points, armour class and the markers they set, put back together as they were (DMT-01).
+    const { token_id, stats, markers } = inverse.payload;
+    return statsChanged(updateToken(db, token_id, { ...stats, markers }, 'live'));
   }
   if (inverse.type === 'fog.restore') {
     return fogChanged(writeFog(db, inverse.scene_id, { restore: inverse.restore }, 'live'));
@@ -411,6 +440,18 @@ export function createLiveCommands(
     return [{ type: 'ruler.cleared' }];
   };
   return { apply: applyNoting, release, history, camera, ruler };
+}
+
+/** A change of hit points or armour class: none when the stats and the markers are what they were. */
+function statsChanged(result: ReturnType<typeof updateToken>): LiveResult {
+  if (
+    result.outcome === 'updated' &&
+    sameStats(statsOf(result.before), statsOf(result.token)) &&
+    sameMarkers(result.before.markers, result.token.markers)
+  ) {
+    return [];
+  }
+  return changed(result);
 }
 
 function changed(result: ReturnType<typeof updateToken>): LiveResult {

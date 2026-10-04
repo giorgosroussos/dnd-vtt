@@ -174,6 +174,8 @@ describe('the process command validator', () => {
     'token.setVisibility',
     'token.delete',
     'token.setMarkers',
+    'token.setStats',
+    'token.applyHp',
     'fog.paint',
     'fog.fill',
     'scene.activate',

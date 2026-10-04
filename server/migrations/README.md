@@ -29,3 +29,5 @@ Numbered SQL migrations, applied in order by `src/db/migrate.ts` before the serv
 `0008_encounter.sql` adds `encounter`, the initiative tracker of a scene, at most one per scene and deleted with it, its entries a JSON array; additive (TBL-06, Q-104, Q-105, D-160).
 
 `0009_settings_tv_address.sql` adds `settings.tv_address`, the TV address the DM chose in Settings for the connect panel, or NULL for Automatic, which every existing database keeps; additive (PKG-01, Q-110, D-169).
+
+`0010_hit_points.sql` adds `token.hp_current`, `hp_max`, `hp_temp` and `ac`, and `asset.hp_max` and `ac`, the defaults copied to new tokens, each NULL for none, which every existing token and asset keeps; additive (DMT-01, Q-112, D-180).

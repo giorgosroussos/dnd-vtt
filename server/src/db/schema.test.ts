@@ -92,6 +92,10 @@ function specEntities(): { entity: string; fields: string[]; notes: string[]; te
     });
 }
 
+// Fields of specs/03-domain-model.md §1 that a Phase 7 package still to come adds (specs/13-implementation-plan.md
+// §12): DM notes (DMT-04). The package that adds a column removes it here.
+const PLANNED: Partial<Record<SchemaTable, string[]>> = { scene: ['notes'], token: ['notes'] };
+
 const TABLE_OF: Record<string, SchemaTable> = {
   Image: 'image',
   Asset: 'asset',
@@ -147,6 +151,8 @@ describe('migration 0001 on a fresh database', () => {
           expected.add(field);
         }
       }
+      // Fields the spec names for a package not built yet, each removed from here by the package that adds it.
+      for (const field of PLANNED[table] ?? []) expected.delete(field);
       if (entity === 'Settings') {
         for (const [phrase, column] of Object.entries(SETTINGS_PROSE)) {
           expect(text).toContain(phrase);
@@ -191,6 +197,9 @@ describe('migration 0001 on a fresh database', () => {
         'size TEXT NOT NULL',
         'default_hidden INTEGER NOT NULL',
         "notes TEXT NOT NULL DEFAULT ''",
+        // Migration 0010 (DMT-01, Q-112).
+        'hp_max INTEGER NULL',
+        'ac INTEGER NULL',
       ],
       asset_tag: ['id TEXT NOT NULL', 'asset_id TEXT NOT NULL', 'tag TEXT NOT NULL'],
       campaign: [
@@ -239,6 +248,11 @@ describe('migration 0001 on a fresh database', () => {
         'shown INTEGER NOT NULL DEFAULT 0',
         // Migration 0004 (TBL-02, Q-099).
         "markers TEXT NOT NULL DEFAULT '[]'",
+        // Migration 0010 (DMT-01, Q-112).
+        'hp_current INTEGER NULL',
+        'hp_max INTEGER NULL',
+        'hp_temp INTEGER NULL',
+        'ac INTEGER NULL',
       ],
       // Migration 0008 (TBL-06, D-160).
       encounter: [
@@ -1051,6 +1065,48 @@ describe('migrations on the generated fixture database (specs/14-agent-playbook.
     }
     for (const bad of ['192.168.1', '192.168.1.1.1', 'emberglass.local', '192.168.1.13a', '1.2.3.4 ', '', 'a.b.c.d']) {
       expect(() => set.run(bad), bad).toThrow(/CHECK constraint failed/);
+    }
+  });
+
+  it('adds hit points and armour class at migration 0010, none on existing data, refusing values out of bounds (Q-112)', () => {
+    createFixtureDatabase(dataDir);
+    migrateDataDirectory(dataDir, MIGRATIONS_DIR, new Date(), 9);
+    db = openDatabase(dataDir);
+    const columns = (table: string) =>
+      (db!.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
+    expect(columns('token')).not.toContain('hp_current');
+    const tokens = db.prepare('SELECT count(*) FROM token').pluck().get() as number;
+    db.close();
+
+    const result = migrateDataDirectory(dataDir, MIGRATIONS_DIR);
+
+    expect(result).toMatchObject({ from: 9, to: LATEST });
+    expect(result.backup).not.toBeNull();
+    db = openDatabase(dataDir);
+    expect(columns('token')).toEqual(expect.arrayContaining(['hp_current', 'hp_max', 'hp_temp', 'ac']));
+    expect(columns('asset')).toEqual(expect.arrayContaining(['hp_max', 'ac']));
+    const none = 'hp_current IS NULL AND hp_max IS NULL AND hp_temp IS NULL AND ac IS NULL';
+    expect(db.prepare(`SELECT count(*) FROM token WHERE ${none}`).pluck().get()).toBe(tokens);
+    expect(db.prepare('SELECT count(*) FROM asset WHERE hp_max IS NOT NULL OR ac IS NOT NULL').pluck().get()).toBe(0);
+    const id = db.prepare('SELECT id FROM token LIMIT 1').pluck().get() as string;
+    const set = (column: string, value: number | null) =>
+      db!.prepare(`UPDATE token SET ${column} = ? WHERE id = ?`).run(value, id);
+    for (const [column, value] of [
+      ['hp_current', 0],
+      ['hp_max', 1],
+      ['hp_temp', 9999],
+      ['ac', 99],
+      ['ac', null],
+    ] as const) {
+      expect(() => set(column, value)).not.toThrow();
+    }
+    for (const [column, value] of [
+      ['hp_current', -1],
+      ['hp_max', 0],
+      ['hp_temp', 10000],
+      ['ac', 100],
+    ] as const) {
+      expect(() => set(column, value), `${column} ${value}`).toThrow(/CHECK constraint failed/);
     }
   });
 

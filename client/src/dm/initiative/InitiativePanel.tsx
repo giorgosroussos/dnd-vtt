@@ -19,6 +19,7 @@ import { Dialog } from '../../ui/Dialog.js';
 import { Icon } from '../../ui/icons.js';
 import { t } from '../../ui/messages.js';
 import { useFocusLater } from '../../ui/useFocusLater.js';
+import { TokenStatsBadge } from '../tokens/TokenStats.js';
 
 // The Initiative tab of the DM view (TBL-06, specs/08-ux-journeys.md §12, specs/04-live-sync.md §14, Q-104,
 // Q-106, D-160). The table rolls physical dice; this records the order. Start combat builds it from the
@@ -221,6 +222,7 @@ export function InitiativePanel({
                     {token ? <Markers token={token} /> : null}
                   </span>
                 </span>
+                {token ? <TokenStatsBadge stats={token} /> : null}
                 <InitiativeField
                   name={name}
                   value={entry.initiative}
@@ -267,6 +269,7 @@ export function InitiativePanel({
                         </span>
                         <span className="eg-initiative__name">{member.label}</span>
                         <Markers token={member} />
+                        <TokenStatsBadge stats={member} />
                       </button>
                     </li>
                   ))}
