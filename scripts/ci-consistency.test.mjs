@@ -111,6 +111,19 @@ describe('CI and the command contract agree', () => {
     expect(readme).toContain('| `package · windows` | `windows-latest` | `make package` |');
   });
 
+  // The package is built and gated after a merge to main and on demand, never on a pull request (D-179); the gates
+  // job carries no condition of its own and is skipped with the job it needs. The release workflow, on a tag,
+  // always builds and gates before it publishes.
+  it('builds and gates the package in CI on main and on demand, not on pull requests', () => {
+    expect(workflow).toMatch(/^on:\n {2}pull_request:\n {2}push:\n {4}branches: \[main\]\n {2}workflow_dispatch:\n/m);
+    const job = /^ {2}package:\n([\s\S]*?)(?=^ {2}\S)/m.exec(workflow)?.[1] ?? '';
+    expect(job).toMatch(/^ {4}if: github\.event_name != 'pull_request'$/m);
+    const gates = /^ {2}package-gates:\n([\s\S]*?)(?=^ {2}\S|(?![\s\S]))/m.exec(workflow)?.[1] ?? '';
+    expect(gates).toContain('needs: package');
+    const built = /^ {2}package:\n([\s\S]*?)(?=^ {2}\S)/m.exec(release)?.[1] ?? '';
+    expect(built).not.toMatch(/^ {4}if:/m);
+  });
+
   // The installer is installed, upgraded and uninstalled only where the variable says the machine may be
   // changed; a job that lost it would skip that silently (review T-H1). Both jobs keep both files.
   it('runs the installer checks in both package jobs, and keeps and releases the installer beside the zip', () => {
