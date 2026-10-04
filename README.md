@@ -4,7 +4,7 @@ A free, self-hosted virtual tabletop for in-person play, compatible with 5th edi
 
 ## Install and start
 
-You need Node.js 24 or newer (<https://nodejs.org>) and Git. Emberglass is installed from source; nothing is published to a package registry.
+On Windows you can use the installer or the portable zip instead, which need no Node.js, Git or terminal: see [Windows package](#windows-package) below. Everywhere else, and on Windows if you prefer, you need Node.js 24 or newer (<https://nodejs.org>) and Git. Emberglass is installed from source; nothing is published to a package registry.
 
 Type the commands below in a terminal: on Windows, Command Prompt or PowerShell; on Linux or macOS, Terminal. `npm install` can take a few minutes the first time. Keep the terminal window open while you play: closing it stops the server.
 
@@ -19,12 +19,42 @@ npm start
 - To update, run `git pull` and `npm install`, then `npm run build` before `npm start`. `npm start` builds only when no build exists, so without this step it would start the old build.
 - Stop the server with Ctrl+C.
 
-On start the console prints the player view's address and a QR code for it, for example `http://192.168.1.20:3000/`, followed by the PC's other addresses.
+On start the console prints the player view's address and a QR code for it, for example `http://192.168.1.20:3000/`, followed by the PC's other addresses, each with the name of its network adapter. Emberglass picks the address itself: the Wi-Fi's or the Ethernet's, before those of virtual adapters that WSL, Hyper-V, VMware, VirtualBox, Docker or a VPN add.
 
 - **First run.** While no PIN is set, the console says so and prints the address to open. Open `http://localhost:3000/dm` (or your port, if you set `EMBERGLASS_PORT`) in a browser **on this PC** and choose the DM PIN (4 to 8 digits; 6 to 8 are much harder to guess). Setup is refused from any other device, and from this PC through its network address: use `localhost`.
-- **The TV.** Open the printed address in the TV's browser, or use Connect a screen in the DM view (the screens counter in its header), which shows the same address and code. The player view needs no PIN.
+- **The TV.** Open the printed address in the TV's browser, or use Connect a screen in the DM view (the screens counter in its header), which shows the same address and code. The player view needs no PIN. If neither the TV nor a phone opens it, check that Windows calls your Wi-Fi a private network (see Firewall below), then choose the TV address in Settings.
 - **The DM view.** On any browser on the Wi-Fi, open the same address followed by `/dm`, then enter the PIN. A browser stays signed in until the server restarts, the PIN changes or it signs out.
 - **Forgotten PIN.** Run `npm run reset-pin` in the Emberglass folder on this PC, then set a new one from `http://localhost:3000/dm` (or your port).
+
+### Windows package
+
+Each release on the repository's GitHub Releases page carries two files for Windows x64, each with its own Node.js runtime and its SHA-256 checksum:
+
+- `Emberglass-<version>-win-x64-setup.exe`, the **installer** (recommended);
+- `Emberglass-<version>-win-x64.zip`, the **portable package**, for a PC where you cannot or do not want to install.
+
+**Before opening either file, check it.** Run `certutil -hashfile <file> SHA256` in Command Prompt, in the folder you downloaded it to, and compare the result with the file's `.sha256`. If they differ, do not open the file. A match shows the download is intact; it does not show who built it. **Neither is signed.** The first time you run one, Windows may show "Windows protected your PC": choose **More info**, then **Run anyway**, only for a file whose checksum matches.
+
+Before a release is published, its installer is installed on a fresh Windows build machine and must pass the hidden-information tests, the five DM journeys in Chrome and Edge, and the offline check; the zip holds the same program and passes a start-up check. These tests vouch for the program the release workflow built, not for the third-party packages it is built from. Optionally, if you use the GitHub CLI (<https://cli.github.com>, signed in with `gh auth login`), `gh attestation verify <file> --repo giorgosroussos/dnd-vtt --signer-workflow giorgosroussos/dnd-vtt/.github/workflows/release.yml` confirms the file was built by this repository's release workflow.
+
+**The installer.**
+
+- It installs Emberglass for every user of the PC under `C:\Program Files\Emberglass`, with one administrator prompt. It adds an **Emberglass** folder to the Start Menu (Emberglass, Reset the Emberglass PIN, Uninstall Emberglass) and, if you tick it, a desktop shortcut.
+- It allows Emberglass through Windows Defender Firewall on **private networks only**, and blocks it on public ones, so Windows never asks. Your Wi-Fi must be a private network in Windows' settings: on a network Windows classes as Public the TV cannot reach the server. To change it: Settings, Network & internet, Wi-Fi, your network, Network profile type: **Private network**.
+- **To update,** finish your session, then run the newer installer: it upgrades in place, and stops Emberglass if it is still running. The first start then upgrades your data after a dated backup copy.
+- **To uninstall,** use Uninstall Emberglass in the Start Menu, or Settings, Apps. It stops Emberglass if it is running, then removes the program, its shortcuts and its firewall rules. It **never** removes your data in `%APPDATA%\Emberglass`; delete that folder yourself if you want it gone.
+- The Emberglass shortcut opens a console window, which cannot be pinned to the taskbar: pin it to Start instead.
+- **One DM at a time on a shared PC.** If two Windows users of the same PC start Emberglass, the second one's shortcut opens the first one's DM view, on the same port. Use one Windows account for Emberglass, or give each user their own `EMBERGLASS_PORT`.
+
+**The portable zip.** Unzip it into a folder of its own, for example `Documents\Emberglass`, and double-click `Emberglass.cmd`. To update, stop the server and unzip the newer package into a new folder. Windows asks about the firewall on the first start: allow private networks only.
+
+**Either way:**
+
+- Start Emberglass from its shortcut or `Emberglass.cmd`. It opens the DM view, `http://127.0.0.1:3000/dm`, in your browser, starting the server first if it is not already running; starting it again on the same port while it runs only opens the browser. Keep its window open while you play: closing it stops the server. The window shows the TV's address and QR code.
+- Your data is in `%APPDATA%\Emberglass`, as with a source install, never in the program's folder.
+- **Forgotten PIN.** Use Reset the Emberglass PIN, or `Reset PIN.cmd` in the zip's folder, then set a new one from `http://127.0.0.1:3000/dm`.
+- If another program already uses port 3000, the window says so and how to start Emberglass on another port, for that start only.
+- `README.txt` in the program's folder says the same and names the source tag it was built from; `THIRD_PARTY_NOTICES.txt` holds the licences of everything it carries. Emberglass never checks for updates.
 
 ## Settings
 
@@ -33,6 +63,7 @@ The DM view's Settings (the button at the right of its header; Sign out is in th
 - **The upload limit:** 50 MB by default, from 1 to 1,024 MB. The next upload is checked against it.
 - **The display size:** the longest side, in pixels, of the version of each map and token image that screens show. It is 4,096 by default, from 512 to 16,383. Choose a smaller size if the TV is slow or runs out of memory. After a change, every display version is made again in the background, and the TV shows each map at the new size once it is done. Originals, which calibration uses, never change.
 - **Diagonals on the ruler:** every diagonal square counts 5 ft (PHB, the default), or diagonals alternate 5 ft and 10 ft (DMG). The distance on the TV follows at once.
+- **TV address:** Automatic, the default, needs nothing from you. Change it only if the TV or a phone cannot open the address Connect a screen shows: choose your PC's Wi-Fi or Ethernet address from the list, where each is named with its adapter. In Windows Settings, open Network & internet, then your network: the one to choose is its **IPv4 address** (not the default gateway or a DNS server, which are your router). Connect a screen, its QR code and the console at the next start then use it. If the PC no longer has that address, on another Wi-Fi for example, Emberglass goes back to Automatic and says so.
 - **Change the PIN:** give the current PIN and the new one. Every other browser signed in to the DM view is signed out.
 
 Two environment variables set what the Settings cannot, and are read when the server starts:
@@ -56,14 +87,15 @@ It holds:
 
 - `emberglass.db`, the database: campaigns, sessions, scenes, tokens, the asset library and the settings;
 - `images/`, every uploaded image in its three versions;
-- `logs/`, `emberglass.log` and up to three older files, 5 MB each.
+- `logs/`, `emberglass.log` and up to three older files, 5 MB each;
+- `emberglass.lock`, which a running server holds so that no second one uses the folder (it holds no data).
 
 Nothing about the game is stored anywhere else.
 
 - **Backup.** Stop the server, then copy the whole data directory somewhere safe. There is no database server to set up or dump. To restore, or to move your campaigns to another PC, put the copy in place (or point `EMBERGLASS_DATA_DIR` at it) and start Emberglass.
 - **Automatic backups.** Before it applies a database change after an update, Emberglass copies the database to `emberglass-backup-<date and time>-v<version>.db` in the data directory. Delete old ones when you no longer need them.
 - **Backups hold the PIN hash.** The database, every `emberglass-backup-*.db` file and every copy of the folder hold the PIN as a salted hash, never the PIN itself. A 4-to-8-digit PIN can still be guessed offline from a stolen copy. After changing the PIN or running `npm run reset-pin`, delete the old `emberglass-backup-*.db` files and old copies you do not need, and keep the others where only you can read them.
-- **One server per data directory.** Run only one Emberglass server on a data folder at a time. A second server started on the same folder breaks any upload the first is receiving and deletes images uploaded but not yet used by an asset or a scene, even if it then fails to start because the port is taken.
+- **One server per data directory.** Emberglass runs only one server on a data folder at a time: a second one started on the same folder, on any port, says that another Emberglass is running with it and stops before it touches anything. It holds the folder through `emberglass.lock`, which it releases when it stops, even after a crash; leave the file where it is. Started from the Windows package on the same port, a second start just opens the running server's DM view.
 - **The images folder grows with your uploads.** An image is removed only when nothing uses it any more: no asset and no scene. The same file uploaded twice is stored once.
 
 ## Network and security
@@ -82,7 +114,7 @@ Emberglass is meant for a trusted home network.
 
 ### Firewall
 
-**Windows.** The first time Emberglass starts, Windows Defender Firewall asks whether Node.js may communicate on networks. Allow it on **private networks only**, and leave public networks unticked. Your home Wi-Fi must be set as a private network in Windows' network settings; otherwise the TV cannot reach the server. To change the answer later, open Windows Defender Firewall, then "Allow an app through firewall", then Node.js.
+**Windows.** With the Windows installer this is done for you: see [Windows package](#windows-package). Otherwise, the first time Emberglass starts, Windows Defender Firewall asks whether Node.js (with the zip: Emberglass) may communicate on networks. Allow it on **private networks only**, and leave public networks unticked. Your home Wi-Fi must be set as a private network in Windows' network settings; otherwise the TV cannot reach the server. To change the answer later, open Windows Defender Firewall, then "Allow an app through firewall", then Node.js (or Emberglass).
 
 **Linux.** If a host firewall is active, open the port (3000 by default) to your home network only. For example, for a network of `192.168.1.x`:
 
@@ -153,8 +185,14 @@ GitHub Actions, `.github/workflows/ci.yml` (FND-02, `specs/13-implementation-pla
 | `check-docs · linux`, `check-docs · windows` | both | `make check-docs` |
 | `audit · linux`, `audit · windows` | both | `make audit` |
 | `scan-secrets · linux`, `scan-secrets · windows` | both | `make scan-secrets` |
+| `package · windows` | `windows-latest` | `make package` |
+| `package gates · windows` | `windows-latest` | `make package-gates` |
 
 The `e2e` jobs run the acceptance suite (`specs/10-testing-acceptance.md` §4–§6, D-127): Chromium runs every spec, and the five journeys of `e2e/tests/journeys/` also run in Firefox and WebKit on both runners and in Edge on Windows, as named by `EMBERGLASS_E2E_BROWSERS` (locally the default is Chromium alone; `npx playwright install firefox webkit` adds the others). Every browser runs behind a proxy that refuses and records anything beyond the local host, and the server under a guard that does the same, so `make e2e` is also the offline run. Its last test, `e2e/tests/offline.spec.ts`, fails unless every server announced the guard and nothing was attempted but one probe request from each browser, which shows that browser's traffic was watched; Edge's own calls to Microsoft's services are blocked and listed, not counted (D-133). `make build` fails when the built client references another host (`scripts/check-external-urls.mjs`).
+
+The `package · windows` job builds the portable Windows package from the commit (`scripts/package/build.mjs`: the server bundled by esbuild, the runner's own Node.js renamed `emberglass.exe`, the native modules `npm ci` installed for Windows, the licences) and checks it as a DM would use it (`scripts/package/check.mjs`): unzipped, started by `Emberglass.cmd` with no Node.js on PATH and an empty data directory, it must pass `make smoke`'s checks, and a second start must only open the browser; the zip is kept as an artifact for seven days. Elsewhere `make package` builds and checks the same folder for that system, to try it; only Windows x64 is published. `.github/workflows/release.yml` runs the same target on a `v<version>` tag (D-164, D-166).
+
+The `package gates · windows` job (PKG-03, D-176) takes the installer and zip that job kept, installs the installer silently on a fresh Windows runner, and runs `make package-gates` (`scripts/package/gates.mjs`) against the installed folder: the three `@gate:` tests of the hidden-information suite, then the five journeys and the large-scene fixture in Chromium and Edge, then the offline run's check. Every server of both runs is the installed `emberglass.exe` running the installed launcher, as `Emberglass.cmd` does, with nothing on PATH, so no Node.js is found and no other browser opens; the job fails unless each gate test ran there and passed (the verdicts are `scripts/package/lib.mjs`'s, tested in `lib.test.mjs`), checks that the installer and zip are the ones the package job built, and uninstalls the package at the end. Elsewhere `make package-gates` runs the same against the zip `make package` left, unzipped. On a tag, the release workflow runs this job after `package · windows`, and only when it passes, and the owner approves the job in the repository's `release` environment, does its last job, which runs no project code, check that the files are the ones built and gated, attest their build provenance and publish the GitHub Release (a pre-release for a tag such as `v1.0.0-rc.1`); a release already published for the tag is never replaced, and a draft an earlier attempt left is deleted, not published (D-177).
 
 Gates that the testing specification requires and nothing implements yet would run as failing-forward tripwires (`make tripwire`, D-061), one job each; there are none left, since REL-02 promoted the last two, and `make tripwire` says so.
 

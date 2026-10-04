@@ -1,10 +1,13 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import {
+  API_CONNECT_PATH,
   API_PATHS,
   DISPLAY_SIZE_BOUNDS,
   PIN_PATTERN,
   RULER_RULES,
   UPLOAD_LIMIT_BOUNDS,
+  type ConnectAddress,
+  type ConnectInfo,
   type RulerRule,
   type Settings,
   type SettingsUpdate,
@@ -27,7 +30,10 @@ import { pinRefusalText } from './SignIn.js';
 // (review C-L2); saved with nothing changed, the display size is sent alone, which finishes a
 // regeneration a restart cut short and changes nothing else (D-124). A new display size is applied in
 // the background, which the saved message says. Save and Change PIN stay focusable while their request
-// runs (aria-disabled), so the keyboard keeps its place (D-090).
+// runs (aria-disabled), so the keyboard keeps its place (D-090). The TV address (PKG-01, Q-110, D-169) is
+// the emergency correction of the address Connect a screen finds by itself: Automatic by default, or one
+// of the addresses this PC has now, each named with its adapter, read from GET /api/connect; a saved one
+// the PC no longer has stays listed, marked, until the DM changes it.
 
 const MB = 1024 * 1024;
 const LIMIT_MB = { min: UPLOAD_LIMIT_BOUNDS.min / MB, max: UPLOAD_LIMIT_BOUNDS.max / MB };
@@ -71,6 +77,12 @@ export function SettingsDialog({
   const [limit, setLimit] = useState('');
   const [display, setDisplay] = useState('');
   const [rule, setRule] = useState<RulerRule>('phb');
+  // The TV address: '' for Automatic, else the address. The detected addresses come with the settings.
+  const [tvAddress, setTvAddress] = useState('');
+  const [detected, setDetected] = useState<ConnectAddress[]>([]);
+  const [automatic, setAutomatic] = useState<string | null>(null);
+  // Whether the addresses of this PC could be read: without them a saved address is not called missing.
+  const [detectedRead, setDetectedRead] = useState(false);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<string>();
@@ -83,10 +95,21 @@ export function SettingsDialog({
     setLimit(megabytes(settings.upload_limit_bytes));
     setDisplay(String(settings.display_variant_size));
     setRule(settings.ruler_rule);
+    setTvAddress(settings.tv_address ?? '');
   };
 
   useEffect(() => {
     let active = true;
+    // The addresses of this PC for the TV address; without them only Automatic and a saved address are offered.
+    request<ConnectInfo>('GET', API_CONNECT_PATH).then(
+      (info) => {
+        if (!active) return;
+        setDetected(info.addresses);
+        setAutomatic(info.automatic);
+        setDetectedRead(true);
+      },
+      () => {},
+    );
     request<Settings>('GET', API_PATHS.settings).then(
       (settings) => {
         if (!active) return;
@@ -143,6 +166,7 @@ export function SettingsDialog({
       ...(limitMb !== undefined ? { upload_limit_bytes: limitMb * MB } : {}),
       ...(size !== undefined ? { display_variant_size: size } : {}),
       ...(rule !== loaded.ruler_rule ? { ruler_rule: rule } : {}),
+      ...((tvAddress || null) !== loaded.tv_address ? { tv_address: tvAddress || null } : {}),
     };
     if (Object.keys(update).length === 0) update.display_variant_size = loaded.display_variant_size;
     setSaving(true);
@@ -192,44 +216,78 @@ export function SettingsDialog({
               {t('settings.tableHeading')}
             </h3>
             {failure ? <Notice>{failure}</Notice> : null}
-            <TextField
-              label={t('settings.uploadLimit')}
-              inputMode="numeric"
-              value={limit}
-              error={errors.limit}
-              aria-describedby={`${ids}-limit`}
-              onChange={(event) => edit(() => setLimit(event.target.value))}
-            />
-            <p id={`${ids}-limit`} className="eg-dm__status">
-              {t('settings.uploadLimitHint', shown(LIMIT_MB))}
-            </p>
-            <TextField
-              label={t('settings.displaySize')}
-              inputMode="numeric"
-              value={display}
-              error={errors.display}
-              aria-describedby={`${ids}-display`}
-              onChange={(event) => edit(() => setDisplay(event.target.value))}
-            />
-            <p id={`${ids}-display`} className="eg-dm__status">
-              {t('settings.displaySizeHint', shown(DISPLAY_SIZE_BOUNDS))}
-            </p>
-            <fieldset className="eg-settings__rule">
-              <legend>{t('settings.rulerRule')}</legend>
-              {RULER_RULES.map((each) => (
-                <div className="eg-check" key={each}>
-                  <input
-                    id={`${ids}-${each}`}
-                    type="radio"
-                    name={`${ids}-rule`}
-                    value={each}
-                    checked={rule === each}
-                    onChange={() => edit(() => setRule(each))}
-                  />
-                  <label htmlFor={`${ids}-${each}`}>{t(RULE_LABELS[each])}</label>
+            {/* Two columns of fields on a laptop's window, so the dialog fits its 620 px without scrolling (G-041). */}
+            <div className="eg-settings__fields">
+              <div className="eg-settings__group">
+                <TextField
+                  label={t('settings.uploadLimit')}
+                  inputMode="numeric"
+                  value={limit}
+                  error={errors.limit}
+                  aria-describedby={`${ids}-limit`}
+                  onChange={(event) => edit(() => setLimit(event.target.value))}
+                />
+                <p id={`${ids}-limit`} className="eg-dm__status">
+                  {t('settings.uploadLimitHint', shown(LIMIT_MB))}
+                </p>
+                <TextField
+                  label={t('settings.displaySize')}
+                  inputMode="numeric"
+                  value={display}
+                  error={errors.display}
+                  aria-describedby={`${ids}-display`}
+                  onChange={(event) => edit(() => setDisplay(event.target.value))}
+                />
+                <p id={`${ids}-display`} className="eg-dm__status">
+                  {t('settings.displaySizeHint', shown(DISPLAY_SIZE_BOUNDS))}
+                </p>
+              </div>
+              <div className="eg-settings__group">
+                <fieldset className="eg-settings__rule">
+                  <legend>{t('settings.rulerRule')}</legend>
+                  {RULER_RULES.map((each) => (
+                    <div className="eg-check" key={each}>
+                      <input
+                        id={`${ids}-${each}`}
+                        type="radio"
+                        name={`${ids}-rule`}
+                        value={each}
+                        checked={rule === each}
+                        onChange={() => edit(() => setRule(each))}
+                      />
+                      <label htmlFor={`${ids}-${each}`}>{t(RULE_LABELS[each])}</label>
+                    </div>
+                  ))}
+                </fieldset>
+                <div className="eg-field">
+                  <label htmlFor={`${ids}-tv`}>{t('settings.tvAddress')}</label>
+                  <select
+                    id={`${ids}-tv`}
+                    className="eg-field__input"
+                    value={tvAddress}
+                    aria-describedby={`${ids}-tv-hint`}
+                    onChange={(event) => edit(() => setTvAddress(event.target.value))}
+                  >
+                    <option value="">{automaticLabel(detected, automatic)}</option>
+                    {detected.map((entry) => (
+                      <option key={entry.address} value={entry.address}>
+                        {t('settings.tvAddressOption', { address: entry.address, adapter: entry.adapter })}
+                      </option>
+                    ))}
+                    {loaded.tv_address !== null && !detected.some((entry) => entry.address === loaded.tv_address) ? (
+                      <option value={loaded.tv_address}>
+                        {t(detectedRead ? 'settings.tvAddressMissing' : 'settings.tvAddressSaved', {
+                          address: loaded.tv_address,
+                        })}
+                      </option>
+                    ) : null}
+                  </select>
                 </div>
-              ))}
-            </fieldset>
+                <p id={`${ids}-tv-hint`} className="eg-dm__status">
+                  {t('settings.tvAddressHint')}
+                </p>
+              </div>
+            </div>
             <p className="eg-dm__status eg-settings__status" role="status">
               {saving ? t('settings.saving') : (status ?? '')}
             </p>
@@ -249,6 +307,13 @@ export function SettingsDialog({
       </div>
     </Dialog>
   );
+}
+
+/** Automatic, with the address the server picks with no choice, when the addresses could be read. */
+function automaticLabel(detected: readonly ConnectAddress[], automatic: string | null): string {
+  const entry = detected.find((each) => each.address === automatic);
+  if (!entry) return t('settings.tvAddressAutomatic');
+  return t('settings.tvAddressAutomaticNow', { address: entry.address, adapter: entry.adapter });
 }
 
 type PinErrors = { current?: string | undefined; next?: string | undefined; confirm?: string | undefined };

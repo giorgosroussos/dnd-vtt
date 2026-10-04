@@ -201,6 +201,7 @@ export function readEntities(db: Database.Database): Entities {
       hidden: row.hidden === 1,
       markers: row.markers === undefined ? [] : (JSON.parse(row.markers as string) as unknown),
     })) as Token[],
-    settings: all('settings').map((row) => without(row, 'pin_hash')) as Settings[],
+    // The TV address (migration 0009, Q-110) is Automatic, null, on a database before it.
+    settings: all('settings').map((row) => ({ tv_address: null, ...without(row, 'pin_hash') })) as Settings[],
   };
 }

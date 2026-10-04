@@ -4,8 +4,13 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
 
 ## Now
 
-- None: every work package of `13` is done. Owed by hand: the acceptance run on the owner's LG TV, deferred by the owner (D-151), tracked as G-043 with G-002, G-031 and G-040; follow `docs/acceptance/rel-03-owner-run.md` and hand the record back.
+- None: every work package of `specs/13-implementation-plan.md` is done (D-152).
+
+Owed by hand, before the 1.0.0 release:
+
+- the acceptance run on the owner's LG TV (D-151, G-043 with G-002, G-031 and G-040), following `docs/acceptance/rel-03-owner-run.md`;
+- the install in Windows Sandbox from a release candidate (D-178, G-046), following `docs/acceptance/pkg-03-sandbox-run.md`;
+- `package · windows` and `package gates · windows` added to the ruleset on `main` (G-045).
 
 ## Next
 
-- None: REL-03 was the last package of `13` §7 and §10.

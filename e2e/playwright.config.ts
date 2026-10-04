@@ -1,8 +1,9 @@
 import { mkdtempSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { defineConfig, devices, type Project } from '@playwright/test';
+import { PACKAGE_DIR, packageEnv, packageLauncher } from './package.js';
 
 // End-to-end tests drive a DM view and a player view against a running server
 // (specs/10-testing-acceptance.md §2): the production build, started the way a
@@ -55,6 +56,21 @@ const chromium = devices['Desktop Chrome'];
 const setUp = /(?:^|[\\/])tests[\\/]first-run\.spec\.ts$/;
 const journey = /[\\/]journeys[\\/].+\.spec\.ts$/;
 
+// Against a package (PKG-03, `make package-gates`): the journeys alone, after the First run test that sets the
+// PIN they sign in with, and the offline check; the server is the package's launcher, not a build of this tree.
+const guard = pathToFileURL(path.join(repoRoot, 'e2e', 'offline', 'guard.mjs')).href;
+const quote = (part: string) => `"${part}"`;
+const server = PACKAGE_DIR
+  ? (() => {
+      const { program, args } = packageLauncher(PACKAGE_DIR, guard);
+      return { command: [program, ...args].map(quote).join(' '), env: packageEnv() };
+    })()
+  : {
+      // `npm start` runs scripts/start.mjs; the guard is loaded into that same process.
+      command: 'npm run build && node --import ./e2e/offline/guard.mjs scripts/start.mjs',
+      env: {},
+    };
+
 export default defineConfig({
   testDir: 'tests',
   globalSetup: './global-setup.ts',
@@ -75,7 +91,7 @@ export default defineConfig({
     { name: 'first-run', testMatch: setUp, use: chromium },
     {
       name: 'chromium',
-      testIgnore: [setUp, /offline\.spec\.ts$/],
+      ...(PACKAGE_DIR ? { testMatch: journey } : { testIgnore: [setUp, /offline\.spec\.ts$/] }),
       dependencies: ['first-run'],
       use: chromium,
     },
@@ -93,14 +109,14 @@ export default defineConfig({
     },
   ],
   webServer: {
-    // `npm start` runs scripts/start.mjs; the guard is loaded into that same process.
-    command: 'npm run build && node --import ./e2e/offline/guard.mjs scripts/start.mjs',
+    command: server.command,
     cwd: repoRoot,
     url: `http://127.0.0.1:${port}/`,
     reuseExistingServer: false,
     timeout: 180_000,
     stdout: 'pipe',
     env: {
+      ...server.env,
       EMBERGLASS_PORT: port,
       EMBERGLASS_DATA_DIR: process.env.EMBERGLASS_E2E_DATA_DIR,
       EMBERGLASS_E2E_OUTBOUND_LOG: process.env.EMBERGLASS_E2E_OUTBOUND_LOG,

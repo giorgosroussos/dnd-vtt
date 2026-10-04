@@ -253,8 +253,8 @@ it('show only catalogue text: the Connect a screen panel, with addresses and wit
   const server = new FakeServer();
   server.connect = {
     addresses: [
-      { address: t('app.name'), url: t('app.name'), private: true },
-      { address: t('dm.role'), url: t('dm.role'), private: false },
+      { address: t('app.name'), url: t('app.name'), private: true, adapter: t('app.name'), virtual: false },
+      { address: t('dm.role'), url: t('dm.role'), private: false, adapter: t('dm.role'), virtual: true },
     ],
     qr: server.connect.qr,
   };

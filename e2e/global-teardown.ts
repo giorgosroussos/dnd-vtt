@@ -10,6 +10,9 @@ export default function globalTeardown(): void {
   // The offline run's outbound log, read by offline.spec.ts; nothing holds it open.
   const log = process.env.EMBERGLASS_E2E_OUTBOUND_LOG;
   if (log) rmSync(path.dirname(log), { recursive: true, force: true });
+  // The empty PATH folder of a run against a package (PKG-03, e2e/package.ts); nothing is ever in it.
+  const noPrograms = process.env.EMBERGLASS_E2E_NO_PROGRAMS;
+  if (noPrograms) rmSync(noPrograms, { recursive: true, force: true });
   const dir = process.env.EMBERGLASS_E2E_DATA_DIR;
   if (!dir) return;
   try {

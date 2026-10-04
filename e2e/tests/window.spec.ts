@@ -206,3 +206,32 @@ test('the DM view at a laptop’s 1,280 × 620: calibration, token placement and
     await context.close();
   }
 });
+
+// The Settings dialog at narrower laptop windows down to the one-column layout's edge, 620 px high: the
+// TV address added a field (Q-110), and the two field columns must still let every control show without
+// scrolling (PKG-01 review U-M1).
+for (const width of [1200, 1100, 1024, 960]) {
+  test(`the Settings dialog at ${width} × 620 shows every control without scrolling`, async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width, height: HEIGHT }, deviceScaleFactor: 1.5 });
+    const page = await context.newPage();
+    try {
+      await openWorkspace(page);
+      await page.getByRole('banner').getByRole('button', { name: 'Settings', exact: true }).click();
+      const dialog = page.getByRole('dialog', { name: 'Settings' });
+      await expect(dialog.getByLabel('TV address')).toBeVisible();
+      const shown = await layout(page);
+      const window: Box = { top: 0, bottom: HEIGHT, left: 0, right: width };
+      expect(within(shown.dialog!, window)).toBe(true);
+      expect(shown.dialogScrolls).toBe(false);
+      expect(shown.pageScrolls).toBe(false);
+      for (const name of ['Save settings', 'Change PIN', 'Sign out', 'Close']) {
+        const box = (await dialog.getByRole('button', { name, exact: true }).boundingBox())!;
+        expect(within({ top: box.y, bottom: box.y + box.height, left: box.x, right: box.x + box.width }, window)).toBe(
+          true,
+        );
+      }
+    } finally {
+      await context.close();
+    }
+  });
+}

@@ -2,6 +2,7 @@
 import { act, createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { LibraryAsset, Scene } from '@emberglass/shared';
+import rootPackage from '../../../package.json' with { type: 'json' };
 import { t } from '../ui/messages.js';
 import { installCanvas2d, installImageLoading, installResizeObserver } from '../ui/testing/canvas2d.js';
 import {
@@ -84,12 +85,17 @@ const menuItem = (view: HTMLElement, text: string) =>
   );
 
 describe('the header (specs/08-ux-journeys.md §11)', () => {
-  it('opens About & credits, crediting the icons’ authors and the SRD 5.1, and closes it back to its button (TBL-05)', async () => {
+  it('opens About & credits, with the version, crediting the icons’ authors and the SRD 5.1, and closes it back to its button (TBL-05)', async () => {
     const view = await open();
     const about = button(view, t('about.open'))!;
     await click(about);
     const dialog = document.querySelector<HTMLDialogElement>('dialog[open]')!;
     expect(dialog.querySelector('h2')!.textContent).toBe(t('about.title'));
+    // The build's real version, from the root package.json (PKG-01, D-167).
+    expect(dialog.querySelector('.eg-about__version')!.textContent).toBe(
+      t('about.version', { version: rootPackage.version }),
+    );
+    expect(rootPackage.version).toMatch(/^[1-9]\d*\.\d+\.\d+$/);
     expect(dialog.textContent).toContain(t('about.icons', { authors: 'Delapouite, Lorc, Sbed, Skoll' }));
     expect(dialog.textContent).toContain(t('about.srd'));
     expect(dialog.querySelector('a')).toBeNull();

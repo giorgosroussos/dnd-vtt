@@ -121,6 +121,8 @@ export class FakeServer {
   tokens: Record<string, number> = {};
   liveSceneId: string | null = null;
   uploadLimit = 50 * 1024 * 1024;
+  /** The TV address chosen in Settings, null for Automatic (Q-110). */
+  tvAddress: string | null = null;
   displaySize = 4096;
   assets: LibraryAsset[] = [];
   images: Image[] = [];
@@ -138,11 +140,20 @@ export class FakeServer {
   encounters: Record<string, Encounter> = {};
   /** The highest number issued per scene and asset, as `scene.token_numbers` (Q-091). */
   private issued: Record<string, number> = {};
-  /** What GET /api/connect answers (LIV-03): two addresses and a code of the first. */
-  connect: ConnectInfo = {
+  /**
+   * What GET /api/connect answers (LIV-03), in the automatic order: two addresses with their adapters and a
+   * code of the first. The TV address chosen in Settings (Q-110) is moved first when it is among them.
+   */
+  connect: Omit<ConnectInfo, 'chosen' | 'chosen_found' | 'automatic'> = {
     addresses: [
-      { address: '192.168.1.20', url: 'http://192.168.1.20:3000/', private: true },
-      { address: '100.64.3.4', url: 'http://100.64.3.4:3000/', private: false },
+      { address: '192.168.1.20', url: 'http://192.168.1.20:3000/', private: true, adapter: 'Wi-Fi', virtual: false },
+      {
+        address: '100.64.3.4',
+        url: 'http://100.64.3.4:3000/',
+        private: false,
+        adapter: 'vEthernet (WSL)',
+        virtual: true,
+      },
     ],
     qr: {
       size: 21,
@@ -1037,7 +1048,17 @@ export class FakeServer {
       return json(200, { dm: true });
     }
     if (!this.signedIn) return failure(401, 'unauthorized');
-    if (path === '/api/connect' && method === 'GET') return json(200, this.connect);
+    if (path === '/api/connect' && method === 'GET') {
+      const { addresses } = this.connect;
+      const chosen = addresses.find((entry) => entry.address === this.tvAddress);
+      return json(200, {
+        ...this.connect,
+        addresses: chosen ? [chosen, ...addresses.filter((entry) => entry !== chosen)] : addresses,
+        chosen: this.tvAddress,
+        chosen_found: chosen !== undefined,
+        automatic: addresses[0]?.address ?? null,
+      } satisfies ConnectInfo);
+    }
     // How many player views are connected (UIX-01): the open player sockets.
     if (path === '/api/screens' && method === 'GET') {
       return json(200, { count: this.sockets.filter((each) => each.connected && each.view === 'player').length });
@@ -1066,6 +1087,7 @@ export class FakeServer {
         this.uploadLimit = update.upload_limit_bytes ?? this.uploadLimit;
         this.displaySize = update.display_variant_size ?? this.displaySize;
         this.rulerRule = update.ruler_rule ?? this.rulerRule;
+        if (update.tv_address !== undefined) this.tvAddress = update.tv_address;
       }
       return json(200, {
         id: '00000000-0000-4000-8000-00000000ffff',
@@ -1073,6 +1095,7 @@ export class FakeServer {
         ruler_rule: this.rulerRule,
         upload_limit_bytes: this.uploadLimit,
         display_variant_size: this.displaySize,
+        tv_address: this.tvAddress,
       });
     }
     if (path === '/api/settings/pin' && method === 'PUT') {

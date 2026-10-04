@@ -1,9 +1,14 @@
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import type { AddressInfo } from 'node:net';
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { createServer, type AddressInfo } from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
+import Database from 'better-sqlite3';
 import type { FastifyInstance, InjectOptions, LightMyRequestResponse } from 'fastify';
 import sharp from 'sharp';
 import { io as connectClient, type Socket as ClientSocket } from 'socket.io-client';
-import { expect } from 'vitest';
+import { expect, vi } from 'vitest';
 import {
   SOCKET_CHANNELS,
   SOCKET_PATH,
@@ -15,12 +20,27 @@ import {
   type SnapshotEvent,
   type TokenChange,
 } from '@emberglass/shared';
+import { DATABASE_FILE } from '../../db/database.js';
 import { createVersionCounters, type VersionCounters } from '../../domain/version.js';
 import { buildTestApp, createTestData, setUpPin, type TestData } from '../../http/testing/app.js';
 
 // A live server for the WebSocket tests: a real SQLite file in a temporary data directory, a real
 // port and real Socket.io clients (specs/10-testing-acceptance.md §2). Images are generated from a
 // name, so the same name gives the same bytes and the same sha256 in every run (Q-088).
+//
+// With EMBERGLASS_TEST_PACKAGE naming the folder of an installed or unzipped package (PKG-03,
+// specs/10-testing-acceptance.md §4), the server is that package instead: its own runtime runs its
+// launcher, as Emberglass.cmd does, on a fresh data directory and a free port, with no program on PATH
+// (so no browser opens). Requests then go over HTTP, the database is read through a read-only connection
+// to the package's file, and the package's own limits apply, its one snapshot a second among them
+// (`make package-gates`, D-176).
+
+/** The package the tests run against, or undefined for the in-process server. */
+export const PACKAGE_DIR = process.env.EMBERGLASS_TEST_PACKAGE || undefined;
+
+// A packaged server starts in seconds, and answers at most one snapshot request a second per socket,
+// which the tests ask for after every step.
+if (PACKAGE_DIR) vi.setConfig({ testTimeout: 900_000, hookTimeout: 120_000 });
 
 export interface Client {
   socket: ClientSocket;
@@ -38,13 +58,17 @@ export interface Client {
 
 export interface LiveHarness {
   readonly data: TestData;
+  /** The in-process server; absent against a package, where `request` and `inject` go over HTTP. */
   readonly app: FastifyInstance;
   readonly cookie: string;
   readonly url: string;
+  /** The in-process version counters; absent against a package, whose snapshots carry the version. */
   readonly versions: VersionCounters;
   connect(headers?: Record<string, string | undefined>, auth?: Record<string, unknown>): Promise<Client>;
   command(client: Client, type: string, payload: unknown): Promise<CommandAck>;
   inject(options: InjectOptions, as?: string): Promise<LightMyRequestResponse>;
+  /** A request without any session, as a player view's browser makes it. */
+  request(options: InjectOptions): Promise<LightMyRequestResponse>;
   post(target: string, payload: unknown): Promise<LightMyRequestResponse>;
   image(name: string, width?: number): Promise<Image>;
   asset(name: string, fields?: Partial<LibraryAsset>): Promise<LibraryAsset>;
@@ -58,23 +82,203 @@ export function ok<T>(response: LightMyRequestResponse, status = 200): T {
   return (status === 204 ? undefined : response.json<T>()) as T;
 }
 
-export async function startLive({
-  snapshotIntervalMs = 0,
-}: { snapshotIntervalMs?: number } = {}): Promise<LiveHarness> {
+/** The server a harness drives: the in-process app, or a package's own process. */
+interface Backend {
+  data: TestData;
+  app: FastifyInstance;
+  versions: VersionCounters;
+  url: string;
+  cookie: string;
+  /** A request with the headers given, and no others. */
+  send(options: InjectOptions): Promise<LightMyRequestResponse>;
+  close(): Promise<void>;
+}
+
+const PIN = '4826';
+
+async function inProcess(snapshotIntervalMs: number): Promise<Backend> {
   const data = createTestData('emberglass-liv02-');
   const versions = createVersionCounters();
   // Snapshot requests unthrottled unless a test says otherwise: the tests use one after each step to
   // know that every event the step caused has arrived (Socket.io keeps a socket's messages in order).
   // The same interval bounds viewport reports (LIV-06).
   const app = await buildTestApp(data, { versions, liveLimits: { snapshotIntervalMs } });
-  const cookie = await setUpPin(app, '4826');
+  const cookie = await setUpPin(app, PIN);
   await app.listen({ port: 0, host: '127.0.0.1' });
-  const url = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
+  return {
+    data,
+    app,
+    versions,
+    url: `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`,
+    cookie,
+    send: (options) => app.inject(options),
+    async close() {
+      await app.close();
+      data.remove();
+    },
+  };
+}
+
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const probe = createServer();
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const { port } = probe.address() as AddressInfo;
+      probe.close(() => resolve(port));
+    });
+  });
+}
+
+/** The fields of an inject response the tests read, from a real HTTP exchange. */
+async function overHttp(url: string, options: InjectOptions): Promise<LightMyRequestResponse> {
+  const headers: Record<string, string> = {};
+  for (const [name, value] of Object.entries((options.headers ?? {}) as Record<string, string | number | undefined>)) {
+    if (value !== undefined) headers[name.toLowerCase()] = String(value);
+  }
+  const payload = options.payload ?? options.body;
+  let body: string | Buffer | undefined;
+  if (typeof payload === 'string' || Buffer.isBuffer(payload)) body = payload;
+  else if (payload !== undefined) {
+    body = JSON.stringify(payload);
+    headers['content-type'] ??= 'application/json';
+  }
+  if (typeof options.url !== 'string') throw new Error('Requests to a package take a URL string.');
+  const target = options.url;
+  const response = await fetch(new URL(target, url), {
+    method: options.method ?? 'GET',
+    headers,
+    redirect: 'manual',
+    ...(body === undefined ? {} : { body }),
+  });
+  const rawPayload = Buffer.from(await response.arrayBuffer());
+  const responseHeaders: Record<string, string | string[]> = {};
+  response.headers.forEach((value, name) => {
+    if (name !== 'set-cookie') responseHeaders[name] = value;
+  });
+  const cookies = response.headers.getSetCookie();
+  if (cookies.length > 0) responseHeaders['set-cookie'] = cookies.length === 1 ? cookies[0]! : cookies;
+  const text = rawPayload.toString('utf8');
+  return {
+    statusCode: response.status,
+    headers: responseHeaders,
+    rawPayload,
+    payload: text,
+    body: text,
+    json: () => JSON.parse(text) as unknown,
+  } as unknown as LightMyRequestResponse;
+}
+
+/** The environment of a DM's PC with no program on PATH: no Node, and no browser for the launcher to open. */
+function packageEnv(root: string, port: number, dataDir: string): NodeJS.ProcessEnv {
+  const noPrograms = path.join(root, 'no-programs');
+  mkdirSync(noPrograms, { recursive: true });
+  const keep =
+    process.platform === 'win32'
+      ? ['SystemRoot', 'SystemDrive', 'windir', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA']
+      : ['TMPDIR'];
+  return {
+    ...Object.fromEntries(keep.filter((name) => process.env[name]).map((name) => [name, process.env[name]])),
+    ...(process.platform === 'win32' ? {} : { HOME: root }),
+    PATH: noPrograms,
+    EMBERGLASS_PORT: String(port),
+    EMBERGLASS_DATA_DIR: dataDir,
+  };
+}
+
+async function packaged(folder: string): Promise<Backend> {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'emberglass-package-gate-'));
+  const dataDir = path.join(root, 'data');
+  const port = await freePort();
+  const url = `http://127.0.0.1:${port}`;
+  const runtime = path.join(folder, process.platform === 'win32' ? 'emberglass.exe' : 'emberglass');
+  const child: ChildProcess = spawn(runtime, [path.join(folder, 'app', 'launcher.mjs')], {
+    env: packageEnv(root, port, dataDir),
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+  });
+  let output = '';
+  child.stdout!.on('data', (chunk: Buffer) => (output += chunk.toString('utf8')));
+  child.stderr!.on('data', (chunk: Buffer) => (output += chunk.toString('utf8')));
+  const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
+  child.once('error', (error) => (output += `\n${error.message}`));
+  const opened: Database.Database[] = [];
+  const stop = async () => {
+    for (const db of opened) if (db.open) db.close();
+    if (child.exitCode === null && child.signalCode === null) {
+      if (process.platform === 'win32' && child.pid !== undefined) {
+        spawnSync('taskkill', ['/pid', String(child.pid), '/t', '/f'], { stdio: 'ignore' });
+      } else child.kill('SIGTERM');
+      await exited;
+    }
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  };
+  try {
+    // The launcher starts the server in its own process and says so (specs/09-operations.md §1, §2).
+    await vi.waitFor(
+      async () => {
+        if (child.exitCode !== null) throw new Error(`the package's launcher exited:\n${output}`);
+        expect(output).toContain(`Emberglass is running on port ${port}`);
+        // With nothing on PATH the launcher finds no browser to open, so none runs outside the test's control.
+        expect(output).toContain('Could not open a browser.');
+        expect((await fetch(`${url}/api/auth`)).status).toBe(200);
+      },
+      { timeout: 60_000, interval: 200 },
+    );
+    // `make package-gates` counts these lines to know that the gates ran here, against the package (D-177).
+    const log = process.env.EMBERGLASS_TEST_PACKAGE_LOG;
+    if (log) appendFileSync(log, `${JSON.stringify({ folder, pid: child.pid })}\n`);
+    const setup = await overHttp(url, { method: 'POST', url: '/api/setup', payload: { pin: PIN } });
+    const cookie = [setup.headers['set-cookie'] ?? []].flat().find((value) => value.startsWith('emberglass_dm='));
+    if (setup.statusCode !== 200 || !cookie) throw new Error(`setup answered ${setup.statusCode}: ${setup.body}`);
+    const reopen = () => {
+      const db = new Database(path.join(dataDir, DATABASE_FILE), { readonly: true, fileMustExist: true });
+      opened.push(db);
+      return db;
+    };
+    const absent = (what: string) => () => {
+      throw new Error(`${what} is the in-process server's; the tests run against the package in ${folder}`);
+    };
+    return {
+      data: {
+        root,
+        dataDir,
+        dist: path.join(folder, 'app', 'client', 'dist'),
+        db: reopen(),
+        reopen,
+        // Closed with the server, by `close`.
+        remove: () => undefined,
+      },
+      get app(): FastifyInstance {
+        return absent('app')();
+      },
+      get versions(): VersionCounters {
+        return absent('versions')();
+      },
+      url,
+      cookie: cookie.split(';', 1)[0]!,
+      send: (options) => overHttp(url, options),
+      close: stop,
+    };
+  } catch (error) {
+    await stop();
+    throw error;
+  }
+}
+
+export async function startLive({
+  snapshotIntervalMs = 0,
+}: { snapshotIntervalMs?: number } = {}): Promise<LiveHarness> {
+  if (PACKAGE_DIR && snapshotIntervalMs !== 0) {
+    throw new Error('A test of its own snapshot interval cannot run against a package, whose interval is fixed.');
+  }
+  const backend = PACKAGE_DIR ? await packaged(PACKAGE_DIR) : await inProcess(snapshotIntervalMs);
+  const { url, cookie } = backend;
   const clients: ClientSocket[] = [];
   let session: { id: string } | undefined;
 
   const inject = (options: InjectOptions, as = cookie) =>
-    app.inject({ ...options, headers: { cookie: as, ...(options.headers as Record<string, string> | undefined) } });
+    backend.send({ ...options, headers: { cookie: as, ...(options.headers as Record<string, string> | undefined) } });
   const post = (target: string, payload: unknown) =>
     inject({ method: 'POST', url: target, payload: payload as object });
 
@@ -146,15 +350,22 @@ export async function startLive({
   };
 
   const harness: LiveHarness = {
-    data,
-    app,
+    get data() {
+      return backend.data;
+    },
+    get app() {
+      return backend.app;
+    },
     cookie,
     url,
-    versions,
+    get versions() {
+      return backend.versions;
+    },
     connect,
     command: (client, type, payload) =>
       client.socket.timeout(5_000).emitWithAck(SOCKET_CHANNELS.command, { type, payload }) as Promise<CommandAck>,
     inject,
+    request: (options) => backend.send(options),
     post,
     image,
     async asset(name, fields = {}) {
@@ -180,8 +391,7 @@ export async function startLive({
     },
     async close() {
       for (const client of clients.splice(0)) client.disconnect();
-      await app.close();
-      data.remove();
+      await backend.close();
     },
   };
   return harness;

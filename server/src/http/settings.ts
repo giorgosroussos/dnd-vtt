@@ -14,7 +14,9 @@ import type { LiveSocket } from '../ws/live.js';
 import { clientAddress } from './auth.js';
 
 // PATCH /api/settings (REL-01, specs/09-operations.md §7, Q-051): the DM changes the upload limit,
-// the display-version size and the ruler's diagonal rule without restarting. The session guard and
+// the display-version size, the ruler's diagonal rule and the connect panel's TV address (PKG-01, Q-110)
+// without restarting; the TV address is read by GET /api/connect at each request, and the console's at
+// the next start. The session guard and
 // the Origin check of auth.ts come first, like every /api write; the body is strict and bounded
 // (SettingsUpdateSchema), so a refused one changes nothing. Each setting takes effect where it is
 // read: the upload limit on the next upload (images.ts reads it for each one), the rule at the next
@@ -37,7 +39,7 @@ export function registerSettings(app: FastifyInstance, { db, logger, live, regen
     (request, reply) => {
       const before = readSettings(db);
       const after = live.refresh(() => updateSettings(db, request.body));
-      const changed = (['upload_limit_bytes', 'display_variant_size', 'ruler_rule'] as const).filter(
+      const changed = (['upload_limit_bytes', 'display_variant_size', 'ruler_rule', 'tv_address'] as const).filter(
         (key) => before[key] !== after[key],
       );
       if (changed.length > 0) {

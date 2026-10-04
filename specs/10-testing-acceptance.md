@@ -31,6 +31,7 @@ Every change MUST pass these gates through the root `Makefile`, locally and in C
 - The player view MUST also be accepted on the owner's LG TV, in its built-in webOS browser, loading the large-scene fixture, before the player view is accepted; this run confirms the display-version size (`05` §7). [Q-019, recommendation accepted]
 - The DM view MUST be accepted on current Chrome, Edge, Firefox and Safari on a laptop or desktop (`08` §7). [Q-029, Q-019]
 - The server MUST pass the acceptance scenarios on Windows and on Linux (`09` §3). [Q-018, recommendation accepted]
+- The Windows package MUST pass the acceptance scenarios, the hidden-information suite and the offline run once installed, before a release is published, and once by hand on a Windows with no Node installed (`09` §1). [Q-107, recommendation accepted]
 
 ## 5. Acceptance scenarios
 

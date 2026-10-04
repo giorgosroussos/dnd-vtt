@@ -1,9 +1,13 @@
 {
   "name": "emberglass",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Self-hosted virtual tabletop for in-person play, compatible with 5th edition (SRD 5.1).",
   "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/giorgosroussos/dnd-vtt"
+  },
   "type": "module",
   "engines": {
     "node": ">=24"
@@ -33,10 +37,12 @@
     "@eslint/js": "^10.0.1",
     "@secretlint/secretlint-rule-preset-recommend": "^13.0.5",
     "@types/node": "^24.13.6",
+    "esbuild": "^0.28.2",
     "eslint": "^10.11.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^17.12.0",
     "prettier": "^3.9.9",
+    "resedit": "^3.1.0",
     "secretlint": "^13.0.5",
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.70.1",

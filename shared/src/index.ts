@@ -226,6 +226,8 @@ export {
   DEFAULT_FEET_PER_SQUARE,
   DEFAULT_GRID_EXTENT,
   DEFAULT_SETTINGS,
+  IPV4_PATTERN,
+  Ipv4Schema,
   GRID_TYPES,
   GridPresetSchema,
   GridSchema,

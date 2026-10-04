@@ -1608,7 +1608,7 @@ textarea.eg-field__input {
  * by a rule, one above the other in a narrow window; the rule's radio buttons without the browser's group
  * border, and an empty status taking no room. Never wider than the window less a margin (review U-L6). */
 .eg-dialog.eg-settings {
-  max-width: min(56rem, calc(100vw - 2rem));
+  max-width: min(76rem, calc(100vw - 2rem));
 }
 
 /* Closer than other dialogs' rows of buttons: the whole dialog fits a laptop's 620 px window. */
@@ -1616,11 +1616,31 @@ textarea.eg-field__input {
   margin-top: var(--space-4);
 }
 
+/* The table's settings in two columns of fields beside the PIN change: on a laptop's 1,280 × 620 window the
+   whole dialog shows without scrolling, the TV address included (G-041, Q-110). */
 .eg-settings__columns {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 2fr 1fr;
   gap: var(--space-6);
   align-items: start;
+}
+
+/* minmax(0, 1fr): a long adapter name in the TV address select must not widen its column (review U-L11). */
+.eg-settings__fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-6);
+  align-items: start;
+}
+
+.eg-settings__fields select {
+  width: 100%;
+}
+
+.eg-settings__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
 }
 
 .eg-settings__heading {
@@ -1635,6 +1655,10 @@ textarea.eg-field__input {
 @media (width <= 940px) {
   .eg-settings__columns {
     grid-template-columns: 1fr;
+  }
+
+  .eg-settings__fields {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .eg-settings__pin {

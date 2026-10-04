@@ -11,7 +11,7 @@ import {
 import { contrastFailures } from './contrast.js';
 import { openWorkspace, seedCampaign } from './dm.js';
 import { solidPng } from './png.js';
-import { create, drawn, newAsset, picker, status, unique } from './prep.js';
+import { create, drawn, newAsset, picker, status, tokensOf, unique } from './prep.js';
 
 // Tokens in preparation against the real server (PRP-04, specs/05-assets-and-images.md §2–§5,
 // specs/06-grid-and-measurement.md §4, specs/08-ux-journeys.md §8, D-100): added, chosen, moved and
@@ -152,6 +152,17 @@ test('a click on a token opens its popover and a drag closes it, keeping the tok
   await expect.poll(async () => (await drawn(page))[0]!.x).not.toBe(before.x);
   await expect(selectedTokenLabel(page)).toHaveText(label);
   await expect(tokenPopover(page)).toHaveCount(0);
+  // The drop is saved and snapped on the server, and drawn there, before the next click aims at the token:
+  // until then it can still move once more, and a click at its old place misses it (CI run 37003661035,
+  // then locally on the same line).
+  await expect.poll(async () => (await tokensOf(page, scene.id))[0]!.x).not.toBe(3);
+  const stored = (await tokensOf(page, scene.id))[0]!;
+  await expect
+    .poll(async () => {
+      const [token] = await drawn(page);
+      return [token!.x, token!.y];
+    })
+    .toEqual([stored.x, stored.y]);
 
   // Clicking it again opens the popover; Space and a drag pans the view and closes it.
   [x, y] = await centre();

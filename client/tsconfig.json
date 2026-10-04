@@ -9,6 +9,6 @@
     "types": ["vite/client"],
     "tsBuildInfoFile": "../node_modules/.tmp/client.tsbuildinfo"
   },
-  "include": ["src", "vite.config.ts", "vitest.config.ts"],
+  "include": ["src", "build-version.ts", "build-version.test.ts", "vite.config.ts", "vitest.config.ts"],
   "references": [{ "path": "../shared/tsconfig.build.json" }]
 }

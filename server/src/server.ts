@@ -1,19 +1,34 @@
 import { loadConfig } from './config.js';
 import { connectBanner, connectInfo, systemInterfaces } from './connect.js';
 import { openDatabase } from './db/database.js';
+import { lockDataDirectory } from './db/lock.js';
 import { migrateDataDirectory } from './db/migrate.js';
-import { readPinHash } from './db/settings.js';
+import { readPinHash, readSettings } from './db/settings.js';
 import { buildApp } from './http/app.js';
 import { createLogger } from './log/logger.js';
 import { CLIENT_DIST, CLIENT_ROOT, MIGRATIONS_DIR } from './paths.js';
 
 // One process: the built client (or Vite in development), the REST API and the
 // WebSocket of the live scene, all on one port (specs/02-architecture.md §2).
-export async function start({ dev }: { dev: boolean }): Promise<void> {
+/** A running server: closing it stops it and releases its data directory (D-173). */
+export interface Running {
+  port: number;
+  close(): Promise<void>;
+}
+
+export async function start({
+  dev,
+  clientDist = CLIENT_DIST,
+}: {
+  dev: boolean;
+  clientDist?: string;
+}): Promise<Running> {
   const config = loadConfig();
   // Console and logs/emberglass.log in the data directory (specs/09-operations.md §6, D-035).
   const logger = createLogger({ dataDir: config.dataDir });
 
+  // Before anything touches the data: one server per data directory, since start-up cleans it (D-173).
+  const lock = lockDataDirectory(config.dataDir);
   try {
     // Migrations run before the server accepts connections (specs/09-operations.md §2).
     const migration = migrateDataDirectory(config.dataDir, MIGRATIONS_DIR);
@@ -21,12 +36,15 @@ export async function start({ dev }: { dev: boolean }): Promise<void> {
 
     const db = openDatabase(config.dataDir);
     const app = await buildApp({
-      client: dev ? { kind: 'dev', root: CLIENT_ROOT } : { kind: 'static', dist: CLIENT_DIST },
+      client: dev ? { kind: 'dev', root: CLIENT_ROOT } : { kind: 'static', dist: clientDist },
       logger,
       db,
       dataDir: config.dataDir,
     });
-    app.addHook('onClose', () => db.close());
+    app.addHook('onClose', () => {
+      db.close();
+      lock.release();
+    });
     await app.listen({ port: config.port, host: '0.0.0.0' });
     logger.info('server.started', `Emberglass is running on port ${config.port}${dev ? ' (development)' : ''}.`, {
       port: config.port,
@@ -34,7 +52,7 @@ export async function start({ dev }: { dev: boolean }): Promise<void> {
     });
     // The player view's URL and QR code for the TV, straight to the console: a QR code is not a
     // log line (specs/09-operations.md §2, §4, specs/08-ux-journeys.md §5); the URLs are logged too.
-    const connect = connectInfo(systemInterfaces(), config.port);
+    const connect = connectInfo(systemInterfaces(), config.port, readSettings(db).tv_address);
     logger.info(
       'server.addresses',
       `Player view: ${connect.addresses.map((entry) => entry.url).join(' ') || 'no network address'}`,
@@ -54,7 +72,17 @@ export async function start({ dev }: { dev: boolean }): Promise<void> {
     };
     process.once('SIGINT', stop);
     process.once('SIGTERM', stop);
+    const address = app.server.address();
+    return {
+      port: address !== null && typeof address === 'object' ? address.port : config.port,
+      close: async () => {
+        process.off('SIGINT', stop);
+        process.off('SIGTERM', stop);
+        await app.close();
+      },
+    };
   } catch (error) {
+    lock.release();
     logger.error('server.failed', 'Emberglass could not start.', { error });
     throw error;
   }

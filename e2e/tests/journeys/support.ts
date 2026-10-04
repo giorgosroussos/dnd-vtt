@@ -3,8 +3,9 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { expect, type Page, type TestInfo } from '@playwright/test';
+import { PACKAGE_DIR, packageEnv, packageLauncher } from '../../package.js';
 
 // What the acceptance journeys of specs/10-testing-acceptance.md §5 share (REL-02, D-127): the
 // locators of both views, what the TV draws, names unique to each browser of the matrix, this PC's
@@ -90,17 +91,29 @@ export interface OwnServer {
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
 
 /**
- * Starts the built server the way a DM does (`npm start` runs scripts/start.mjs), on a fresh data
- * directory and a port of its own, under the offline guard like the suite's own server.
+ * Starts the built server the way a DM does (`npm start` runs scripts/start.mjs), or the package's launcher
+ * when the run is against a package (PKG-03), on a fresh data directory and a port of its own, under the
+ * offline guard like the suite's own server.
  */
 export async function startOwnServer(): Promise<OwnServer> {
   const port = await freePort();
   const dataDir = mkdtempSync(path.join(os.tmpdir(), 'emberglass-journey-'));
   let printed = '';
-  const child: ChildProcess = spawn(process.execPath, ['--import', './e2e/offline/guard.mjs', 'scripts/start.mjs'], {
+  const guard = pathToFileURL(path.join(repoRoot, 'e2e', 'offline', 'guard.mjs')).href;
+  const { program, args } = PACKAGE_DIR
+    ? packageLauncher(PACKAGE_DIR, guard)
+    : { program: process.execPath, args: ['--import', guard, 'scripts/start.mjs'] };
+  const child: ChildProcess = spawn(program, args, {
     cwd: repoRoot,
-    env: { ...process.env, EMBERGLASS_PORT: String(port), EMBERGLASS_DATA_DIR: dataDir, FORCE_COLOR: '0' },
+    env: {
+      ...process.env,
+      ...(PACKAGE_DIR ? packageEnv() : {}),
+      EMBERGLASS_PORT: String(port),
+      EMBERGLASS_DATA_DIR: dataDir,
+      FORCE_COLOR: '0',
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
   });
   child.stdout!.on('data', (chunk: Buffer) => (printed += chunk.toString('utf8')));
   child.stderr!.on('data', (chunk: Buffer) => (printed += chunk.toString('utf8')));
@@ -123,6 +136,8 @@ export async function startOwnServer(): Promise<OwnServer> {
         { timeout: 30_000 },
       )
       .toBe(200);
+    // The package's launcher, with nothing on PATH, opens no browser outside the offline proxy (PKG-03).
+    if (PACKAGE_DIR) await expect.poll(() => printed).toContain('Could not open a browser.');
   } catch (error) {
     await stop();
     throw error;

@@ -1,6 +1,6 @@
 {
   "name": "@emberglass/server",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "private": true,
   "license": "AGPL-3.0-only",
   "type": "module",
@@ -13,7 +13,7 @@
     "reset-pin": "tsx --conditions=development src/auth/reset-pin-cli.ts"
   },
   "dependencies": {
-    "@emberglass/shared": "0.0.0",
+    "@emberglass/shared": "1.0.0",
     "@fastify/static": "^10.1.4",
     "ajv": "^8.20.0",
     "better-sqlite3": "^13.0.3",
