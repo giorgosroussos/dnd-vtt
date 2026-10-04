@@ -172,7 +172,7 @@ Stack: Node.js 24 LTS (one process), TypeScript, Fastify, Socket.io, SQLite (bet
 
 ### Continuous integration
 
-GitHub Actions, `.github/workflows/ci.yml` (FND-02, `specs/13-implementation-plan.md` §3; D-060, D-061), on every pull request, every push to `main` and on demand. Every job runs exactly one root `Makefile` target, so a gate cannot pass in CI and fail locally: to reproduce a red job, run its command. Before it, a job only provisions the machine (checkout, Node from `.nvmrc`, `make setup`; on Windows also MSYS2 for `make` and bash). No job retries.
+GitHub Actions, `.github/workflows/ci.yml` (FND-02, `specs/13-implementation-plan.md` §3; D-060, D-061), on every pull request, every push to `main` and on demand. The two package jobs run only on pushes to `main` and on demand, not on pull requests (D-179). Every job runs exactly one root `Makefile` target, so a gate cannot pass in CI and fail locally: to reproduce a red job, run its command. Before it, a job only provisions the machine (checkout, Node from `.nvmrc`, `make setup`; on Windows also MSYS2 for `make` and bash). No job retries.
 
 | Job | Runners | Command |
 | --- | --- | --- |
@@ -196,5 +196,5 @@ The `package gates · windows` job (PKG-03, D-176) takes the installer and zip t
 
 Gates that the testing specification requires and nothing implements yet would run as failing-forward tripwires (`make tripwire`, D-061), one job each; there are none left, since REL-02 promoted the last two, and `make tripwire` says so.
 
-`make verify` runs the first seven gate commands; `make audit` and `make scan-secrets` run beside it. Caches (npm, Playwright browsers) are keyed on `package-lock.json`, and a failed `e2e` job keeps `e2e/test-results/` as an artifact for seven days. A ruleset on `main` requires every job above by name, so a red pipeline blocks a merge; it lives on GitHub, not in this repository.
+`make verify` runs the first seven gate commands; `make audit` and `make scan-secrets` run beside it. Caches (npm, Playwright browsers) are keyed on `package-lock.json`, and a failed `e2e` job keeps `e2e/test-results/` as an artifact for seven days. A ruleset on `main` requires every job above by name but the two package jobs, so a red pipeline blocks a merge; it lives on GitHub, not in this repository. The package jobs cannot be required checks, since they do not run on pull requests: a red one on `main` is fixed before the next tag, and the release workflow refuses to publish without them.
 

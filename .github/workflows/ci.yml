@@ -131,8 +131,12 @@ jobs:
   # The portable package (PKG-01, D-164, D-166): built on Windows from this commit and checked as a DM
   # would use it, with no Node on PATH and an empty data directory. Not a matrix entry: only Windows
   # x64 is packaged (specs/09-operations.md §3). The release workflow runs the same target on a tag.
+  # Not on pull requests (D-179): on every push to main and when CI is started by hand, so a change that
+  # breaks the package shows right after it merges, and always before a tag can publish it. The gates job
+  # below needs this one, so it is skipped with it.
   package:
     name: package · windows
+    if: github.event_name != 'pull_request'
     # The digests of what this job built (review S-M1, D-177): the gates and the release check that what they
     # download is still exactly that, so a later job's code cannot swap the artifact unnoticed.
     outputs:

@@ -195,6 +195,7 @@ Affected specs: …
 - D-176 — PKG-03: the package gates run against the installed package by make package-gates, in CI and before a release is published, with build provenance — implementation
 - D-177 — PKG-03 review fixes: tested gate verdicts, fog revocation in the package gates, digests carried from the build, the release behind the owner's approval, and release notes that say what ran — implementation
 - D-178 — The Windows Sandbox install deferred: PKG-03 done without it, the manual install kept as gap G-046 — adr
+- D-179 — The package and its gates run in CI on pushes to main and on demand, not on pull requests; G-045 retired — implementation
 
 ## D-001 (2026-09-23) — Repository documentation regime
 Type: implementation
@@ -1459,3 +1460,10 @@ Why: Owner's decision on 2026-10-04: the owner does not want to run the Sandbox 
 Alternatives: Keeping PKG-03 in progress and the pull request open until the Sandbox run (offered to the owner, not chosen); counting the owner's own-PC install as the manual run (rejected: that PC had an earlier install and its data, and `10` §4 names a Windows with no Node); amending `10` §4 to drop the manual install (rejected: the owner defers it, and a locked decision is not rewritten by a deferral).
 Affected specs: `10` §4, `13` §11, `12` §3
 Owner approval: granted 2026-10-04
+
+## D-179 (2026-10-04) — The package and its gates run in CI on pushes to main and on demand, not on pull requests; G-045 retired
+Type: implementation
+Decision: The owner's choice (2026-10-04): in `.github/workflows/ci.yml` the `package · windows` job carries `if: github.event_name != 'pull_request'`, so it and `package gates · windows`, which needs it and has no condition of its own, run on every push to `main` and on `workflow_dispatch`, never on a pull request. The release workflow is unchanged: on a tag it always builds, gates and waits for the owner's approval before publishing (D-176, D-177). `scripts/ci-consistency.test.mjs` requires the condition on the CI package job, the gates job's `needs: package`, CI's three triggers, and no condition on the release workflow's package job. G-045 is retired: a job that does not run on pull requests cannot be a required check of the ruleset on `main`, so the package jobs are left out of it by design; README.md says so.
+Why: The two Windows jobs take about 15 minutes of runner time on every pull request and have hung intermittently in `make package` (twice in about ten runs), holding pull requests back for what the release workflow checks anyway before anything is published. Running them on `main` still shows a change that breaks the package right after it merges, and before any tag.
+Alternatives: On demand only (rejected by the owner: the release workflow would be the first automatic check, so a break could first show when releasing); on pull requests that touch packaging files only (rejected by the owner: needs a path-filter step, and a server change elsewhere could break the package unnoticed); keeping them on every pull request and adding them to the ruleset as G-045 asked (rejected by the owner: the time and the intermittent hang on every pull request).
+Affected specs: `13` §11; `10` §1
