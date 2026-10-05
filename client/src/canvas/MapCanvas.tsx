@@ -856,6 +856,13 @@ export function MapCanvas({
     }
     if (controls && selected) {
       const arrow = ARROWS[event.key];
+      // A group moves together, each token by its own step (UXR-02).
+      const group = (controls.selectedIds ?? []).flatMap((id) => tokens.filter((token) => token.id === id));
+      if (arrow && group.length > 1 && controls.onMoveMany) {
+        event.preventDefault();
+        controls.onMoveMany(group.map((token) => ({ id: token.id, at: nudge(token, token.size, arrow[0], arrow[1]) })));
+        return;
+      }
       if (arrow) {
         event.preventDefault();
         controls.onMove(selected.id, nudge(selected, selected.size, arrow[0], arrow[1]));

@@ -367,6 +367,83 @@ describe('moving tokens in the DM mode (specs/06-grid-and-measurement.md §4, D-
   });
 });
 
+describe('several tokens at once (UXR-02, specs/08-ux-journeys.md §14)', () => {
+  const press = (stage: Konva.Stage, id: string, type: 'pointerdown' | 'pointerup', init: MouseEventInit = {}) => {
+    const group = groupOf(stage, id)!;
+    act(() => {
+      group.fire(type, { target: group, evt: new MouseEvent(type, { clientX: 100, clientY: 100, ...init }) }, true);
+    });
+  };
+
+  it('Ctrl or Cmd and a press toggles a token in the selection without selecting it alone, and outlines every one', async () => {
+    const tokenControls = controls({ selectedId: 'g2', selectedIds: ['g1', 'g2'], onToggle: vi.fn() });
+    const { stage } = await draw({ grid: GRID, map: MAP, mode: 'dm', tokens: [GOBLIN, HIDDEN, GIANT], tokenControls });
+    expect(groupOf(stage, 'g1')!.findOne('.token-selected')).toBeDefined();
+    expect(groupOf(stage, 'g2')!.findOne('.token-selected')).toBeDefined();
+    expect(groupOf(stage, 'h1')!.findOne('.token-selected')).toBeUndefined();
+    press(stage, 'h1', 'pointerdown', { ctrlKey: true });
+    press(stage, 'g1', 'pointerdown', { metaKey: true });
+    expect(tokenControls.onToggle).toHaveBeenNthCalledWith(1, 'h1');
+    expect(tokenControls.onToggle).toHaveBeenNthCalledWith(2, 'g1');
+    expect(tokenControls.onSelect).not.toHaveBeenCalled();
+  });
+
+  it('a press on one of the group keeps the group; a click without a drag selects that token alone', async () => {
+    const tokenControls = controls({
+      selectedId: 'g2',
+      selectedIds: ['g1', 'g2'],
+      onToggle: vi.fn(),
+      onMoveMany: vi.fn(),
+    });
+    const { stage } = await draw({ grid: GRID, map: MAP, mode: 'dm', tokens: [GOBLIN, HIDDEN], tokenControls });
+    press(stage, 'g1', 'pointerdown');
+    expect(tokenControls.onSelect).not.toHaveBeenCalled();
+    press(stage, 'g1', 'pointerup');
+    expect(tokenControls.onSelect).toHaveBeenCalledWith('g1');
+    expect(tokenControls.onOpenPopover).toHaveBeenCalledWith('g1');
+  });
+
+  it('a drag of one of the group moves them all by the same snapped squares, as one move of the group', async () => {
+    const onMoveMany = vi.fn();
+    const onMove = vi.fn();
+    const tokenControls = controls({ selectedId: 'g1', selectedIds: ['g2', 'g1'], onMoveMany, onMove });
+    const { stage } = await draw({ grid: GRID, map: MAP, mode: 'dm', tokens: [GOBLIN, HIDDEN, GIANT], tokenControls });
+    const goblin = groupOf(stage, 'g1')!;
+    act(() => {
+      goblin.fire('dragstart', { target: goblin, evt: new MouseEvent('mousedown') });
+      // Grid 2, 3 to 4.4, 3.2: the others follow as it moves.
+      goblin.position({ x: 15 + 4.4 * 50, y: 125 + 3.2 * 50 });
+      goblin.fire('dragmove', { target: goblin, evt: new MouseEvent('mousemove') });
+    });
+    expect(groupOf(stage, 'g2')!.position().x).toBeCloseTo(15 + (4.5 + 2.4) * 50, 6);
+    expect(groupOf(stage, 'h1')!.position()).toEqual({ x: 15 + 6 * 50, y: 125 + 6 * 50 });
+    act(() => {
+      goblin.fire('dragend', { target: goblin, evt: new MouseEvent('mouseup') });
+    });
+    // Snapped to 4, 3: two squares right, none down; the hidden goblin keeps its offset, half squares and all.
+    expect(onMoveMany).toHaveBeenCalledWith([
+      { id: 'g1', at: { x: 4, y: 3 } },
+      { id: 'g2', at: { x: 6.5, y: 1.25 } },
+    ]);
+    expect(onMove).not.toHaveBeenCalled();
+    expect(groupOf(stage, 'g2')!.position()).toEqual({ x: 15 + 6.5 * 50, y: 125 + 1.25 * 50 });
+    expect(tokenControls.onSelect).not.toHaveBeenCalled();
+  });
+
+  it('the arrow keys nudge every token of the group', async () => {
+    const onMoveMany = vi.fn();
+    const tokenControls = controls({ selectedId: 'g1', selectedIds: ['g2', 'g1'], onMoveMany });
+    const { view } = await draw({ grid: GRID, map: MAP, mode: 'dm', tokens: [GOBLIN, HIDDEN], tokenControls });
+    act(() => {
+      viewport(view).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+    });
+    expect(onMoveMany).toHaveBeenCalledWith([
+      { id: 'g2', at: { x: 5, y: 2 } },
+      { id: 'g1', at: { x: 2, y: 4 } },
+    ]);
+  });
+});
+
 describe('dragging a library asset onto the map (UXR-03, specs/05-assets-and-images.md §5)', () => {
   const TYPE = 'application/x-emberglass-asset';
   // A drag event as a browser sends it; jsdom has no DragEvent, so the data transfer is attached.

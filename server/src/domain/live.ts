@@ -28,6 +28,7 @@ import {
   type TokenDeletePayload,
   type TokenMovePayload,
   type TokenApplyHpPayload,
+  type TokenBatchPayload,
   type TokenSetMarkersPayload,
   type TokenSetStatsPayload,
   type TokenSetVisibilityPayload,
@@ -273,6 +274,7 @@ export function applyLiveCommand(db: Database.Database, command: CommandEnvelope
  * again.
  */
 export function applyInverse(db: Database.Database, inverse: Inverse): LiveResult {
+  if (inverse.type === 'batch') return replay(db, inverse).result;
   if (inverse.type === 'token.setVisibility' && !inverse.payload.hidden) {
     const current = readToken(db, inverse.payload.token_id);
     if (current === undefined) return tokenNotFound();
@@ -307,6 +309,72 @@ export function applyInverse(db: Database.Database, inverse: Inverse): LiveResul
     default:
       return notLive();
   }
+}
+
+/** A command of a batch refused: thrown out of the batch's transaction, which rolls the whole batch back. */
+class BatchRefused extends Error {
+  constructor(readonly envelope: ErrorEnvelope) {
+    super(envelope.error.message);
+  }
+}
+
+/**
+ * Applies `token.batch` (UXR-02, specs/04-live-sync.md §2, §8, Q-123): its commands in order in one transaction,
+ * each through `applyLiveCommand` exactly as if sent alone, so each room receives what those commands would send.
+ * The first one refused rolls the whole batch back and is its answer: nothing changed, nobody is told. Its undo is
+ * one compound inverse, of the commands that changed something; a batch that changed nothing has none.
+ */
+export function applyBatch(
+  db: Database.Database,
+  command: CommandEnvelope,
+): { result: LiveResult; inverse: Inverse | undefined } {
+  const { commands } = command.payload as TokenBatchPayload;
+  const effects: LiveEffect[] = [];
+  const inverses: Inverse[] = [];
+  try {
+    db.transaction(() => {
+      for (const each of commands) {
+        const part = { type: each.type, payload: each.payload } as CommandEnvelope;
+        const result = applyLiveCommand(db, part);
+        if (!Array.isArray(result)) throw new BatchRefused(result);
+        effects.push(...result);
+        const inverse = inverseOf(part, result);
+        if (inverse !== undefined) inverses.push(inverse);
+      }
+    })();
+  } catch (error) {
+    if (error instanceof BatchRefused) return { result: error.envelope, inverse: undefined };
+    throw error;
+  }
+  return { result: effects, inverse: inverses.length === 0 ? undefined : { type: 'batch', inverses } };
+}
+
+/**
+ * Applies an inverse from the history and answers what undoes it in turn. A compound one (a batch's) replays its
+ * parts last first in one transaction, all or nothing as the batch was, and is undone in turn by the compound of
+ * its parts' own, kept so that replaying it, last first again, runs them in the batch's order.
+ */
+export function replay(db: Database.Database, inverse: Inverse): { result: LiveResult; back: Inverse | undefined } {
+  if (inverse.type !== 'batch') {
+    const result = applyInverse(db, inverse);
+    return { result, back: Array.isArray(result) ? inverseOfInverse(inverse, result) : undefined };
+  }
+  const effects: LiveEffect[] = [];
+  const backs: Inverse[] = [];
+  try {
+    db.transaction(() => {
+      for (const part of [...inverse.inverses].reverse()) {
+        const { result, back } = replay(db, part);
+        if (!Array.isArray(result)) throw new BatchRefused(result);
+        effects.push(...result);
+        if (back !== undefined) backs.push(back);
+      }
+    })();
+  } catch (error) {
+    if (error instanceof BatchRefused) return { result: error.envelope, back: undefined };
+    throw error;
+  }
+  return { result: effects, back: backs.length === 0 ? undefined : { type: 'batch', inverses: backs } };
 }
 
 export interface LiveCommands {
@@ -354,8 +422,7 @@ export function createLiveCommands(
         const live = liveSceneId();
         const inverse = history.pop(live);
         if (inverse === undefined) return [];
-        const result = applyInverse(db, inverse);
-        const redo = Array.isArray(result) ? inverseOfInverse(inverse, result) : undefined;
+        const { result, back: redo } = replay(db, inverse);
         if (redo !== undefined && live !== null) history.recordRedo(live, redo);
         return result;
       }
@@ -365,8 +432,7 @@ export function createLiveCommands(
         const live = liveSceneId();
         const redo = history.popRedo(live);
         if (redo === undefined) return [];
-        const result = applyInverse(db, redo);
-        const inverse = Array.isArray(result) ? inverseOfInverse(redo, result) : undefined;
+        const { result, back: inverse } = replay(db, redo);
         if (inverse !== undefined && live !== null) history.record(live, inverse, true);
         return result;
       }
@@ -404,6 +470,12 @@ export function createLiveCommands(
         const live = liveSceneId();
         if (live === null || live !== scene_id) return notLive();
         return [{ type: 'ping', x, y }];
+      }
+      case 'token.batch': {
+        const { result, inverse } = applyBatch(db, command);
+        const live = liveSceneId();
+        if (inverse !== undefined && live !== null) history.record(live, inverse);
+        return result;
       }
       case 'camera.setPlayer': {
         const { scene_id, camera: next } = command.payload as CameraSetPlayerPayload;

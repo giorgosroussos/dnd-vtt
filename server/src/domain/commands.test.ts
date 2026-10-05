@@ -176,6 +176,7 @@ describe('the process command validator', () => {
     'token.setMarkers',
     'token.setStats',
     'token.applyHp',
+    'token.batch',
     'fog.paint',
     'fog.fill',
     'scene.activate',
@@ -212,6 +213,53 @@ describe('the process command validator', () => {
       expect((send({ type, payload: { scene_id: 'x' } }) as ErrorEnvelope).error.code, type).toBe('validation_failed');
     }
     expect(apply).not.toHaveBeenCalled();
+  });
+
+  it('refuses a batch that is empty, too long, nested, holds a command it may not, or a malformed one (UXR-02)', () => {
+    const { apply, send } = harness(validateCommand);
+    const token_id = '00000000-0000-4000-8000-000000000001';
+    const move = { type: 'token.move', payload: { token_id, x: 1, y: 2 } };
+    for (const payload of [
+      { commands: [] },
+      { commands: Array.from({ length: 51 }, () => move) },
+      { commands: [{ type: 'token.batch', payload: { commands: [move] } }] },
+      { commands: [{ type: 'token.add', payload: { scene_id: token_id, asset_id: token_id, x: 1, y: 1 } }] },
+      { commands: [{ type: 'token.setStats', payload: { token_id, ac: 12 } }] },
+      { commands: [{ type: 'token.move', payload: { token_id, x: 1 } }] },
+      { commands: [{ type: 'token.move', payload: { token_id, x: 1, y: 2, label: 'x' } }] },
+      { commands: [{ ...move, extra: true }] },
+      { commands: [move], scene_id: token_id },
+    ]) {
+      expect((send({ type: 'token.batch', payload }) as ErrorEnvelope).error.code).toBe('validation_failed');
+    }
+    expect(apply).not.toHaveBeenCalled();
+    expect(
+      send({
+        type: 'token.batch',
+        payload: {
+          commands: [
+            move,
+            { type: 'token.setVisibility', payload: { token_id, hidden: true } },
+            { type: 'token.setMarkers', payload: { token_id, markers: [{ id: 'prone' }] } },
+            { type: 'token.applyHp', payload: { token_id, delta: -3 } },
+            { type: 'token.delete', payload: { token_id } },
+          ],
+        },
+      }),
+    ).toEqual({ ok: true });
+  });
+
+  it('refuses an object nested in a payload that is not a plain JSON object (UXR-02)', () => {
+    const { apply, send } = harness(validateCommand);
+    const token_id = '00000000-0000-4000-8000-000000000001';
+    const binary = Buffer.from('{}');
+    const refused = send({ type: 'token.batch', payload: { commands: [{ type: 'token.delete', payload: binary }] } });
+    expect((refused as ErrorEnvelope).error.code).toBe('validation_failed');
+    expect((refused as ErrorEnvelope).error.details).toEqual([
+      { path: '/payload/commands/0/payload', message: 'must be a plain JSON object' },
+    ]);
+    expect(apply).not.toHaveBeenCalled();
+    expect(send({ type: 'token.delete', payload: { token_id } })).toEqual({ ok: true });
   });
 
   it('refuses a ruler command with a square off the whole grid, a distance of its own or waypoints (LIV-07)', () => {

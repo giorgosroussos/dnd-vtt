@@ -87,3 +87,30 @@ export function DeleteTokenDialog({
     </Dialog>
   );
 }
+
+// Deleting several selected tokens (UXR-02): asked once for the group, opening on the button that keeps them.
+export function DeleteGroupDialog({
+  count,
+  onConfirm,
+  onClose,
+}: {
+  count: number;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  const keep = useRef<HTMLButtonElement>(null);
+  useEffect(() => keep.current?.focus(), []);
+  return (
+    <Dialog heading={t('group.deleteDialog.heading', { count })} onClose={onClose}>
+      <p className="eg-dialog__body">{t('group.deleteDialog.body')}</p>
+      <div className="eg-dialog__actions">
+        <Button variant="danger" onClick={onConfirm}>
+          {t('group.deleteDialog.confirm')}
+        </Button>
+        <Button ref={keep} onClick={onClose}>
+          {t('group.deleteDialog.cancel')}
+        </Button>
+      </div>
+    </Dialog>
+  );
+}

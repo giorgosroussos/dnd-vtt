@@ -43,7 +43,9 @@ function statusOf(token: SceneToken, fog: FogMask): string {
 export function TokenList({
   tokens,
   selectedId,
+  selectedIds,
   onSelect,
+  onToggle,
   onToggleHidden,
   onRevealAll,
   onAdd,
@@ -53,7 +55,11 @@ export function TokenList({
   /** The scene's painted fog, which a token's status says it stands under (TBL-04). */
   fog?: FogMask;
   selectedId: string | undefined;
+  /** Several selected (UXR-02): every one is marked selected. */
+  selectedIds?: readonly string[] | undefined;
   onSelect: (token: SceneToken) => void;
+  /** Ctrl (Cmd on macOS) and a click on a row: the token joins the selection or leaves it (UXR-02). */
+  onToggle?: ((token: SceneToken) => void) | undefined;
   onToggleHidden: (token: SceneToken) => void;
   onRevealAll: (tokens: SceneToken[]) => void;
   /** Add token; absent while tokens cannot be added. */
@@ -98,15 +104,22 @@ export function TokenList({
               {members.map((token) => (
                 <li
                   key={token.id}
-                  className={token.id === selectedId ? 'eg-token-row eg-token-row--selected' : 'eg-token-row'}
+                  className={
+                    (selectedIds?.includes(token.id) ?? token.id === selectedId)
+                      ? 'eg-token-row eg-token-row--selected'
+                      : 'eg-token-row'
+                  }
                   data-hidden={token.hidden || undefined}
                   data-token={token.id}
                 >
                   <button
                     type="button"
                     className="eg-token-row__select"
-                    aria-current={token.id === selectedId || undefined}
-                    onClick={() => onSelect(token)}
+                    aria-current={(selectedIds?.includes(token.id) ?? token.id === selectedId) || undefined}
+                    onClick={(event) => {
+                      if (onToggle && (event.ctrlKey || event.metaKey)) onToggle(token);
+                      else onSelect(token);
+                    }}
                   >
                     <span className={`eg-avatar eg-avatar--${token.asset.category}`} aria-hidden="true">
                       {initialsOf(token.label)}

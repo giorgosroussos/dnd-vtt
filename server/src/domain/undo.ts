@@ -15,7 +15,7 @@ import type { LiveEffect } from './live.js';
 // The DM's undo history (LIV-05; specs/04-live-sync.md §8, Q-005, Q-050, D-040, D-117). The server
 // keeps, in memory only, the inverse of every undoable command applied to the live scene: `token.add`,
 // `token.move`, `token.setVisibility`, `token.setMarkers` (TBL-02), `token.delete`, the fog commands
-// (TBL-04), the encounter commands (TBL-06) and the hit-point commands (DMT-01). Setup edits over REST are not commands and
+// (TBL-04), the encounter commands (TBL-06), the hit-point commands (DMT-01) and `token.batch` (UXR-02), one step. Setup edits over REST are not commands and
 // never enter it (Q-050). It belongs to one live scene and is emptied whenever the live scene changes
 // (another scene activated, Blank TV, the live scene deleted), holds the last 100 inverses, and dies
 // with the process. One history serves every DM browser: undo takes back the most recent command on
@@ -48,7 +48,10 @@ export type Inverse =
   | { type: 'fog.restore'; scene_id: string; restore: FogMask }
   // The encounter (TBL-06): every encounter command is undone by putting the whole encounter back as it
   // was, or taking it away when the scene had none; not on the wire either.
-  | { type: 'encounter.restore'; scene_id: string; restore: Encounter | null };
+  | { type: 'encounter.restore'; scene_id: string; restore: Encounter | null }
+  // A `token.batch` (UXR-02, Q-123): the inverses of its commands in their order, replayed last first in one
+  // transaction, so one undo takes back the whole group; not on the wire.
+  | { type: 'batch'; inverses: Inverse[] };
 
 export const UNDO_LIMIT = 100;
 

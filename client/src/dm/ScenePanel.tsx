@@ -27,6 +27,7 @@ import {
   type TokenMarker,
   type TokenStats,
   type TokenUpdateBody,
+  type BatchedCommand,
 } from '@emberglass/shared';
 import { formatDecimal, formatNumber } from '../canvas/calibration.js';
 import {
@@ -64,13 +65,15 @@ import type { DmScene } from './live/dmScene.js';
 import type { DmLive } from './live/useDmLive.js';
 import { FOLLOW_INTERVAL_MS, throttle, type Throttle } from './live/throttle.js';
 import { entityPath } from './tree/paths.js';
-import { DeleteTokenDialog, RenameDialog } from './tokens/TokenBar.js';
+import { DeleteGroupDialog, DeleteTokenDialog, RenameDialog } from './tokens/TokenBar.js';
+import { GroupBar } from './tokens/GroupBar.js';
+import { deleteCommands, hideCommands, hpCommands, markerCommands, moveCommands } from './tokens/group.js';
 import { TokenList } from './tokens/TokenList.js';
 import { TokenPicker } from './tokens/TokenPicker.js';
 import { FillFogDialog, FogBrushBar, FogPanel } from './fog/FogPanel.js';
 import { useSceneFog } from './fog/useSceneFog.js';
 import { TokenPopover } from './tokens/TokenPopover.js';
-import { markerName } from '../ui/conditions.js';
+import { conditionLabel, markerName } from '../ui/conditions.js';
 import { toCanvasToken, useSceneTokens } from './tokens/useSceneTokens.js';
 import { InitiativePanel } from './initiative/InitiativePanel.js';
 import { SceneNotes } from './notes/Notes.js';
@@ -371,7 +374,12 @@ export function ScenePanel({
     rulerQueue.current.next = undefined;
     toAnnounce.current = undefined;
   }
-  const [selectedToken, setSelectedToken] = useState<string>();
+  // The selected tokens (UXR-02): one by a click, more by Ctrl or Cmd and a click; the last is the primary, whose
+  // popover opens and which the keys act on when it is alone.
+  const [selection, setSelection] = useState<readonly string[]>([]);
+  const selectedToken = selection.at(-1);
+  const setSelectedToken = (id: string | undefined) => setSelection(id === undefined ? [] : [id]);
+  const [deletingGroup, setDeletingGroup] = useState<readonly SceneToken[]>();
   // Whether the selected token's popover is open: a click on the token, a choice in the list or a token
   // just placed opens it; a drag of the token or a pan closes it, and the token stays selected (D-156).
   const [popoverOpen, setPopoverOpen] = useState(false);
@@ -395,6 +403,14 @@ export function ScenePanel({
       setPingOn(false);
       setFogOn(false);
     }
+  };
+  // Ctrl or Cmd and a click: the token joins the selection or leaves it; no popover for a group (UXR-02).
+  const toggleToken = (id: string) => {
+    setSelection((now) => (now.includes(id) ? now.filter((each) => each !== id) : [...now, id]));
+    setPopoverOpen(false);
+    stopMeasuring();
+    setPingOn(false);
+    setFogOn(false);
   };
   const [picking, setPicking] = useState(false);
   const [placingAsset, setPlacingAsset] = useState<LibraryAsset>();
@@ -599,6 +615,9 @@ export function ScenePanel({
     ? liveScene.tokens.map((token) => ({ ...token, ...pending[token.id]?.fields }))
     : sceneTokens.tokens;
   const selected = tokens?.find((token) => token.id === selectedToken);
+  // The group, in the order selected, of the tokens still on the scene; a group of one is a plain selection.
+  const group = selection.flatMap((id) => tokens?.filter((token) => token.id === id) ?? []);
+  const grouped = group.length > 1;
 
   const openDialog = (open: () => void) => {
     opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -1073,6 +1092,9 @@ export function ScenePanel({
     } else if (key === 't' && canAddToken) {
       event.preventDefault();
       openPicker();
+    } else if (key === 'h' && grouped && tokenControls) {
+      event.preventDefault();
+      hideGroup();
     } else if (key === 'h' && selected && tokenControls) {
       event.preventDefault();
       toggleHidden(selected);
@@ -1081,7 +1103,7 @@ export function ScenePanel({
       event.preventDefault();
       onSideTab('notes');
       setFocusSceneNotes((n) => n + 1);
-    } else if (key === 'd' && selected && tokenControls && !placingAsset) {
+    } else if (key === 'd' && selected && !grouped && tokenControls && !placingAsset) {
       // Damage or healing (DMT-01): the selected token's popover, its hit-point field focused.
       event.preventDefault();
       setPopoverOpen(true);
@@ -1143,7 +1165,15 @@ export function ScenePanel({
           const token = tokens?.find((each) => each.id === id);
           if (token) void changeToken(token, at, moved);
         },
-        onDelete: (id) => openDialog(() => setDeleting(tokens?.find((token) => token.id === id))),
+        onDelete: (id) =>
+          openDialog(() =>
+            grouped && group.some((token) => token.id === id)
+              ? setDeletingGroup(group)
+              : setDeleting(tokens?.find((token) => token.id === id)),
+          ),
+        selectedIds: grouped ? group.map((token) => token.id) : undefined,
+        onToggle: toggleToken,
+        onMoveMany: (moves) => void runGroup(moveCommands(group, moves), (count) => t('group.moved', { count })),
       };
 
   // The token controls: neither while calibrating nor before the tokens have arrived.
@@ -1224,6 +1254,83 @@ export function ScenePanel({
     void changeToken(token, { markers }, (updated) => t('tokens.exhaustionSet', { label: updated.label, level }));
   }
 
+  // Actions on the selected group (UXR-02, specs/08-ux-journeys.md §14): on the live scene one `token.batch`, one
+  // undo step, its moves, visibility and markers shown at once until the answer (Q-123); in preparation the same
+  // changes over REST, one token at a time. A refusal of the batch changes nothing and says why.
+  async function runGroup(commands: BatchedCommand[], said: (count: number) => string) {
+    if (commands.length === 0) return;
+    if (isLive) {
+      const seq = ++pendingSeq.current;
+      const shown = (each: BatchedCommand) =>
+        each.type === 'token.move'
+          ? { x: each.payload.x, y: each.payload.y }
+          : each.type === 'token.setVisibility'
+            ? { hidden: each.payload.hidden }
+            : each.type === 'token.setMarkers'
+              ? { markers: each.payload.markers }
+              : undefined;
+      setPending((current) => {
+        const next = { ...current };
+        for (const each of commands) {
+          const fields = shown(each);
+          if (fields)
+            next[each.payload.token_id] = { seq, fields: { ...current[each.payload.token_id]?.fields, ...fields } };
+        }
+        return next;
+      });
+      const ok = await command('token.batch', { commands }, 'group.failed');
+      setPending((current) => Object.fromEntries(Object.entries(current).filter(([, each]) => each.seq !== seq)));
+      if (ok) announce(said(commands.length));
+    } else {
+      let done = 0;
+      for (const each of commands) {
+        const token = tokens?.find((one) => one.id === each.payload.token_id);
+        if (!token) continue;
+        if (each.type === 'token.delete') {
+          if (await sceneTokens.remove(token.id)) done++;
+          continue;
+        }
+        // Damage or healing as the popover sends it in preparation: the hit points it leaves, the server setting
+        // the markers they drive (DMT-01).
+        const healed = each.type === 'token.applyHp' ? applyHp(token, each.payload.delta) : undefined;
+        const body: TokenUpdateBody | undefined =
+          each.type === 'token.move'
+            ? { x: each.payload.x, y: each.payload.y }
+            : each.type === 'token.setVisibility'
+              ? { hidden: each.payload.hidden }
+              : each.type === 'token.setMarkers'
+                ? { markers: each.payload.markers }
+                : healed && { hp_current: healed.hp_current, hp_temp: healed.hp_temp };
+        if (body && (await sceneTokens.change(token.id, body)).ok) done++;
+      }
+      if (done > 0) announce(said(done));
+    }
+    onTokensChanged?.();
+  }
+  function hideGroup() {
+    const { hidden, commands } = hideCommands(group);
+    void runGroup(commands, (count) => t(hidden ? 'group.hidden' : 'group.revealed', { count }));
+  }
+  function markGroup(id: string) {
+    const { on, commands } = markerCommands(group, id);
+    const marker = conditionLabel(id);
+    void runGroup(commands, (count) => t(on ? 'group.markerOn' : 'group.markerOff', { marker, count }));
+  }
+  function hpGroup(delta: number) {
+    const { skipped, commands } = hpCommands(group, delta);
+    if (commands.length === 0) return announce(t('group.hpNone'));
+    const amount = delta > 0 ? `+${delta}` : `−${-delta}`;
+    void runGroup(commands, (count) =>
+      skipped > 0 ? t('group.hpSkipped', { amount, count, skipped }) : t('group.hpApplied', { amount, count }),
+    );
+  }
+  async function deleteGroup(doomed: readonly SceneToken[]) {
+    setDeletingGroup(undefined);
+    refocus.current = 'add';
+    await runGroup(deleteCommands(doomed), (count) => t('group.deleted', { count }));
+    setSelectedToken(undefined);
+  }
+
   // Reveal all hidden monsters: one change each, in turn (UIX-01); on the live scene each is its own
   // `token.setVisibility`, undone one at a time.
   async function revealAll(hidden: SceneToken[]) {
@@ -1266,7 +1373,7 @@ export function ScenePanel({
     </>
   ) : null;
   const popover =
-    tokens && !placingAsset && popoverOpen
+    tokens && !placingAsset && popoverOpen && !grouped
       ? (anchor: Parameters<NonNullable<Parameters<typeof MapCanvas>[0]['popover']>>[0]) =>
           selected ? (
             <TokenPopover
@@ -1299,6 +1406,8 @@ export function ScenePanel({
     <TokenList
       tokens={tokens}
       selectedId={selected?.id}
+      selectedIds={grouped ? group.map((token) => token.id) : undefined}
+      onToggle={draft ? undefined : (token) => toggleToken(token.id)}
       onSelect={(token) => {
         selectToken(token.id);
         setPopoverOpen(true);
@@ -1623,6 +1732,17 @@ export function ScenePanel({
                     fog={{ fog, tool: fogTool }}
                   />
                   {map && draft ? <CornerMagnifier map={map} calibration={draft.calibration} /> : null}
+                  {grouped && tokenControls ? (
+                    <GroupBar
+                      count={group.length}
+                      allHidden={group.every((token) => token.hidden)}
+                      onHide={hideGroup}
+                      onMarker={markGroup}
+                      onHp={hpGroup}
+                      onDelete={() => openDialog(() => setDeletingGroup(group))}
+                      onClear={() => setSelectedToken(undefined)}
+                    />
+                  ) : null}
                 </div>
               </div>
             ) : failure ? null : (
@@ -1667,6 +1787,16 @@ export function ScenePanel({
                 }}
                 onClose={() => {
                   setFilling(undefined);
+                  refocus.current = 'opener';
+                }}
+              />
+            ) : null}
+            {deletingGroup ? (
+              <DeleteGroupDialog
+                count={deletingGroup.length}
+                onConfirm={() => void deleteGroup(deletingGroup)}
+                onClose={() => {
+                  setDeletingGroup(undefined);
                   refocus.current = 'opener';
                 }}
               />

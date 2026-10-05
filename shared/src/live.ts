@@ -1,4 +1,4 @@
-import { Type, type Static } from 'typebox';
+import { Type, type Static, type TSchema } from 'typebox';
 import {
   GridSchema,
   ImageSchema,
@@ -71,6 +71,7 @@ export const COMMAND_TYPES = [
   'token.setMarkers',
   'token.setStats',
   'token.applyHp',
+  'token.batch',
   'fog.paint',
   'fog.fill',
   'scene.activate',
@@ -342,6 +343,31 @@ export const TokenSetStatsPayloadSchema = Type.Object(
   { ...strict, minProperties: 2 },
 );
 export const TokenApplyHpPayloadSchema = Type.Object({ token_id: UuidSchema, delta: HpDeltaSchema }, strict);
+// `token.batch` (UXR-02, specs/04-live-sync.md §2, §8, Q-123): the commands of a group of selected tokens, applied in
+// order, all or nothing, and undone as one step. Each is a token command the batch may hold, checked against that
+// command's own payload schema; a batch never holds another.
+export const MAX_BATCH_COMMANDS = 50;
+export const BATCH_COMMAND_TYPES = [
+  'token.move',
+  'token.setVisibility',
+  'token.setMarkers',
+  'token.applyHp',
+  'token.delete',
+] as const satisfies readonly CommandType[];
+export type BatchCommandType = (typeof BATCH_COMMAND_TYPES)[number];
+const batched = <T extends BatchCommandType, P extends TSchema>(type: T, payload: P) =>
+  Type.Object({ type: Type.Literal(type), payload }, strict);
+export const BatchedCommandSchema = Type.Union([
+  batched('token.move', TokenMovePayloadSchema),
+  batched('token.setVisibility', TokenSetVisibilityPayloadSchema),
+  batched('token.setMarkers', TokenSetMarkersPayloadSchema),
+  batched('token.applyHp', TokenApplyHpPayloadSchema),
+  batched('token.delete', TokenDeletePayloadSchema),
+]);
+export const TokenBatchPayloadSchema = Type.Object(
+  { commands: Type.Array(BatchedCommandSchema, { minItems: 1, maxItems: MAX_BATCH_COMMANDS }) },
+  strict,
+);
 export const SceneActivatePayloadSchema = Type.Object({ scene_id: UuidSchema }, strict);
 export const SceneDeactivatePayloadSchema = Type.Object({}, strict);
 export const UndoPayloadSchema = Type.Object({}, strict);
@@ -388,6 +414,7 @@ export const LIVE_COMMAND_PAYLOAD_SCHEMAS = {
   'token.setMarkers': TokenSetMarkersPayloadSchema,
   'token.setStats': TokenSetStatsPayloadSchema,
   'token.applyHp': TokenApplyHpPayloadSchema,
+  'token.batch': TokenBatchPayloadSchema,
   'scene.activate': SceneActivatePayloadSchema,
   'scene.deactivate': SceneDeactivatePayloadSchema,
   'camera.setPlayer': CameraSetPlayerPayloadSchema,
@@ -415,6 +442,8 @@ export type TokenDeletePayload = Static<typeof TokenDeletePayloadSchema>;
 export type TokenSetMarkersPayload = Static<typeof TokenSetMarkersPayloadSchema>;
 export type TokenSetStatsPayload = Static<typeof TokenSetStatsPayloadSchema>;
 export type TokenApplyHpPayload = Static<typeof TokenApplyHpPayloadSchema>;
+export type BatchedCommand = Static<typeof BatchedCommandSchema>;
+export type TokenBatchPayload = Static<typeof TokenBatchPayloadSchema>;
 export type SceneActivatePayload = Static<typeof SceneActivatePayloadSchema>;
 export type SceneDeactivatePayload = Static<typeof SceneDeactivatePayloadSchema>;
 export type UndoPayload = Static<typeof UndoPayloadSchema>;

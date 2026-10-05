@@ -17,7 +17,8 @@ import { applyPlayerEvent, PACKAGE_DIR, startLive, type LiveHarness, type Player
 // TV camera and screens reporting their viewports, and since LIV-07 measuring with the ruler on the live
 // scene, and on a scene that is not live, which reaches players not at all, since TBL-01 pinging both, since TBL-02 marking a hidden token and a visible one, since TBL-06 an encounter run with hidden enemies about, and since TBL-04 fog
 // painted, erased, painted again, undone and redone, and the whole map fogged and cleared, with tokens
-// placed, revealed, moved and deleted under it. It asserts that no hidden
+// placed, revealed, moved and deleted under it, and since UXR-02 a batch mixing a hidden token and a visible one,
+// and its undo. It asserts that no hidden
 // token's id, asset, image or name appears, and that the count of hidden tokens cannot be learnt
 // either: the whole recording is identical, byte for byte once identifiers are numbered by first
 // appearance, to the recording of the same session without any of the hidden-only steps
@@ -266,6 +267,34 @@ async function record(hidden: boolean): Promise<Recording> {
   await step('undo the hit points of the goblin', undo);
   await step('undo the 0 hit points of the hidden boss', undo, true);
   await step('undo the hit points of the hidden boss', undo, true);
+  // A batch (UXR-02, specs/04-live-sync.md §2, §4, §8, Q-123): the hidden boss and the visible goblin moved, marked
+  // and hidden together in one command each, then undone. Players hear what the goblin's commands alone would send,
+  // nothing of the boss nor of how many commands the batch held: in the session without hidden tokens the same
+  // batches hold the goblin's commands alone, and the recordings must be the same.
+  const together = (each: (token: string, n: number) => { type: string; payload: object }) => ({
+    commands: [...(hidden ? [each(boss!.id, 0)] : []), each(firstGoblin.id, 1)],
+  });
+  await step('move the hidden boss and the visible goblin together', () =>
+    send(
+      'token.batch',
+      together((token_id, n) => ({ type: 'token.move', payload: { token_id, x: 4 + n, y: 4 } })),
+    ),
+  );
+  await step('mark the hidden boss and the visible goblin prone together', () =>
+    send(
+      'token.batch',
+      together((token_id) => ({ type: 'token.setMarkers', payload: { token_id, markers: [{ id: 'prone' }] } })),
+    ),
+  );
+  await step('hide the hidden boss and the visible goblin together', () =>
+    send(
+      'token.batch',
+      together((token_id) => ({ type: 'token.setVisibility', payload: { token_id, hidden: true } })),
+    ),
+  );
+  await step('undo hiding them together', undo);
+  await step('undo marking them together', undo);
+  await step('undo moving them together', undo);
   // DM notes (DMT-04, specs/04-live-sync.md §4, §16): over REST on the live scene and on a scene that is not live, a
   // hidden token's and a visible one's, and an asset's beside them. The DM room hears `notes.updated` for the live
   // scene's; players hear nothing of any of them, and B's reach them not when B goes live.
@@ -601,6 +630,23 @@ describe('what a player view receives across a live session (specs/10-testing-ac
     expect(eventsOf('damage the visible goblin to bloodied')).toEqual(['token.updated', 'scene.snapshot']);
     expect(eventsOf('undo the damage of the goblin')).toEqual(['token.updated', 'scene.snapshot']);
     expect(eventsOf('undo the hit points of the goblin')).toEqual(['scene.snapshot']);
+    // A batch reaches players as the visible token's commands would, one event each, never as a batch (UXR-02).
+    expect(eventsOf('move the hidden boss and the visible goblin together')).toEqual([
+      'token.updated',
+      'scene.snapshot',
+    ]);
+    expect(eventsOf('mark the hidden boss and the visible goblin prone together')).toEqual([
+      'token.updated',
+      'scene.snapshot',
+    ]);
+    expect(eventsOf('hide the hidden boss and the visible goblin together')).toEqual([
+      'token.removed',
+      'scene.snapshot',
+    ]);
+    expect(eventsOf('undo hiding them together')).toEqual(['token.added', 'scene.snapshot']);
+    expect(eventsOf('undo moving them together')).toEqual(['token.updated', 'scene.snapshot']);
+    expect(text).not.toContain('token.batch');
+    expect(text).not.toContain('"commands"');
     // Notes send players nothing at all, the live scene's and a visible token's included (DMT-04).
     for (const name of [
       'write notes on the live scene',
