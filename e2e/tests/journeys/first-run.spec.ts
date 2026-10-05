@@ -67,7 +67,7 @@ test('First run: the server starts, a LAN browser cannot set the PIN, the server
     await dm.getByLabel('PIN, 4 to 8 digits').fill('24681357');
     await dm.getByLabel('The same PIN again').fill('24681357');
     await dm.getByRole('button', { name: 'Set PIN' }).click();
-    await expect(dm.getByRole('navigation', { name: 'Scenes of this session' })).toBeVisible();
+    await expect(dm.getByRole('navigation', { name: 'Scenes of this session', includeHidden: true })).toBeAttached();
     await expect(dm.getByRole('heading', { level: 1 })).toHaveText('No scene selected');
 
     // The LAN browser now gets the PIN form, never setup; the right PIN opens the DM view there too.
@@ -76,7 +76,9 @@ test('First run: the server starts, a LAN browser cannot set the PIN, the server
     await guest.getByLabel('PIN', { exact: true }).fill('24681357');
     await guest.getByRole('button', { name: 'Enter' }).click();
     // The workspace's code is its own chunk, loaded from the LAN address too.
-    await expect(guest.getByRole('navigation', { name: 'Scenes of this session' })).toBeVisible(wait);
+    await expect(guest.getByRole('navigation', { name: 'Scenes of this session', includeHidden: true })).toBeAttached(
+      wait,
+    );
     // And a second setup is refused even from the server PC.
     const again = await dm.evaluate(() =>
       fetch('/api/setup', {

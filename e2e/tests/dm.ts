@@ -21,9 +21,10 @@ export async function signIn(page: Page): Promise<void> {
 export async function openWorkspace(page: Page): Promise<void> {
   await signIn(page);
   await page.goto('/dm');
-  // The workspace's header and its scene list (UIX-01).
+  // The workspace's header and its scene list (UIX-01): in the document, docked or collapsed at the edge (UXR-01),
+  // since a context on another origin (a second server, the LAN address) starts with the sidebar collapsed.
   await expect(page.locator('.eg-header__crumbs')).toBeVisible();
-  await expect(page.getByRole('navigation', { name: 'Scenes of this session' })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Scenes of this session', includeHidden: true })).toBeAttached();
 }
 
 /** Creates a campaign with sessions through the API; answers the campaign id. */

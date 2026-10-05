@@ -145,7 +145,7 @@ test('Recover: the TV and the DM laptop lose the network and get it back, and bo
         { id: keeperToken.id, x: 7, hidden: false },
       ]);
     await expect(dm.getByRole('heading', { level: 1, name: 'Enter the DM PIN' })).toHaveCount(0);
-    await expect(dm.getByRole('navigation', { name: 'Scenes of this session' })).toBeVisible();
+    await expect(dm.getByRole('navigation', { name: 'Scenes of this session', includeHidden: true })).toBeAttached();
     // And the laptop still commands: Blank TV from it reaches the TV.
     await liveBar(dm).getByRole('button', { name: 'Go idle' }).click();
     await expect(player(tv)).toHaveAttribute('data-scene', 'idle');
