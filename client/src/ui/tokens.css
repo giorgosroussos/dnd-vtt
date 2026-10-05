@@ -738,6 +738,108 @@ main[data-cursor='hidden'] * {
   background: var(--color-player-text);
 }
 
+/*
+ * The player view on any screen (UXR-05, specs/08-ux-journeys.md §7, §14, Q-125): clear of a phone's notch and
+ * rounded corners, the strip and the plate in proportion to the shorter side, and on a narrow screen the strip
+ * naming only the token whose turn it is. A TV and a desktop keep the sizes above.
+ */
+main[data-view='player'] .eg-player__plate {
+  left: max(2.1vw, calc(env(safe-area-inset-left) + 8px));
+  bottom: max(3.3vh, calc(env(safe-area-inset-bottom) + 8px));
+}
+
+main[data-view='player'] .eg-player__initiative {
+  top: max(1.4vh, calc(env(safe-area-inset-top) + 6px));
+}
+
+@media (width <= 700px) {
+  .eg-player__initiative {
+    max-width: calc(100vw - 16px);
+    gap: 6px;
+    padding: 5px 8px;
+  }
+
+  .eg-player__initiative-portrait {
+    width: clamp(28px, 9vw, 40px);
+    height: clamp(28px, 9vw, 40px);
+  }
+
+  .eg-player__initiative-card:not(.eg-player__initiative-card--current) .eg-player__initiative-name {
+    display: none;
+  }
+
+  .eg-player__initiative-card:not(.eg-player__initiative-card--current) {
+    padding-right: 3px;
+  }
+
+  .eg-player__initiative-name {
+    font-size: clamp(13px, 4vw, 18px);
+  }
+
+  .eg-player__initiative-round {
+    font-size: clamp(13px, 4vw, 18px);
+  }
+
+  .eg-player__plate {
+    max-width: calc(100vw - 96px);
+  }
+
+  .eg-player__plate-name {
+    font-size: clamp(16px, 5vw, 24px);
+  }
+}
+
+/* A handheld's strip scrolls sideways under a finger when it holds more than fits. */
+main[data-handheld] .eg-player__initiative {
+  pointer-events: auto;
+}
+
+main[data-handheld] .eg-player__initiative-cards {
+  overflow-x: auto;
+  scrollbar-width: none;
+  /* Scrolling clips what hangs outside the cards: room below for the NOW and NEXT tags, given back after. */
+  padding: 4px 2px 14px;
+  margin-bottom: -10px;
+}
+
+/* The map takes the handheld's pinch and drag itself, so the browser zooms and scrolls nothing. */
+.eg-canvas--touch {
+  touch-action: none;
+}
+
+/* The handheld's buttons, bottom right, fading a few seconds after the last touch (UXR-05). */
+.eg-player__controls {
+  position: fixed;
+  right: max(12px, calc(env(safe-area-inset-right) + 8px));
+  bottom: max(12px, calc(env(safe-area-inset-bottom) + 8px));
+  display: flex;
+  gap: 10px;
+  transition: opacity 300ms ease;
+}
+
+.eg-player__controls--faded {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.eg-player__control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border: 1px solid rgb(245 236 224 / 30%);
+  border-radius: 50%;
+  background: rgb(10 8 6 / 72%);
+  color: var(--color-player-text);
+  cursor: pointer;
+}
+
+.eg-player__control[aria-pressed='true'] {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
 /* The idle screen: the wordmark over a slow ember glow (specs/08-ux-journeys.md §4, §11). */
 .eg-idle {
   position: relative;

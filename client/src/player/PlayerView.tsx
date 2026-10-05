@@ -1,10 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { MapCanvas } from '../canvas/MapCanvas.js';
 import type { CanvasToken } from '../canvas/tokens.js';
 import { Icon } from '../ui/icons.js';
 import { IdleScreen } from '../ui/IdleScreen.js';
+import { t } from '../ui/messages.js';
 import { CURSOR_IDLE_MS, useIdleCursor } from '../ui/useIdleCursor.js';
 import { InitiativeStrip } from './InitiativeStrip.js';
+import { isIdentity, TOUCH_IDENTITY, type TouchView } from './touchView.js';
+import { canFullscreen, fullscreenElement, toggleFullscreen, useHandheld } from './useHandheld.js';
 import { usePlayerLive } from './usePlayerLive.js';
 
 export { CURSOR_IDLE_MS };
@@ -18,14 +21,63 @@ export function labelScaleFor(height: number): number {
   return Math.max(1.6, (2.55 * height) / 1080);
 }
 
-function useLabelScale(): number {
-  const [scale, setScale] = useState(() => labelScaleFor(window.innerHeight));
+/**
+ * The same on a handheld (UXR-05): read at arm's length, not across a room, so in proportion to the screen's
+ * shorter side, portrait or landscape, and never below the DM view's own size.
+ */
+export function handheldLabelScaleFor(width: number, height: number): number {
+  return Math.max(1, (2.55 * Math.min(width, height)) / 1080);
+}
+
+function useLabelScale(handheld: boolean): number {
+  const scaleNow = () =>
+    handheld ? handheldLabelScaleFor(window.innerWidth, window.innerHeight) : labelScaleFor(window.innerHeight);
+  const [scale, setScale] = useState(scaleNow);
   useEffect(() => {
-    const onResize = () => setScale(labelScaleFor(window.innerHeight));
+    const onResize = () => setScale(scaleNow());
+    onResize();
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- scaleNow reads only `handheld`.
+  }, [handheld]);
   return scale;
+}
+
+/** How long the handheld's buttons stay after the last touch (UXR-05). */
+export const CONTROLS_IDLE_MS = 3_000;
+
+// The handheld's buttons show on a touch and fade a few seconds after the last one.
+function useShownOnTouch(enabled: boolean): boolean {
+  const [shown, setShown] = useState(true);
+  useEffect(() => {
+    if (!enabled) return;
+    let timer = setTimeout(() => setShown(false), CONTROLS_IDLE_MS);
+    const touched = () => {
+      clearTimeout(timer);
+      setShown(true);
+      timer = setTimeout(() => setShown(false), CONTROLS_IDLE_MS);
+    };
+    window.addEventListener('pointerdown', touched);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('pointerdown', touched);
+    };
+  }, [enabled]);
+  return shown;
+}
+
+function useFullscreen(): boolean {
+  const [on, setOn] = useState(() => fullscreenElement() !== null);
+  useEffect(() => {
+    const changed = () => setOn(fullscreenElement() !== null);
+    document.addEventListener('fullscreenchange', changed);
+    document.addEventListener('webkitfullscreenchange', changed);
+    return () => {
+      document.removeEventListener('fullscreenchange', changed);
+      document.removeEventListener('webkitfullscreenchange', changed);
+    };
+  }, []);
+  return on;
 }
 
 // Player view at / (FND-04, LIV-01, LIV-03, UIX-01): the idle screen while nothing is live
@@ -38,21 +90,36 @@ function useLabelScale(): number {
 // the edge (§13, TBL-04). Over
 // it a subtle vignette and, at the bottom left, the scene's name, which fades after a few seconds; changes
 // between idle and live, and between scenes, fade (specs/08-ux-journeys.md §11). It has no controls and
-// nothing that takes focus, and hides the pointer after two seconds still (Q-054). It keeps the live
+// nothing that takes focus, and hides the pointer after two seconds still (Q-054). On a handheld, a phone or a
+// tablet (UXR-05, specs/08-ux-journeys.md §14, Q-125), and only there, it has a fullscreen button where the browser
+// can, and the screen's own pinch zoom and pan over the DM's camera, returned to it by a button shown while zoomed,
+// a double tap and every activation; it sends nothing either way. It keeps the live
 // connection, reconnecting by itself and resynchronising from a fresh snapshot (§5, §6); meanwhile it
 // keeps its last picture and says nothing, since nobody operates the TV (D-104). The data attributes are
 // for the end-to-end tests: the connection state, how many snapshots arrived and whether a scene is drawn.
 export function PlayerView() {
   const live = usePlayerLive();
   const cursorHidden = useIdleCursor(CURSOR_IDLE_MS);
-  const labelScale = useLabelScale();
+  const handheld = useHandheld();
+  const labelScale = useLabelScale(handheld);
+  const controlsShown = useShownOnTouch(handheld);
+  const fullscreen = useFullscreen();
+  const main = useRef<HTMLElement>(null);
   const scene = live.scene ?? null;
   const tokens: CanvasToken[] = scene?.tokens.map((token) => ({ ...token, hidden: false })) ?? [];
   // What counts as another scene for the fade and the name plate: players are told no scene id.
   const identity = scene ? `${scene.name}\u0000${scene.map?.id ?? 'none'}` : 'idle';
+  // The handheld's own view, kept for the scene it was made on: another scene going live starts at the DM's camera.
+  const viewKey = identity;
+  const [touch, setTouch] = useState<{ key: string; view: TouchView }>({ key: viewKey, view: TOUCH_IDENTITY });
+  const touchView = touch.key === viewKey ? touch.view : TOUCH_IDENTITY;
+  const zoomed = !isIdentity(touchView);
   return (
     <main
+      ref={main}
       data-view="player"
+      data-handheld={handheld || undefined}
+      data-zoomed={zoomed || undefined}
       data-live={live.status}
       data-snapshots={live.snapshots}
       data-scene={scene ? 'live' : 'idle'}
@@ -71,6 +138,7 @@ export function PlayerView() {
               ping={{ shown: live.pings }}
               fog={{ fog: scene.fog }}
               labelScale={labelScale}
+              touch={handheld ? { view: touchView, onView: (view) => setTouch({ key: viewKey, view }) } : undefined}
             />
             <div className="eg-player__vignette" aria-hidden="true" />
             <p className="eg-player__plate">
@@ -85,6 +153,33 @@ export function PlayerView() {
           <IdleScreen />
         )}
       </div>
+      {handheld ? (
+        <div
+          className={controlsShown || zoomed ? 'eg-player__controls' : 'eg-player__controls eg-player__controls--faded'}
+        >
+          {zoomed ? (
+            <button
+              type="button"
+              className="eg-player__control"
+              aria-label={t('player.reset')}
+              onClick={() => setTouch({ key: viewKey, view: TOUCH_IDENTITY })}
+            >
+              <Icon name="reset" size={20} />
+            </button>
+          ) : null}
+          {canFullscreen() ? (
+            <button
+              type="button"
+              className="eg-player__control"
+              aria-label={fullscreen ? t('player.exitFullscreen') : t('player.fullscreen')}
+              aria-pressed={fullscreen}
+              onClick={() => main.current && toggleFullscreen(main.current)}
+            >
+              <Icon name={fullscreen ? 'minimize' : 'maximize'} size={20} />
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </main>
   );
 }

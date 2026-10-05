@@ -67,6 +67,8 @@ import { labelOffset, rulerForKey, sameSquare, squareAt, squareCentre, type Rule
 import { FogLayer } from './FogLayer.js';
 import { PingLayer, type PingPoint } from './PingLayer.js';
 import { TokenLayer, type TokenControls } from './TokenLayer.js';
+import { bounded, compose, type TouchView } from '../player/touchView.js';
+import { useTouchGestures } from '../player/useTouchGestures.js';
 import {
   clampToWorld,
   footprint,
@@ -446,6 +448,7 @@ export function MapCanvas({
   ref,
   labelScale = 1,
   camera: playerCamera,
+  touch,
   tvFrame,
   ruler,
   ping,
@@ -480,6 +483,8 @@ export function MapCanvas({
   labelScale?: number;
   /** Player view only: the player camera; fitted to the map when absent. */
   camera?: PlayerCamera | undefined;
+  /** Player view on a handheld only (UXR-05): the screen's own pinch zoom and pan over the player camera. */
+  touch?: { view: TouchView; onView: (view: TouchView) => void } | undefined;
   /** DM view in live mode only: the frame of what the TV sees, which steers it. */
   tvFrame?: TvFrame | undefined;
   /** The measurement drawn, and in the DM view the ruler tool (LIV-07). */
@@ -520,7 +525,25 @@ export function MapCanvas({
     `${worldKey}:${viewport.width}x${viewport.height}`,
     mode === 'player',
   );
-  const camera = mode === 'dm' ? (manual?.key === worldKey ? manual.camera : fitted) : glided;
+  // A handheld's own view over the player camera (UXR-05): between the whole map and eight times the DM's camera.
+  const touchMin = Math.min(1, fitted.scale / glided.scale);
+  const camera =
+    mode === 'dm'
+      ? manual?.key === worldKey
+        ? manual.camera
+        : fitted
+      : touch
+        ? compose(glided, bounded(touch.view, glided, world, viewport, touchMin))
+        : glided;
+  const gestures = useTouchGestures(
+    touch && ready
+      ? {
+          view: touch.view,
+          onView: (view) => touch.onView(bounded(view, glided, world, viewport, touchMin)),
+          min: touchMin,
+        }
+      : undefined,
+  );
   // From the latest camera, not this render's: wheel and drag events arrive outside React's
   // synchronous updates, and several can land before the next render (D-093).
   const changeCamera = (change: (current: Camera) => Camera) =>
@@ -1562,7 +1585,8 @@ export function MapCanvas({
     return (
       <div
         ref={viewportRef}
-        className="eg-canvas eg-canvas--player"
+        className={touch ? 'eg-canvas eg-canvas--player eg-canvas--touch' : 'eg-canvas eg-canvas--player'}
+        {...gestures}
         {...state}
         {...rulerState}
         {...pingState}
