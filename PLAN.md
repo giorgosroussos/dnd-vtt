@@ -4,17 +4,13 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
 
 ## Now
 
-### DMT-01
+### DMT-04
 
-Hit points and armour class (`13` §12; `03` §9, `04` §2, `04` §3, `04` §4, `04` §8, `04` §15, `05` §1, `05` §3, `08` §13, `10` §3; Q-112, Q-116, D-180, D-181, D-182). An additive migration adds nullable `hp_current`, `hp_max`, `hp_temp` and `ac` to tokens and `hp_max` and `ac` to assets, the defaults copied to new tokens; `token.setStats` and `token.applyHp { delta }` are undoable live commands, temporary hit points taking damage first; with `hp_max` set, Bloodied follows half, 0 sets Dead (monster, npc) or Unconscious (player character), and rising above 0 removes neither, live and in preparation. Acceptance: integration tests on a real SQLite file cover each threshold, with and without `hp_max`, undo and redo, and the asset defaults; the hidden-information suite passes with hit points in its script and finds none in any player message. Implemented and green locally (D-182, TRACEABILITY.md); left: CI on the pull request and prompt 2 (review), whose findings are fixed on the branch before DMT-01 is done.
+DM notes (`13` §12; `02` §5, `03` §1, `03` §7, `03` §10, `04` §2, `04` §3, `04` §4, `04` §16, `08` §13, `10` §3; Q-114, D-181, D-186). Migration 0012 adds `notes` to scenes and tokens, empty by default, at most 20,000 characters; `PUT /api/scenes/:id/notes` and `PUT /api/tokens/:id/notes` on any scene, live included, not undoable, the live scene's telling the DM room alone by `notes.updated`; a duplicated scene copying its notes and its tokens' (with their hit points); the DM view saving as typed with nothing typed ever lost, the Notes tab and N, a token's notes in its popover beside its asset's, the marks on the map, the rows and the scene list, and the turn's initiative row opening them. Acceptance: `server/src/ws/notes.test.ts` covers the REST edits on a live and a prepared scene, `notes.updated` reaching only the DM room and the duplication; the hidden-information suite passes with notes in its script and finds none in any player message; `client/src/dm/notes/*.test.tsx` cover the autosave, a failed save, the limit, another window's change and text-only rendering; `e2e/tests/notes.spec.ts` with a DM and a player context. Implemented and green locally (TRACEABILITY.md); left: CI on the pull request and prompt 2 (review), whose findings are fixed on the branch before DMT-04 is done.
 
-### DMT-02
+### DMT-01 to DMT-03
 
-Per-enemy initiative (`13` §12; `03` §1, `04` §4, `04` §14, `08` §12, `10` §3; Q-111, Q-117, Q-118, D-180, D-181, D-183, D-184). One `kind: monster` entry per visible, living monster and npc at start, sorted, dragged, added (optionally with its number) and removed like a player character's; Dead or unseen ones kept and passed over; the tokens players newly see offered together; "No enemies left. End combat?" when the turn passes with no enemy able to act; migration 0011 expanding a stored Enemies entry in place; the TV strip naming each enemy by its label, a Dead one greyed. Acceptance: the encounter's rule tests and integration tests cover start, sorting, turns passing over Dead and unseen entries, the late-enemy offer and the expansion of a stored encounter; the hidden-information suite passes with a hidden monster in the encounter; `e2e/tests/initiative.spec.ts` shows each bandit's label on the TV strip. Implemented and green locally (TRACEABILITY.md); left: CI on the pull request and prompt 2 (review), whose findings are fixed on the branch before DMT-02 is done.
-
-### DMT-03
-
-Follow my view (`13` §12; `04` §9, `08` §11, `08` §13; Q-113, Q-120, D-185). A toggle among the live scene's TV camera controls (and C), off at every activation, kept by the DM view: while on, the DM's whole visible area widened to the TV's shape about its centre (`followRect`) goes out as `camera.setPlayer` through a 100 ms throttle with leading and trailing sends, an unchanged camera not sent; the frame hidden and the live indicator saying "TV follows you"; Lock TV camera, Send my view, Fit map, TV zoom and the frame, another scene going live and the TV going idle turning it off, the TV camera's own events never; paused while another scene is open and resumed, sending at once, on returning (Q-120); the TV gliding 120 ms between cameras. Acceptance: unit tests of the widening (wider, narrower, same shape, the bounds) and the throttle; component tests of each way off, the echo, the pause and resume; `e2e/tests/follow.spec.ts` with a DM and a player context. Implemented and green locally (TRACEABILITY.md); left: CI on the pull request and prompt 2 (review), whose findings are fixed on the branch before DMT-03 is done.
+Hit points and armour class (D-182), per-enemy initiative (D-183, D-184) and Follow my view (Q-120, D-185) are implemented and green locally, their acceptance as `13` §12 states it and their evidence in TRACEABILITY.md. Each waits for what DMT-04 waits for: CI on the pull request of `feat/dm-toolkit` and prompt 2 (review), whose findings are fixed on the branch before the package is done.
 
 Owed by hand, before the 1.0.0 release:
 
@@ -23,5 +19,4 @@ Owed by hand, before the 1.0.0 release:
 
 ## Next
 
-- DMT-04 DM notes (`13` §12; `03` §10, `04` §16; Q-114).
 - DMT-05 Export and import (`13` §12; `09` §9, `07` §9; Q-115, Q-119), last so that its format carries every field above.

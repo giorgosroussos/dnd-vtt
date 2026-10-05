@@ -32,7 +32,8 @@ type IconName =
   | 'info'
   | 'swords'
   | 'shield'
-  | 'follow';
+  | 'follow'
+  | 'note';
 
 const STROKED: Record<Exclude<IconName, 'stop' | 'more' | 'drop'>, readonly string[]> = {
   logo: ['M12 2l6 8-6 12-6-12z', 'M12 2v20M6 10h12'],
@@ -67,6 +68,8 @@ const STROKED: Record<Exclude<IconName, 'stop' | 'more' | 'drop'>, readonly stri
     'M6 12a6 6 0 1 0 12 0a6 6 0 1 0-12 0',
     'M11 12a1 1 0 1 0 2 0a1 1 0 1 0-2 0',
   ],
+  // A page with lines: DM notes (DMT-04).
+  note: ['M6 3h9l4 4v14H6z', 'M15 3v4h4', 'M9 12h6M9 16h6'],
   // A shield: a token's armour class (DMT-01).
   shield: ['M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6z'],
   // Two crossed blades: the Enemies entry of the initiative order (TBL-06).

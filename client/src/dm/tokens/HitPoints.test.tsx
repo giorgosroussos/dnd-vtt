@@ -9,6 +9,7 @@ import {
   click,
   FakeServer,
   installDialog,
+  openLibrary,
   openSwitcher,
   popover,
   selectTokenRow,
@@ -228,7 +229,7 @@ describe('preparation, lists and the asset editor (specs/08-ux-journeys.md §13)
 
   it('saves an asset’s default maximum and armour class, refusing values out of bounds', async () => {
     const view = await open();
-    await click(view.querySelector('[role="tab"]:nth-child(3)'));
+    await openLibrary(view);
     await click(button(view, t('library.editOf', { name: 'Ogre' })));
     const dialog = document.querySelector<HTMLDialogElement>('dialog[open]')!;
     const field = (label: string) =>

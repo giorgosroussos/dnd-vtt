@@ -37,8 +37,15 @@ describe('token bodies (PRP-04, D-100)', () => {
     }
   });
 
-  it('answers a token with its stored fields and the drawing fields of its asset', () => {
+  it('answers a token with its stored fields, the drawing fields of its asset and its asset’s notes', () => {
     expect(Object.keys(SceneTokenSchema.properties)).toEqual([...Object.keys(TokenSchema.properties), 'asset']);
-    expect(Object.keys(SceneTokenSchema.properties.asset.properties)).toEqual(['name', 'image_id', 'size', 'category']);
+    // The asset's notes are shown beside the token's own, read-only (DMT-04, specs/03-domain-model.md §10).
+    expect(Object.keys(SceneTokenSchema.properties.asset.properties)).toEqual([
+      'name',
+      'image_id',
+      'size',
+      'category',
+      'notes',
+    ]);
   });
 });

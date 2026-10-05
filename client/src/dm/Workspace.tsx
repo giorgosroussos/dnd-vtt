@@ -2,6 +2,7 @@ import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react'
 import {
   API_PATHS,
   DEFAULT_SETTINGS,
+  hasNotes,
   type AuthState,
   type Campaign,
   type Scene,
@@ -100,8 +101,9 @@ export function Workspace({
   // The session chosen now, once its record has arrived.
   const shown = current && current.session.id === sessionId ? current : undefined;
   // The live scene's tokens changed: the scene list's counts are read again.
+  // And its notes' mark, which another DM window may have changed (DMT-04).
   const liveSignature = live.scene
-    ? `${live.scene.scene.id}:${live.scene.tokens.length}:${live.scene.tokens.filter((token) => token.hidden).length}:${live.scene.scene.name}`
+    ? `${live.scene.scene.id}:${live.scene.tokens.length}:${live.scene.tokens.filter((token) => token.hidden).length}:${live.scene.scene.name}:${hasNotes(live.scene.scene.notes)}`
     : 'none';
   const sessionScenes = useSessionScenes(shown?.session.id, `${scenesVersion}:${liveSignature}`);
 
@@ -467,6 +469,7 @@ export function Workspace({
             setupOpen={setupOpen}
             onSetupOpen={setSetupOpen}
             onTokensChanged={bumpScenes}
+            onNotesChanged={bumpScenes}
           />
         ) : (
           <>

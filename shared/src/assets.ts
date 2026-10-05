@@ -1,6 +1,7 @@
 import { Type, type Static } from 'typebox';
 import { AssetSchema, ASSET_CATEGORIES, Sha256Schema, TOKEN_SIZES, UuidSchema } from './entities.js';
 import { AcSchema, HpMaxSchema } from './hp.js';
+import { NotesSchema } from './notes.js';
 
 // The shared asset library over REST (specs/02-architecture.md §5, specs/05-assets-and-images.md
 // §1, §2, §4, §5, specs/03-domain-model.md §7, D-020, D-022, D-083). Every body is strict: an
@@ -53,7 +54,7 @@ export const AssetCreateBodySchema = Type.Object(
     size: Type.Enum(TOKEN_SIZES),
     default_hidden: Type.Optional(Type.Boolean()),
     tags: Type.Optional(Type.Array(TagInputSchema)),
-    notes: Type.Optional(Type.String()),
+    notes: Type.Optional(NotesSchema),
     // Defaults for its new tokens (DMT-01); left out, none.
     hp_max: Type.Optional(HpMaxSchema),
     ac: Type.Optional(AcSchema),
@@ -71,7 +72,7 @@ export const AssetUpdateBodySchema = Type.Object(
     size: Type.Optional(Type.Enum(TOKEN_SIZES)),
     default_hidden: Type.Optional(Type.Boolean()),
     tags: Type.Optional(Type.Array(TagInputSchema)),
-    notes: Type.Optional(Type.String()),
+    notes: Type.Optional(NotesSchema),
     // Null clears a default; tokens already placed keep theirs (D-181).
     hp_max: Type.Optional(HpMaxSchema),
     ac: Type.Optional(AcSchema),

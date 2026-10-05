@@ -36,6 +36,7 @@ const token: Token = {
   hp_max: null,
   hp_temp: null,
   ac: null,
+  notes: '',
 };
 
 const scene: Scene = {
@@ -54,6 +55,7 @@ const scene: Scene = {
     columns: 30,
     rows: 20,
   },
+  notes: '',
 };
 
 describe('entity contract (specs/03-domain-model.md §1, D-075)', () => {
@@ -92,7 +94,12 @@ describe('entity contract (specs/03-domain-model.md §1, D-075)', () => {
     expect(Value.Check(TokenSchema, { ...token, x: '2.25' })).toBe(false);
     expect(Value.Check(TokenSchema, { ...token, character_id: UUID })).toBe(false);
     expect(Value.Check(TokenSchema, { ...token, character_id: '' })).toBe(false);
-    expect(Value.Check(TokenSchema, { ...token, notes: 'x' })).toBe(false);
+    // DM notes are plain text, kept with their line breaks (DMT-04); a token without them is not one.
+    expect(Value.Check(TokenSchema, { ...token, notes: 'Leader:\nflees at half HP' })).toBe(true);
+    const withoutNotes: Partial<Token> = { ...token };
+    delete withoutNotes.notes;
+    expect(Value.Check(TokenSchema, withoutNotes)).toBe(false);
+    expect(Value.Check(TokenSchema, { ...token, notes: null })).toBe(false);
   });
 
   it('holds a map-less scene with no square size, and only square grids', () => {

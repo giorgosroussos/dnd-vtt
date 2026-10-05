@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent } from 'react';
 import {
   API_STRUCTURE_PATHS as PATHS,
+  hasNotes,
   imageFileUrl,
+  notesPreview,
   type Scene,
   type SceneSummary,
   type Session,
@@ -90,8 +92,8 @@ export function nextScene(scenes: readonly Scene[], liveId: string | undefined, 
 
 // The left sidebar (UIX-01, specs/08-ux-journeys.md §1, §11, Q-089, Q-100): the current session's title
 // and scene count, a button to add a scene, and its scenes in order, each with its map's thumbnail, its
-// name and how many tokens it holds and how many are hidden. The live scene says it is on the TV; every
-// other scene has a button that puts it on the TV. Scenes reorder by dragging, or by Move up and Move down
+// name and how many tokens it holds and how many are hidden, and a page mark when it has notes (DMT-04). The
+// live scene says it is on the TV; every other scene has a button that puts it on the TV. Scenes reorder by dragging, or by Move up and Move down
 // in each scene's menu, which also renames, duplicates and deletes (specs/03-domain-model.md §7). The
 // footer names the scene NEXT UP with Go live (Shift+N, handled by the workspace). The server's answer is
 // always what the list shows next: after a change it is read again.
@@ -306,6 +308,17 @@ export function SceneList({
                 >
                   <span className="eg-scenes__thumb">
                     {scene.map_image_id ? <img src={imageFileUrl(scene.map_image_id, 'thumbnail')} alt="" /> : null}
+                    {hasNotes(scene.notes) ? (
+                      // The scene has notes (DMT-04): a small page on the thumbnail's corner, their first lines on hover.
+                      <span
+                        className="eg-note-mark eg-scenes__notes"
+                        title={notesPreview(scene.notes)}
+                        data-note-mark=""
+                      >
+                        <Icon name="note" size={12} />
+                        <span className="eg-visually-hidden">{t('notes.sceneHas', { name: scene.name })}</span>
+                      </span>
+                    ) : null}
                   </span>
                   <span className="eg-scenes__text">
                     <span className="eg-scenes__name">{scene.name}</span>

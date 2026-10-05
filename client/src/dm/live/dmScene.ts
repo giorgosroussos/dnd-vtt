@@ -8,6 +8,7 @@ import type {
   EventEnvelope,
   HistoryChangedPayload,
   FogMask,
+  NotesUpdatedPayload,
   FogUpdatedPayload,
   RulerShownPayload,
   SceneToken,
@@ -26,6 +27,7 @@ import type {
 // sees what the TV sees, another DM browser's measurement included. `history.changed` (UIX-01) replaces
 // whether undo and redo would change anything, which greys the rail's Undo and Redo. `fog.updated`
 // (TBL-04) replaces the scene's painted fog. `encounter.updated` (TBL-06) replaces the scene's encounter.
+// `notes.updated` (DMT-04) replaces the scene's notes, or one of its tokens'.
 
 /** The live scene, or null while nothing is live. */
 export type DmScene = DmLiveScene | null;
@@ -97,6 +99,14 @@ export function applyDmEvent(scene: DmScene, event: EventEnvelope): DmScene {
       // A malformed event is skipped: the encounter stays as it was.
       if (encounter !== null && !isEncounter(encounter)) return scene;
       return { ...scene, encounter: encounter === null ? null : structuredClone(encounter) };
+    }
+    case 'notes.updated': {
+      const { scene_id, token_id, notes } = event.payload as unknown as Partial<NotesUpdatedPayload>;
+      // A malformed event, or one of another scene, is skipped: the notes stay as they were.
+      if (typeof notes !== 'string' || scene_id !== scene.scene.id) return scene;
+      if (token_id === null) return { ...scene, scene: { ...scene.scene, notes } };
+      if (!scene.tokens.some((each) => each.id === token_id)) return scene;
+      return { ...scene, tokens: scene.tokens.map((each) => (each.id === token_id ? { ...each, notes } : each)) };
     }
     default:
       return scene;

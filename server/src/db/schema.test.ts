@@ -96,8 +96,8 @@ function specEntities(): { entity: string; fields: string[]; notes: string[]; te
 }
 
 // Fields of specs/03-domain-model.md §1 that a Phase 7 package still to come adds (specs/13-implementation-plan.md
-// §12): DM notes (DMT-04). The package that adds a column removes it here.
-const PLANNED: Partial<Record<SchemaTable, string[]>> = { scene: ['notes'], token: ['notes'] };
+// §12): none since DMT-04. The package that adds a column removes it here.
+const PLANNED: Partial<Record<SchemaTable, string[]>> = {};
 
 const TABLE_OF: Record<string, SchemaTable> = {
   Image: 'image',
@@ -236,6 +236,8 @@ describe('migration 0001 on a fresh database', () => {
         "token_numbers TEXT NOT NULL DEFAULT '{}'",
         // Migration 0006 (TBL-04, D-154).
         "fog TEXT NOT NULL DEFAULT '[]'",
+        // Migration 0012 (DMT-04, Q-114).
+        "notes TEXT NOT NULL DEFAULT ''",
       ],
       token: [
         'id TEXT NOT NULL',
@@ -256,6 +258,8 @@ describe('migration 0001 on a fresh database', () => {
         'hp_max INTEGER NULL',
         'hp_temp INTEGER NULL',
         'ac INTEGER NULL',
+        // Migration 0012 (DMT-04, Q-114).
+        "notes TEXT NOT NULL DEFAULT ''",
       ],
       // Migration 0008 (TBL-06, D-160).
       encounter: [
@@ -1110,6 +1114,35 @@ describe('migrations on the generated fixture database (specs/14-agent-playbook.
       ['ac', 100],
     ] as const) {
       expect(() => set(column, value), `${column} ${value}`).toThrow(/CHECK constraint failed/);
+    }
+  });
+
+  it('adds notes to scenes and tokens at migration 0012, empty on existing data, refusing more than the limit (Q-114)', () => {
+    createFixtureDatabase(dataDir);
+    migrateDataDirectory(dataDir, MIGRATIONS_DIR, new Date(), 11);
+    db = openDatabase(dataDir);
+    const columns = (table: string) =>
+      (db!.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
+    expect(columns('scene')).not.toContain('notes');
+    expect(columns('token')).not.toContain('notes');
+    const counts = countRows(db);
+    db.close();
+
+    const result = migrateDataDirectory(dataDir, MIGRATIONS_DIR);
+
+    expect(result).toMatchObject({ from: 11, to: LATEST });
+    expect(result.backup).not.toBeNull();
+    db = openDatabase(dataDir);
+    expect(countRows(db)).toEqual(counts);
+    for (const table of ['scene', 'token']) {
+      expect(db.prepare(`SELECT DISTINCT notes FROM ${table}`).pluck().all(), table).toEqual(['']);
+      const id = db.prepare(`SELECT id FROM ${table} LIMIT 1`).pluck().get() as string;
+      const set = (notes: string) => db!.prepare(`UPDATE ${table} SET notes = ? WHERE id = ?`).run(notes, id);
+      // Characters, not bytes: 20,000 dragons are 80,000 bytes and still within the limit.
+      expect(() => set('🐉'.repeat(20_000))).not.toThrow();
+      expect(() => set('Line one\nline two')).not.toThrow();
+      expect(() => set('x'.repeat(20_001)), table).toThrow(/CHECK constraint failed/);
+      expect(() => db!.prepare(`UPDATE ${table} SET notes = NULL WHERE id = ?`).run(id)).toThrow(/NOT NULL/);
     }
   });
 

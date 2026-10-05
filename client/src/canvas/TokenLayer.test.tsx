@@ -200,7 +200,7 @@ describe('drawing tokens (specs/05-assets-and-images.md §2, specs/03-domain-mod
     // What the end-to-end tests read (LIV-03): the visible tokens drawn, with no hidden flag.
     const listed = JSON.parse(view.querySelector<HTMLElement>('[data-tokens]')!.dataset.tokens!) as object[];
     expect(listed.map((box) => (box as { id: string }).id)).toEqual(['g1', 'h1']);
-    expect(listed.every((box) => !('hidden' in box))).toBe(true);
+    expect(listed.every((box) => !('hidden' in box) && !('note' in box))).toBe(true);
   });
 });
 
@@ -649,5 +649,36 @@ describe('initials (UIX-01)', () => {
     expect(initialsOf('Λύκος 12')).toBe('Λ12');
     expect(initialsOf('όφις')).toBe('ΌΦ');
     expect(initialsOf('Deadeye 1790780094125')).toBe('D1');
+  });
+});
+
+describe('the notes badge (DMT-04, specs/08-ux-journeys.md §13)', () => {
+  const NOTED = token({ id: 'n1', label: 'Bandit 1', x: 5, y: 5, note: 'Leader: flees at half HP' });
+
+  it('marks a token with notes on the DM’s map only, on its left edge, its hover text the notes', async () => {
+    const { stage } = await draw({
+      grid: GRID,
+      map: MAP,
+      mode: 'dm',
+      tokens: [NOTED, GOBLIN],
+      tokenControls: controls(),
+    });
+    expect(stage.find('.token-note-marker').map((badge) => badge.getParent()!.id())).toEqual(['token-n1']);
+    const badge = groupOf(stage, 'n1')!.findOne('.token-note-marker')!;
+    expect(badge.x()).toBeLessThan(groupOf(stage, 'n1')!.findOne<Konva.Circle>('.token-ring')!.x());
+    act(() => {
+      badge.fire('mouseenter', { evt: new MouseEvent('mouseenter') });
+    });
+    expect(stage.container().title).toBe('Leader: flees at half HP');
+    act(() => {
+      badge.fire('mouseleave', { evt: new MouseEvent('mouseleave') });
+    });
+    expect(stage.container().hasAttribute('title')).toBe(false);
+  });
+
+  it('never draws it on the player view, whatever a token carries', async () => {
+    const { stage } = await draw({ grid: GRID, map: MAP, mode: 'player', tokens: [NOTED, GOBLIN] });
+    expect(groups(stage)).toHaveLength(2);
+    expect(stage.find('.token-note-marker')).toHaveLength(0);
   });
 });

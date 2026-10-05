@@ -145,7 +145,8 @@ describe('placing a token', () => {
         hp_max: null,
         hp_temp: null,
         ac: null,
-        asset: { name: 'Goblin', image_id: goblin.image_id, size: 'medium', category: 'monster' },
+        notes: '',
+        asset: { name: 'Goblin', image_id: goblin.image_id, size: 'medium', category: 'monster', notes: '' },
       },
       relabelled: [],
     });
@@ -567,6 +568,7 @@ describe('changing a token', () => {
       image_id: newImage,
       size: 'huge',
       category: goblin.category,
+      notes: '',
     });
     ok(await remove(tokenUrl(token.id)), 204);
     expect(await list(cave.id)).toEqual([]);

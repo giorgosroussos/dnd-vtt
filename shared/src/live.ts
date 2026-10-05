@@ -12,6 +12,7 @@ import { EncounterSchema, InitiativeSchema, MAX_ENCOUNTER_ENTRIES, PlayerEncount
 import type { ErrorEnvelope } from './errors.js';
 import { FogMaskSchema, FogStrokeSchema } from './fog.js';
 import { HpDeltaSchema } from './hp.js';
+import type { NotesUpdatedPayload } from './notes.js';
 import { SceneTokenSchema, TokenChangeSchema, TokenCreateBodySchema } from './tokens.js';
 
 // WebSocket envelopes (specs/04-live-sync.md §2, §3, §5; D-047, D-064).
@@ -104,6 +105,7 @@ export const EVENT_TYPES = [
   'history.changed',
   'fog.updated',
   'encounter.updated',
+  'notes.updated',
 ] as const;
 
 export type CommandType = (typeof COMMAND_TYPES)[number];
@@ -509,7 +511,9 @@ export type DmEvent =
   | EventEnvelope<'ping', PingShownPayload>
   | EventEnvelope<'history.changed', HistoryChangedPayload>
   | EventEnvelope<'fog.updated', FogUpdatedPayload>
-  | EventEnvelope<'encounter.updated', DmEncounterPayload>;
+  | EventEnvelope<'encounter.updated', DmEncounterPayload>
+  // DM notes (DMT-04): the DM room's only, never the players'.
+  | EventEnvelope<'notes.updated', NotesUpdatedPayload>;
 
 /** Every event of the players room with its payload: nothing here names a hidden token. */
 export type PlayerEvent =

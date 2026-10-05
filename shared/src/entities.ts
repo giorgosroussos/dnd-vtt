@@ -139,6 +139,8 @@ export const SceneSchema = Type.Object(
     order: Type.Integer({ minimum: 0 }),
     map_image_id: Type.Union([Sha256Schema, Type.Null()]),
     grid: GridSchema,
+    // The DM's notes, plain text, never sent to players (DMT-04, specs/03-domain-model.md §10).
+    notes: Type.String(),
   },
   strict,
 );
@@ -164,6 +166,8 @@ export const TokenSchema = Type.Object(
     hp_max: HpMaxSchema,
     hp_temp: HpSchema,
     ac: AcSchema,
+    // The DM's notes, plain text, never in a players' token (DMT-04, specs/03-domain-model.md §10).
+    notes: Type.String(),
   },
   strict,
 );

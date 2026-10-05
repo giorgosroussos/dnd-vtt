@@ -45,6 +45,10 @@ import {
 // the token, pulsing on the TV; Concentrating a dotted purple ring further out; Unconscious and Dead
 // desaturate the token, Dead also darkens it and strikes its label through; Invisible draws it semi-
 // transparent, players included, and is not the hide toggle. The hidden badge sits alone on its right edge.
+//
+// DM notes (DMT-04, specs/08-ux-journeys.md §13): on the DM's map only, a token with notes of its own or from its
+// asset carries a page badge on its left edge, whose hover text is their first lines, set on the canvas element as a
+// plain-text title. The player mode never draws it, and no player token carries notes.
 
 export const TOKEN_COLOURS = {
   hidden: THEME.hidden,
@@ -90,6 +94,8 @@ export const BLOODIED_PULSE_MS = 1_600;
 export const BLOODIED_PULSES = 3;
 const reducedMotion = () =>
   typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+// The page of the notes badge (DMT-04), on a 24-unit grid, as the DM view's note icon.
+const NOTE_PAGE = 'M6 3h9l4 4v14H6zM15 3v4h4M9 12h6M9 16h6';
 // The crossed eye of the hidden badge, on a 24-unit grid.
 const EYE_OFF =
   'M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3 3.8M6.6 6.6C3.7 8.4 2 12 2 12s3.5 7 10 7a9.6 9.6 0 0 0 5.4-1.6';
@@ -535,6 +541,42 @@ export function TokenLayer({
                   strokeWidth={3}
                   lineCap="round"
                   lineJoin="round"
+                />
+              </Group>
+            ) : null}
+            {mode === 'dm' && token.note ? (
+              <Group
+                name="token-note-marker"
+                x={centre - radius}
+                y={centre}
+                scaleX={inverse}
+                scaleY={inverse}
+                onMouseEnter={(event) => {
+                  const container = event.target.getStage()?.container();
+                  if (container) container.title = token.note ?? '';
+                }}
+                onMouseLeave={(event) => {
+                  const container = event.target.getStage()?.container();
+                  if (container) container.removeAttribute('title');
+                }}
+              >
+                <Circle
+                  radius={BADGE_PX}
+                  fill={TOKEN_COLOURS.labelBackground}
+                  stroke={TOKEN_COLOURS.text}
+                  strokeWidth={1}
+                />
+                <Path
+                  data={NOTE_PAGE}
+                  x={-4.5}
+                  y={-4.5}
+                  scaleX={9 / 24}
+                  scaleY={9 / 24}
+                  stroke={TOKEN_COLOURS.text}
+                  strokeWidth={2.5}
+                  lineCap="round"
+                  lineJoin="round"
+                  listening={false}
                 />
               </Group>
             ) : null}

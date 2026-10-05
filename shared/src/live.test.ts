@@ -52,14 +52,7 @@ describe('WebSocket envelope names', () => {
   });
 
   it('lists exactly the events of specs/04-live-sync.md §3', () => {
-    // `notes.updated` belongs to DM notes (DMT-04, specs/13-implementation-plan.md §12), not built yet; that
-    // package removes it from here.
-    const planned = ['notes.updated'];
-    expect([...EVENT_TYPES].sort()).toEqual(
-      tableNames('3')
-        .filter((name) => !planned.includes(name))
-        .sort(),
-    );
+    expect([...EVENT_TYPES].sort()).toEqual(tableNames('3').sort());
   });
 
   it('uses one Socket.io channel for commands, one for events, one for snapshot requests and one for viewport reports', () => {

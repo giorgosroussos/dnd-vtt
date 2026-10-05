@@ -301,8 +301,20 @@ describe('a REST change to an asset with a token on the live scene (05 §5, G-01
     const kobold = await h.asset('Kobold');
     await h.place(w.other.id, kobold.id, 0, 0);
     ok(await patchAsset(kobold.id, { size: 'small', image_id: (await h.image('kobold, repainted')).id }));
-    ok(await patchAsset(w.goblin.id, { notes: 'Carries a rusty key', tags: ['cave'], default_hidden: true }));
+    ok(await patchAsset(w.goblin.id, { tags: ['cave'], default_hidden: true }));
     expect(await w.dm.settle()).toEqual([]);
+    expect(await w.player.settle()).toEqual([]);
+  });
+
+  it('sends the DM room alone a snapshot when a live token’s asset’s notes change, shown beside its own (DMT-04)', async () => {
+    const w = await world();
+    ok(await patchAsset(w.goblin.id, { notes: 'Carries a rusty key' }));
+    const events = await w.dm.settle();
+    expect(events.map((event) => event.type)).toEqual(['scene.snapshot']);
+    const { scene } = events[0]!.payload as DmSnapshot;
+    expect(scene!.tokens.filter((token) => token.asset_id === w.goblin.id).map((token) => token.asset.notes)).toContain(
+      'Carries a rusty key',
+    );
     expect(await w.player.settle()).toEqual([]);
   });
 });

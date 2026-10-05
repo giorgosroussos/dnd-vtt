@@ -266,6 +266,39 @@ async function record(hidden: boolean): Promise<Recording> {
   await step('undo the hit points of the goblin', undo);
   await step('undo the 0 hit points of the hidden boss', undo, true);
   await step('undo the hit points of the hidden boss', undo, true);
+  // DM notes (DMT-04, specs/04-live-sync.md §4, §16): over REST on the live scene and on a scene that is not live, a
+  // hidden token's and a visible one's, and an asset's beside them. The DM room hears `notes.updated` for the live
+  // scene's; players hear nothing of any of them, and B's reach them not when B goes live.
+  const notes = async (url: string, text: string, method: 'PUT' | 'PATCH' = 'PUT'): Promise<string[]> => {
+    secrets.push(text);
+    const response = await live.inject({ method, url, payload: { notes: text } });
+    expect(response.statusCode, response.body).toBe(200);
+    return (await dm.settle()).map((event) => event.type);
+  };
+  await step('write notes on the live scene', async () => {
+    expect(await notes(`/api/scenes/${sceneA.id}/notes`, 'Note A: the floor gives way on round 3')).toEqual([
+      'notes.updated',
+    ]);
+  });
+  await step(
+    'write notes on the hidden boss',
+    async () =>
+      expect(await notes(`/api/tokens/${boss!.id}/notes`, 'Note boss: a doppelganger')).toEqual(['notes.updated']),
+    true,
+  );
+  await step('write notes on the visible goblin', async () => {
+    const said = await notes(`/api/tokens/${firstGoblin.id}/notes`, 'Note goblin:\nflees at half HP');
+    expect(said).toEqual(['notes.updated']);
+  });
+  await step('write notes on the goblin asset', async () => {
+    // Shown beside its live tokens' notes, so the DM room gets a fresh snapshot, and players nothing.
+    expect(await notes(`/api/assets/${goblin.id}`, 'Note goblins: cowards', 'PATCH')).toEqual(['scene.snapshot']);
+  });
+  await step('write notes on a scene that is not live, and on a token of it', async () => {
+    expect(await notes(`/api/scenes/${sceneB.id}/notes`, 'Note B: the troll under the bridge')).toEqual([]);
+    const [token] = (await live.inject({ method: 'GET', url: `/api/scenes/${sceneB.id}/tokens` })).json<SceneToken[]>();
+    expect(await notes(`/api/tokens/${token!.id}/notes`, 'Note B token: pays the toll')).toEqual([]);
+  });
   await step('activate B', () => send('scene.activate', { scene_id: sceneB.id }));
   await step('a second screen reports its viewport and the DM steers the TV on B', async () => {
     const second = await live.connect();
@@ -522,7 +555,7 @@ describe('what a player view receives across a live session (specs/10-testing-ac
     expect(during('activate B', 'deactivate')).not.toContain('The crypt');
     expect(during('deactivate', 'activate A again')).not.toMatch(/The crypt|The bridge/);
     expect(during('activate A again')).not.toContain('The bridge');
-    // Nor any hit points or armour class (DMT-01).
+    // Nor any hit points or armour class (DMT-01), nor notes (DMT-04).
     for (const forbidden of [
       '"hidden"',
       '"notes"',
@@ -568,6 +601,17 @@ describe('what a player view receives across a live session (specs/10-testing-ac
     expect(eventsOf('damage the visible goblin to bloodied')).toEqual(['token.updated', 'scene.snapshot']);
     expect(eventsOf('undo the damage of the goblin')).toEqual(['token.updated', 'scene.snapshot']);
     expect(eventsOf('undo the hit points of the goblin')).toEqual(['scene.snapshot']);
+    // Notes send players nothing at all, the live scene's and a visible token's included (DMT-04).
+    for (const name of [
+      'write notes on the live scene',
+      'write notes on the hidden boss',
+      'write notes on the visible goblin',
+      'write notes on the goblin asset',
+      'write notes on a scene that is not live, and on a token of it',
+    ]) {
+      expect(eventsOf(name), name).toEqual(['scene.snapshot']);
+    }
+    expect(text).not.toContain('Note ');
     expect(eventsOf('paint the vault')).toEqual(['fog.updated', 'scene.snapshot']);
     expect(eventsOf('place a lone sentry')).toEqual(['token.added', 'scene.snapshot']);
     expect(eventsOf('place a second sentry under the fog and delete it there')).toEqual(['scene.snapshot']);

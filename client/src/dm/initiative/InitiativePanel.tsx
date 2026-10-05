@@ -21,13 +21,15 @@ import { Icon } from '../../ui/icons.js';
 import { t } from '../../ui/messages.js';
 import { useFocusLater } from '../../ui/useFocusLater.js';
 import { TokenStatsBadge } from '../tokens/TokenStats.js';
+import { tokenHasNotes, tokenNotesPreview } from '../notes/Notes.js';
 
 // The Initiative tab of the DM view (TBL-06, DMT-02, specs/08-ux-journeys.md §12, specs/04-live-sync.md §14,
 // Q-111, Q-117, Q-118, D-180). The table rolls physical dice; this records the order. Start combat builds it
 // from the player characters, monsters and npcs players see; each row has a drag handle, the token's avatar,
 // its name and a number field. Typing a number sorts the rows (the server does), a drag sets the order, and
 // Move up and Move down do what a drag does from the keyboard. The turn's row is highlighted and the next one
-// marked; a row passed over is dimmed, a Dead monster's greyed. Tokens players can now see without an entry
+// marked; a row passed over is dimmed, a Dead monster's greyed. The turn's row, when its token has notes, has a
+// button that opens them (DMT-04). Tokens players can now see without an entry
 // are offered together, each with an optional number. Every change is a live command; the panel holds no
 // order of its own.
 
@@ -40,6 +42,8 @@ export interface InitiativePanelProps {
   fog: FogMask;
   /** Sends a live command; true when the server applied it. */
   onCommand: (type: CommandType, payload: object) => Promise<boolean>;
+  /** Opens the token's notes (DMT-04): from the turn's row, when its token has any. */
+  onOpenNotes?: ((tokenId: string) => void) | undefined;
 }
 
 /** `ids` with `id` moved to where `target` is. */
@@ -58,7 +62,15 @@ function initiativeOf(text: string): number | null | undefined {
   return value >= INITIATIVE_BOUNDS.min && value <= INITIATIVE_BOUNDS.max ? value : undefined;
 }
 
-export function InitiativePanel({ sceneId, live, encounter, tokens, fog, onCommand }: InitiativePanelProps) {
+export function InitiativePanel({
+  sceneId,
+  live,
+  encounter,
+  tokens,
+  fog,
+  onCommand,
+  onOpenNotes,
+}: InitiativePanelProps) {
   const [confirmingEnd, setConfirmingEnd] = useState(false);
   // The tokens the DM skipped adding, or removed, in this browser only: not offered again.
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(new Set());
@@ -234,6 +246,18 @@ export function InitiativePanel({ sceneId, live, encounter, tokens, fog, onComma
                   </span>
                 </span>
                 {token ? <TokenStatsBadge stats={token} /> : null}
+                {isCurrent && token && onOpenNotes && tokenHasNotes(token) ? (
+                  // The turn's token has notes: that is when "flees at half HP" matters (DMT-04).
+                  <button
+                    type="button"
+                    className="eg-note-button"
+                    aria-label={t('notes.openOf', { name })}
+                    title={tokenNotesPreview(token)}
+                    onClick={() => onOpenNotes(token.id)}
+                  >
+                    <Icon name="note" size={14} />
+                  </button>
+                ) : null}
                 <InitiativeField
                   name={name}
                   value={entry.initiative}

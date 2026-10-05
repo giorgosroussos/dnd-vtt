@@ -3,6 +3,7 @@ import {
   EXHAUSTION,
   EXHAUSTION_LEVELS,
   hasMarker,
+  hasNotes,
   API_IMAGE_PATHS,
   FEET_PER_SQUARE_BOUNDS,
   FIT_CAMERA,
@@ -70,6 +71,7 @@ import { TokenPopover } from './tokens/TokenPopover.js';
 import { markerName } from '../ui/conditions.js';
 import { toCanvasToken, useSceneTokens } from './tokens/useSceneTokens.js';
 import { InitiativePanel } from './initiative/InitiativePanel.js';
+import { SceneNotes } from './notes/Notes.js';
 
 // The selected scene in the centre of the workspace (PRP-02, specs/08-ux-journeys.md §1, §3,
 // specs/06-grid-and-measurement.md §2, specs/03-domain-model.md §6, D-090, D-093): its setup and
@@ -144,8 +146,13 @@ import { InitiativePanel } from './initiative/InitiativePanel.js';
 // selected token take the pointer and the keys in turn.
 //
 // Shortcuts (UIX-01, specs/08-ux-journeys.md §11): V selects, M measures, T adds a token, H hides or
-// reveals the selected token, Ctrl+Z undoes and Ctrl+Shift+Z or Ctrl+Y redoes, from anywhere in the DM
-// view but a text field or an open dialog; none acts while typing.
+// reveals the selected token, N opens the scene's notes, Ctrl+Z undoes and Ctrl+Shift+Z or Ctrl+Y redoes, from
+// anywhere in the DM view but a text field or an open dialog; none acts while typing.
+//
+// DM notes (DMT-04, specs/04-live-sync.md §16, specs/08-ux-journeys.md §13, Q-114): the scene's in the right-hand
+// panel's Notes tab, reached with N, which also puts the cursor in them; a token's in its popover, with its asset's
+// beside them, and opened from the initiative order on the token's turn. Saved over REST as they are typed, on this
+// scene live or not; on the live scene another DM window's change arrives as `notes.updated`. Not undoable.
 //
 // The workspace keys this panel by scene: a request still running when another scene is
 // selected ends in a panel that is gone, so its answer changes nothing on screen. One change
@@ -237,6 +244,7 @@ export function ScenePanel({
   setupOpen: setupOpenProp,
   onSetupOpen,
   onTokensChanged,
+  onNotesChanged,
 }: {
   sceneId: string;
   name: string;
@@ -259,6 +267,8 @@ export function ScenePanel({
   onSetupOpen?: ((open: boolean) => void) | undefined;
   /** Told after a change to the scene's tokens or map, so the scene list's counts and thumbnail are read again. */
   onTokensChanged?: (() => void) | undefined;
+  /** Told when the scene's notes become empty or stop being empty, so the scene list's mark is read again. */
+  onNotesChanged?: (() => void) | undefined;
   /** The server-wide diagonal rule the ruler measures by (specs/06-grid-and-measurement.md §5, Q-037). */
   rulerRule?: RulerRule | undefined;
   /** Told when measuring starts, so the workspace reads the rule again: another browser may have changed it (G-036). */
@@ -365,6 +375,15 @@ export function ScenePanel({
   const [popoverOpen, setPopoverOpen] = useState(false);
   // Raised by D: the popover's hit-point field takes focus (DMT-01).
   const [focusHp, setFocusHp] = useState(0);
+  // Raised from the initiative order: that token's popover notes field takes focus (DMT-04).
+  const [notesFocus, setNotesFocus] = useState<{ id: string; n: number }>();
+  // Raised by N: the Notes tab's field takes focus (DMT-04).
+  const [focusSceneNotes, setFocusSceneNotes] = useState(0);
+  // A request is for the popover or tab it opened, and the token it was for: one opened again later, or another
+  // token's, takes no focus of itself.
+  if (!popoverOpen && focusHp !== 0) setFocusHp(0);
+  if (notesFocus !== undefined && (!popoverOpen || notesFocus.id !== selectedToken)) setNotesFocus(undefined);
+  if (sideTab !== 'notes' && focusSceneNotes !== 0) setFocusSceneNotes(0);
   // Choosing a token gives the arrow keys back to it and ends measuring.
   const selectToken = (id: string | undefined) => {
     setSelectedToken(id);
@@ -1055,6 +1074,11 @@ export function ScenePanel({
     } else if (key === 'h' && selected && tokenControls) {
       event.preventDefault();
       toggleHidden(selected);
+    } else if (key === 'n' && scene) {
+      // The scene's notes (DMT-04): the Notes tab, its field focused.
+      event.preventDefault();
+      onSideTab('notes');
+      setFocusSceneNotes((n) => n + 1);
     } else if (key === 'd' && selected && tokenControls && !placingAsset) {
       // Damage or healing (DMT-01): the selected token's popover, its hit-point field focused.
       event.preventDefault();
@@ -1067,6 +1091,14 @@ export function ScenePanel({
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
   }, []);
+
+  // A token's notes from the initiative order (DMT-04): its popover open on the map, centred, the cursor in its notes.
+  function openTokenNotes(id: string) {
+    selectToken(id);
+    setPopoverOpen(true);
+    setNotesFocus((current) => ({ id, n: (current?.n ?? 0) + 1 }));
+    canvas.current?.centreOn(id);
+  }
 
   // Moves are announced too, since the canvas says nothing to assistive technology (review).
   const moved = (updated: SceneToken) =>
@@ -1243,6 +1275,10 @@ export function ScenePanel({
               onStats={(stats) => void changeStats(selected, stats)}
               initiative={initiativeAction(selected)}
               focusHp={focusHp}
+              focusNotes={notesFocus?.id === selected.id ? notesFocus.n : 0}
+              onNotesSaved={(token) => {
+                if (!isLive) sceneTokens.stored(token);
+              }}
             />
           ) : null
       : undefined;
@@ -1679,7 +1715,20 @@ export function ScenePanel({
             tokens={tokens ?? []}
             fog={fog}
             onCommand={(type, payload) => command(type, payload, 'initiative.failed')}
+            onOpenNotes={openTokenNotes}
           />
+        }
+        notes={
+          scene ? (
+            <SceneNotes
+              scene={scene}
+              focus={focusSceneNotes}
+              onSaved={(saved) => {
+                if (hasNotes(saved.notes) !== hasNotes(scene.notes)) onNotesChanged?.();
+                if (!isLive) setScene(saved);
+              }}
+            />
+          ) : undefined
         }
         round={combat ? encounter.round : undefined}
         library={library}
@@ -1704,6 +1753,7 @@ function ShortcutBar({
     ['shortcuts.keyP', 'shortcuts.ping'],
     ['shortcuts.keyH', 'shortcuts.hide'],
     ['shortcuts.keyD', 'shortcuts.hp'],
+    ['shortcuts.keyN', 'shortcuts.notes'],
     ['shortcuts.keyUndo', 'shortcuts.undo'],
     ...(live ? ([['shortcuts.keyC', 'shortcuts.follow']] as [MessageKey, MessageKey][]) : []),
     ...(combat ? ([['shortcuts.keyEnter', 'shortcuts.nextTurn']] as [MessageKey, MessageKey][]) : []),

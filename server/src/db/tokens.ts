@@ -42,8 +42,8 @@ import { refusal, type TokenScope } from './scope.js';
 
 const COLUMNS = `token.id, token.scene_id, token.asset_id, token.label, token.x, token.y, token.hidden,
   token.z_order, token.markers, token.character_id, token.hp_current, token.hp_max, token.hp_temp, token.ac,
-  asset.name AS asset_name, asset.image_id AS asset_image_id,
-  asset.size AS asset_size, asset.category AS asset_category`;
+  token.notes, asset.name AS asset_name, asset.image_id AS asset_image_id,
+  asset.size AS asset_size, asset.category AS asset_category, asset.notes AS asset_notes`;
 const FROM = 'FROM token JOIN asset ON asset.id = token.asset_id';
 
 interface Row {
@@ -61,10 +61,12 @@ interface Row {
   hp_max: number | null;
   hp_temp: number | null;
   ac: number | null;
+  notes: string;
   asset_name: string;
   asset_image_id: string;
   asset_size: TokenSize;
   asset_category: AssetCategory;
+  asset_notes: string;
 }
 
 /** The markers given, each condition once, in the order given; anything else is dropped (D-157). */
@@ -85,7 +87,14 @@ const toToken = (row: Row): SceneToken => ({
   hp_max: row.hp_max,
   hp_temp: row.hp_temp,
   ac: row.ac,
-  asset: { name: row.asset_name, image_id: row.asset_image_id, size: row.asset_size, category: row.asset_category },
+  notes: row.notes,
+  asset: {
+    name: row.asset_name,
+    image_id: row.asset_image_id,
+    size: row.asset_size,
+    category: row.asset_category,
+    notes: row.asset_notes,
+  },
 });
 
 /** Whether players have seen the token (Q-096); kept out of SceneToken, which clients receive. */
@@ -324,6 +333,16 @@ export function updateToken(
   })();
 }
 
+/**
+ * Sets the token's notes, the whole text, on any scene, the live one included (DMT-04, specs/04-live-sync.md §2,
+ * §16): notes are neither a live command nor preparation, and are not undoable. Undefined when the token does not
+ * exist.
+ */
+export function updateTokenNotes(db: Database.Database, id: string, notes: string): SceneToken | undefined {
+  db.prepare('UPDATE token SET notes = ? WHERE id = ?').run(notes, id);
+  return readToken(db, id);
+}
+
 export type TokenDeleteOutcome =
   // `encounter`: the scene's encounter before and after the token's entry went, when it had one (TBL-06).
   | { outcome: 'deleted'; token: SceneToken; shown: boolean; encounter?: { before: Encounter; encounter: Encounter } }
@@ -360,7 +379,7 @@ export type TokenRestoreOutcome =
 
 /**
  * Puts a deleted token back exactly as it was: its id, label, position, visibility, stacking
- * order, markers and whether players had seen it (`shown`, Q-096; by default, whether it was visible) (LIV-05, undo of `token.delete`, specs/04-live-sync.md §8, D-117). No number is issued, and
+ * order, markers, hit points, armour class, notes and whether players had seen it (`shown`, Q-096; by default, whether it was visible) (LIV-05, undo of `token.delete`, specs/04-live-sync.md §8, D-117). No number is issued, and
  * none is taken back: its label is the one it had, or the asset's current name if it carried the
  * asset's bare name and the asset was renamed since. Refused when its scene is gone or not in `scope`,
  * or its asset was deleted meanwhile. Each deletion's inverse is taken once, so its id is free; were
@@ -386,8 +405,8 @@ export function restoreToken(
     const label = token.label === token.asset.name ? name : token.label;
     db.prepare(
       `INSERT INTO token (id, scene_id, asset_id, label, x, y, hidden, z_order, markers, character_id, shown,
-         hp_current, hp_max, hp_temp, ac)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         hp_current, hp_max, hp_temp, ac, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       token.id,
       token.scene_id,
@@ -404,6 +423,7 @@ export function restoreToken(
       token.hp_max,
       token.hp_temp,
       token.ac,
+      token.notes,
     );
     // Put back where players can see it though they never did (the fog lifted meanwhile): numbered as at
     // a first showing (TBL-03).

@@ -32,6 +32,7 @@ import {
   type TokenMarker,
   type TokenStats,
   TokenUpdateBodySchema,
+  NotesBodySchema,
   type CommandAck,
   type CommandEnvelope,
   type DmSnapshot,
@@ -225,6 +226,7 @@ export class FakeServer {
       order,
       map_image_id: null,
       grid: { ...DEFAULT_GRID },
+      notes: '',
     };
     this.scenes.push(scene);
     this.tokens[scene.id] = tokens;
@@ -267,7 +269,14 @@ export class FakeServer {
       character_id: null,
       // The asset's defaults, at full hit points, as the server copies them (DMT-01).
       ...statsFromAsset(asset),
-      asset: { name: asset.name, image_id: asset.image_id, size: asset.size, category: asset.category },
+      notes: '',
+      asset: {
+        name: asset.name,
+        image_id: asset.image_id,
+        size: asset.size,
+        category: asset.category,
+        notes: asset.notes,
+      },
       ...fields,
     };
     this.sceneTokens.push(token);
@@ -378,6 +387,28 @@ export class FakeServer {
     return json(200, { token: { ...token }, relabelled: renamed ? [{ ...renamed }] : [] });
   }
 
+  // DM notes (DMT-04), as the server keeps them: on any scene, the live one included, the whole text; the live
+  // scene's reach every DM socket as `notes.updated`.
+  private handleNotes(method: string, kind: 'scene' | 'token', id: string, b: Record<string, unknown>): Reply {
+    if (method !== 'PUT') return failure(404, 'not_found');
+    if (!Value.Check(NotesBodySchema, b)) return failure(400, 'validation_failed');
+    const notes = b.notes;
+    if (kind === 'scene') {
+      const scene = this.scenes.find((each) => each.id === id);
+      if (!scene) return failure(404, 'not_found');
+      scene.notes = notes;
+      if (scene.id === this.liveSceneId) this.deliver('notes.updated', { scene_id: id, token_id: null, notes });
+      return json(200, { ...scene });
+    }
+    const token = this.sceneTokens.find((each) => each.id === id);
+    if (!token) return failure(404, 'not_found');
+    token.notes = notes;
+    if (token.scene_id === this.liveSceneId) {
+      this.deliver('notes.updated', { scene_id: token.scene_id, token_id: id, notes });
+    }
+    return json(200, this.withAsset(token));
+  }
+
   addImage(fields: Partial<Image> = {}): Image {
     const image: Image = {
       id: (++counter).toString(16).padStart(64, '0'),
@@ -443,7 +474,8 @@ export class FakeServer {
     this.calls.push(call);
     const intercepted = await this.before?.(call);
     if (intercepted) return intercepted;
-    if (call.method === 'GET') return this.handle(call);
+    // Notes tell the DM room by `notes.updated` alone, never by a snapshot (DMT-04).
+    if (call.method === 'GET' || /\/notes$/.test(call.path)) return this.handle(call);
     const before = this.dmSnapshot();
     const reply = this.handle(call);
     if (before.scene !== null && before.scene.scene.map_image_id !== this.liveMap()) {
@@ -537,7 +569,13 @@ export class FakeServer {
       asset
         ? {
             ...token,
-            asset: { name: asset.name, image_id: asset.image_id, size: asset.size, category: asset.category },
+            asset: {
+              name: asset.name,
+              image_id: asset.image_id,
+              size: asset.size,
+              category: asset.category,
+              notes: asset.notes,
+            },
           }
         : token,
     );
@@ -1177,6 +1215,8 @@ export class FakeServer {
     }
     const asset = /^\/api\/assets(?:\/([^/]+))?$/.exec(path);
     if (asset) return this.handleAssets(method, asset[1], query, b);
+    const notes = /^\/api\/(scenes|tokens)\/([^/]+)\/notes$/.exec(path);
+    if (notes) return this.handleNotes(method, notes[1] === 'scenes' ? 'scene' : 'token', notes[2]!, b);
     const sceneTokens = /^\/api\/scenes\/([^/]+)\/tokens$/.exec(path);
     if (sceneTokens) return this.handleTokens(method, sceneTokens[1], undefined, b);
     const token = /^\/api\/tokens\/([^/]+)$/.exec(path);
@@ -1324,10 +1364,11 @@ export async function click(element: Element | null | undefined): Promise<void> 
 
 /** Types `value` into an input the way React sees a user's typing. */
 export function type(input: Element | null | undefined, value: string): Promise<void> {
-  if (!(input instanceof HTMLInputElement)) throw new Error('not an input');
+  if (!(input instanceof HTMLInputElement) && !(input instanceof HTMLTextAreaElement)) throw new Error('not an input');
   act(() => {
     // Through the prototype's setter, which React does not intercept.
-    Reflect.set(HTMLInputElement.prototype, 'value', value, input);
+    const prototype = input instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+    Reflect.set(prototype, 'value', value, input);
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
   return Promise.resolve();

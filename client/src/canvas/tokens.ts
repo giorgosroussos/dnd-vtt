@@ -32,6 +32,11 @@ export interface CanvasToken {
    * whose entry has the turn, a player character's or a monster's; none when absent.
    */
   turn?: 'current' | undefined;
+  /**
+   * The first lines of its notes and its asset's, on the DM's map only (DMT-04): drawn as a page badge whose hover text
+   * they are; none when it has no notes. A player token never carries it.
+   */
+  note?: string | undefined;
 }
 
 /** World pixels per square, and where grid unit (0, 0) lies. */

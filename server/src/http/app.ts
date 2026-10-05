@@ -14,6 +14,7 @@ import { registerCampaigns } from './campaigns.js';
 import { registerConnect } from './connect.js';
 import type { NetworkInterfaces } from '../connect.js';
 import { registerFog } from './fog.js';
+import { registerNotes } from './notes.js';
 import { registerTokens } from './tokens.js';
 import { imageFileRemover, registerImages } from './images.js';
 import { createDisplayRegenerator, type DisplayRegenerator } from '../images/regenerator.js';
@@ -131,6 +132,7 @@ export async function buildApp({
   registerCampaigns(app, db, removeImages, live.refresh);
   registerAssets(app, db, removeImages, live.refresh);
   registerTokens(app, db);
+  registerNotes(app, db, live.notesChanged);
   registerFog(app, db);
   registerConnect(
     app,

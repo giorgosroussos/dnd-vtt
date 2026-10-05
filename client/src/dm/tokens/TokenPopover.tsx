@@ -15,17 +15,19 @@ import { Icon } from '../../ui/icons.js';
 import { Menu } from '../../ui/Menu.js';
 import { t } from '../../ui/messages.js';
 import { HitPoints } from './HitPoints.js';
+import { TokenNotes } from '../notes/Notes.js';
 
 const WIDTH = 272;
 const GAP = 14;
 
 /** Beside the token, on its right when there is room and on its left otherwise, kept inside the canvas. */
-function placement(anchor: TokenAnchor): { left: number; top: number; side: 'left' | 'right' } {
+function placement(anchor: TokenAnchor): { left: number; top: number; maxHeight: number; side: 'left' | 'right' } {
   const right = anchor.left + anchor.side + GAP;
   const fitsRight = right + WIDTH <= anchor.viewport.width - 8;
   const left = fitsRight ? right : Math.max(8, anchor.left - GAP - WIDTH);
   const top = Math.min(Math.max(8, anchor.top + anchor.side / 2 - 70), Math.max(8, anchor.viewport.height - 340));
-  return { left, top, side: fitsRight ? 'right' : 'left' };
+  // Taller than the room below it (long notes), it scrolls rather than run past the canvas.
+  return { left, top, maxHeight: Math.max(200, anchor.viewport.height - top - 8), side: fitsRight ? 'right' : 'left' };
 }
 
 // The selected token's popover (UIX-01, specs/08-ux-journeys.md §11, specs/04-live-sync.md §2): its name,
@@ -38,7 +40,7 @@ function placement(anchor: TokenAnchor): { left: number; top: number; side: 'lef
 // chip, while on, carries a stepper for its level. Each chip's hover text is its rule text (D-158).
 // Between them, the token's hit points and armour class (DMT-01, HitPoints.tsx). While combat runs, the menu
 // adds a player character, monster or npc without an entry to the initiative order, or says why it cannot
-// (DMT-02).
+// (DMT-02). Last, the token's notes, saved as they are typed, with its asset's under them, read-only (DMT-04).
 export function TokenPopover({
   token,
   anchor,
@@ -54,6 +56,8 @@ export function TokenPopover({
   onStats,
   initiative,
   focusHp = 0,
+  focusNotes = 0,
+  onNotesSaved,
 }: {
   token: SceneToken;
   anchor: TokenAnchor;
@@ -71,13 +75,17 @@ export function TokenPopover({
   initiative?: { disabledReason?: string | undefined; onAdd: () => void } | undefined;
   /** Raised each time D asks for the hit-point field. */
   focusHp?: number;
+  /** Raised each time the notes field is asked for: from the initiative order (DMT-04). */
+  focusNotes?: number;
+  /** The token as the server stored its notes. */
+  onNotesSaved: (token: SceneToken) => void;
 }) {
-  const { left, top, side } = placement(anchor);
+  const { left, top, maxHeight, side } = placement(anchor);
   const prepOnly = live ? t('tokens.prepOnly') : undefined;
   return (
     <section
       className={`eg-popover eg-popover--${side}`}
-      style={{ left, top, width: WIDTH }}
+      style={{ left, top, width: WIDTH, maxHeight, overflowY: 'auto' }}
       aria-label={t('tokens.popoverOf', { label: token.label })}
     >
       <div className="eg-popover__head">
@@ -155,6 +163,7 @@ export function TokenPopover({
           <MoreConditions token={token} onToggle={onToggleMarker} />
         </div>
       </div>
+      <TokenNotes token={token} focus={focusNotes} onSaved={onNotesSaved} />
       {live ? <p className="eg-popover__note">{t('tokens.prepOnlyNote')}</p> : null}
     </section>
   );

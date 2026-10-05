@@ -250,6 +250,18 @@ export {
 } from './hp.js';
 export { isMeasurement, rulerFeet, rulerSquares, type RulerSquare } from './ruler.js';
 export {
+  API_NOTES_PATHS,
+  NOTES_MAX_LENGTH,
+  NotesBodySchema,
+  NotesSchema,
+  NotesUpdatedPayloadSchema,
+  hasNotes,
+  notesLength,
+  notesPreview,
+  type NotesBody,
+  type NotesUpdatedPayload,
+} from './notes.js';
+export {
   ASSET_CATEGORIES,
   AssetSchema,
   AssetTagSchema,

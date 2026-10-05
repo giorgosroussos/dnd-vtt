@@ -1471,7 +1471,8 @@ export function MapCanvas({
           return {
             id: token.id,
             label: token.label,
-            ...(dm ? { hidden: token.hidden } : {}),
+            // Whether the DM's map draws its notes badge (DMT-04); the player mode has none.
+            ...(dm ? { hidden: token.hidden, note: token.note !== undefined } : {}),
             markers: token.markers ?? [],
             x: token.x,
             y: token.y,

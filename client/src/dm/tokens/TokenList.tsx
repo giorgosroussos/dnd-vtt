@@ -5,6 +5,7 @@ import { t, type MessageKey } from '../../ui/messages.js';
 import { initialsOf } from '../../canvas/TokenLayer.js';
 import { markerName } from '../../ui/conditions.js';
 import { TokenStatsBadge } from './TokenStats.js';
+import { NoteMark } from '../notes/Notes.js';
 
 const CATEGORY_NAMES: Record<AssetCategory, MessageKey> = {
   pc: 'asset.category.pc',
@@ -23,7 +24,8 @@ const GROUPS: { key: 'party' | 'monsters' | 'others'; heading: MessageKey; categ
 // "In this scene", the right panel's first tab (UIX-01, specs/08-ux-journeys.md §11): the scene's tokens
 // grouped into the party (player characters), the monsters, with Reveal all while any is hidden, and every
 // other token (NPCs and objects, which the design draws no group for). Each row names its token and says
-// what it is or that it is hidden, with its eye toggle; a hidden row is italic, its avatar ring dashed and
+// what it is or that it is hidden, with its eye toggle and, when it has notes of its own or from its asset, a page
+// mark whose hover text is their first lines (DMT-04); a hidden row is italic, its avatar ring dashed and
 // its eye crossed out, so it never reads as a visible one. A row selects its token and centres the map on
 // it. Every control is a native button, so the keyboard reaches all of it.
 /**
@@ -113,6 +115,7 @@ export function TokenList({
                       <span className="eg-token-row__name">{token.label}</span>
                       <span className="eg-token-row__status">{statusOf(token, fog)}</span>
                     </span>
+                    <NoteMark token={token} />
                     <TokenStatsBadge stats={token} />
                   </button>
                   <button

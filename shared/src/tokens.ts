@@ -42,6 +42,8 @@ export const SceneTokenSchema = Type.Object(
         image_id: AssetSchema.properties.image_id,
         size: AssetSchema.properties.size,
         category: AssetSchema.properties.category,
+        // Shown beside the token's own notes, read-only (DMT-04, specs/03-domain-model.md §10).
+        notes: AssetSchema.properties.notes,
       },
       strict,
     ),
