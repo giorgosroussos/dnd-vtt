@@ -21,6 +21,7 @@ import { ScenePanel } from './ScenePanel.js';
 import { AboutDialog } from './AboutDialog.js';
 import { SettingsDialog } from './SettingsDialog.js';
 import { SidePanel, type SideTab } from './SidePanel.js';
+import { SidebarDock } from './SidebarDock.js';
 import { Library } from './library/Library.js';
 import { useDmLive } from './live/useDmLive.js';
 import { nextScene, SceneList, useSessionScenes } from './scenes/SceneList.js';
@@ -411,7 +412,7 @@ export function Workspace({
       {failure ? <Notice>{failure}</Notice> : null}
       {barMessage ? <Notice>{barMessage}</Notice> : null}
       <div className="eg-workspace__columns">
-        <div className="eg-workspace__sidebar">
+        <SidebarDock>
           <SceneList
             session={shown?.session}
             scenes={sessionScenes}
@@ -448,7 +449,7 @@ export function Workspace({
               )}
             </section>
           ) : null}
-        </div>
+        </SidebarDock>
         {selected ? (
           <ScenePanel
             key={selected.id}

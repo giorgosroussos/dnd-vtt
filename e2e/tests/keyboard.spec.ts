@@ -64,6 +64,9 @@ test('every interactive element of the DM view is reached, shown and operated by
   await page.exposeFunction('egActivated', () => {
     activations++;
   });
+  // Operating the sidebar's pin collapses it, and the browser remembers that: every reopening starts docked
+  // again, so each element is walked to in the same view (UXR-01).
+  await page.addInitScript(() => window.localStorage.setItem('emberglass.sidebar', 'pinned'));
   await openDm(page);
   const count = await page.locator(FOCUSABLE).count();
   expect(count, 'the DM view has no interactive element to test').toBeGreaterThan(0);

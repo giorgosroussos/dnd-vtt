@@ -41,6 +41,68 @@
   overflow-y: auto;
 }
 
+/* The scene sidebar's dock (UXR-01, specs/08-ux-journeys.md §14): collapsed to a strip at the left edge,
+ * the sidebar sliding out over the map, which keeps its size; pinned, the sidebar in its column. */
+.eg-dock {
+  position: relative;
+  z-index: 30;
+  flex-shrink: 0;
+  display: flex;
+  width: var(--sidebar-strip);
+}
+
+.eg-dock--pinned {
+  width: var(--sidebar-width);
+}
+
+.eg-dock--pinned > .eg-workspace__sidebar {
+  flex: 1;
+}
+
+.eg-dock__edge {
+  width: var(--sidebar-strip);
+  display: flex;
+  justify-content: center;
+  padding: var(--space-3) 0 0;
+  border: none;
+  border-right: 1px solid var(--color-divider);
+  background: var(--color-panel);
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.eg-dock__edge:hover,
+.eg-dock--open > .eg-dock__edge {
+  background: var(--color-hover);
+  color: var(--color-text);
+}
+
+.eg-dock:not(.eg-dock--pinned) > .eg-workspace__sidebar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--sidebar-strip);
+  width: var(--sidebar-width);
+  transform: translateX(calc(-100% - var(--sidebar-strip)));
+  visibility: hidden;
+  transition:
+    transform 160ms ease,
+    visibility 0s linear 160ms;
+}
+
+.eg-dock--open:not(.eg-dock--pinned) > .eg-workspace__sidebar {
+  transform: none;
+  visibility: visible;
+  box-shadow: 10px 0 28px rgb(0 0 0 / 50%);
+  transition: transform 160ms ease;
+}
+
+.eg-dock__bar {
+  display: flex;
+  justify-content: flex-end;
+  margin: calc(-1 * var(--space-2)) 0 calc(-1 * var(--space-3));
+}
+
 /* Header */
 .eg-header {
   height: var(--header-height);

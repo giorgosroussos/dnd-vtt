@@ -97,6 +97,7 @@
 
   --header-height: 56px;
   --sidebar-width: 256px;
+  --sidebar-strip: 16px;
   --side-panel-width: 320px;
 
   color-scheme: dark;

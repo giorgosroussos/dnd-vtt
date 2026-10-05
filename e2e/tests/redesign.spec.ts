@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { selectScene, viewport } from './canvas-view.js';
-import { openWorkspace, seedCampaign } from './dm.js';
+import { openWorkspace, seedCampaign, signIn } from './dm.js';
 import { solidPng } from './png.js';
 import { commandFromPage } from './socket.js';
 
@@ -123,5 +123,55 @@ test('the three screens at the boards’ sizes, the side panels at their widths 
     await dmContext.close();
     await tvContext.close();
     await smallContext.close();
+  }
+});
+
+test('the scene sidebar starts collapsed at the edge, opens over the map on hover, closes on leaving and docks by its pin', async ({
+  browser,
+}) => {
+  // A browser that never pinned it: the default of Q-121.
+  const context = await browser.newContext({
+    viewport: { width: 1440, height: 900 },
+    storageState: { cookies: [], origins: [] },
+  });
+  const dm = await context.newPage();
+  try {
+    await signIn(dm);
+    await dm.goto('/dm');
+    await expect(dm.locator('.eg-header__crumbs')).toBeVisible();
+    const dock = dm.locator('.eg-dock');
+    const scenes = dm.getByRole('navigation', { name: 'Scenes of this session' });
+    const strip = dm.getByRole('button', { name: 'Show scenes' });
+    await expect(dock).toHaveAttribute('data-sidebar', 'collapsed');
+    await expect(scenes).toBeHidden();
+    // Collapsed, the map takes the sidebar's width; open, it keeps its size under the sidebar.
+    const collapsed = (await dm.locator('main.eg-scene').boundingBox())!;
+    expect(collapsed.width).toBe(1440 - 16 - 320);
+
+    const edge = (await strip.boundingBox())!;
+    await dm.mouse.move(edge.x + edge.width / 2, edge.y + 200);
+    await expect(dock).toHaveAttribute('data-sidebar', 'open');
+    await expect(scenes).toBeVisible();
+    expect((await dm.locator('main.eg-scene').boundingBox())!.width).toBe(collapsed.width);
+    await capture(dm, 'dm-sidebar-open-1440x900');
+    await dm.mouse.move(900, 450);
+    await expect(dock).toHaveAttribute('data-sidebar', 'collapsed');
+    await expect(scenes).toBeHidden();
+
+    // A click opens it until it is closed again; the pin docks it, and a reload keeps it docked.
+    await strip.click();
+    await dm.mouse.move(900, 450);
+    await expect(scenes).toBeVisible();
+    await dm.getByRole('button', { name: 'Keep scenes open' }).click();
+    await expect(dock).toHaveAttribute('data-sidebar', 'pinned');
+    await dm.reload();
+    await expect(dock).toHaveAttribute('data-sidebar', 'pinned');
+    expect((await dm.locator('.eg-workspace__sidebar').boundingBox())!.width).toBe(256);
+    expect((await dm.locator('main.eg-scene').boundingBox())!.width).toBe(1440 - 256 - 320);
+    await dm.getByRole('button', { name: 'Let scenes collapse' }).click();
+    await expect(dock).toHaveAttribute('data-sidebar', 'collapsed');
+    await expect(strip).toBeFocused();
+  } finally {
+    await context.close();
   }
 });

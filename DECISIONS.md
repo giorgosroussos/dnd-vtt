@@ -206,6 +206,7 @@ Affected specs: …
 - D-187 — DMT-05: export and import as a zip of format 1, read by yauzl from its central directory, written by yazl as it streams, every refusal storing nothing — implementation
 - D-188 — UI/UX refinements (Phase 8): a collapsible scene sidebar, multi-select with token.batch, drag from the library, a compact campaigns menu and a responsive player view on handhelds — adr
 - D-189 — Q-121 to Q-125 written into the specs: Phase 8, the UI/UX refinements, with the defaults the owner's answers leave open — spec-amendment
+- D-190 — UXR-01: the scene sidebar's dock, opened by hover or by a click, and the end-to-end contexts starting docked — implementation
 
 ## D-001 (2026-09-23) — Repository documentation regime
 Type: implementation
@@ -1552,3 +1553,10 @@ Decision: Writes D-188 into the specs by `make unlock` of `01`, `04`, `05`, `08`
 Why: The amendment regime (D-002) requires the owner's answers in the specs before code, and the derived characteristics of each package are checked by `make check-docs`.
 Alternatives: Leaving the refinements as implementation decisions only (rejected: they cross locked bullets of `12` and red lines of AGENTS.md, which need the spec text to move with them).
 Affected specs: `01` §2, §4, §6, §11; `04` §2, §8; `05` §5; `08` §1, §3, §7, §9, §14; `10` §3, §4; `11`; `12` §3, §5; `13` §2, §13; `14` §3
+
+## D-190 (2026-10-05) — UXR-01: the scene sidebar's dock, opened by hover or by a click, and the end-to-end contexts starting docked
+Type: implementation
+Decision: Within Q-121. `client/src/dm/SidebarDock.tsx` wraps the scene list and Next up. Collapsed (the default), a 16 px strip (`--sidebar-strip`) holds the toggle (`Show scenes` / `Hide scenes`, `aria-expanded`, `aria-controls`); the sidebar is absolutely placed over the map, slid out and made `inert` while closed. Two ways open it: hover (pointer enter on the strip or the sidebar; a touch pointer ignored), closed 250 ms after the pointer leaves (`SIDEBAR_CLOSE_MS`) unless a drag that started in it, a dialog of its own or a keyboard focus (`:focus-visible`) holds it; and a click on the toggle, which keeps it open until the toggle, Escape or a press outside it. Keyboard focus moving into it opens it as hover does. The pin (`Keep scenes open` / `Let scenes collapse`, `aria-pressed`) docks it in its 256 px column, as before Phase 8, remembered in localStorage under `emberglass.sidebar` (every access in try/catch; refused storage starts collapsed); unpinning moves the focus to the toggle. The Playwright config's `storageState` starts every context with the sidebar docked, so the specs written before Phase 8 reach the scene list in its column as a DM who pinned it does; `redesign.spec.ts` covers the collapsed default in a context without it, and the keyboard walk re-docks it before every reopening since it operates the pin.
+Why: A click-opened sidebar that closed as the pointer left would fight a DM who clicked to use it; hover-open needs the grace period so that a diagonal move to the list does not close it. Docking the end-to-end contexts keeps sixty-odd specs about other features from each learning to open the sidebar.
+Alternatives: Every spec opening the sidebar through a helper (rejected: dozens of direct uses of the scene list, and no feature of theirs is the sidebar); hover alone without the click (rejected: the owner asked for a button too); resizing the map when it opens (rejected by Q-121).
+Affected specs: `08` §1, §14
