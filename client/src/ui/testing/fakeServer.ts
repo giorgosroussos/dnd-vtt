@@ -18,6 +18,7 @@ import {
   withoutEntry,
   type Encounter,
   type EncounterChange,
+  type ImportProgress,
   type FogMask,
   type FogStroke,
   type FogWriteBody,
@@ -133,6 +134,22 @@ export class FakeServer {
   tokens: Record<string, number> = {};
   liveSceneId: string | null = null;
   uploadLimit = 50 * 1024 * 1024;
+  importLimit = 2 * 1024 * 1024 * 1024;
+  /** What POST /api/import answers (DMT-05); the archives it was sent, and what GET /api/import/progress says. */
+  importReply: { status: number; body: unknown } = {
+    status: 200,
+    body: {
+      kind: 'assets',
+      campaign: null,
+      sessions: 0,
+      scenes: 0,
+      tokens: 0,
+      assets: { added: 1, reused: 0 },
+      images: { added: 1, reused: 0 },
+    },
+  };
+  imports: unknown[] = [];
+  importProgress: ImportProgress = { running: false, stage: null, done: 0, total: 0 };
   /** The TV address chosen in Settings, null for Automatic (Q-110). */
   tvAddress: string | null = null;
   displaySize = 4096;
@@ -1186,6 +1203,7 @@ export class FakeServer {
         this.displaySize = update.display_variant_size ?? this.displaySize;
         this.rulerRule = update.ruler_rule ?? this.rulerRule;
         if (update.tv_address !== undefined) this.tvAddress = update.tv_address;
+        this.importLimit = update.import_limit_bytes ?? this.importLimit;
       }
       return json(200, {
         id: '00000000-0000-4000-8000-00000000ffff',
@@ -1194,8 +1212,14 @@ export class FakeServer {
         upload_limit_bytes: this.uploadLimit,
         display_variant_size: this.displaySize,
         tv_address: this.tvAddress,
+        import_limit_bytes: this.importLimit,
       });
     }
+    if (path === '/api/import' && method === 'POST') {
+      this.imports.push(body);
+      return json(this.importReply.status, this.importReply.body);
+    }
+    if (path === '/api/import/progress' && method === 'GET') return json(200, this.importProgress);
     if (path === '/api/settings/pin' && method === 'PUT') {
       if (!Value.Check(PinChangeBodySchema, b)) return failure(400, 'validation_failed');
       if (this.pausedFor !== undefined) return failure(429, 'pin_paused', { 'retry-after': String(this.pausedFor) });

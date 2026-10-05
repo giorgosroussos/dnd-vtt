@@ -130,7 +130,7 @@ const bundle = await build({
   format: 'esm',
   target: 'node24',
   external: [...NATIVE, ...DEV_ONLY],
-  define: { __EMBERGLASS_BUNDLE__: 'true' },
+  define: { __EMBERGLASS_BUNDLE__: 'true', __EMBERGLASS_VERSION__: JSON.stringify(version) },
   // The CommonJS libraries inside an ES module bundle still call require for Node's built-ins.
   banner: {
     js: "import { createRequire as __emberglassRequire } from 'node:module';\nconst require = __emberglassRequire(import.meta.url);",

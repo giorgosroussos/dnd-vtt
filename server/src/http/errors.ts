@@ -42,6 +42,8 @@ export class ApiFailure extends Error {
       headers?: Record<string, string>;
       details?: ErrorDetail[];
       usages?: AssetUsage[];
+      /** With `import_newer_format`: the format the archive names (DMT-05). */
+      formatVersion?: number;
     } = {},
   ) {
     super(message);
@@ -52,7 +54,13 @@ export function toFailure(thrown: unknown): HttpFailure {
   if (thrown instanceof ApiFailure)
     return {
       status: thrown.status,
-      envelope: errorEnvelope(thrown.code, thrown.message, thrown.options.details, thrown.options.usages),
+      envelope: errorEnvelope(
+        thrown.code,
+        thrown.message,
+        thrown.options.details,
+        thrown.options.usages,
+        thrown.options.formatVersion,
+      ),
     };
   if (typeof thrown !== 'object' || thrown === null) return internal();
   const error = thrown as Thrown;

@@ -8,6 +8,7 @@ import { VIEW_PATHS } from '@emberglass/shared';
 import type { Logger } from '../log/logger.js';
 import { compileSchema } from '../validation.js';
 import type { ScryptParams } from '../auth/pin-hash.js';
+import { registerArchive } from './archive.js';
 import { registerAssets } from './assets.js';
 import { registerAuth, type Auth } from './auth.js';
 import { registerCampaigns } from './campaigns.js';
@@ -145,6 +146,7 @@ export async function buildApp({
   app.addHook('preClose', () => regenerator.stop());
   registerSettings(app, { db, logger, live, regenerator });
   await registerImages(app, { db, imagesDir, auth, regenerator, refresh: live.refresh });
+  await registerArchive(app, { db, imagesDir, logger, regenerator });
   const sendIndex = client.kind === 'static' ? await serveBuild(app, client.dist) : await serveVite(app, client.root);
 
   // Both views come from one client build: the player view at /, the DM view at /dm.

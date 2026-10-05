@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent, type ReactNode } from 'react';
-import { API_STRUCTURE_PATHS as PATHS, type Campaign, type Scene, type Session } from '@emberglass/shared';
+import {
+  API_STRUCTURE_PATHS as PATHS,
+  exportCampaignPath,
+  type Campaign,
+  type Scene,
+  type Session,
+} from '@emberglass/shared';
+import { ImportDialog } from '../archive/ImportDialog.js';
 import { Button } from '../../ui/Button.js';
 import { Notice } from '../../ui/Notice.js';
 import { TextField } from '../../ui/TextField.js';
@@ -16,7 +23,9 @@ import { entityPath, sceneOrderPath, scenesPath, sessionOrderPath, sessionsPath,
 // Every action is a visible button in the Tab order. Sessions and scenes reorder by
 // dragging among their siblings, or by Move up and Move down from the keyboard;
 // campaigns stay in the server's order, by name. The server's answer is always
-// what the tree shows next: after a change, the list it changed is read again.
+// what the tree shows next: after a change, the list it changed is read again. Each campaign offers Export, a
+// download of its archive, and the tree one Import, of a campaign or library assets (DMT-05, specs/08-ux-journeys.md
+// §13); an imported campaign appears in the list once the import ends.
 
 type Ordered = 'session' | 'scene';
 type Action = 'name' | 'up' | 'down' | 'rename';
@@ -65,6 +74,7 @@ export function SceneTree({
   const [creating, setCreating] = useState<string>();
   const [renaming, setRenaming] = useState<string>();
   const [deleting, setDeleting] = useState<DeleteTarget>();
+  const [importing, setImporting] = useState(false);
   const [dragging, setDragging] = useState<Dragging>();
   // The row a drag is over, drawn as where the dragged one will land (G-018).
   const [over, setOver] = useState<string>();
@@ -355,6 +365,18 @@ export function SceneTree({
                   </Button>
                 </>
               ) : null}
+              {kind === 'campaign' ? (
+                // A download: the browser saves the archive the server streams, named by the campaign and the date.
+                <a
+                  className="eg-button eg-button--secondary eg-button--small"
+                  href={exportCampaignPath(item.id)}
+                  download
+                  data-action="export"
+                  aria-label={t('tree.exportOf', { name })}
+                >
+                  {t('tree.export')}
+                </a>
+              ) : null}
               <Button
                 size="small"
                 data-action="rename"
@@ -464,8 +486,21 @@ export function SceneTree({
             })}
           </ul>
           {createControl('', 'tree.newCampaign', 'tree.campaignName')}
+          <div className="eg-tree__create">
+            <Button size="small" data-action="import" onClick={() => setImporting(true)}>
+              {t('tree.import')}
+            </Button>
+          </div>
         </>
       )}
+      {importing ? (
+        <ImportDialog
+          onImported={(summary) => {
+            if (summary.campaign !== null) void loadCampaigns();
+          }}
+          onClose={() => setImporting(false)}
+        />
+      ) : null}
       {deleting ? (
         <DeleteDialog
           target={deleting}

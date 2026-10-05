@@ -111,12 +111,13 @@ const TABLE_OF: Record<string, SchemaTable> = {
   Settings: 'settings',
 };
 
-// Settings lists four of its fields in prose; these are their columns.
+// Settings lists five of its fields in prose; these are their columns.
 const SETTINGS_PROSE: Record<string, string> = {
   'ruler rule': 'ruler_rule',
   'upload limit': 'upload_limit_bytes',
   'display variant size': 'display_variant_size',
   'TV address': 'tv_address',
+  'import limit': 'import_limit_bytes',
   'PIN hash': 'pin_hash',
 };
 
@@ -280,6 +281,8 @@ describe('migration 0001 on a fresh database', () => {
         'pin_hash TEXT NULL',
         // Migration 0009 (PKG-01, Q-110).
         'tv_address TEXT NULL',
+        // Migration 0013 (DMT-05, Q-119).
+        'import_limit_bytes INTEGER NOT NULL DEFAULT 2147483648',
       ],
     });
   });
@@ -1144,6 +1147,30 @@ describe('migrations on the generated fixture database (specs/14-agent-playbook.
       expect(() => set('x'.repeat(20_001)), table).toThrow(/CHECK constraint failed/);
       expect(() => db!.prepare(`UPDATE ${table} SET notes = NULL WHERE id = ?`).run(id)).toThrow(/NOT NULL/);
     }
+  });
+
+  it('adds the import limit at migration 0013, 2 GB on existing data, refusing one that is not positive (Q-119)', () => {
+    createFixtureDatabase(dataDir);
+    migrateDataDirectory(dataDir, MIGRATIONS_DIR, new Date(), 12);
+    db = openDatabase(dataDir);
+    const columns = () => (db!.prepare('PRAGMA table_info(settings)').all() as { name: string }[]).map((c) => c.name);
+    expect(columns()).not.toContain('import_limit_bytes');
+    const before = db.prepare('SELECT live_scene_id, ruler_rule, upload_limit_bytes, tv_address FROM settings').get();
+    db.close();
+
+    const result = migrateDataDirectory(dataDir, MIGRATIONS_DIR);
+
+    expect(result).toMatchObject({ from: 12, to: LATEST });
+    expect(result.backup).not.toBeNull();
+    db = openDatabase(dataDir);
+    expect(db.prepare('SELECT import_limit_bytes FROM settings').pluck().get()).toBe(2 * 1024 ** 3);
+    expect(db.prepare('SELECT live_scene_id, ruler_rule, upload_limit_bytes, tv_address FROM settings').get()).toEqual(
+      before,
+    );
+    const set = db.prepare('UPDATE settings SET import_limit_bytes = ?');
+    expect(() => set.run(64 * 1024 ** 3)).not.toThrow();
+    for (const bad of [0, -1]) expect(() => set.run(bad), String(bad)).toThrow(/CHECK constraint failed/);
+    expect(() => set.run(null)).toThrow(/NOT NULL/);
   });
 
   it('expands a stored Enemies entry in place at migration 0011, the turn following it, an empty one dropped (DMT-02)', () => {

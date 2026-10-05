@@ -3,6 +3,7 @@ import {
   API_CONNECT_PATH,
   API_PATHS,
   DISPLAY_SIZE_BOUNDS,
+  IMPORT_LIMIT_BOUNDS,
   PIN_PATTERN,
   RULER_RULES,
   UPLOAD_LIMIT_BOUNDS,
@@ -33,10 +34,12 @@ import { pinRefusalText } from './SignIn.js';
 // runs (aria-disabled), so the keyboard keeps its place (D-090). The TV address (PKG-01, Q-110, D-169) is
 // the emergency correction of the address Connect a screen finds by itself: Automatic by default, or one
 // of the addresses this PC has now, each named with its adapter, read from GET /api/connect; a saved one
-// the PC no longer has stays listed, marked, until the DM changes it.
+// the PC no longer has stays listed, marked, until the DM changes it. The import limit (DMT-05, Q-119) bounds an
+// import's archive and its entries once unpacked, in whole MB like the upload limit.
 
 const MB = 1024 * 1024;
 const LIMIT_MB = { min: UPLOAD_LIMIT_BOUNDS.min / MB, max: UPLOAD_LIMIT_BOUNDS.max / MB };
+const IMPORT_LIMIT_MB = { min: IMPORT_LIMIT_BOUNDS.min / MB, max: IMPORT_LIMIT_BOUNDS.max / MB };
 const PIN = new RegExp(PIN_PATTERN);
 const RULE_LABELS: Record<RulerRule, MessageKey> = { phb: 'settings.rulerRule.phb', dmg: 'settings.rulerRule.dmg' };
 const shown = (bounds: { min: number; max: number }) => ({
@@ -53,7 +56,7 @@ function wholeWithin(text: string, { min, max }: { min: number; max: number }): 
 
 const megabytes = (bytes: number): string => String(Math.round((bytes / MB) * 10) / 10);
 
-type FieldErrors = { limit?: string | undefined; display?: string | undefined };
+type FieldErrors = { limit?: string | undefined; display?: string | undefined; importLimit?: string | undefined };
 
 export function SettingsDialog({
   onClose,
@@ -76,6 +79,7 @@ export function SettingsDialog({
   const [attempt, setAttempt] = useState(0);
   const [limit, setLimit] = useState('');
   const [display, setDisplay] = useState('');
+  const [importLimit, setImportLimit] = useState('');
   const [rule, setRule] = useState<RulerRule>('phb');
   // The TV address: '' for Automatic, else the address. The detected addresses come with the settings.
   const [tvAddress, setTvAddress] = useState('');
@@ -94,6 +98,7 @@ export function SettingsDialog({
     setLoaded(settings);
     setLimit(megabytes(settings.upload_limit_bytes));
     setDisplay(String(settings.display_variant_size));
+    setImportLimit(megabytes(settings.import_limit_bytes));
     setRule(settings.ruler_rule);
     setTvAddress(settings.tv_address ?? '');
   };
@@ -148,23 +153,28 @@ export function SettingsDialog({
     if (saving || !loaded) return;
     const limitChanged = limit.trim() !== megabytes(loaded.upload_limit_bytes);
     const displayChanged = display.trim() !== String(loaded.display_variant_size);
+    const importChanged = importLimit.trim() !== megabytes(loaded.import_limit_bytes);
     const limitMb = limitChanged ? wholeWithin(limit, LIMIT_MB) : undefined;
     const size = displayChanged ? wholeWithin(display, DISPLAY_SIZE_BOUNDS) : undefined;
+    const importMb = importChanged ? wholeWithin(importLimit, IMPORT_LIMIT_MB) : undefined;
     const found: FieldErrors = {
       limit: limitChanged && limitMb === undefined ? t('settings.uploadLimitInvalid', shown(LIMIT_MB)) : undefined,
       display:
         displayChanged && size === undefined ? t('settings.displaySizeInvalid', shown(DISPLAY_SIZE_BOUNDS)) : undefined,
+      importLimit:
+        importChanged && importMb === undefined ? t('settings.importLimitInvalid', shown(IMPORT_LIMIT_MB)) : undefined,
     };
     setErrors(found);
     setStatus(undefined);
     setFailure(undefined);
-    if (found.limit || found.display) {
+    if (found.limit || found.display || found.importLimit) {
       focusNext.current = 'invalid';
       return;
     }
     const update: SettingsUpdate = {
       ...(limitMb !== undefined ? { upload_limit_bytes: limitMb * MB } : {}),
       ...(size !== undefined ? { display_variant_size: size } : {}),
+      ...(importMb !== undefined ? { import_limit_bytes: importMb * MB } : {}),
       ...(rule !== loaded.ruler_rule ? { ruler_rule: rule } : {}),
       ...((tvAddress || null) !== loaded.tv_address ? { tv_address: tvAddress || null } : {}),
     };
@@ -219,16 +229,27 @@ export function SettingsDialog({
             {/* Two columns of fields on a laptop's window, so the dialog fits its 620 px without scrolling (G-041). */}
             <div className="eg-settings__fields">
               <div className="eg-settings__group">
-                <TextField
-                  label={t('settings.uploadLimit')}
-                  inputMode="numeric"
-                  value={limit}
-                  error={errors.limit}
-                  aria-describedby={`${ids}-limit`}
-                  onChange={(event) => edit(() => setLimit(event.target.value))}
-                />
+                {/* The two limits side by side, one hint for both, so the dialog keeps to a laptop's window (G-041). */}
+                <div className="eg-settings__pair">
+                  <TextField
+                    label={t('settings.uploadLimit')}
+                    inputMode="numeric"
+                    value={limit}
+                    error={errors.limit}
+                    aria-describedby={`${ids}-limit`}
+                    onChange={(event) => edit(() => setLimit(event.target.value))}
+                  />
+                  <TextField
+                    label={t('settings.importLimit')}
+                    inputMode="numeric"
+                    value={importLimit}
+                    error={errors.importLimit}
+                    aria-describedby={`${ids}-limit`}
+                    onChange={(event) => edit(() => setImportLimit(event.target.value))}
+                  />
+                </div>
                 <p id={`${ids}-limit`} className="eg-dm__status">
-                  {t('settings.uploadLimitHint', shown(LIMIT_MB))}
+                  {t('settings.limitsHint', { upload: shown(LIMIT_MB).max, import: shown(IMPORT_LIMIT_MB).max })}
                 </p>
                 <TextField
                   label={t('settings.displaySize')}

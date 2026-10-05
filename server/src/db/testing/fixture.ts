@@ -216,7 +216,12 @@ export function readEntities(db: Database.Database): Entities {
       hidden: row.hidden === 1,
       markers: row.markers === undefined ? [] : (JSON.parse(row.markers as string) as unknown),
     })) as Token[],
-    // The TV address (migration 0009, Q-110) is Automatic, null, on a database before it.
-    settings: all('settings').map((row) => ({ tv_address: null, ...without(row, 'pin_hash') })) as Settings[],
+    // The TV address (migration 0009, Q-110) is Automatic, null, on a database before it, and the import limit
+    // (migration 0013, Q-119) its 2 GB default.
+    settings: all('settings').map((row) => ({
+      tv_address: null,
+      import_limit_bytes: 2 * 1024 ** 3,
+      ...without(row, 'pin_hash'),
+    })) as Settings[],
   };
 }

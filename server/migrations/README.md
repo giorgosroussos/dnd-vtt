@@ -35,3 +35,5 @@ Numbered SQL migrations, applied in order by `src/db/migrate.ts` before the serv
 `0011_enemy_entries.sql` expands every stored encounter's Enemies entry in place into one monster entry per member it had (visible monster and npc tokens without Dead), in the order of the DM's token list with its number; one without members is removed. The expansion reads the fog, so it is the step in code that `src/db/migration-steps.ts` gives this file, in the same transaction; no schema change. Not reversible in place: the dated backup is its rollback (DMT-02, Q-111, D-180).
 
 `0012_notes.sql` adds `scene.notes` and `token.notes`, the DM's plain-text notes, empty on every existing scene and token, each at most 20,000 characters; additive (DMT-04, Q-114, D-186).
+
+`0013_settings_import_limit.sql` adds `settings.import_limit_bytes`, the import limit of `specs/09-operations.md` §9, 2 GB on every existing database; additive (DMT-05, Q-119).

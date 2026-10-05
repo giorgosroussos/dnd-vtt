@@ -28,6 +28,12 @@ export const ERROR_MESSAGES: Readonly<Record<ErrorCode | 'network', MessageKey>>
   calibration_needs_map: 'error.code.calibration_needs_map',
   scene_live: 'error.code.scene_live',
   scene_not_live: 'error.code.scene_not_live',
+  import_busy: 'error.code.import_busy',
+  import_too_large: 'error.code.import_too_large',
+  import_newer_format: 'error.code.import_newer_format',
+  import_unsafe_entry: 'error.code.import_unsafe_entry',
+  import_invalid: 'error.code.import_invalid',
+  import_image_refused: 'error.code.import_image_refused',
   network: 'error.code.network',
 };
 

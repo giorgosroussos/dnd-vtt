@@ -9,6 +9,7 @@ import {
   DEFAULT_SETTINGS,
   DISPLAY_SIZE_BOUNDS,
   ErrorEnvelopeSchema,
+  IMPORT_LIMIT_BOUNDS,
   SettingsSchema,
   UPLOAD_LIMIT_BOUNDS,
   type ErrorEnvelope,
@@ -124,6 +125,24 @@ describe('PATCH /api/settings (specs/09-operations.md §7)', () => {
     ]);
   });
 
+  // The import limit (DMT-05, specs/09-operations.md §7, §9, Q-119); its effect on an import is in archive tests.
+  it('starts the import limit at 2 GB and sets it alone, logging the change', async () => {
+    const before = readSettings(data.db);
+    expect(before.import_limit_bytes).toBe(DEFAULT_SETTINGS.import_limit_bytes);
+    expect(before.import_limit_bytes).toBe(2 * 1024 * MB);
+    const changed = ok(await patch({ import_limit_bytes: 500 * MB }));
+    expect(changed).toEqual({ ...before, import_limit_bytes: 500 * MB });
+    expect(readSettings(data.db)).toEqual(changed);
+    const lines = readFileSync(logFilePath(data.dataDir), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((line) => line.event === 'settings.changed');
+    expect(lines).toEqual([
+      expect.objectContaining({ msg: 'Settings changed: import_limit_bytes.', import_limit_bytes: 500 * MB }),
+    ]);
+  });
+
   it('is refused without a DM session, and with a foreign Origin, changing nothing', async () => {
     const before = readSettings(data.db);
     expectFailure(
@@ -152,6 +171,9 @@ describe('PATCH /api/settings (specs/09-operations.md §7)', () => {
     ['a TV address as a number', { tv_address: 3232235909 }],
     ['a valid field beside an invalid TV address', { ruler_rule: 'dmg', tv_address: '1.2.3.256' }],
     ['a valid TV address beside an invalid field', { tv_address: '192.168.1.133', display_variant_size: 0 }],
+    ['an import limit under 1 MB', { import_limit_bytes: IMPORT_LIMIT_BOUNDS.min - 1 }],
+    ['an import limit over 64 GB', { import_limit_bytes: IMPORT_LIMIT_BOUNDS.max + 1 }],
+    ['an import limit as text', { import_limit_bytes: '2147483648' }],
     ['not an object', [1]],
   ])('refuses %s and changes nothing', async (_name, body) => {
     const before = readSettings(data.db);

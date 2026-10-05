@@ -1429,6 +1429,64 @@
   grid-column: 2;
 }
 
+/* The selection mode of an export (DMT-05): a check box before each asset. */
+.eg-library__item--selecting {
+  grid-template-columns: auto 40px 1fr;
+}
+
+.eg-library__item--selecting .eg-tree__actions {
+  grid-column: 3;
+}
+
+.eg-library__check {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--color-accent);
+}
+
+.eg-library__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.eg-library__actions .eg-button[aria-pressed='true'] {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+/* Import (DMT-05): the stage the import is at, its bar, and what it added or why it was refused. */
+.eg-import__progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-height: 2.5em;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.eg-import__progress progress {
+  width: 100%;
+  accent-color: var(--color-accent);
+}
+
+.eg-import__summary {
+  margin: 0;
+}
+
+.eg-import__detail {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  overflow-wrap: anywhere;
+}
+
+a.eg-button {
+  text-decoration: none;
+}
+
 .eg-library__thumb {
   width: 40px;
   height: 40px;
@@ -1677,6 +1735,13 @@ textarea.eg-field__input {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+}
+
+.eg-settings__pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  align-items: start;
 }
 
 .eg-settings__heading {

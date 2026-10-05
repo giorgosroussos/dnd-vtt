@@ -89,11 +89,25 @@ export function prepareImagesDir(
 }
 
 /**
+ * A new folder under `.incoming`, for an import to stage its images in (DMT-05): inside the images folder, so they
+ * move into place by a rename, and emptied at every start like an interrupted upload's.
+ */
+export function newStagingDir(imagesDir: string): string {
+  const staged = path.join(imagesDir, INCOMING_DIR, randomUUID());
+  mkdirSync(staged, { recursive: true });
+  return staged;
+}
+
+/** Where a staged image's original goes in its staging folder, as in its folder of the images folder. */
+export const stagedOriginal = (staged: string): string => path.join(staged, VARIANT_FILES.original);
+
+/**
  * Writes `body` to `file` while hashing it, and stops receiving as soon as it is over `limit`
  * bytes or its first bytes are not an accepted type (D-044): nothing more is read, so an
- * oversized upload never reaches the disk beyond the limit, nor memory at all.
+ * oversized upload never reaches the disk beyond the limit, nor memory at all. An import's
+ * images are received the same way (DMT-05, specs/07-security-and-access.md §9).
  */
-function receive(body: Readable, file: string, limit: number): Promise<{ sha256: string; mime: ImageMime }> {
+export function receive(body: Readable, file: string, limit: number): Promise<{ sha256: string; mime: ImageMime }> {
   return new Promise((resolve, reject) => {
     const out = createWriteStream(file, { flags: 'wx' });
     const hash = createHash('sha256');
@@ -190,7 +204,7 @@ async function writeVersion(
  * file. Width and height are the image as shown, after its orientation, which is what
  * calibration measures.
  */
-async function processUpload(
+export async function processUpload(
   staged: string,
   mime: ImageMime,
   displaySize: number,

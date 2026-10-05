@@ -85,6 +85,8 @@ describe('entity contract (specs/03-domain-model.md §1, D-075)', () => {
       display_variant_size: 4096,
       // The TV address is Automatic until the DM chooses one (Q-110).
       tv_address: null,
+      // The import limit, 2 GB (specs/09-operations.md §7, Q-119).
+      import_limit_bytes: 2_147_483_648,
     });
   });
 

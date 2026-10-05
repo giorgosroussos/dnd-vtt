@@ -7,14 +7,15 @@ import {
   type Settings,
   type SettingsUpdate,
 } from '@emberglass/shared';
-import { readSettings, updateSettings } from '../db/settings.js';
+import { readSettings, UPDATABLE, updateSettings } from '../db/settings.js';
 import type { DisplayRegenerator } from '../images/regenerator.js';
 import type { Logger } from '../log/logger.js';
 import type { LiveSocket } from '../ws/live.js';
 import { clientAddress } from './auth.js';
 
 // PATCH /api/settings (REL-01, specs/09-operations.md §7, Q-051): the DM changes the upload limit,
-// the display-version size, the ruler's diagonal rule and the connect panel's TV address (PKG-01, Q-110)
+// the display-version size, the ruler's diagonal rule, the connect panel's TV address (PKG-01, Q-110) and the
+// import limit (DMT-05, Q-119), read by the next import,
 // without restarting; the TV address is read by GET /api/connect at each request, and the console's at
 // the next start. The session guard and
 // the Origin check of auth.ts come first, like every /api write; the body is strict and bounded
@@ -39,9 +40,7 @@ export function registerSettings(app: FastifyInstance, { db, logger, live, regen
     (request, reply) => {
       const before = readSettings(db);
       const after = live.refresh(() => updateSettings(db, request.body));
-      const changed = (['upload_limit_bytes', 'display_variant_size', 'ruler_rule', 'tv_address'] as const).filter(
-        (key) => before[key] !== after[key],
-      );
+      const changed = UPDATABLE.filter((key) => before[key] !== after[key]);
       if (changed.length > 0) {
         logger.info('settings.changed', `Settings changed: ${changed.join(', ')}.`, {
           address: clientAddress(request),
