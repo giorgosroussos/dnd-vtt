@@ -16,15 +16,16 @@ What Emberglass is for, who uses it, and what each release contains.
 
 ## 2. Actors
 
-The actors MUST be exactly these: [input, Q-007, Q-010, Q-029]
+The actors MUST be exactly these: [input, Q-007, Q-010, Q-029, Q-125]
 
 | Actor | Device | Access | Can |
 | --- | --- | --- | --- |
 | DM | laptop or desktop browser (`08` §7) | DM view, after the PIN (`07` §1) | prepare everything, run the live scene |
-| Player screen | TV or projector browser | player view, no credential (`07` §3) | display the visible state of the live scene |
+| Player screen | TV or projector browser, or since Phase 8 a phone or tablet (§11) | player view, no credential (`07` §3) | display the visible state of the live scene |
 | Players | none in the MVP | — | look at the player screen |
 
 - The MVP MUST NOT provide player devices, player accounts or per-player views. [input]
+- Since Phase 8 a phone or tablet MAY open the read-only player view as one more player screen (§11); it sends no command and is no player device in the sense above: no account, no per-player view and no part in the game. [Q-125]
 - Any browser on the LAN MAY open the player view; it is read-only. [Q-010, recommendation accepted]
 
 ## 3. MVP capabilities
@@ -58,7 +59,7 @@ Phase 2 MUST NOT be implemented in the MVP; it covers: [input]
 
 - characters with a join link or QR code per character;
 - permissions: each player moves only their own token;
-- a mobile UI;
+- a mobile UI, beyond the read-only player view on phones and tablets of §11; [Q-125]
 - an initiative tracker;
 - HP and conditions on tokens;
 - fog of war;
@@ -91,7 +92,7 @@ These MUST NOT be implemented in the MVP: [input]
 - physical screen scale for miniatures (1 square = 25 mm);
 - a live drag preview with throttling.
 
-Adding tokens by dragging them from a sidebar comes later (the input says «αργότερα» without naming a phase); the MVP flow is button, picker, click on the map (`05` §5). [input]
+Adding tokens by dragging them from a sidebar comes later (the input says «αργότερα» without naming a phase); the MVP flow is button, picker, click on the map (`05` §5). [input] The drag from the library arrives in Phase 8 (§11). [Q-124]
 
 Area-of-effect templates are a nice-to-have and MUST NOT be implemented; the ping moved to §9. [Q-099]
 
@@ -134,3 +135,13 @@ After the Windows package (`13` §11), Emberglass MUST add: [Q-111, Q-112, Q-113
 - Follow my view, which keeps the TV camera on the DM's view of the live scene (`04` §9, `08` §13); [Q-113]
 - DM notes per scene and per token, seen only by the DM (`03` §10, `04` §16); [Q-114]
 - export of a campaign or of library assets as a zip, and its import on any Emberglass (`09` §9, `07` §9). [Q-115, Q-119]
+
+## 11. The UI/UX refinements
+
+After the DM toolkit (`13` §12), Emberglass MUST add: [Q-121, Q-122, Q-123, Q-124, Q-125, D-189]
+
+- a scene sidebar that collapses to the edge of the DM view and opens on hover (`08` §1, `08` §14); [Q-121]
+- several tokens selected at once, moved, hidden or revealed, marked, damaged or healed and deleted together, one undo step on the live scene (`04` §2, `04` §8, `08` §14); [Q-122, Q-123]
+- a token added by dragging an asset from the library onto the map, beside the picker (`05` §5); [Q-124]
+- the campaigns menu's actions as icons with their names as tooltips (`08` §14); [D-189]
+- the read-only player view laid out for phones, tablets and large screens, with fullscreen and the screen's own pinch zoom on touch devices (`08` §7, `08` §9, `08` §14). [Q-125]

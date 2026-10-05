@@ -4,17 +4,17 @@ Only `Now` and `Next`. Completed items are removed; Git is the archive. See `AGE
 
 ## Now
 
+### UXR-01 to UXR-05
+
+The UI/UX refinements (`13` §13; `01` §11, `08` §14; Q-121 to Q-125, D-188, D-189), on `feat/dm-toolkit`, one commit each, in the order UXR-04, UXR-01, UXR-03, UXR-02, UXR-05: the campaigns menu's icons with tooltips; the scene sidebar collapsing to an edge strip, opened on hover and pinned; a library asset dragged onto the map; several tokens selected with Ctrl and acted on together, `token.batch` one undo step on the live scene (`04` §2, §8); the player view laid out for phones, tablets and large screens, with fullscreen and its own pinch zoom on touch devices without hover (`08` §7, §9). Acceptance: each package's exit in `13` §13; the hidden-information suite with a batch in its script; `e2e/tests/multi-select.spec.ts` and `e2e/tests/player-mobile.spec.ts`. Prompt 2 (review) for UXR-02 and UXR-05.
+
 ### DMT-05
 
 Export and import (`13` §12; `09` §7, §9, `07` §9, `05` §6, `02` §5, `08` §13, `10` §3; Q-115, Q-119, D-181, D-187). A zip of format 1 (`manifest.json`, `data/*.json`, `images/<sha256>.<ext>`) for a campaign or library assets, streamed out by `GET /api/export/campaigns/:id` and `GET /api/export/assets`; `POST /api/import` reading it from its central directory with every refusal of `07` §9 storing nothing, a campaign always a new copy, images reused by hash, assets by identifier; migration 0013 adds the import limit, 2 GB, in Settings; Export, Import and the library's selection mode in the DM view. Acceptance: `server/src/http/archive.test.ts` (the export and import test of `10` §3 and every refusal with the database file and the images folder unchanged byte for byte), `shared/src/archive.test.ts`, `client/src/dm/archive/Archive.test.tsx`, `e2e/tests/archive.spec.ts` (a campaign with a running combat imported on a second data directory and played there; the large-scene fixture's round trip). Implemented and green locally (TRACEABILITY.md); left: CI on the pull request and prompt 2 (review), whose findings are fixed on the branch before DMT-05 is done.
 
-### DMT-04
+### DMT-01 to DMT-04
 
-DM notes (`13` §12; `02` §5, `03` §1, `03` §7, `03` §10, `04` §2, `04` §3, `04` §4, `04` §16, `08` §13, `10` §3; Q-114, D-181, D-186). Migration 0012 adds `notes` to scenes and tokens, empty by default, at most 20,000 characters; `PUT /api/scenes/:id/notes` and `PUT /api/tokens/:id/notes` on any scene, live included, not undoable, the live scene's telling the DM room alone by `notes.updated`; a duplicated scene copying its notes and its tokens' (with their hit points); the DM view saving as typed with nothing typed ever lost, the Notes tab and N, a token's notes in its popover beside its asset's, the marks on the map, the rows and the scene list, and the turn's initiative row opening them. Acceptance: `server/src/ws/notes.test.ts` covers the REST edits on a live and a prepared scene, `notes.updated` reaching only the DM room and the duplication; the hidden-information suite passes with notes in its script and finds none in any player message; `client/src/dm/notes/*.test.tsx` cover the autosave, a failed save, the limit, another window's change and text-only rendering; `e2e/tests/notes.spec.ts` with a DM and a player context. Implemented and green locally (TRACEABILITY.md); left: CI on the pull request and prompt 2 (review), whose findings are fixed on the branch before DMT-04 is done.
-
-### DMT-01 to DMT-03
-
-Hit points and armour class (D-182), per-enemy initiative (D-183, D-184) and Follow my view (Q-120, D-185) are implemented and green locally, their acceptance as `13` §12 states it and their evidence in TRACEABILITY.md. Each waits for what DMT-04 waits for: CI on the pull request of `feat/dm-toolkit` and prompt 2 (review), whose findings are fixed on the branch before the package is done.
+Hit points and armour class (D-182), per-enemy initiative (D-183, D-184), Follow my view (Q-120, D-185) and DM notes (D-186) are implemented and green locally, their acceptance as `13` §12 states it and their evidence in TRACEABILITY.md. Each waits for what DMT-05 waits for: CI on the pull request of `feat/dm-toolkit` and prompt 2 (review), whose findings are fixed on the branch before the package is done.
 
 Owed by hand, before the 1.0.0 release:
 

@@ -40,6 +40,7 @@ Token footprint MUST follow the asset's size: [input]
 ## 5. Adding tokens and deleting assets
 
 - Adding a token MUST follow the flow: an add button, a picker with search and filter, then a click on the map where the token is placed. [input]
+- An asset of the library MUST also be addable by dragging it onto the map, placed where it is dropped and snapped as a placed token is, Alt placing it off the grid (`06` §4); the picker stays the keyboard path. [Q-124]
 - Deleting an asset used by any token MUST be refused, listing the scenes that use it (`03` §7). [input]
 - Changing an asset's image MUST update every token of that asset, including on the live scene. [input]
 

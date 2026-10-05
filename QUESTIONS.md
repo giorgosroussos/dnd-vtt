@@ -143,6 +143,11 @@ Every card opens `Blocking` and is answered before the specification proceeds. `
 - Q-118 — A monster or npc entry whose token is Dead or unseen — ux — Resolved
 - Q-119 — The size limit of an import archive — security — Resolved
 - Q-120 — Follow my view while the DM opens another scene to prepare — ux — Resolved
+- Q-121 — A collapsible scene sidebar — ux — Resolved
+- Q-122 — Selecting several tokens at once — ux — Resolved
+- Q-123 — One undo step for an action on a group of tokens — data — Resolved
+- Q-124 — Dragging a token from the library onto the map — ux — Resolved
+- Q-125 — The player view on phones, tablets and large screens — scope — Resolved
 
 ## Blocking
 
@@ -1518,5 +1523,61 @@ None.
   - B) It turns off, like a manual TV camera control → effect on ux: the DM turns it on again after every look at another scene.
   - C) It keeps sending the last view of the live scene → effect on ux: nothing changes on the TV, but the toggle looks on while nothing follows.
 - Recommendation: A, because preparing the next scene is not a decision about the TV, and the TV should neither jump nor stop following because of it.
+- Blocks: specification
+- Answer: A (2026-10-05; recommendation accepted)
+
+### Q-121 — A collapsible scene sidebar
+- Surface: ux
+- Source: The owner's brief of 2026-10-05 (UI/UX refinements), asked in the planning session of that day.
+- Question: How should the DM view's left sidebar (the session's scenes and Next up) make room for the map?
+- Options:
+  - A) It collapses to a strip at the left edge by default; hovering near that edge opens it over the map and moving away closes it; a toggle opens it on click and a pin docks it in its column, remembered per browser → effect on ux: the map gains the sidebar's width, the scenes stay a hover away.
+  - B) Both side panels collapse the same way → effect on ux: more map, but the Library tab, the source of a drag to the map, hides too.
+  - C) The same mechanics, docked by default → effect on ux: nothing changes until the DM unpins it.
+- Recommendation: A, because the scene list is consulted between scenes while the right panel is in use all the time.
+- Blocks: specification
+- Answer: A (2026-10-05; recommendation accepted)
+
+### Q-122 — Selecting several tokens at once
+- Surface: ux
+- Source: The owner's brief of 2026-10-05 (UI/UX refinements), asked in the planning session of that day.
+- Question: Can the DM select several tokens and act on them together, and with what?
+- Options:
+  - A) Ctrl (Cmd on macOS) and a click add or remove a token from the selection, on the map and in the token list; a drag of any selected token moves them all, keeping their offsets, the arrow keys nudge them all; a bar offers Hide or Reveal, a condition toggled on all, one amount of damage or healing on each, and Delete with one confirmation → effect on ux: groups of monsters handled in one gesture.
+  - B) Only moving together → effect on ux: the other actions stay one token at a time.
+- Recommendation: A, as the owner asked.
+- Blocks: specification
+- Answer: A (2026-10-05; recommendation accepted)
+
+### Q-123 — One undo step for an action on a group of tokens
+- Surface: data
+- Source: The owner's brief of 2026-10-05 (UI/UX refinements), asked in the planning session of that day.
+- Question: On the live scene, how does undo treat an action on several selected tokens?
+- Options:
+  - A) One batched command, `token.batch`, carrying the move, visibility, marker, hit-point and delete commands of the group, applied all or nothing in one transaction and undone and redone as one step; each effect projected to the players room as its single command's → effect on data: one new live command and a compound inverse; the hidden-information suite covers it.
+  - B) One command per token → effect on data: no contract change, but undoing a group of five takes five Ctrl+Z.
+- Recommendation: A, because a group action is one decision of the DM and the history is bounded to 100 steps.
+- Blocks: specification
+- Answer: A (2026-10-05; recommendation accepted)
+
+### Q-124 — Dragging a token from the library onto the map
+- Surface: ux
+- Source: The owner's brief of 2026-10-05 (UI/UX refinements), asked in the planning session of that day.
+- Question: Can the DM add a token by dragging an asset from the Library tab onto the map, and what becomes of the picker?
+- Options:
+  - A) Yes, beside the picker: a library asset dragged onto the map is placed where it is dropped, snapped as a placed token is, Alt for no snapping; the picker stays, keyboard-operable, its rows laid out with the thumbnail, the name and the Choose button on one line → effect on ux: the drag `01` §6 put off arrives, and the keyboard flow is kept.
+  - B) No, the picker alone → effect on ux: no change.
+- Recommendation: A, as the owner asked, keeping the picker as the keyboard alternative.
+- Blocks: specification
+- Answer: A (2026-10-05; recommendation accepted)
+
+### Q-125 — The player view on phones, tablets and large screens
+- Surface: scope
+- Source: The owner's brief of 2026-10-05 (UI/UX refinements), asked in the planning session of that day.
+- Question: Can the read-only player view be opened on phones and tablets, and what may it offer there?
+- Options:
+  - A) The player view lays out for any screen from a phone to a large desktop; on a touch device without hover it offers a fullscreen button where the browser supports it and pinch and drag to zoom and pan its own view, with a button and a double tap returning to the DM's camera; it still sends no command, a handheld reports no viewport so the TV frame keeps the TV's shape, and the TV keeps no controls → effect on scope: phones become screens of the table, still read-only, still filtered on the server; the DM's camera is a handheld's starting view, not its limit.
+  - B) TV and projector only, as Q-054 and `01` §4 say → effect on scope: no change.
+- Recommendation: A, as the owner asked; nothing hidden reaches a handheld, which receives exactly what the TV does.
 - Blocks: specification
 - Answer: A (2026-10-05; recommendation accepted)

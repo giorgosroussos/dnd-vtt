@@ -31,10 +31,10 @@ The agent MUST: [D-005]
 6. update the shared type definitions and docs when contracts change;
 7. report changed behavior, migration and rollback implications and remaining risks.
 
-The agent MUST NOT: [D-005]
+The agent MUST NOT: [D-005, Q-125]
 
 - change product scope or locked decisions;
-- introduce player devices, character sheets, rules automation, remote play, map creation, automatic fog or lighting, or any other excluded capability;
+- introduce player devices (the read-only player view on phones and tablets of `01` §11 excepted), character sheets, rules automation, remote play, map creation, automatic fog or lighting, or any other excluded capability;
 - trust a client-supplied role or visibility claim;
 - weaken a test merely to make CI pass;
 - edit unrelated user code or reformat the repository broadly;

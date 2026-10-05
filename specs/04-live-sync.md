@@ -32,10 +32,12 @@ Commands flow from a DM socket to the server; the server MUST reject any command
 | `encounter.reorder`, `encounter.setInitiative` | set the order of the entries by dragging, or an entry's initiative number, which sorts them (§14) | yes |
 | `encounter.next`, `encounter.previous` | pass the turn to the next or the previous entry, counting rounds (§14) | yes |
 | `encounter.addEntry`, `encounter.removeEntry` | add a player character's, a monster's or an npc's entry, or remove one (§14) | yes |
+| `token.batch` | apply 1 to 50 `token.move`, `token.setVisibility`, `token.setMarkers`, `token.applyHp` and `token.delete` commands together, all or nothing (`08` §14) | yes, as one step |
 | `undo` | apply the most recent inverse command | — |
 | `redo` | apply again the most recently undone command | — |
 
-- The token commands on the live scene MUST be exactly `token.add`, `token.move`, `token.setVisibility`, `token.setMarkers`, `token.setStats`, `token.applyHp` and `token.delete`; label and stacking order are edited only on scenes that are not live, notes at any time over REST (§16); deleting a token also removes its initiative entry, and undoing the delete puts the entry back (§14). [input, Q-014, Q-099, Q-111, Q-112, Q-114]
+- The token commands on the live scene MUST be exactly `token.add`, `token.move`, `token.setVisibility`, `token.setMarkers`, `token.setStats`, `token.applyHp` and `token.delete`, and `token.batch` grouping some of them; label and stacking order are edited only on scenes that are not live, notes at any time over REST (§16); deleting a token also removes its initiative entry, and undoing the delete puts the entry back (§14). [input, Q-014, Q-099, Q-111, Q-112, Q-114, Q-123]
+- `token.batch` MUST apply its commands in order in one transaction, refusing the whole batch, with nothing changed, when any of them is refused; it MUST NOT nest. Its effects MUST be projected to each room exactly as the same commands sent one by one would be, so that nothing a player receives names the batch or counts its commands (§4). [Q-123]
 - Clearing the live scene MUST be possible at any time with `scene.deactivate`. [Q-025]
 - Conflicting commands MUST resolve last-write-wins. [input]
 - Several DM sockets MAY be connected at once, each receiving every `dm` event. [Q-008, recommendation accepted]
@@ -91,7 +93,7 @@ Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-02
 
 ## 8. Undo
 
-- The server MUST keep the inverse of every undoable DM command on the live scene: move, add, delete, visibility, markers, hit points and armour class with the markers they set (§15), the fog commands, each stroke one step, and the encounter commands (§14). [input, Q-099, Q-101, Q-111, Q-112]
+- The server MUST keep the inverse of every undoable DM command on the live scene: move, add, delete, visibility, markers, hit points and armour class with the markers they set (§15), the fog commands, each stroke one step, and the encounter commands (§14); a `token.batch` is one step, undone and redone whole. [input, Q-099, Q-101, Q-111, Q-112, Q-123]
 - Ctrl+Z in the DM view MUST cause the most recent inverse command to be applied as an ordinary command, so synchronisation does not change. [input]
 - Ctrl+Z sends `undo`; the server applies the inverse from its history through the ordinary command path. [D-040]
 - The undo history MUST be held in memory only, cleared when another scene is activated or the server restarts, and bounded to the last 100 commands. [Q-005]

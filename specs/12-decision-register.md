@@ -69,11 +69,11 @@ Each bullet below is an owner decision: stated in the requirements (`[input]`) o
 ## 3. Scope
 
 - The MVP covers preparation and display for in-person play by a DM alone; players and rules come in Phase 2 (`01` §1, `01` §4). [input]
-- No player devices, character sheets, remote play or map creation in the MVP (`01` §2, `01` §7). [input]
+- No player devices, character sheets, remote play or map creation in the MVP (`01` §2, `01` §7); a phone or tablet may open the read-only player view since Phase 8 (`01` §11). [input, Q-125]
 - No game rules in code beyond the size table, the ruler and the hit-point automation (`01` §1). [input, Q-112]
 - The MVP capability list of `01` §3 is the release content. [input]
 - Campaign and library export and import as a zip are built in the DM toolkit; copying the data folder stays the backup (`01` §4, `01` §10). [Q-115, recommendation accepted]
-- Live token commands are add, move, visibility, markers, hit points and armour class, and delete (`04` §2). [input, Q-014, Q-099, Q-112, recommendation accepted]
+- Live token commands are add, move, visibility, markers, hit points and armour class, and delete, and a batch of them undone as one step (`04` §2). [input, Q-014, Q-099, Q-112, Q-123, recommendation accepted]
 - The live scene's setup can be edited while live and is pushed as a snapshot (`04` §10). [Q-015, recommendation accepted]
 - No area-of-effect templates (`01` §6). [Q-099, recommendation accepted]
 - Ping, four condition markers and manual fog regions are built after the MVP's features, before the release (`01` §9). [Q-099, recommendation accepted]
@@ -118,7 +118,7 @@ Each bullet below is an owner decision: stated in the requirements (`[input]`) o
 
 ## 5. Product identity and UX
 
-- One DM workspace: a header naming what the TV shows, the session's scenes left, canvas centre, tokens and library right, the tree behind the session switcher (`08` §1). [Q-023, Q-100]
+- One DM workspace: a header naming what the TV shows, the session's scenes left, collapsible, canvas centre, tokens and library right, the tree behind the session switcher (`08` §1). [Q-023, Q-100, Q-121]
 - One canvas with an unmistakable live mode and a prep mode that never reaches the TV (`08` §2). [Q-024]
 - Independent DM and player cameras; the DM steers the player camera through a frame (`04` §9). [input]
 - The player view shows a dark idle screen with the product name and a waiting line when nothing is live (`08` §4). [Q-025, Q-100]
@@ -130,7 +130,7 @@ Each bullet below is an owner decision: stated in the requirements (`[input]`) o
 - Visible tokens' labels are shown on the TV (`04` §4). [Q-032, recommendation accepted]
 - The player view is at `/` and the DM view at `/dm` (`02` §2). [Q-052, recommendation accepted]
 - The connect panel lists every LAN address with its adapter and highlights one chosen with no step by the DM, virtual adapters' addresses last and private-range ones first; a TV address chosen in Settings is the emergency correction, falling back to automatic when gone (`08` §5). [Q-110]
-- Hidden tokens are semi-transparent with a marker in the DM view; the player view has no controls (`08` §9). [Q-054, recommendation accepted]
+- Hidden tokens are semi-transparent with a marker in the DM view; the player view has no controls, but for fullscreen, its own pinch zoom and its reset on touch devices without hover (`08` §9, `08` §14). [Q-054, Q-125, recommendation accepted]
 - Token numbers are per scene, never reused; a lone token keeps the bare name (`05` §3). [Q-063, recommendation accepted]
 - Tag filters narrow (all selected tags match); results sorted by name (`05` §1). [Q-064, recommendation accepted]
 - The critical journeys are First run, Prepare, Connect TV, Run and Recover (`08` §10). [Q-065, recommendation accepted]
