@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react';
 import {
   API_PATHS,
+  imageFileUrl,
   DEFAULT_SETTINGS,
   hasNotes,
   type AuthState,
@@ -412,43 +413,56 @@ export function Workspace({
       {failure ? <Notice>{failure}</Notice> : null}
       {barMessage ? <Notice>{barMessage}</Notice> : null}
       <div className="eg-workspace__columns">
-        <SidebarDock>
-          <SceneList
-            session={shown?.session}
-            scenes={sessionScenes}
-            selectedId={selected?.id}
-            liveId={liveId}
-            connected={connected}
-            onSelect={setSelected}
-            onPutOnTv={(scene) => void goLive(scene)}
-            onChanged={bumpScenes}
-            onScenesRemoved={removed}
-            onSceneRenamed={renamed}
-            onChooseSession={() => setSwitcherOpen(true)}
-          />
-          {shown ? (
-            <section className="eg-next" aria-label={t('next.label')}>
-              <h2 className="eg-next__heading">{t('next.heading')}</h2>
-              {next ? (
-                <div className="eg-next__row">
-                  <span className="eg-next__name">{next.name}</span>
-                  <button
-                    type="button"
-                    className="eg-button eg-button--primary eg-button--small"
-                    aria-label={t('next.goLiveOf', { name: next.name })}
-                    aria-keyshortcuts="Shift+N"
-                    aria-disabled={!connected || undefined}
-                    onClick={() => void goLive(next)}
-                  >
-                    {t('liveBar.goLive')}
-                    <kbd>{t('next.key')}</kbd>
-                  </button>
-                </div>
-              ) : (
-                <p className="eg-next__none">{t('next.none')}</p>
-              )}
-            </section>
-          ) : null}
+        <SidebarDock
+          scenes={(sessionScenes.scenes ?? []).map((scene) => ({
+            id: scene.id,
+            name: scene.name,
+            thumbnail: scene.map_image_id ? imageFileUrl(scene.map_image_id, 'thumbnail') : undefined,
+            live: scene.id === liveId,
+            selected: scene.id === selected?.id,
+          }))}
+        >
+          {(pin) => (
+            <>
+              <SceneList
+                actions={pin}
+                session={shown?.session}
+                scenes={sessionScenes}
+                selectedId={selected?.id}
+                liveId={liveId}
+                connected={connected}
+                onSelect={setSelected}
+                onPutOnTv={(scene) => void goLive(scene)}
+                onChanged={bumpScenes}
+                onScenesRemoved={removed}
+                onSceneRenamed={renamed}
+                onChooseSession={() => setSwitcherOpen(true)}
+              />
+              {shown ? (
+                <section className="eg-next" aria-label={t('next.label')}>
+                  <h2 className="eg-next__heading">{t('next.heading')}</h2>
+                  {next ? (
+                    <div className="eg-next__row">
+                      <span className="eg-next__name">{next.name}</span>
+                      <button
+                        type="button"
+                        className="eg-button eg-button--primary eg-button--small"
+                        aria-label={t('next.goLiveOf', { name: next.name })}
+                        aria-keyshortcuts="Shift+N"
+                        aria-disabled={!connected || undefined}
+                        onClick={() => void goLive(next)}
+                      >
+                        {t('liveBar.goLive')}
+                        <kbd>{t('next.key')}</kbd>
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="eg-next__none">{t('next.none')}</p>
+                  )}
+                </section>
+              ) : null}
+            </>
+          )}
         </SidebarDock>
         {selected ? (
           <ScenePanel

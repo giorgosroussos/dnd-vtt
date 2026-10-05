@@ -32,7 +32,23 @@ export const SIDEBAR_CLOSE_MS = 250;
 // button, Escape or a click elsewhere closes it. It stays open while it holds the keyboard focus, a drag
 // or a dialog of its own. The pin docks it in its column, as before the refinements, and the browser
 // remembers it. Closed, it is hidden, so nothing in it takes the focus.
-export function SidebarDock({ children }: { children: ReactNode }) {
+export interface RailScene {
+  id: string;
+  name: string;
+  thumbnail: string | undefined;
+  live: boolean;
+  selected: boolean;
+}
+
+export function SidebarDock({
+  scenes = [],
+  children,
+}: {
+  /** The session's scenes, drawn small on the collapsed rail: an overview, the sidebar itself a hover away. */
+  scenes?: readonly RailScene[];
+  /** The sidebar's content, given the pin to place in its header. */
+  children: (pin: ReactNode) => ReactNode;
+}) {
   const [pinned, setPinned] = useState(rememberedPinned);
   const [open, setOpen] = useState<false | 'hover' | 'click'>(false);
   const dock = useRef<HTMLDivElement>(null);
@@ -120,28 +136,41 @@ export function SidebarDock({ children }: { children: ReactNode }) {
       }}
     >
       {pinned ? null : (
-        <button
-          ref={toggle}
-          type="button"
-          className="eg-dock__edge"
-          aria-expanded={shown}
-          aria-controls={id}
-          aria-label={shown ? t('sidebar.hide') : t('sidebar.show')}
-          onClick={() => setOpen((now) => (now === 'click' ? false : 'click'))}
-        >
-          <Icon name="sidebar" size={14} />
-        </button>
+        <div className="eg-dock__rail">
+          <button
+            ref={toggle}
+            type="button"
+            className="eg-dock__toggle"
+            aria-expanded={shown}
+            aria-controls={id}
+            aria-label={shown ? t('sidebar.hide') : t('sidebar.show')}
+            onClick={() => setOpen((now) => (now === 'click' ? false : 'click'))}
+          >
+            <Icon name="sidebar" size={18} />
+          </button>
+          {/* The scenes at a glance, for the eye: the sidebar, on hover or the toggle, is where they are chosen. */}
+          <ul className="eg-dock__scenes" aria-hidden="true">
+            {scenes.map((scene) => (
+              <li
+                key={scene.id}
+                className={`eg-dock__scene${scene.selected ? ' eg-dock__scene--selected' : ''}`}
+                data-live={scene.live || undefined}
+              >
+                {scene.thumbnail ? <img src={scene.thumbnail} alt="" draggable={false} /> : null}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
       <div id={id} className="eg-workspace__sidebar" inert={!shown}>
-        <div className="eg-dock__bar">
+        {children(
           <IconButton
             icon="pin"
             label={pinned ? t('sidebar.unpin') : t('sidebar.pin')}
             aria-pressed={pinned}
             onClick={() => pin(!pinned)}
-          />
-        </div>
-        {children}
+          />,
+        )}
       </div>
     </div>
   );

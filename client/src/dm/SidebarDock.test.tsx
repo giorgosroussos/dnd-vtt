@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, createElement } from 'react';
+import { act, createElement, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { t } from '../ui/messages.js';
 import { render, type Rendered } from '../ui/testing/render.js';
@@ -19,14 +19,27 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+const RAIL = [
+  { id: 'a', name: 'Cave', thumbnail: '/a.png', live: true, selected: false },
+  { id: 'b', name: 'Hall', thumbnail: undefined, live: false, selected: true },
+];
 const mount = () => {
-  rendered = render(createElement(SidebarDock, null, createElement('button', { type: 'button' }, t('next.heading'))));
+  rendered = render(
+    createElement(SidebarDock, {
+      scenes: RAIL,
+      children: (pinControl: ReactNode) =>
+        createElement('div', null, pinControl, createElement('button', { type: 'button' }, t('next.heading'))),
+    }),
+  );
   return rendered.container;
 };
 const dock = (view: HTMLElement) => view.querySelector<HTMLElement>('.eg-dock')!;
 const state = (view: HTMLElement) => dock(view).dataset.sidebar;
-const edge = (view: HTMLElement) => view.querySelector<HTMLButtonElement>('.eg-dock__edge');
-const pin = (view: HTMLElement) => view.querySelector<HTMLButtonElement>('.eg-dock__bar button')!;
+const edge = (view: HTMLElement) => view.querySelector<HTMLButtonElement>('.eg-dock__toggle');
+const pin = (view: HTMLElement) =>
+  view.querySelector<HTMLButtonElement>(
+    `button[aria-label="${t('sidebar.pin')}"], button[aria-label="${t('sidebar.unpin')}"]`,
+  )!;
 const sidebar = (view: HTMLElement) => view.querySelector<HTMLElement>('.eg-workspace__sidebar')!;
 const fire = (target: Element, type: string) => {
   act(() => {
@@ -42,6 +55,19 @@ describe('the scene sidebar', () => {
     expect(edge(view)!.getAttribute('aria-expanded')).toBe('false');
     expect(edge(view)!.getAttribute('aria-label')).toBe(t('sidebar.show'));
     expect(edge(view)!.getAttribute('aria-controls')).toBe(sidebar(view).id);
+  });
+
+  it('draws the session’s scenes small on the collapsed rail, the shown one ringed and the live one marked', () => {
+    const view = mount();
+    const scenes = [...view.querySelectorAll<HTMLElement>('.eg-dock__scenes li')];
+    expect(view.querySelector('.eg-dock__scenes')!.getAttribute('aria-hidden')).toBe('true');
+    expect(scenes).toHaveLength(2);
+    expect(scenes[0]!.dataset.live).toBe('true');
+    expect(scenes[0]!.querySelector('img')!.getAttribute('src')).toBe('/a.png');
+    expect(scenes[1]!.classList).toContain('eg-dock__scene--selected');
+    // Pinned, the rail gives way to the sidebar in its column.
+    act(() => pin(view).click());
+    expect(view.querySelector('.eg-dock__rail')).toBeNull();
   });
 
   it('opens on hover and closes a moment after the pointer leaves', () => {

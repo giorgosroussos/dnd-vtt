@@ -85,7 +85,7 @@ export function TokenPopover({
   return (
     <section
       className={`eg-popover eg-popover--${side}`}
-      style={{ left, top, width: WIDTH, maxHeight, overflowY: 'auto' }}
+      style={{ left, top, width: WIDTH, maxHeight, overflowX: 'hidden', overflowY: 'auto' }}
       aria-label={t('tokens.popoverOf', { label: token.label })}
     >
       <div className="eg-popover__head">
@@ -251,6 +251,8 @@ function MoreConditions({ token, onToggle }: { token: SceneToken; onToggle: (id:
   useEffect(() => {
     if (!open) return;
     search.current?.focus();
+    // The list opens under the chips: the popover scrolls it into view when it would open below its edge.
+    box.current?.scrollIntoView?.({ block: 'nearest' });
     const outside = (event: PointerEvent) => {
       const target = event.target as Node;
       if (!box.current?.contains(target) && !button.current?.contains(target)) setOpen(false);

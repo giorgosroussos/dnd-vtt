@@ -41,14 +41,15 @@
   overflow-y: auto;
 }
 
-/* The scene sidebar's dock (UXR-01, specs/08-ux-journeys.md §14): collapsed to a strip at the left edge,
- * the sidebar sliding out over the map, which keeps its size; pinned, the sidebar in its column. */
+/* The scene sidebar's dock (UXR-01, specs/08-ux-journeys.md §14). Collapsed, a rail at the left edge: the toggle,
+ * then the session's scenes as small thumbnails, the one shown ringed and the live one marked. Open, the sidebar
+ * floats over the map as a card, which keeps its size. Pinned, the sidebar sits in its column as before. */
 .eg-dock {
   position: relative;
   z-index: 30;
   flex-shrink: 0;
   display: flex;
-  width: var(--sidebar-strip);
+  width: var(--sidebar-rail);
 }
 
 .eg-dock--pinned {
@@ -59,48 +60,147 @@
   flex: 1;
 }
 
-.eg-dock__edge {
-  width: var(--sidebar-strip);
+.eg-dock__rail {
   display: flex;
-  justify-content: center;
-  padding: var(--space-3) 0 0;
-  border: none;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  width: var(--sidebar-rail);
+  padding: var(--space-3) 0;
   border-right: 1px solid var(--color-divider);
   background: var(--color-panel);
-  color: var(--color-text-muted);
-  cursor: pointer;
+  overflow: hidden;
 }
 
-.eg-dock__edge:hover,
-.eg-dock--open > .eg-dock__edge {
+.eg-dock__toggle {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    color 120ms ease,
+    border-color 120ms ease;
+}
+
+.eg-dock__toggle:hover,
+.eg-dock--open .eg-dock__toggle {
+  border-color: var(--color-selected-edge);
   background: var(--color-hover);
   color: var(--color-text);
 }
 
+.eg-dock__scenes {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: var(--space-3) 0 0;
+  border-top: 1px solid var(--color-divider);
+  list-style: none;
+  overflow: hidden;
+}
+
+.eg-dock__scene {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: var(--color-surface);
+  box-shadow: inset 0 0 0 1px var(--color-border);
+}
+
+.eg-dock__scene img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  border-radius: 8px;
+  opacity: 0.75;
+}
+
+.eg-dock__scene--selected {
+  box-shadow: 0 0 0 2px var(--color-accent);
+}
+
+.eg-dock__scene--selected img {
+  opacity: 1;
+}
+
+.eg-dock__scene[data-live]::after {
+  content: '';
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--color-panel);
+  border-radius: 50%;
+  background: var(--color-live);
+}
+
+/* Open over the map: a card floating beside the rail, sliding out of it. */
 .eg-dock:not(.eg-dock--pinned) > .eg-workspace__sidebar {
   position: absolute;
-  top: 0;
-  bottom: 0;
-  left: var(--sidebar-strip);
+  top: var(--space-2);
+  bottom: var(--space-2);
+  left: var(--space-2);
   width: var(--sidebar-width);
-  transform: translateX(calc(-100% - var(--sidebar-strip)));
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: var(--color-panel);
+  box-shadow:
+    0 18px 48px rgb(0 0 0 / 60%),
+    0 0 0 1px rgb(0 0 0 / 30%);
+  opacity: 0;
+  transform: translateX(-12px);
   visibility: hidden;
   transition:
+    opacity 140ms ease,
     transform 160ms ease,
     visibility 0s linear 160ms;
 }
 
 .eg-dock--open:not(.eg-dock--pinned) > .eg-workspace__sidebar {
+  opacity: 1;
   transform: none;
   visibility: visible;
-  box-shadow: 10px 0 28px rgb(0 0 0 / 50%);
-  transition: transform 160ms ease;
+  transition:
+    opacity 140ms ease,
+    transform 160ms ease;
 }
 
-.eg-dock__bar {
+/* New scene and the pin, side by side in the sidebar's header. */
+.eg-scenes__actions {
   display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+}
+
+.eg-scenes__actions--alone {
   justify-content: flex-end;
-  margin: calc(-1 * var(--space-2)) 0 calc(-1 * var(--space-3));
+}
+
+.eg-scenes__actions .eg-icon-button--bordered {
+  width: 32px;
+  height: 32px;
+  border-color: transparent;
+}
+
+.eg-scenes__actions .eg-icon-button[aria-pressed='true'] {
+  border-color: transparent;
+  background: var(--color-selected);
+  color: var(--color-accent);
 }
 
 /* Header */
@@ -1332,9 +1432,10 @@
 }
 
 /* More…: the other conditions, searched, in a list below the chips (TBL-05). */
+/* The chip sits among the others and the list opens as a row of its own under them, inside the popover, so it is
+ * never clipped by the popover's edge nor gives it a sideways scroll. */
 .eg-more-conditions {
-  position: relative;
-  display: inline-flex;
+  display: contents;
 }
 
 .eg-chip--more {
@@ -1342,19 +1443,16 @@
 }
 
 .eg-more-conditions__box {
-  position: absolute;
-  z-index: 30;
-  top: calc(100% + 4px);
-  left: 0;
+  flex: 1 0 100%;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  width: 200px;
-  padding: 6px;
+  gap: 6px;
+  min-width: 0;
+  margin-top: 2px;
+  padding: 8px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  background: var(--color-raised);
-  box-shadow: 0 12px 32px rgb(0 0 0 / 55%);
+  background: var(--color-surface);
 }
 
 .eg-more-conditions__search {
@@ -1374,9 +1472,10 @@
 }
 
 .eg-more-conditions__list {
-  display: flex;
-  flex-direction: column;
-  max-height: 220px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px;
+  max-height: 188px;
   margin: 0;
   padding: 0;
   overflow-y: auto;
@@ -1386,7 +1485,8 @@
 .eg-more-conditions__option {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  min-width: 0;
   min-height: 28px;
   padding: 2px 8px;
   border-radius: 6px;
@@ -1399,6 +1499,13 @@
 .eg-more-conditions__option[data-active] {
   background: var(--color-hover);
   color: var(--color-text);
+}
+
+.eg-more-conditions__option > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .eg-more-conditions__option[aria-selected='true'] {

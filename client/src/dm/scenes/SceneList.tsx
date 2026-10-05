@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent, type ReactNode } from 'react';
 import {
   API_STRUCTURE_PATHS as PATHS,
   hasNotes,
@@ -109,6 +109,7 @@ export function SceneList({
   onScenesRemoved,
   onSceneRenamed,
   onChooseSession,
+  actions,
 }: {
   session: Session | undefined;
   scenes: SessionScenes;
@@ -121,6 +122,8 @@ export function SceneList({
   onScenesRemoved: (ids: string[]) => void;
   onSceneRenamed: (scene: Scene) => void;
   onChooseSession: () => void;
+  /** Controls of the sidebar itself, beside New scene in the header (UXR-01). */
+  actions?: ReactNode;
 }) {
   const root = useRef<HTMLElement>(null);
   const [creating, setCreating] = useState(false);
@@ -194,6 +197,7 @@ export function SceneList({
   if (!session) {
     return (
       <nav className="eg-scenes" aria-label={t('scenes.label')}>
+        {actions ? <div className="eg-scenes__actions eg-scenes__actions--alone">{actions}</div> : null}
         <p className="eg-dm__status">{t('scenes.noSession')}</p>
         <div>
           <Button onClick={onChooseSession}>{t('header.chooseSession')}</Button>
@@ -214,15 +218,18 @@ export function SceneList({
               : t(count === 1 ? 'scenes.count.one' : 'scenes.count.other', { count })}
           </p>
         </div>
-        <button
-          type="button"
-          className="eg-icon-button"
-          aria-label={t('tree.newScene')}
-          aria-expanded={creating}
-          onClick={() => setCreating((open) => !open)}
-        >
-          <Icon name="plus" size={18} />
-        </button>
+        <div className="eg-scenes__actions">
+          <button
+            type="button"
+            className="eg-icon-button"
+            aria-label={t('tree.newScene')}
+            aria-expanded={creating}
+            onClick={() => setCreating((open) => !open)}
+          >
+            <Icon name="plus" size={18} />
+          </button>
+          {actions}
+        </div>
       </div>
       {failure ? <Notice>{failure}</Notice> : null}
       {scenes.failure ? <Notice>{scenes.failure}</Notice> : null}

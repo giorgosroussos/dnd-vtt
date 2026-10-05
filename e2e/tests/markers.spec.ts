@@ -140,6 +140,8 @@ test('a marker set on the live scene shows on the TV, is undone and redone, surv
       'Stunned',
     ]) {
       await tokenPopover(dm).getByRole('button', { name: 'More conditions' }).click();
+      // The list opens inside the popover, under the chips: never wider than it, so it never scrolls sideways.
+      expect(await tokenPopover(dm).evaluate((popover) => popover.scrollWidth - popover.clientWidth)).toBe(0);
       await tokenPopover(dm).getByRole('combobox', { name: 'Search conditions' }).fill(name.slice(0, 4));
       await tokenPopover(dm).getByRole('option', { name, exact: true }).click();
       expected.push(name === 'Exhaustion' ? 'exhaustion:1' : name.toLowerCase());

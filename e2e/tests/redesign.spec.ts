@@ -146,7 +146,7 @@ test('the scene sidebar starts collapsed at the edge, opens over the map on hove
     await expect(scenes).toBeHidden();
     // Collapsed, the map takes the sidebar's width; open, it keeps its size under the sidebar.
     const collapsed = (await dm.locator('main.eg-scene').boundingBox())!;
-    expect(collapsed.width).toBe(1440 - 16 - 320);
+    expect(collapsed.width).toBe(1440 - 56 - 320);
 
     const edge = (await strip.boundingBox())!;
     await dm.mouse.move(edge.x + edge.width / 2, edge.y + 200);

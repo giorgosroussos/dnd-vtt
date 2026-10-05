@@ -210,6 +210,7 @@ Affected specs: …
 - D-191 — UXR-03: a library asset dragged onto the map, by HTML5 drag and drop under its own type, the picker's rows on one line — implementation
 - D-192 — UXR-02: token.batch, all or nothing in one transaction with a compound inverse, and the DM view's selection of several tokens — implementation
 - D-193 — UXR-05: the player view on handhelds, a touch view composed over the DM's camera, fullscreen where the browser can, no viewport report — implementation
+- D-194 — UXR-01 redesigned after the owner's review: a 56 px rail with the scenes at a glance, the sidebar a floating card, the pin in its header; More… opens inside the popover — implementation
 
 ## D-001 (2026-09-23) — Repository documentation regime
 Type: implementation
@@ -1584,3 +1585,10 @@ Decision: Within Q-125. A handheld is `(pointer: coarse) and (hover: none)` (`cl
 Why: Composing over the steered camera keeps the DM's control (a pan or Follow my view still moves the handheld) while the screen looks around; keying by scene identity is the only activation signal a player has.
 Alternatives: An independent camera on the handheld (rejected: it would stop following the DM); resetting on every snapshot (rejected: a setup edit or a reconnect would throw the zoom away); letting a handheld report its size (rejected: a phone connected first would set the TV frame's shape).
 Affected specs: `01` §2; `04` §9; `08` §7, §9, §14; `10` §4
+
+## D-194 (2026-10-05) — UXR-01 redesigned after the owner's review: a 56 px rail with the scenes at a glance, the sidebar a floating card, the pin in its header; More… opens inside the popover
+Type: implementation
+Decision: Within Q-121 and D-190, after the owner found the edge strip and the floating pin poor. Collapsed, the sidebar is a 56 px rail (`--sidebar-rail`): a 36 px toggle, then the session's scenes as 36 px thumbnails, the one shown ringed in the accent, the live one with a live-coloured dot; the thumbnails are an overview only (`aria-hidden`), since hovering the rail opens the sidebar where scenes are chosen. Open, the sidebar is a card inset 8 px over the rail and the map, rounded and shadowed, fading and sliding in. The pin moved from a bar above the title into the scene list's header beside New scene (`SceneList` `actions`, the dock passing it through a render prop), pressed in the accent while docked. Behaviour, keys, the close delay and the remembered pin are D-190's. Separately, the popover's More… list was an absolutely placed 200 px box beside the chip: inside the popover, which scrolls, it overflowed sideways, adding both scrollbars and clipping the list. It now opens as a full-width row under the chips (the wrapper `display: contents`, the box `flex: 1 0 100%`), its conditions in two columns, the popover hiding sideways overflow and scrolling the list into view; `markers.spec.ts` asserts the popover never scrolls sideways.
+Why: The owner's review of 2026-10-05: the sidebar works but looks rough, and More… broke the popover.
+Alternatives: A rail whose thumbnails select a scene (rejected: hover opens the sidebar before a thumbnail can be clicked); the More… list drawn outside the popover in the body (rejected: it would float away from the popover when the popover scrolls).
+Affected specs: `08` §11, §14
