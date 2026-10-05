@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { MapCanvas } from '../canvas/MapCanvas.js';
 import type { CanvasToken } from '../canvas/tokens.js';
 import { Icon } from '../ui/icons.js';
+import { Logo } from '../ui/Logo.js';
 import { IdleScreen } from '../ui/IdleScreen.js';
 import { t } from '../ui/messages.js';
 import { CURSOR_IDLE_MS, useIdleCursor } from '../ui/useIdleCursor.js';
@@ -143,7 +144,7 @@ export function PlayerView() {
             <div className="eg-player__vignette" aria-hidden="true" />
             <p className="eg-player__plate">
               <span className="eg-player__plate-logo" aria-hidden="true">
-                <Icon name="logo" size={26} />
+                <Logo size={26} />
               </span>
               <span className="eg-player__plate-name">{scene.name}</span>
             </p>

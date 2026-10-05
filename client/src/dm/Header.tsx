@@ -1,6 +1,7 @@
 import { useEffect, useId, useState, type ReactNode, type Ref } from 'react';
 import { API_SCREENS_PATH, type ScreenCount } from '@emberglass/shared';
 import { Icon } from '../ui/icons.js';
+import { Logo } from '../ui/Logo.js';
 import { t } from '../ui/messages.js';
 import { request } from './api.js';
 
@@ -73,7 +74,7 @@ export function Header({
       <div className="eg-header__start">
         <span className="eg-header__brand">
           <span className="eg-header__logo">
-            <Icon name="logo" size={22} />
+            <Logo size={22} />
           </span>
           <span className="eg-header__wordmark">{t('app.name')}</span>
         </span>

@@ -840,9 +840,12 @@ main[data-handheld] .eg-player__initiative-cards {
   color: var(--color-accent);
 }
 
-/* The idle screen: the wordmark over a slow ember glow (specs/08-ux-journeys.md §4, §11). */
+/* The idle screen: the wordmark over a slow ember glow (specs/08-ux-journeys.md §4, §11). The glow is three
+   layers, all centred on the mark: a warm vignette in the background, a wide ember haze that breathes, and a
+   tight halo with the mark's own light around it, the brand logo's halo and glow. */
 .eg-idle {
   position: relative;
+  isolation: isolate;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -850,33 +853,57 @@ main[data-handheld] .eg-player__initiative-cards {
   justify-content: center;
   gap: 3.3vh;
   height: 100%;
-  background: var(--color-player-bg);
+  background-color: var(--color-player-bg);
+  background-image: radial-gradient(ellipse 75vh 65vh at 50% 36%, #2c1b0e 0%, #140e09 55%, rgb(10 8 6 / 0%) 100%);
   color: var(--color-player-text);
 }
 
 .eg-idle__glow {
   position: absolute;
+  z-index: -1;
   left: 50%;
-  top: 50%;
-  width: 55vh;
-  height: 55vh;
-  margin: -27.5vh 0 0 -27.5vh;
+  top: 36%;
+  width: 110vh;
+  height: 90vh;
+  margin: -45vh 0 0 -55vh;
   border-radius: 50%;
-  background: radial-gradient(circle, rgb(232 145 58 / 16%) 0%, rgb(232 145 58 / 0%) 70%);
+  background:
+    radial-gradient(closest-side, rgb(255 138 36 / 22%) 0%, rgb(226 88 26 / 9%) 45%, rgb(226 88 26 / 0%) 100%),
+    radial-gradient(closest-side, rgb(155 34 22 / 0%) 55%, rgb(155 34 22 / 7%) 75%, rgb(155 34 22 / 0%) 100%);
   /* Three breaths, then still (D-146): an endless animation repaints the idle TV for hours, and on a browser
      painting without compositing (Windows WebKit in CI) slows everything else on the machine. */
-  animation: eg-ember 5s ease-in-out 3;
+  animation: eg-ember 6s ease-in-out 3;
 }
 
 .eg-idle__logo {
   position: relative;
   display: inline-flex;
-  color: var(--color-accent);
+}
+
+/* The halo close around the mark, as on the brand logo. */
+.eg-idle__logo::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  left: 50%;
+  top: 50%;
+  width: 34vh;
+  height: 38vh;
+  margin: -19vh 0 0 -17vh;
+  border-radius: 50%;
+  background: radial-gradient(
+    closest-side,
+    rgb(255 138 36 / 55%) 0%,
+    rgb(226 88 26 / 20%) 45%,
+    rgb(226 88 26 / 0%) 100%
+  );
+  animation: eg-ember-halo 6s ease-in-out 3;
 }
 
 .eg-idle__logo svg {
-  width: 11vh;
-  height: 11vh;
+  width: 13vh;
+  height: 13vh;
+  filter: drop-shadow(0 0 1.2vh rgb(255 176 48 / 60%)) drop-shadow(0 0 4vh rgb(226 88 26 / 45%));
 }
 
 .eg-idle__text {
@@ -896,6 +923,10 @@ main[data-handheld] .eg-player__initiative-cards {
   font-weight: 700;
   line-height: 1;
   letter-spacing: 1px;
+  color: #f2eadb;
+  text-shadow:
+    0 0 0.4vh rgb(255 207 106 / 25%),
+    0 0 3vh rgb(232 145 58 / 35%);
 }
 
 .eg-idle__line {
@@ -907,18 +938,32 @@ main[data-handheld] .eg-player__initiative-cards {
 @keyframes eg-ember {
   0%,
   100% {
-    opacity: 0.55;
+    opacity: 1;
     transform: scale(1);
   }
 
   50% {
+    opacity: 0.6;
+    transform: scale(0.94);
+  }
+}
+
+@keyframes eg-ember-halo {
+  0%,
+  100% {
     opacity: 1;
-    transform: scale(1.08);
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.7;
+    transform: scale(1.06);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .eg-idle__glow,
+  .eg-idle__logo::before,
   .eg-player__fade,
   .eg-player__initiative {
     animation: none;
