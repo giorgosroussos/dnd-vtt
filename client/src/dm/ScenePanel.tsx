@@ -35,6 +35,7 @@ import {
   type CanvasRail,
   type CanvasTokenControls,
   type Measure,
+  type AssetDrop,
   type Placing,
   type FogTool,
   type PingTool,
@@ -57,6 +58,7 @@ import { SidePanel, type SideTab } from './SidePanel.js';
 import { CalibrationPanel } from './calibration/CalibrationPanel.js';
 import { CornerMagnifier } from './calibration/CornerMagnifier.js';
 import { startDraft, withRect, type Draft } from './calibration/draft.js';
+import { ASSET_DRAG_TYPE, assetDrag } from './library/assetDrag.js';
 import { megabytes } from './library/labels.js';
 import type { DmScene } from './live/dmScene.js';
 import type { DmLive } from './live/useDmLive.js';
@@ -1115,6 +1117,17 @@ export function ScenePanel({
         onCancel: cancelPlacing,
       }
     : undefined;
+  // A library asset dragged onto the map is placed where it is dropped, as a click places a chosen one (UXR-03).
+  const assetDrop: AssetDrop | undefined = draft
+    ? undefined
+    : {
+        sizeOf: (types) => assetDrag.of(types)?.size,
+        onDrop: (at) => {
+          const asset = assetDrag.of([ASSET_DRAG_TYPE]);
+          assetDrag.end();
+          if (asset) void placeToken(asset, at);
+        },
+      };
   const tokenControls: CanvasTokenControls | undefined = draft
     ? undefined
     : {
@@ -1603,6 +1616,7 @@ export function ScenePanel({
                     tokens={tokens?.map((token) => ({ ...toCanvasToken(token), turn: turnOf(token) })) ?? []}
                     tokenControls={tokenControls}
                     placing={placing}
+                    assetDrop={assetDrop}
                     tvFrame={tvFrame}
                     ruler={{ shown: shownRuler, tool: rulerTool }}
                     ping={{ shown: isLive && live ? live.pings : [], tool: pingTool }}

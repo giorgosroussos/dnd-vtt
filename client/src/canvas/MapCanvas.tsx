@@ -5,6 +5,7 @@ import {
   useImperativeHandle,
   useRef,
   useState,
+  type DragEvent as ReactDragEvent,
   type KeyboardEvent,
   type ReactNode,
   type Ref,
@@ -136,6 +137,8 @@ export const CANVAS_COLOURS = {
   tvFrame: THEME.accent,
   tvFrameText: THEME.onAccent,
   tvDim: 'rgba(8, 6, 4, 0.42)',
+  // The footprint of a library asset dragged over the map (UXR-03): the accent, lightly filled.
+  dropFill: 'rgba(232, 152, 72, 0.22)',
 } as const;
 // The TV frame's corner handles and the width of its border's grip, in screen pixels.
 const HANDLE_PX = 12;
@@ -266,6 +269,14 @@ export interface Placing {
   /** Where the token goes, in grid units, snapped unless Alt was held. */
   onPlace: (at: Point) => void;
   onCancel: () => void;
+}
+
+/** A library asset dragged onto the map (UXR-03, specs/05-assets-and-images.md §5). */
+export interface AssetDrop {
+  /** The dragged asset's size, or undefined when the drag is not an asset the map takes. */
+  sizeOf: (types: readonly string[]) => TokenSize | undefined;
+  /** Where the token goes, in grid units, snapped unless Alt was held. */
+  onDrop: (at: Point) => void;
 }
 
 /** The DM's token controls: selection, moves and the deletion request. */
@@ -428,6 +439,7 @@ export function MapCanvas({
   tokens = [],
   tokenControls,
   placing,
+  assetDrop,
   rail,
   status,
   popover,
@@ -454,6 +466,8 @@ export function MapCanvas({
   tokenControls?: CanvasTokenControls | undefined;
   /** DM view only: a token being placed by a click on the map. */
   placing?: Placing | undefined;
+  /** DM view only: a library asset dragged onto the map. */
+  assetDrop?: AssetDrop | undefined;
   /** DM view only: the tool rail (UIX-01). */
   rail?: CanvasRail | undefined;
   /** DM view only: the grid and diagonal rule, bottom left (UIX-01). */
@@ -654,6 +668,43 @@ export function MapCanvas({
   // Centred on `at`, snapped unless Alt, and kept on the map.
   const placeAt = (target: Placing & { frame: typeof frame & object }, at: Point, alt: boolean): Point =>
     clampToWorld(target.frame, world, placePosition(target.frame, at, target.size, alt), target.size, !alt);
+
+  // A library asset dragged over the map: its footprint where it would land (UXR-03).
+  const [dropping, setDropping] = useState<{ at: Point; size: TokenSize }>();
+  const dropTarget = dm && !measuring && frame ? assetDrop : undefined;
+  const dropPoint = (event: ReactDragEvent<HTMLDivElement>): { at: Point; size: TokenSize } | undefined => {
+    const size = dropTarget?.sizeOf([...event.dataTransfer.types]);
+    if (!size || !frame) return undefined;
+    const box = event.currentTarget.getBoundingClientRect();
+    const pointer = {
+      x: (event.clientX - box.left - camera.x) / camera.scale,
+      y: (event.clientY - box.top - camera.y) / camera.scale,
+    };
+    return { at: placeAt({ size, frame, onPlace: () => {}, onCancel: () => {} }, pointer, event.altKey), size };
+  };
+  const dropHandlers = dropTarget
+    ? {
+        onDragOver: (event: ReactDragEvent<HTMLDivElement>) => {
+          const point = dropPoint(event);
+          if (!point) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'copy';
+          setDropping((now) =>
+            now && now.size === point.size && now.at.x === point.at.x && now.at.y === point.at.y ? now : point,
+          );
+        },
+        onDragLeave: (event: ReactDragEvent<HTMLDivElement>) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropping(undefined);
+        },
+        onDrop: (event: ReactDragEvent<HTMLDivElement>) => {
+          const point = dropPoint(event);
+          setDropping(undefined);
+          if (!point) return;
+          event.preventDefault();
+          dropTarget.onDrop(point.at);
+        },
+      }
+    : {};
 
   // The world point at the centre of the view, where Enter places a token.
   const centreWorld = (): Point => ({
@@ -1392,6 +1443,22 @@ export function MapCanvas({
       {frame && ping ? (
         <PingLayer pings={ping.shown} frame={frame} scale={camera.scale} labelScale={labelScale} />
       ) : null}
+      {dropping && frame ? (
+        // The footprint of the asset dragged over the map, where it would land (UXR-03).
+        <Layer listening={false}>
+          <Rect
+            name="drop-target"
+            {...toWorld(frame, dropping.at)}
+            width={footprint(dropping.size) * frame.square}
+            height={footprint(dropping.size) * frame.square}
+            cornerRadius={(footprint(dropping.size) * frame.square) / 2}
+            fill={CANVAS_COLOURS.dropFill}
+            stroke={CANVAS_COLOURS.measure}
+            strokeWidth={2 / camera.scale}
+            dash={[6 / camera.scale, 4 / camera.scale]}
+          />
+        </Layer>
+      ) : null}
       {place ? (
         // Where Enter places the token: the centre of the view, marked while placing (review).
         <Layer listening={false}>
@@ -1556,6 +1623,8 @@ export function MapCanvas({
         {...fogState}
         // A right-button drag pans while measuring, so it opens no context menu (review U-M2).
         onContextMenu={rulerOn || fogOn ? (event) => event.preventDefault() : undefined}
+        {...dropHandlers}
+        data-dropping={dropping ? JSON.stringify(dropping.at) : undefined}
         data-tokens={tokenBoxes}
       >
         {stage}

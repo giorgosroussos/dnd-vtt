@@ -112,6 +112,17 @@ async function selectTokenById(view: HTMLElement, id: string) {
 }
 
 describe('the add flow: button, picker, click on the map (specs/05-assets-and-images.md §5)', () => {
+  it('lays each picker row on one line with its Choose button, and a click anywhere on the row chooses (UXR-03)', async () => {
+    const view = await open();
+    await click(addButton(view));
+    const row = picker().querySelector<HTMLElement>(`.eg-picker__item[data-asset="${goblin.id}"]`)!;
+    expect(row.querySelector('img')).not.toBeNull();
+    expect(row.lastElementChild!.getAttribute('aria-label')).toBe(t('tokens.picker.chooseOf', { name: 'Goblin' }));
+    await click(row.querySelector('.eg-library__name'));
+    expect(picker()).toBeNull();
+    expect(view.textContent).toContain(t('tokens.placing', { name: 'Goblin' }));
+  });
+
   it('places the chosen asset where the map is clicked, in grid units, numbered and hidden from its asset', async () => {
     const view = await open();
     await addThroughPicker(view, goblin);

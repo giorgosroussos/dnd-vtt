@@ -3,7 +3,9 @@ import { API_ARCHIVE_PATHS, imageFileUrl, type LibraryAsset } from '@emberglass/
 import { ImportDialog } from '../archive/ImportDialog.js';
 import { useFocusLater } from '../../ui/useFocusLater.js';
 import { Button } from '../../ui/Button.js';
+import { IconButton } from '../../ui/IconButton.js';
 import { t } from '../../ui/messages.js';
+import { ASSET_DRAG_TYPE, assetDrag } from './assetDrag.js';
 import { AssetDeleteDialog } from './AssetDeleteDialog.js';
 import { AssetDialog } from './AssetDialog.js';
 import { categoryLabel, sizeLabel } from './labels.js';
@@ -114,6 +116,16 @@ export function Library({ uploadLimit }: { uploadLimit: number }) {
               key={asset.id}
               className={selection ? 'eg-library__item eg-library__item--selecting' : 'eg-library__item'}
               data-asset={asset.id}
+              // Dragged onto the map, it places a token there (UXR-03); the token picker is the keyboard's way.
+              draggable={!selection}
+              onDragStart={(event) => {
+                event.dataTransfer.effectAllowed = 'copy';
+                event.dataTransfer.setData(ASSET_DRAG_TYPE, asset.id);
+                const thumb = event.currentTarget.querySelector('img');
+                if (thumb) event.dataTransfer.setDragImage(thumb, 20, 20);
+                assetDrag.start(asset);
+              }}
+              onDragEnd={() => assetDrag.end()}
             >
               {selection ? (
                 <input
@@ -125,7 +137,12 @@ export function Library({ uploadLimit }: { uploadLimit: number }) {
                 />
               ) : null}
               {/* Decorative: the name beside it says what it is. */}
-              <img className="eg-library__thumb" src={imageFileUrl(asset.image_id, 'thumbnail')} alt="" />
+              <img
+                className="eg-library__thumb"
+                src={imageFileUrl(asset.image_id, 'thumbnail')}
+                alt=""
+                draggable={false}
+              />
               <div className="eg-library__text">
                 <span className="eg-library__name">{asset.name}</span>
                 <span className="eg-library__meta">
@@ -133,21 +150,20 @@ export function Library({ uploadLimit }: { uploadLimit: number }) {
                 </span>
                 {asset.default_hidden ? <span className="eg-library__hidden">{t('library.hidden')}</span> : null}
               </div>
-              <span className="eg-tree__actions">
-                <Button
-                  size="small"
-                  aria-label={t('library.editOf', { name: asset.name })}
+              <span className="eg-library__row-actions">
+                <IconButton
+                  icon="pencil"
+                  label={t('library.editOf', { name: asset.name })}
+                  tip={t('library.edit')}
                   onClick={() => setOpen({ kind: 'edit', asset })}
-                >
-                  {t('library.edit')}
-                </Button>
-                <Button
-                  size="small"
-                  aria-label={t('library.deleteOf', { name: asset.name })}
+                />
+                <IconButton
+                  icon="trash"
+                  danger
+                  label={t('library.deleteOf', { name: asset.name })}
+                  tip={t('library.delete')}
                   onClick={() => setOpen({ kind: 'delete', asset })}
-                >
-                  {t('library.delete')}
-                </Button>
+                />
               </span>
             </li>
           ))}

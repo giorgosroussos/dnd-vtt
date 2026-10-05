@@ -207,6 +207,7 @@ Affected specs: …
 - D-188 — UI/UX refinements (Phase 8): a collapsible scene sidebar, multi-select with token.batch, drag from the library, a compact campaigns menu and a responsive player view on handhelds — adr
 - D-189 — Q-121 to Q-125 written into the specs: Phase 8, the UI/UX refinements, with the defaults the owner's answers leave open — spec-amendment
 - D-190 — UXR-01: the scene sidebar's dock, opened by hover or by a click, and the end-to-end contexts starting docked — implementation
+- D-191 — UXR-03: a library asset dragged onto the map, by HTML5 drag and drop under its own type, the picker's rows on one line — implementation
 
 ## D-001 (2026-09-23) — Repository documentation regime
 Type: implementation
@@ -1560,3 +1561,10 @@ Decision: Within Q-121. `client/src/dm/SidebarDock.tsx` wraps the scene list and
 Why: A click-opened sidebar that closed as the pointer left would fight a DM who clicked to use it; hover-open needs the grace period so that a diagonal move to the list does not close it. Docking the end-to-end contexts keeps sixty-odd specs about other features from each learning to open the sidebar.
 Alternatives: Every spec opening the sidebar through a helper (rejected: dozens of direct uses of the scene list, and no feature of theirs is the sidebar); hover alone without the click (rejected: the owner asked for a button too); resizing the map when it opens (rejected by Q-121).
 Affected specs: `08` §1, §14
+
+## D-191 (2026-10-05) — UXR-03: a library asset dragged onto the map, by HTML5 drag and drop under its own type, the picker's rows on one line
+Type: implementation
+Decision: Within Q-124. A library row is `draggable` outside the export selection mode; its drag carries the asset's identifier under `application/x-emberglass-asset` (`client/src/dm/library/assetDrag.ts`), `effectAllowed` copy, the thumbnail as the drag image, and the dragged asset is kept in that module because a drop target reads the drag's data only on the drop. `MapCanvas` takes an `assetDrop` prop (DM mode, not while calibrating): `dragover` accepts only that type, computes the drop point from the pointer through the camera with the same `placeAt` a click uses (centred, snapped, Alt for none, kept on the map) and draws the footprint as `drop-target`, exposed to the end-to-end tests as `data-dropping`; `drop` hands the grid point to `ScenePanel`, whose `placeToken` places it on a prepared scene over REST or on the live one by `token.add`, selecting it with its popover, exactly as a click after the picker does. Any other drag (files, text) is not taken. The picker's rows (`.eg-picker__item`) lay out the thumbnail, the name and Choose on one line, the whole row choosing; the library's own Edit and Delete became icon buttons at the row's end, their names unchanged.
+Why: Reusing `placeAt` and `placeToken` keeps one placement rule for click, Enter and drop; a module-level holder is the only way to know the asset's size during `dragover`.
+Alternatives: Dragging from the picker dialog (rejected: a modal dialog makes the map behind it inert); reading the size from a second drag type carrying it (rejected: types are lower-cased strings, a footprint needs the asset, and the holder already has it).
+Affected specs: `05` §5; `08` §14

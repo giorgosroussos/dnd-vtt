@@ -367,6 +367,69 @@ describe('moving tokens in the DM mode (specs/06-grid-and-measurement.md §4, D-
   });
 });
 
+describe('dragging a library asset onto the map (UXR-03, specs/05-assets-and-images.md §5)', () => {
+  const TYPE = 'application/x-emberglass-asset';
+  // A drag event as a browser sends it; jsdom has no DragEvent, so the data transfer is attached.
+  function drag(view: HTMLElement, type: string, x: number, y: number, types: string[] = [TYPE], altKey = false) {
+    const evt = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, altKey });
+    Object.defineProperty(evt, 'dataTransfer', { value: { types, dropEffect: 'none' } });
+    act(() => {
+      viewport(view).dispatchEvent(evt);
+    });
+    return evt;
+  }
+  const assetDrop = (size: 'medium' | 'large' = 'medium') => ({
+    sizeOf: vi.fn((types: readonly string[]) => (types.includes(TYPE) ? size : undefined)),
+    onDrop: vi.fn(),
+  });
+
+  it('shows the footprint where it would land, snapped, and places it there on the drop', async () => {
+    const drop = assetDrop();
+    const { view, stage } = await draw({ grid: GRID, map: MAP, mode: 'dm', assetDrop: drop });
+    const screen = (gx: number, gy: number) =>
+      [stage.x() + (15 + gx * 50) * stage.scaleX(), stage.y() + (125 + gy * 50) * stage.scaleY()] as const;
+    const over = drag(view, 'dragover', ...screen(5.5, 7.5));
+    expect(over.defaultPrevented).toBe(true);
+    expect(JSON.parse(viewport(view).dataset.dropping!)).toEqual({ x: 5, y: 7 });
+    const ghost = stage.findOne<Konva.Rect>('.drop-target')!;
+    expect(ghost.x()).toBeCloseTo(15 + 5 * 50, 6);
+    expect(ghost.width()).toBeCloseTo(50, 6);
+    drag(view, 'drop', ...screen(5.5, 7.5));
+    expect(drop.onDrop).toHaveBeenCalledWith({ x: 5, y: 7 });
+    expect(viewport(view).dataset.dropping).toBeUndefined();
+    expect(stage.findOne('.drop-target')).toBeUndefined();
+  });
+
+  it('centres a Large asset on the pointer, and Alt drops it off the grid', async () => {
+    const drop = assetDrop('large');
+    const { view, stage } = await draw({ grid: GRID, map: MAP, mode: 'dm', assetDrop: drop });
+    const x = stage.x() + (15 + 5 * 50) * stage.scaleX();
+    const y = stage.y() + (125 + 7 * 50) * stage.scaleY();
+    drag(view, 'drop', x, y);
+    expect(drop.onDrop).toHaveBeenLastCalledWith({ x: 4, y: 6 });
+    drag(view, 'drop', x + 0.3 * 50 * stage.scaleX(), y, [TYPE], true);
+    const [at] = drop.onDrop.mock.calls[1]! as [{ x: number; y: number }];
+    expect(at.x).toBeCloseTo(4.3, 2);
+    expect(at.y).toBeCloseTo(6, 2);
+  });
+
+  it('takes no other drag, and none in the player mode or while calibrating', async () => {
+    const drop = assetDrop();
+    const { view } = await draw({ grid: GRID, map: MAP, mode: 'dm', assetDrop: drop });
+    expect(drag(view, 'dragover', 300, 300, ['Files']).defaultPrevented).toBe(false);
+    drag(view, 'drop', 300, 300, ['Files']);
+    expect(drop.onDrop).not.toHaveBeenCalled();
+    rendered!.unmount();
+    const player = await draw({ grid: GRID, map: MAP, mode: 'player', assetDrop: drop });
+    const evt = new MouseEvent('dragover', { bubbles: true, cancelable: true });
+    Object.defineProperty(evt, 'dataTransfer', { value: { types: [TYPE] } });
+    act(() => {
+      player.view.querySelector('.eg-canvas')!.dispatchEvent(evt);
+    });
+    expect(evt.defaultPrevented).toBe(false);
+  });
+});
+
 describe('placing a token (specs/05-assets-and-images.md §5)', () => {
   const placing = (fields: Partial<Placing> = {}): Placing => ({
     size: 'medium',
