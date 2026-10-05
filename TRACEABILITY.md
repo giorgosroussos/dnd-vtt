@@ -47,7 +47,7 @@ Implementation status and evidence per work package (`specs/13-implementation-pl
 | UXR-01 | 8 | Collapsible scene sidebar | `08` §1, `08` §14 | not started | — |
 | UXR-02 | 8 | Several tokens at once | `04` §2, `04` §8, `08` §14, `10` §3 | not started | — |
 | UXR-03 | 8 | Drag from the library | `05` §5, `08` §14 | not started | — |
-| UXR-04 | 8 | Compact campaigns menu | `08` §14 | not started | — |
+| UXR-04 | 8 | Compact campaigns menu | `08` §14 | in progress | 2026-10-05, branch `feat/dm-toolkit`, local (Linux, WSL2, Node 24.11.0), D-188, D-189: `client/src/ui/components.test.tsx` "IconButton" (named by its label, its tip on hover and on keyboard focus, hidden from assistive technology, gone on blur and Escape); the tree's row actions as icon buttons with their accessible names unchanged, so `client/src/dm/tree/SceneTree.test.tsx`, `client/src/dm/archive/Archive.test.tsx` and end to end `e2e/tests/tree.spec.ts`, `e2e/tests/archive.spec.ts`, `e2e/tests/keyboard.spec.ts` pass unchanged. Left: CI on the pull request. |
 | UXR-05 | 8 | The player view on any screen | `01` §2, `08` §7, `08` §9, `08` §14 | not started | — |
 
 ## Critical end-to-end journeys (`10` §5)

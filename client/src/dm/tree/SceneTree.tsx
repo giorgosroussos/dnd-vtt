@@ -8,6 +8,8 @@ import {
 } from '@emberglass/shared';
 import { ImportDialog } from '../archive/ImportDialog.js';
 import { Button } from '../../ui/Button.js';
+import { IconButton, IconLink } from '../../ui/IconButton.js';
+import { Icon } from '../../ui/icons.js';
 import { Notice } from '../../ui/Notice.js';
 import { TextField } from '../../ui/TextField.js';
 import { useFocusLater } from '../../ui/useFocusLater.js';
@@ -345,54 +347,50 @@ export function SceneTree({
               ) : null}
               {orderable ? (
                 <>
-                  <Button
-                    size="small"
+                  <IconButton
+                    icon="arrowUp"
                     data-action="up"
-                    aria-label={t('tree.moveUpOf', { name })}
+                    label={t('tree.moveUpOf', { name })}
+                    tip={t('tree.moveUp')}
                     disabled={index <= 0 || reordering === options.parentId}
                     onClick={() => move(-1)}
-                  >
-                    {t('tree.moveUp')}
-                  </Button>
-                  <Button
-                    size="small"
+                  />
+                  <IconButton
+                    icon="arrowDown"
                     data-action="down"
-                    aria-label={t('tree.moveDownOf', { name })}
+                    label={t('tree.moveDownOf', { name })}
+                    tip={t('tree.moveDown')}
                     disabled={index < 0 || index >= options.siblings!.length - 1 || reordering === options.parentId}
                     onClick={() => move(1)}
-                  >
-                    {t('tree.moveDown')}
-                  </Button>
+                  />
                 </>
               ) : null}
               {kind === 'campaign' ? (
                 // A download: the browser saves the archive the server streams, named by the campaign and the date.
-                <a
-                  className="eg-button eg-button--secondary eg-button--small"
+                <IconLink
+                  icon="download"
                   href={exportCampaignPath(item.id)}
                   download
                   data-action="export"
-                  aria-label={t('tree.exportOf', { name })}
-                >
-                  {t('tree.export')}
-                </a>
+                  label={t('tree.exportOf', { name })}
+                  tip={t('tree.export')}
+                />
               ) : null}
-              <Button
-                size="small"
+              <IconButton
+                icon="pencil"
                 data-action="rename"
-                aria-label={t('tree.renameOf', { name })}
+                label={t('tree.renameOf', { name })}
+                tip={t('tree.rename')}
                 onClick={() => setRenaming(item.id)}
-              >
-                {t('tree.rename')}
-              </Button>
-              <Button
-                size="small"
+              />
+              <IconButton
+                icon="trash"
+                danger
                 data-action="delete"
-                aria-label={t('tree.deleteOf', { name })}
+                label={t('tree.deleteOf', { name })}
+                tip={t('tree.delete')}
                 onClick={() => setDeleting({ kind, id: item.id, name })}
-              >
-                {t('tree.delete')}
-              </Button>
+              />
             </span>
           </div>
         )}
@@ -485,12 +483,20 @@ export function SceneTree({
               });
             })}
           </ul>
-          {createControl('', 'tree.newCampaign', 'tree.campaignName')}
-          <div className="eg-tree__create">
-            <Button size="small" data-action="import" onClick={() => setImporting(true)}>
-              {t('tree.import')}
-            </Button>
-          </div>
+          {creating === '' ? (
+            createControl('', 'tree.newCampaign', 'tree.campaignName')
+          ) : (
+            <div className="eg-tree__create eg-tree__create--footer">
+              <Button size="small" data-action="new-campaign" onClick={() => setCreating('')}>
+                <Icon name="plus" size={14} />
+                {t('tree.newCampaign')}
+              </Button>
+              <Button size="small" data-action="import" onClick={() => setImporting(true)}>
+                <Icon name="upload" size={14} />
+                {t('tree.import')}
+              </Button>
+            </div>
+          )}
         </>
       )}
       {importing ? (

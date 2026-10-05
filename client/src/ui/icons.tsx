@@ -33,7 +33,18 @@ type IconName =
   | 'swords'
   | 'shield'
   | 'follow'
-  | 'note';
+  | 'note'
+  | 'download'
+  | 'upload'
+  | 'pencil'
+  | 'trash'
+  | 'arrowUp'
+  | 'arrowDown'
+  | 'maximize'
+  | 'minimize'
+  | 'pin'
+  | 'sidebar'
+  | 'reset';
 
 const STROKED: Record<Exclude<IconName, 'stop' | 'more' | 'drop'>, readonly string[]> = {
   logo: ['M12 2l6 8-6 12-6-12z', 'M12 2v20M6 10h12'],
@@ -70,6 +81,18 @@ const STROKED: Record<Exclude<IconName, 'stop' | 'more' | 'drop'>, readonly stri
   ],
   // A page with lines: DM notes (DMT-04).
   note: ['M6 3h9l4 4v14H6z', 'M15 3v4h4', 'M9 12h6M9 16h6'],
+  // The UI/UX refinements (UXR-01, UXR-04, UXR-05).
+  download: ['M12 4v11', 'M7 10l5 5 5-5', 'M5 20h14'],
+  upload: ['M12 15V4', 'M7 9l5-5 5 5', 'M5 20h14'],
+  pencil: ['M4 20h4L19 9l-4-4L4 16z', 'M13.5 6.5l4 4'],
+  trash: ['M4 7h16', 'M9 7V4h6v3', 'M6 7l1 13h10l1-13', 'M10 11v6M14 11v6'],
+  arrowUp: ['M12 19V5', 'M6 11l6-6 6 6'],
+  arrowDown: ['M12 5v14', 'M6 13l6 6 6-6'],
+  maximize: ['M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5', 'M9 9l-5-5M15 9l5-5M9 15l-5 5M15 15l5 5'],
+  minimize: ['M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5'],
+  pin: ['M9 4h6l-1 6 4 4H6l4-4z', 'M12 14v7'],
+  sidebar: ['M4 5h16v14H4z', 'M9 5v14'],
+  reset: ['M4 12a8 8 0 1 0 2.5-5.8', 'M4 4v4h4'],
   // A shield: a token's armour class (DMT-01).
   shield: ['M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6z'],
   // Two crossed blades: the Enemies entry of the initiative order (TBL-06).
