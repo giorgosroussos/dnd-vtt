@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { SceneToken } from '@emberglass/shared';
 import type { TokenAnchor } from '../../canvas/MapCanvas.js';
 import { ConditionIcon, markerName } from '../../ui/conditions.js';
@@ -6,15 +7,29 @@ import { t } from '../../ui/messages.js';
 import { placement } from './TokenPopover.js';
 import { hpFraction } from './TokenStats.js';
 
-const WIDTH = 236;
+const WIDTH = 280;
+// The room kept between the preview and the canvas's edges.
+const MARGIN = 8;
 
 // The preview of a token the DM's mouse rests on (UXR-06, specs/08-ux-journeys.md §14): read-only, beside the token
 // as its popover would be, with what the DM looks up mid-scene: whether players can see it, its hit points and
-// armour class, its conditions and the first lines of its notes, or of its asset's when it has none. It takes no
+// armour class, its conditions and the whole of its notes, or of its asset's when it has none; moved up to stay
+// on the canvas when they are long, and faded at the bottom only when even the canvas's height cannot hold them. It takes no
 // pointer events and no focus, so it never covers a click or a drag on the map; a click on the token opens the
 // popover, where all of this is edited. The DM's view only: nothing here reaches a player view.
 export function TokenPreview({ token, anchor }: { token: SceneToken; anchor: TokenAnchor }) {
-  const { left, top, side } = placement(anchor, WIDTH);
+  const { left, top: below, side } = placement(anchor, WIDTH);
+  // Measured once drawn: a preview that would run past the canvas's bottom moves up, at most to its top.
+  const card = useRef<HTMLElement>(null);
+  const [height, setHeight] = useState<number>();
+  useLayoutEffect(() => {
+    const drawn = card.current?.scrollHeight;
+    if (drawn !== undefined && drawn !== height) setHeight(drawn);
+  }, [token, height]);
+  const room = anchor.viewport.height - 2 * MARGIN;
+  const clipped = height !== undefined && height > room;
+  const top =
+    height === undefined ? below : Math.max(MARGIN, Math.min(below, anchor.viewport.height - MARGIN - height));
   const fraction = hpFraction(token);
   const hasHp = token.hp_current !== null || token.hp_max !== null;
   const notes = token.notes.trim()
@@ -24,8 +39,9 @@ export function TokenPreview({ token, anchor }: { token: SceneToken; anchor: Tok
       : undefined;
   return (
     <aside
-      className={`eg-preview eg-preview--${side}`}
-      style={{ left, top, width: WIDTH }}
+      ref={card}
+      className={`eg-preview eg-preview--${side}${clipped ? ' eg-preview--clipped' : ''}`}
+      style={{ left, top, width: WIDTH, maxHeight: room }}
       role="tooltip"
       aria-label={t('preview.of', { label: token.label })}
       data-preview={token.id}

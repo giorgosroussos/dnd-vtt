@@ -533,6 +533,9 @@ describe('changing tokens (specs/04-live-sync.md §2, D-100)', () => {
   // A click on a token toggles its popover, and the mouse resting on one previews it (UXR-06,
   // specs/08-ux-journeys.md §14).
   describe('clicking and resting on a token', () => {
+    const NOTE = ['Flees at half HP.', 'Knows the way.', ...Array.from({ length: 8 }, (_, n) => `Clue ${n + 1}.`)].join(
+      '\n',
+    );
     const group = (id: string) => stage().findOne<Konva.Group>(`#token-${id}`)!;
     const fire = (
       id: string,
@@ -596,7 +599,7 @@ describe('changing tokens (specs/04-live-sync.md §2, D-100)', () => {
         hp_temp: 2,
         ac: 15,
         markers: [{ id: 'prone' }, { id: 'exhaustion', level: 2 }],
-        notes: 'Flees at half HP.\nKnows the way.',
+        notes: NOTE,
       });
       const view = await open();
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
@@ -619,7 +622,8 @@ describe('changing tokens (specs/04-live-sync.md §2, D-100)', () => {
         'Prone',
         t('conditions.withLevel', { label: 'Exhaustion', level: 2 }),
       ]);
-      expect(card.querySelector('.eg-preview__text')!.textContent).toBe('Flees at half HP.\nKnows the way.');
+      // The whole note, every line of it, not its first lines.
+      expect(card.querySelector('.eg-preview__text')!.textContent).toBe(NOTE);
       // It is no popover: nothing in it can be clicked, and the map stays the selection's.
       expect(popover(view)).toBeNull();
       expect(card.querySelector('button, input, textarea')).toBeNull();

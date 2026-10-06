@@ -49,7 +49,11 @@ test('a click toggles the popover and a resting mouse previews the token', async
   const placed = (await (
     await dm.request.post(`/api/scenes/${scene.id}/tokens`, { data: { asset_id: asset.id, x: 6, y: 4 } })
   ).json()) as { token: { id: string } };
-  await dm.request.put(`/api/tokens/${placed.token.id}/notes`, { data: { notes: 'Regenerates unless burned.' } });
+  const note = [
+    'Regenerates unless burned.',
+    ...Array.from({ length: 9 }, (_, n) => `Line ${n + 2} of the note.`),
+  ].join('\n');
+  await dm.request.put(`/api/tokens/${placed.token.id}/notes`, { data: { notes: note } });
 
   await dm.reload();
   await selectScene(dm, names);
@@ -63,6 +67,21 @@ test('a click toggles the popover and a resting mouse previews the token', async
   // A click opens the popover; a second click on the same token closes it.
   await dm.mouse.click(...centre);
   await expect(tokenPopover(dm)).toBeVisible();
+  // The hit points' editor: its three fields side by side within the popover, which never scrolls sideways.
+  await tokenPopover(dm)
+    .getByRole('button', { name: `Edit the hit points and armour class of ${label}` })
+    .first()
+    .click();
+  const popoverBox = (await tokenPopover(dm).boundingBox())!;
+  for (const name of ['Max HP', 'Temp HP', 'AC']) {
+    const input = tokenPopover(dm).getByRole('textbox', { name, exact: true });
+    await input.focus();
+    const at = (await input.boundingBox())!;
+    expect(at.x).toBeGreaterThanOrEqual(popoverBox.x);
+    expect(at.x + at.width).toBeLessThanOrEqual(popoverBox.x + popoverBox.width);
+    expect(await tokenPopover(dm).evaluate((element) => element.scrollLeft)).toBe(0);
+  }
+  await tokenPopover(dm).getByRole('button', { name: 'Cancel' }).click();
   await dm.mouse.click(...centre);
   await expect(tokenPopover(dm)).toHaveCount(0);
   await expect(dm.locator('.eg-token-row--selected')).toContainText(label);
@@ -82,7 +101,11 @@ test('a click toggles the popover and a resting mouse previews the token', async
   await expect(preview).toBeVisible();
   await expect(preview.locator('[data-hp]')).toHaveText('84 / 84');
   await expect(preview.locator('[data-ac]')).toHaveText('15');
-  await expect(preview).toContainText('Regenerates unless burned.');
+  // The whole note, its last line included, inside the canvas.
+  await expect(preview.locator('.eg-preview__text')).toHaveText(note);
+  const card = (await preview.boundingBox())!;
+  expect(card.y + card.height).toBeLessThanOrEqual(box.y + box.height);
+  expect(card.y).toBeGreaterThanOrEqual(box.y);
   await expect(preview).toHaveCSS('pointer-events', 'none');
   await expect(tokenPopover(dm)).toHaveCount(0);
 
