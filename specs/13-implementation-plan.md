@@ -28,7 +28,7 @@ Phase 6 was added after every earlier package was done (Q-107): it packages what
 
 Phase 7 was added after every earlier package was done (Q-111 to Q-119): its packages run in order, hit points first because per-enemy initiative passes over a monster its hit points made Dead, and export and import last so that its format carries every field the others add.
 
-Phase 8 was added while Phase 7 awaited its review (Q-121 to Q-125): its packages change no stored data, and the one contract change, `token.batch`, is covered by the hidden-information suite.
+Phase 8 was added while Phase 7 awaited its review (Q-121 to Q-125, then Q-126 and Q-127): its packages change no stored data, and the one contract change, `token.batch`, is covered by the hidden-information suite.
 
 ## 3. Phase 0 — Foundations
 
@@ -446,7 +446,7 @@ The hidden-information suite of `10` §3 passes with hit points, notes and per-e
 
 ## 13. Phase 8 — UI/UX refinements
 
-Goal: the DM reaches more of the map, acts on groups of tokens and drags tokens from the library, and the player view opens on any screen from a phone to a large desktop, with hidden information still never leaving the server (`01` §11).
+Goal: the DM reaches more of the map, acts on groups of tokens, drags tokens from the library and looks a token up by resting the pointer on it, orders initiative by drag and wheel with the TV naming only the turn and the next, and the player view opens on any screen from a phone to a large desktop, with hidden information still never leaving the server (`01` §11).
 
 ### Work packages
 
@@ -490,6 +490,25 @@ Goal: the DM reaches more of the map, acts on groups of tokens and drags tokens 
 - Exit: unit tests cover the zoom geometry and the handheld controls, and that a fine-pointer screen still has nothing that takes focus; end-to-end tests on an emulated phone and tablet cover the layout, the fullscreen button, a pinch, its reset and the TV frame's shape.
 - Surfaces: data, security, scope, ux
 - Touches red line: no
+- Contract change: no
+
+`UXR-06` Token click and hover
+
+- A second click on the token whose popover is open closing it, the token kept selected (`08` §11).
+- The mouse resting on a token showing its read-only preview, hit points, armour class, conditions and notes, after a delay that a pointer passing over a token never reaches; hidden on leaving, pressing, zooming or another tool; DM view only (`08` §14).
+- Exit: unit tests cover the delay, the tolerance of a resting pointer and a sweep across tokens showing nothing; the scene panel's tests cover the toggle and the preview's content, and nothing shown for a touch, a held button or the token whose popover is open; an end-to-end test in a real browser covers the second click, a sweep, the rest and leaving.
+- Surfaces: data, scope, ux
+- Touches red line: no
+- Contract change: no
+
+`UXR-07` Initiative refinements
+
+- While a row of the order is dragged, the others making room for it, sliding, so its slot shows where it will land; one reorder sent on the drop (`08` §12).
+- An initiative number stepped by the mouse wheel over its field, sent once the wheel rests (`08` §12).
+- The TV's strip showing only the turn's card and the next one, replaced on every turn; the players' projection unchanged (`08` §12, `04` §4).
+- Exit: unit tests cover the drag order and the wheel's steps, rest and bounds; the panel's tests cover the rows reflowed before the drop and the wheel sending once; the player view's tests cover the two cards, a turn players cannot see and a lone combatant; the initiative end-to-end test covers a real drag reflowing the rows, the wheel and the strip on each turn.
+- Surfaces: security, scope, ux
+- Touches red line: yes
 - Contract change: no
 
 ### Exit criteria

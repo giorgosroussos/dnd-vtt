@@ -138,10 +138,12 @@ After the Windows package (`13` §11), Emberglass MUST add: [Q-111, Q-112, Q-113
 
 ## 11. The UI/UX refinements
 
-After the DM toolkit (`13` §12), Emberglass MUST add: [Q-121, Q-122, Q-123, Q-124, Q-125, D-189]
+After the DM toolkit (`13` §12), Emberglass MUST add: [Q-121, Q-122, Q-123, Q-124, Q-125, Q-126, Q-127, D-189]
 
 - a scene sidebar that collapses to the edge of the DM view and opens on hover (`08` §1, `08` §14); [Q-121]
 - several tokens selected at once, moved, hidden or revealed, marked, damaged or healed and deleted together, one undo step on the live scene (`04` §2, `04` §8, `08` §14); [Q-122, Q-123]
 - a token added by dragging an asset from the library onto the map, beside the picker (`05` §5); [Q-124]
 - the campaigns menu's actions as icons with their names as tooltips (`08` §14); [D-189]
+- a second click on a token closing its popover, and the mouse resting on a token showing a read-only preview of it in the DM view (`08` §11, `08` §14); [Q-126]
+- the initiative order making room for a row as it is dragged, its numbers stepped by the mouse wheel, and the TV's strip naming only the turn and the next (`08` §12); [Q-127]
 - the read-only player view laid out for phones, tablets and large screens, with fullscreen and the screen's own pinch zoom on touch devices (`08` §7, `08` §9, `08` §14). [Q-125]

@@ -75,7 +75,7 @@ The DM view MUST provide, in the palette and typography of the redesign (`01` §
 - on the canvas a tool rail (Select V, Ruler M, Ping P, Fog brush F, Add token T, Undo, Redo), the grid and diagonal rule in use bottom left, the DM's zoom bottom right, and a shortcut bar below;
 - the frame of what the TV shows in the accent colour, the map outside it dimmed (§2);
 - a popover on the selected token with its name and visibility, Hide or Reveal (H), Rename, and a menu with Delete, Duplicate and stacking;
-- the popover opened by a click on the token, by its row in the right panel, or by placing or duplicating it; a press that moves about 4 px is a drag, which closes the popover, leaving it closed after the drop with the token still selected, and Escape, a click on empty map and the start of a pan close it too; [Q-102]
+- the popover opened by a click on the token, by its row in the right panel, or by placing or duplicating it; a press that moves about 4 px is a drag, which closes the popover, leaving it closed after the drop with the token still selected, and Escape, a click on empty map and the start of a pan close it too; a second click on the token whose popover is open closes it, the token still selected; [Q-102, Q-126]
 - in the right panel the live scene's tokens grouped by category, each with its visibility toggle; a row selects and centres its token;
 - tokens drawn as circles ringed by category, a hidden one with a dashed ring, a lighter fill, a crossed-eye badge and an italic label, so it is never taken for a visible one (§9);
 - no shortcut acting while a text field has focus.
@@ -94,7 +94,7 @@ The player view MUST show the live scene with a subtle vignette, labels sized to
 The DM view MUST add, on the live scene (`04` §14): [Q-111]
 
 - an Initiative tab in the right panel, its header showing the round while combat runs, and Start combat while it does not;
-- one row per entry in turn order, each with a drag handle, the token's avatar, its name and an optional initiative number field; typing a number sorts the rows, a drag sets the order and stands until a number is typed again, and Move up and Move down do what a drag does from the keyboard;
+- one row per entry in turn order, each with a drag handle, the token's avatar, its name and an optional initiative number field, the number typed or stepped by the mouse wheel over the field, an empty one starting at 10 [Q-127]; typing a number sorts the rows, a drag sets the order and stands until a number is typed again, and Move up and Move down do what a drag does from the keyboard;
 - the entry whose turn it is highlighted, and the next one marked; on each entry's turn its token ringed on the map and the DM's camera centred on it; an entry passed over (`04` §14) shown dimmed; [Q-111, Q-118]
 - Next turn (Enter) and Previous turn (Shift+Enter), the round counted when the turn passes the last entry; neither acting while a field, a button or a dialog has focus;
 - when Next finds no monster or npc entry that can take its turn, once the encounter has had one, "No enemies left. End combat?" with End combat and Continue; [Q-111, Q-118]
@@ -102,7 +102,7 @@ The DM view MUST add, on the live scene (`04` §14): [Q-111]
 - while combat runs, Add to initiative in the popover of a player character, monster or npc without an entry, saying why when players cannot see it or it carries Dead; a remove action on each row, and Remove dead beside the round, removing every Dead monster's and npc's entry; [Q-111, Q-118, D-183]
 - End combat asked first, saying that it cannot be undone once another scene goes live or the server restarts.
 
-While combat runs, the player view MUST show a strip along its top edge, readable from 2–3 m and no taller than it must be: in turn order, a card for each entry whose token players can see, player characters and enemies alike, with its portrait and its token's label as the map shows it ("Bandit 1"), a Dead one greyed, the turn's entry highlighted, the next one marked, and the round at one end; it shows no entry players cannot see, and fades in and out as scene changes do. [Q-111, Q-118]
+While combat runs, the player view MUST show a strip along its top edge, readable from 2–3 m and no taller than it must be: two cards only, the entry whose turn it is and the next one, each when players can see its token, player characters and enemies alike, with its portrait and its token's label as the map shows it ("Bandit 1"), a Dead one greyed, the turn's card highlighted, the next one marked, and the round at one end; both replaced on every turn; it shows no entry players cannot see, and fades in and out as scene changes do. [Q-111, Q-118, Q-127]
 
 ## 13. The DM toolkit
 
@@ -116,13 +116,14 @@ The DM view MUST add (`01` §10): [Q-112, Q-113, Q-114, Q-115]
 
 ## 14. The UI/UX refinements
 
-The DM view MUST add (`01` §11): [Q-121, Q-122, Q-123, Q-124, D-189]
+The DM view MUST add (`01` §11): [Q-121, Q-122, Q-123, Q-124, Q-126, D-189]
 
 - the scene sidebar collapsed by default to a strip at the left edge; the pointer near that edge, or its toggle, opens it over the map without resizing the map, and leaving it closes it; it stays open while it holds the focus, Escape closes it, and a pin docks it in its column, remembered by the browser; [Q-121]
 - Ctrl (Cmd on macOS) and a click adding a token to the selection or removing it, on the map and in the token list; a plain click selecting that token alone; a drag of a selected token moving the group with its offsets kept, the arrow keys nudging the group, Escape clearing it; [Q-122]
 - with two or more tokens selected, a bar naming how many, with Hide or Reveal (H; Hide unless all are hidden), a condition toggled on all (removed when all carry it, added otherwise), one amount of damage or healing applied to each, Delete asked once for the group, and Clear; on the live scene each action one `token.batch`, one undo step (`04` §2, `04` §8); [Q-122, Q-123]
 - an asset of the Library tab dragged onto the map placed where it is dropped (`05` §5), its footprint shown under the pointer, and the picker's rows laying out the thumbnail, the name and the Choose button on one line; [Q-124]
-- in the session switcher, each row's actions as icons whose names show as tooltips on hover and on keyboard focus, and New campaign and Import side by side. [D-189]
+- in the session switcher, each row's actions as icons whose names show as tooltips on hover and on keyboard focus, and New campaign and Import side by side; [D-189]
+- the mouse resting on a token for about half a second, while tokens can be selected, showing beside it a read-only preview with its name, whether players can see it, its hit points and armour class, its conditions and the first lines of its notes, or of its asset's when it has none; a pointer passing over a token, a touch, a held button or the token whose popover is open showing none; leaving the token, pressing it, zooming or another tool hiding it at once; the preview taking neither the pointer nor the focus, and never drawn on the player view. [Q-126]
 
 The player view MUST, on a touch device whose primary pointer is coarse and cannot hover: [Q-125]
 
