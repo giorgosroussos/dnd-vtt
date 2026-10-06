@@ -552,34 +552,39 @@ describe('the initiative strip (TBL-06, DMT-02, specs/08-ux-journeys.md §12)', 
     next,
   });
 
-  it('shows the order, the turn, the next and the round while combat runs, and fades away when it ends', async () => {
+  it('shows only the turn and the next with the round while combat runs, each turn anew, and fades away when it ends', async () => {
     const tokens = [pc(1, 'Tamsin', 0), pc(2, 'Wren', 1), token(3, 'Goblin', 2)];
     await open(snapshot(tokens));
     expect(strip()).toBeNull();
     await deliver('encounter.updated', 2, { encounter: encounter(0, 1) });
+    // Only the turn and the next: Wren, third in the order, is not on the strip (Q-127).
     expect(cards()).toEqual([
       ['Tamsin', 'now'],
       ['Goblin', 'next'],
-      ['Wren', ''],
     ]);
     expect(strip()!.textContent).toContain(t('initiative.tvRound', { round: 1 }));
     // Portraits are the display version players may fetch of tokens they see.
     expect(strip()!.querySelector('img')!.getAttribute('src')).toBe(imageFileUrl(IMAGE, 'display'));
     // The monster's card is its token's label, in the monster ring colour (Q-111).
     expect(strip()!.querySelectorAll('.eg-player__initiative-card--monster')).toHaveLength(1);
-    expect(strip()!.querySelectorAll('.eg-player__initiative-card--pc')).toHaveLength(2);
+    expect(strip()!.querySelectorAll('.eg-player__initiative-card--pc')).toHaveLength(1);
     // Nothing on the strip takes focus: the TV has no controls.
     expect(strip()!.querySelectorAll(FOCUSABLE)).toHaveLength(0);
     await deliver('encounter.updated', 3, { encounter: encounter(2, 0, 3) });
+    // The turn passes to the end of the order: the next wraps round to the top.
     expect(cards()).toEqual([
-      ['Tamsin', 'next'],
-      ['Goblin', ''],
       ['Wren', 'now'],
+      ['Tamsin', 'next'],
     ]);
     expect(strip()!.textContent).toContain(t('initiative.tvRound', { round: 3 }));
-    // A Dead goblin stays on the strip, greyed (Q-118).
+    // The goblin's turn: Dead while it is shown, it stays on the strip, greyed (Q-118).
+    await deliver('encounter.updated', 4, { encounter: encounter(1, 2, 3) });
+    expect(cards()).toEqual([
+      ['Goblin', 'now'],
+      ['Wren', 'next'],
+    ]);
     expect(strip()!.querySelector('[data-dead]')).toBeNull();
-    await deliver('token.updated', 4, {
+    await deliver('token.updated', 5, {
       token: { ...token(3, 'Goblin', 2), markers: [{ id: 'dead' }] },
       relabelled: [],
     });
@@ -587,7 +592,7 @@ describe('the initiative strip (TBL-06, DMT-02, specs/08-ux-journeys.md §12)', 
     expect(strip()!.querySelector('[data-dead]')!.classList).toContain('eg-player__initiative-card--dead');
     vi.useFakeTimers();
     await act(async () => {
-      fake.sockets[0]!.deliver({ type: 'encounter.updated', version: 5, payload: { encounter: null } });
+      fake.sockets[0]!.deliver({ type: 'encounter.updated', version: 6, payload: { encounter: null } });
       await Promise.resolve();
     });
     expect(strip()!.dataset.initiative).toBe('leaving');
@@ -602,11 +607,21 @@ describe('the initiative strip (TBL-06, DMT-02, specs/08-ux-journeys.md §12)', 
     const tokens = [pc(1, 'Tamsin', 0), pc(2, 'Wren', 1), token(3, 'Goblin', 2)];
     await open({ ...snapshot(tokens), scene: { ...snapshot(tokens).scene!, encounter: encounter(1, 2) as never } });
     expect(cards()).toEqual([
-      ['Tamsin', ''],
       ['Goblin', 'now'],
       ['Wren', 'next'],
     ]);
     await deliver('encounter.updated', 2, { encounter: { round: 0, entries: 'many' } });
-    expect(cards()).toHaveLength(3);
+    expect(cards()).toHaveLength(2);
+  });
+
+  it('shows the next alone on a turn players cannot see, and one card for a lone combatant (Q-127)', async () => {
+    const tokens = [pc(1, 'Tamsin', 0), pc(2, 'Wren', 1), token(3, 'Goblin', 2)];
+    await open(snapshot(tokens));
+    await deliver('encounter.updated', 2, { encounter: { ...encounter(0, 2), current: null } });
+    expect(cards()).toEqual([['Wren', 'next']]);
+    await deliver('encounter.updated', 3, {
+      encounter: { round: 2, entries: encounter(0, 0).entries.slice(0, 1), current: 0, next: 0 },
+    });
+    expect(cards()).toEqual([['Tamsin', 'now']]);
   });
 });

@@ -2212,8 +2212,13 @@ textarea.eg-field__input {
     inset 0 0 0 1px var(--color-selected-edge);
 }
 
-.eg-initiative__row--drop {
-  box-shadow: inset 0 3px 0 var(--color-focus);
+/* The dragged row's slot, where it will land: the others make room for it as it moves. */
+.eg-initiative__row--dragging,
+.eg-initiative__row--dragging:hover {
+  opacity: 0.45;
+  background: var(--color-hover);
+  outline: 1px dashed var(--color-focus);
+  outline-offset: -1px;
 }
 
 .eg-initiative__row--passed .eg-initiative__name {

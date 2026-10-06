@@ -592,6 +592,7 @@
   "initiative.nextKey": "Enter",
   "initiative.numberOf": "Initiative of {name}",
   "initiative.numberPlaceholder": "Init",
+  "initiative.numberHint": "Type a number, or scroll over the field to raise or lower it.",
   "initiative.endDialog.heading": "End combat?",
   "initiative.endDialog.body": "The turn order and the round are cleared. Undo brings them back only until another scene goes live or the server restarts.",
   "initiative.endDialog.confirm": "End combat",
