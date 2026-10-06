@@ -1,4 +1,4 @@
-import { Icon } from './icons.js';
+import { Logo } from './Logo.js';
 import { t } from './messages.js';
 
 // The player view when no scene is live (specs/08-ux-journeys.md §4, §9, §11, Q-025, Q-100, UIX-01): dark,
@@ -10,7 +10,7 @@ export function IdleScreen() {
     <div className="eg-idle">
       <div className="eg-idle__glow" aria-hidden="true" />
       <span className="eg-idle__logo" aria-hidden="true">
-        <Icon name="logo" size={120} strokeWidth={1.1} />
+        <Logo size={120} />
       </span>
       <div className="eg-idle__text">
         <p className="eg-idle__name">{t('app.name')}</p>

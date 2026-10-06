@@ -43,7 +43,7 @@ const isVariant = (value: string): value is ImageVariant => (IMAGE_VARIANTS as r
 // DISCARD_MS is cut off (D-082).
 export const DISCARD_MS = 30_000;
 
-function discardRest(raw: IncomingMessage): void {
+export function discardRest(raw: IncomingMessage): void {
   if (raw.readableEnded || raw.destroyed) return;
   // Destroying the request destroys its connection.
   const timer = setTimeout(() => raw.destroy(), DISCARD_MS);

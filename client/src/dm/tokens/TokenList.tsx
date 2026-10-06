@@ -4,6 +4,8 @@ import { Icon } from '../../ui/icons.js';
 import { t, type MessageKey } from '../../ui/messages.js';
 import { initialsOf } from '../../canvas/TokenLayer.js';
 import { markerName } from '../../ui/conditions.js';
+import { TokenStatsBadge } from './TokenStats.js';
+import { NoteMark } from '../notes/Notes.js';
 
 const CATEGORY_NAMES: Record<AssetCategory, MessageKey> = {
   pc: 'asset.category.pc',
@@ -22,7 +24,8 @@ const GROUPS: { key: 'party' | 'monsters' | 'others'; heading: MessageKey; categ
 // "In this scene", the right panel's first tab (UIX-01, specs/08-ux-journeys.md §11): the scene's tokens
 // grouped into the party (player characters), the monsters, with Reveal all while any is hidden, and every
 // other token (NPCs and objects, which the design draws no group for). Each row names its token and says
-// what it is or that it is hidden, with its eye toggle; a hidden row is italic, its avatar ring dashed and
+// what it is or that it is hidden, with its eye toggle and, when it has notes of its own or from its asset, a page
+// mark whose hover text is their first lines (DMT-04); a hidden row is italic, its avatar ring dashed and
 // its eye crossed out, so it never reads as a visible one. A row selects its token and centres the map on
 // it. Every control is a native button, so the keyboard reaches all of it.
 /**
@@ -40,7 +43,9 @@ function statusOf(token: SceneToken, fog: FogMask): string {
 export function TokenList({
   tokens,
   selectedId,
+  selectedIds,
   onSelect,
+  onToggle,
   onToggleHidden,
   onRevealAll,
   onAdd,
@@ -50,7 +55,11 @@ export function TokenList({
   /** The scene's painted fog, which a token's status says it stands under (TBL-04). */
   fog?: FogMask;
   selectedId: string | undefined;
+  /** Several selected (UXR-02): every one is marked selected. */
+  selectedIds?: readonly string[] | undefined;
   onSelect: (token: SceneToken) => void;
+  /** Ctrl (Cmd on macOS) and a click on a row: the token joins the selection or leaves it (UXR-02). */
+  onToggle?: ((token: SceneToken) => void) | undefined;
   onToggleHidden: (token: SceneToken) => void;
   onRevealAll: (tokens: SceneToken[]) => void;
   /** Add token; absent while tokens cannot be added. */
@@ -95,15 +104,22 @@ export function TokenList({
               {members.map((token) => (
                 <li
                   key={token.id}
-                  className={token.id === selectedId ? 'eg-token-row eg-token-row--selected' : 'eg-token-row'}
+                  className={
+                    (selectedIds?.includes(token.id) ?? token.id === selectedId)
+                      ? 'eg-token-row eg-token-row--selected'
+                      : 'eg-token-row'
+                  }
                   data-hidden={token.hidden || undefined}
                   data-token={token.id}
                 >
                   <button
                     type="button"
                     className="eg-token-row__select"
-                    aria-current={token.id === selectedId || undefined}
-                    onClick={() => onSelect(token)}
+                    aria-current={(selectedIds?.includes(token.id) ?? token.id === selectedId) || undefined}
+                    onClick={(event) => {
+                      if (onToggle && (event.ctrlKey || event.metaKey)) onToggle(token);
+                      else onSelect(token);
+                    }}
                   >
                     <span className={`eg-avatar eg-avatar--${token.asset.category}`} aria-hidden="true">
                       {initialsOf(token.label)}
@@ -112,6 +128,8 @@ export function TokenList({
                       <span className="eg-token-row__name">{token.label}</span>
                       <span className="eg-token-row__status">{statusOf(token, fog)}</span>
                     </span>
+                    <NoteMark token={token} />
+                    <TokenStatsBadge stats={token} />
                   </button>
                   <button
                     type="button"

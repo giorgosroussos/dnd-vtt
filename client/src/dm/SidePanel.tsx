@@ -1,19 +1,25 @@
 import { useId, useRef, type KeyboardEvent, type ReactNode } from 'react';
 import { t } from '../ui/messages.js';
 
-export type SideTab = 'scene' | 'initiative' | 'library';
-const TABS: readonly SideTab[] = ['scene', 'initiative', 'library'];
-const LABELS = { scene: 'side.scene', initiative: 'side.initiative', library: 'side.library' } as const;
+export type SideTab = 'scene' | 'initiative' | 'notes' | 'library';
+const TABS: readonly SideTab[] = ['scene', 'initiative', 'notes', 'library'];
+const LABELS = {
+  scene: 'side.scene',
+  initiative: 'side.initiative',
+  notes: 'side.notes',
+  library: 'side.library',
+} as const;
 
-// The right-hand panel of the workspace (UIX-01, specs/08-ux-journeys.md §1, §11, §12, Q-100, Q-104): three
-// tabs, the tokens of the scene being shown, its initiative order and the asset library, in the tabs pattern:
-// the arrow keys move between the tabs, which switch at once. Every tab stays in the Tab order, so Tab alone
+// The right-hand panel of the workspace (UIX-01, specs/08-ux-journeys.md §1, §11, §12, §13, Q-100, Q-104, Q-114):
+// four tabs, the tokens of the scene being shown, its initiative order, its notes and the asset library, in the tabs
+// pattern: the arrow keys move between the tabs, which switch at once. Every tab stays in the Tab order, so Tab alone
 // reaches each. While combat runs, the Initiative tab names the round.
 export function SidePanel({
   tab,
   onTab,
   scene,
   initiative,
+  notes,
   round,
   library,
 }: {
@@ -23,12 +29,19 @@ export function SidePanel({
   scene: ReactNode;
   /** The scene's initiative order, or undefined while no scene is shown. */
   initiative?: ReactNode;
+  /** The scene's notes (DMT-04), or undefined while no scene is shown. */
+  notes?: ReactNode;
   /** The round, while combat runs on the scene shown. */
   round?: number | undefined;
   library: ReactNode;
 }) {
   const id = useId();
-  const tabs = useRef<Record<SideTab, HTMLButtonElement | null>>({ scene: null, initiative: null, library: null });
+  const tabs = useRef<Record<SideTab, HTMLButtonElement | null>>({
+    scene: null,
+    initiative: null,
+    notes: null,
+    library: null,
+  });
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
     event.preventDefault();
@@ -61,7 +74,9 @@ export function SidePanel({
       <div className="eg-side__panel" role="tabpanel" id={`${id}-${tab}-panel`} aria-labelledby={`${id}-${tab}`}>
         {tab === 'library'
           ? library
-          : ((tab === 'scene' ? scene : initiative) ?? <p className="eg-dm__status">{t('side.noScene')}</p>)}
+          : ((tab === 'scene' ? scene : tab === 'notes' ? notes : initiative) ?? (
+              <p className="eg-dm__status">{t('side.noScene')}</p>
+            ))}
       </div>
     </aside>
   );

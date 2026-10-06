@@ -4,7 +4,7 @@ How the DM prepares and runs a session, what the TV shows, and how screens get c
 
 ## 1. DM workspace
 
-- The DM view MUST be one workspace: a header that names the campaign and session and says what the TV shows, a left sidebar listing the current session's scenes, the scene canvas in the centre, and a right-hand panel whose tabs are the live scene's tokens and the asset library (§11). [Q-023, Q-100]
+- The DM view MUST be one workspace: a header that names the campaign and session and says what the TV shows, a left sidebar listing the current session's scenes, collapsible (§14), the scene canvas in the centre, and a right-hand panel whose tabs are the live scene's tokens and the asset library (§11). [Q-023, Q-100, Q-121]
 - The Campaign → Session → Scene tree MUST be reachable from the header's session switcher, where campaigns and sessions are created, renamed, deleted and reordered. [Q-100]
 - Campaigns, sessions and scenes MUST be creatable, renamable and deletable; sessions MUST be reorderable by dragging in the tree and scenes by dragging in the scene list, each with a keyboard alternative, while campaigns are listed by name. [input, Q-023, Q-089, Q-090, Q-100]
 
@@ -20,6 +20,7 @@ How the DM prepares and runs a session, what the TV shows, and how screens get c
 
 - Both views MUST show the scene's map as a background image with zoom and pan. [input]
 - The DM view MUST support drag to move tokens, Ctrl+Z to undo on the live scene (`04` §8), and the add-token flow of `05` §5. [input]
+- The DM view MUST support selecting several tokens and acting on them together (§14). [Q-122]
 
 ## 4. Player view
 
@@ -41,6 +42,7 @@ How the DM prepares and runs a session, what the TV shows, and how screens get c
 ## 7. Devices
 
 - The DM view MUST support laptop and desktop browsers with mouse and keyboard; touch devices are not supported in the MVP. [Q-029]
+- The player view MUST also lay out on phones and tablets, portrait or landscape, and on large desktop screens, and MUST take touch on a device whose primary pointer is coarse and cannot hover (§14); the DM view stays mouse and keyboard. [Q-125]
 - The player view MUST work on the acceptance browsers and TV of `10` §4. [Q-019, recommendation accepted]
 
 ## 8. Accessibility
@@ -49,7 +51,7 @@ How the DM prepares and runs a session, what the TV shows, and how screens get c
 
 ## 9. Presentation details
 
-- A hidden token is drawn semi-transparent with a hidden marker in the DM view; the player view has no controls and hides the cursor after two seconds. [Q-054]
+- A hidden token is drawn semi-transparent with a hidden marker in the DM view; the player view has no controls and hides the cursor after two seconds. [Q-054] On a touch device without hover, and only there, the player view MAY show the fullscreen and reset buttons of §14. [Q-125]
 
 ## 10. Critical journeys
 
@@ -89,14 +91,45 @@ The player view MUST show the live scene with a subtle vignette, labels sized to
 
 ## 12. Initiative
 
-The DM view MUST add, on the live scene (`04` §14): [Q-104]
+The DM view MUST add, on the live scene (`04` §14): [Q-111]
 
 - an Initiative tab in the right panel, its header showing the round while combat runs, and Start combat while it does not;
 - one row per entry in turn order, each with a drag handle, the token's avatar, its name and an optional initiative number field; typing a number sorts the rows, a drag sets the order and stands until a number is typed again, and Move up and Move down do what a drag does from the keyboard;
-- the entry whose turn it is highlighted, and the next one marked; on a player character's turn its token ringed on the map and the DM's camera centred on it; on the Enemies turn the row opened to list its members with their conditions, each member's token lightly ringed on the map, and a member chosen selecting and centring its token;
+- the entry whose turn it is highlighted, and the next one marked; on each entry's turn its token ringed on the map and the DM's camera centred on it; an entry passed over (`04` §14) shown dimmed; [Q-111, Q-118]
 - Next turn (Enter) and Previous turn (Shift+Enter), the round counted when the turn passes the last entry; neither acting while a field, a button or a dialog has focus;
-- when the Enemies turn starts with no members left, "No enemies left. End combat?" with End combat and Continue; [Q-106]
-- an offer to add a player character token that players can now see and that has no entry ("Add {name} to initiative?"), at the end of the order;
+- when Next finds no monster or npc entry that can take its turn, once the encounter has had one, "No enemies left. End combat?" with End combat and Continue; [Q-111, Q-118]
+- an offer to add the tokens that players can now see and that have no entry, player characters, or monsters or npcs not carrying Dead: one offer for all of them, a fog region revealing four goblins included ("Add {name} to initiative?" for one), each with an optional initiative number, with Add all and Skip; an entry with a number goes in by it (`04` §14), one without at the end of the order, and Skip adds none; [Q-111, Q-117, D-183]
+- while combat runs, Add to initiative in the popover of a player character, monster or npc without an entry, saying why when players cannot see it or it carries Dead; a remove action on each row, and Remove dead beside the round, removing every Dead monster's and npc's entry; [Q-111, Q-118, D-183]
 - End combat asked first, saying that it cannot be undone once another scene goes live or the server restarts.
 
-While combat runs, the player view MUST show a strip along its top edge, readable from 2–3 m and no taller than it must be: each player character's portrait and name and one "Enemies" card in turn order, the turn's entry highlighted, the next one marked, and the round at one end; it MUST name no monster or npc and give no count of them, and fades in and out as scene changes do. [Q-104]
+While combat runs, the player view MUST show a strip along its top edge, readable from 2–3 m and no taller than it must be: in turn order, a card for each entry whose token players can see, player characters and enemies alike, with its portrait and its token's label as the map shows it ("Bandit 1"), a Dead one greyed, the turn's entry highlighted, the next one marked, and the round at one end; it shows no entry players cannot see, and fades in and out as scene changes do. [Q-111, Q-118]
+
+## 13. The DM toolkit
+
+The DM view MUST add (`01` §10): [Q-112, Q-113, Q-114, Q-115]
+
+- a token's hit points, current, maximum and temporary, and its armour class, each optional, read and set wherever the token is edited, on every scene, and on the live scene damage or healing applied by an amount (`04` §15); none of it ever drawn on the player view; [Q-112]
+- an asset's default maximum hit points and armour class in the asset's editor (`03` §9); [Q-112]
+- Follow my view among the TV camera controls of the live scene (§11), a toggle whose state is plain to see, off whenever another TV camera control is used or the TV camera is locked (`04` §9); [Q-113]
+- the scene's notes, and a token's notes with its asset's notes beside them, read-only, each readable and editable on every scene (`03` §10); [Q-114]
+- Export of a campaign and of library assets, the selected ones or all, and Import of either, an import saying what it added and what it reused, or why it was refused (`09` §9). [Q-115]
+
+## 14. The UI/UX refinements
+
+The DM view MUST add (`01` §11): [Q-121, Q-122, Q-123, Q-124, D-189]
+
+- the scene sidebar collapsed by default to a strip at the left edge; the pointer near that edge, or its toggle, opens it over the map without resizing the map, and leaving it closes it; it stays open while it holds the focus, Escape closes it, and a pin docks it in its column, remembered by the browser; [Q-121]
+- Ctrl (Cmd on macOS) and a click adding a token to the selection or removing it, on the map and in the token list; a plain click selecting that token alone; a drag of a selected token moving the group with its offsets kept, the arrow keys nudging the group, Escape clearing it; [Q-122]
+- with two or more tokens selected, a bar naming how many, with Hide or Reveal (H; Hide unless all are hidden), a condition toggled on all (removed when all carry it, added otherwise), one amount of damage or healing applied to each, Delete asked once for the group, and Clear; on the live scene each action one `token.batch`, one undo step (`04` §2, `04` §8); [Q-122, Q-123]
+- an asset of the Library tab dragged onto the map placed where it is dropped (`05` §5), its footprint shown under the pointer, and the picker's rows laying out the thumbnail, the name and the Choose button on one line; [Q-124]
+- in the session switcher, each row's actions as icons whose names show as tooltips on hover and on keyboard focus, and New campaign and Import side by side. [D-189]
+
+The player view MUST, on a touch device whose primary pointer is coarse and cannot hover: [Q-125]
+
+- show a fullscreen button when the browser can put the page in fullscreen, fading after a few seconds without a touch;
+- zoom by a pinch between the whole map and eight times the DM's camera, and pan by a drag, on that screen only, sending nothing;
+- return to the DM's camera on a button shown while zoomed, on a double tap and whenever a scene goes live;
+- not report its size, so that the TV frame keeps the TV's shape (`04` §9).
+
+The DM's camera is such a screen's starting view, not its limit: it holds only what the server sends every player screen (`04` §4). On every other screen the player view keeps no controls (§9). [Q-125]
+

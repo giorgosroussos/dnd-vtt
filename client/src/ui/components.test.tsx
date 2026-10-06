@@ -5,6 +5,7 @@ import { DmView } from '../dm/DmView.js';
 import { PlayerView } from '../player/PlayerView.js';
 import { loadGuardedView } from '../views.js';
 import { Button } from './Button.js';
+import { IconButton } from './IconButton.js';
 import { ErrorBoundary } from './ErrorBoundary.js';
 import { DmErrorScreen } from './ErrorScreen.js';
 import { IdleScreen } from './IdleScreen.js';
@@ -29,6 +30,45 @@ describe('Button', () => {
     const button = rendered.container.querySelector('button')!;
     expect(button.type).toBe('button');
     expect(button.className).toContain('eg-button--secondary');
+  });
+});
+
+describe('IconButton', () => {
+  const tooltip = () => document.querySelector('.eg-tooltip');
+
+  it('is named by its label and shows its tip on hover, hidden from assistive technology', () => {
+    rendered = render(
+      createElement(IconButton, { icon: 'trash', label: t('tree.deleteOf', { name: 'Tomb' }), tip: t('tree.delete') }),
+    );
+    const button = rendered.container.querySelector('button')!;
+    expect(button.type).toBe('button');
+    expect(button.getAttribute('aria-label')).toBe(t('tree.deleteOf', { name: 'Tomb' }));
+    expect(tooltip()).toBeNull();
+    act(() => {
+      button.dispatchEvent(new MouseEvent('pointerover', { bubbles: true }));
+    });
+    expect(tooltip()?.textContent).toBe(t('tree.delete'));
+    expect(tooltip()?.getAttribute('aria-hidden')).toBe('true');
+    act(() => {
+      button.dispatchEvent(new MouseEvent('pointerout', { bubbles: true }));
+    });
+    expect(tooltip()).toBeNull();
+  });
+
+  it('shows its tip on keyboard focus and hides it on blur and Escape', () => {
+    rendered = render(createElement(IconButton, { icon: 'pencil', label: t('tree.rename') }));
+    const button = rendered.container.querySelector('button')!;
+    act(() => button.focus());
+    expect(tooltip()?.textContent).toBe(t('tree.rename'));
+    act(() => {
+      button.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(tooltip()).toBeNull();
+    act(() => button.blur());
+    act(() => button.focus());
+    expect(tooltip()).not.toBeNull();
+    act(() => button.blur());
+    expect(tooltip()).toBeNull();
   });
 });
 

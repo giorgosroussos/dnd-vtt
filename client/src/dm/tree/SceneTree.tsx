@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent, type ReactNode } from 'react';
-import { API_STRUCTURE_PATHS as PATHS, type Campaign, type Scene, type Session } from '@emberglass/shared';
+import {
+  API_STRUCTURE_PATHS as PATHS,
+  exportCampaignPath,
+  type Campaign,
+  type Scene,
+  type Session,
+} from '@emberglass/shared';
+import { ImportDialog } from '../archive/ImportDialog.js';
 import { Button } from '../../ui/Button.js';
+import { IconButton, IconLink } from '../../ui/IconButton.js';
+import { Icon } from '../../ui/icons.js';
 import { Notice } from '../../ui/Notice.js';
 import { TextField } from '../../ui/TextField.js';
 import { useFocusLater } from '../../ui/useFocusLater.js';
@@ -16,7 +25,9 @@ import { entityPath, sceneOrderPath, scenesPath, sessionOrderPath, sessionsPath,
 // Every action is a visible button in the Tab order. Sessions and scenes reorder by
 // dragging among their siblings, or by Move up and Move down from the keyboard;
 // campaigns stay in the server's order, by name. The server's answer is always
-// what the tree shows next: after a change, the list it changed is read again.
+// what the tree shows next: after a change, the list it changed is read again. Each campaign offers Export, a
+// download of its archive, and the tree one Import, of a campaign or library assets (DMT-05, specs/08-ux-journeys.md
+// §13); an imported campaign appears in the list once the import ends.
 
 type Ordered = 'session' | 'scene';
 type Action = 'name' | 'up' | 'down' | 'rename';
@@ -65,6 +76,7 @@ export function SceneTree({
   const [creating, setCreating] = useState<string>();
   const [renaming, setRenaming] = useState<string>();
   const [deleting, setDeleting] = useState<DeleteTarget>();
+  const [importing, setImporting] = useState(false);
   const [dragging, setDragging] = useState<Dragging>();
   // The row a drag is over, drawn as where the dragged one will land (G-018).
   const [over, setOver] = useState<string>();
@@ -335,42 +347,50 @@ export function SceneTree({
               ) : null}
               {orderable ? (
                 <>
-                  <Button
-                    size="small"
+                  <IconButton
+                    icon="arrowUp"
                     data-action="up"
-                    aria-label={t('tree.moveUpOf', { name })}
+                    label={t('tree.moveUpOf', { name })}
+                    tip={t('tree.moveUp')}
                     disabled={index <= 0 || reordering === options.parentId}
                     onClick={() => move(-1)}
-                  >
-                    {t('tree.moveUp')}
-                  </Button>
-                  <Button
-                    size="small"
+                  />
+                  <IconButton
+                    icon="arrowDown"
                     data-action="down"
-                    aria-label={t('tree.moveDownOf', { name })}
+                    label={t('tree.moveDownOf', { name })}
+                    tip={t('tree.moveDown')}
                     disabled={index < 0 || index >= options.siblings!.length - 1 || reordering === options.parentId}
                     onClick={() => move(1)}
-                  >
-                    {t('tree.moveDown')}
-                  </Button>
+                  />
                 </>
               ) : null}
-              <Button
-                size="small"
+              {kind === 'campaign' ? (
+                // A download: the browser saves the archive the server streams, named by the campaign and the date.
+                <IconLink
+                  icon="download"
+                  href={exportCampaignPath(item.id)}
+                  download
+                  data-action="export"
+                  label={t('tree.exportOf', { name })}
+                  tip={t('tree.export')}
+                />
+              ) : null}
+              <IconButton
+                icon="pencil"
                 data-action="rename"
-                aria-label={t('tree.renameOf', { name })}
+                label={t('tree.renameOf', { name })}
+                tip={t('tree.rename')}
                 onClick={() => setRenaming(item.id)}
-              >
-                {t('tree.rename')}
-              </Button>
-              <Button
-                size="small"
+              />
+              <IconButton
+                icon="trash"
+                danger
                 data-action="delete"
-                aria-label={t('tree.deleteOf', { name })}
+                label={t('tree.deleteOf', { name })}
+                tip={t('tree.delete')}
                 onClick={() => setDeleting({ kind, id: item.id, name })}
-              >
-                {t('tree.delete')}
-              </Button>
+              />
             </span>
           </div>
         )}
@@ -463,9 +483,30 @@ export function SceneTree({
               });
             })}
           </ul>
-          {createControl('', 'tree.newCampaign', 'tree.campaignName')}
+          {creating === '' ? (
+            createControl('', 'tree.newCampaign', 'tree.campaignName')
+          ) : (
+            <div className="eg-tree__create eg-tree__create--footer">
+              <Button size="small" data-action="new-campaign" onClick={() => setCreating('')}>
+                <Icon name="plus" size={14} />
+                {t('tree.newCampaign')}
+              </Button>
+              <Button size="small" data-action="import" onClick={() => setImporting(true)}>
+                <Icon name="upload" size={14} />
+                {t('tree.import')}
+              </Button>
+            </div>
+          )}
         </>
       )}
+      {importing ? (
+        <ImportDialog
+          onImported={(summary) => {
+            if (summary.campaign !== null) void loadCampaigns();
+          }}
+          onClose={() => setImporting(false)}
+        />
+      ) : null}
       {deleting ? (
         <DeleteDialog
           target={deleting}

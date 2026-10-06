@@ -1,5 +1,6 @@
 import { Type, type Static } from 'typebox';
 import { MarkersSchema } from './conditions.js';
+import { AcSchema, HpMaxSchema, HpSchema } from './hp.js';
 
 // The eight stored entities of specs/03-domain-model.md §1, as the server reads
 // them from SQLite (server/migrations/0001_initial_schema.sql, D-075). Field
@@ -10,7 +11,8 @@ import { MarkersSchema } from './conditions.js';
 // LIV-02 (specs/04-live-sync.md §4), never these records.
 
 // Lowercase, as the server generates them (specs/03-domain-model.md §3, D-038).
-export const UuidSchema = Type.String({ pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' });
+export const UUID_PATTERN = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
+export const UuidSchema = Type.String({ pattern: UUID_PATTERN });
 // The lowercase hex sha256 of an image's original bytes (specs/03-domain-model.md §3).
 export const Sha256Schema = Type.String({ pattern: '^[0-9a-f]{64}$' });
 
@@ -32,6 +34,8 @@ export const DEFAULT_SETTINGS = {
   display_variant_size: 4096,
   // Automatic: the connect panel ranks the addresses itself (specs/08-ux-journeys.md §5, Q-110).
   tv_address: null,
+  // An archive and its entries once unpacked, at most 2 GB (specs/09-operations.md §7, §9, Q-119).
+  import_limit_bytes: 2 * 1024 * 1024 * 1024,
 } as const;
 
 const strict = { additionalProperties: false } as const;
@@ -96,6 +100,9 @@ export const AssetSchema = Type.Object(
     size: Type.Enum(TOKEN_SIZES),
     default_hidden: Type.Boolean(),
     notes: Type.String(),
+    // Defaults copied to its new tokens, or none (DMT-01, specs/03-domain-model.md §9); the DM's only.
+    hp_max: HpMaxSchema,
+    ac: AcSchema,
   },
   strict,
 );
@@ -135,6 +142,8 @@ export const SceneSchema = Type.Object(
     order: Type.Integer({ minimum: 0 }),
     map_image_id: Type.Union([Sha256Schema, Type.Null()]),
     grid: GridSchema,
+    // The DM's notes, plain text, never sent to players (DMT-04, specs/03-domain-model.md §10).
+    notes: Type.String(),
   },
   strict,
 );
@@ -154,6 +163,14 @@ export const TokenSchema = Type.Object(
     markers: MarkersSchema,
     // Always empty in the MVP; Phase 2 links characters through it.
     character_id: Type.Null(),
+    // Hit points and armour class, each optional (DMT-01, specs/03-domain-model.md §9): the DM's only, never in
+    // a players' token (specs/04-live-sync.md §4).
+    hp_current: HpSchema,
+    hp_max: HpMaxSchema,
+    hp_temp: HpSchema,
+    ac: AcSchema,
+    // The DM's notes, plain text, never in a players' token (DMT-04, specs/03-domain-model.md §10).
+    notes: Type.String(),
   },
   strict,
 );
@@ -169,6 +186,8 @@ export const SettingsSchema = Type.Object(
     display_variant_size: Type.Integer({ minimum: 1 }),
     // The TV address the DM chose in Settings, or null for Automatic (specs/08-ux-journeys.md §5, Q-110).
     tv_address: Type.Union([Ipv4Schema, Type.Null()]),
+    // The largest archive an import takes, and the most its entries may unpack to (DMT-05, specs/09-operations.md §9).
+    import_limit_bytes: Type.Integer({ minimum: 1 }),
   },
   strict,
 );

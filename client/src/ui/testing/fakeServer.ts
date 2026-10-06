@@ -18,11 +18,22 @@ import {
   withoutEntry,
   type Encounter,
   type EncounterChange,
+  type ImportProgress,
   type FogMask,
   type FogStroke,
   type FogWriteBody,
   normaliseMarkers,
+  applyHp,
+  hpChanged,
+  markersForHp,
+  sameStats,
+  statsFromAsset,
+  statsOf,
+  withStats,
+  type TokenMarker,
+  type TokenStats,
   TokenUpdateBodySchema,
+  NotesBodySchema,
   type CommandAck,
   type CommandEnvelope,
   type DmSnapshot,
@@ -103,7 +114,9 @@ type Undoable =
   | CommandEnvelope
   | { type: 'restore'; token: SceneToken; encounter?: Encounter }
   | { type: 'restoreFog'; sceneId: string; fog: FogMask }
-  | { type: 'restoreEncounter'; sceneId: string; encounter: Encounter | null };
+  | { type: 'restoreEncounter'; sceneId: string; encounter: Encounter | null }
+  // Hit points, armour class and the markers they set, put back together (DMT-01), as the server's inverse.
+  | { type: 'restoreStats'; tokenId: string; stats: TokenStats; markers: TokenMarker[] };
 
 const uuid = (): string => `00000000-0000-4000-8000-${String(++counter).padStart(12, '0')}`;
 
@@ -121,6 +134,22 @@ export class FakeServer {
   tokens: Record<string, number> = {};
   liveSceneId: string | null = null;
   uploadLimit = 50 * 1024 * 1024;
+  importLimit = 2 * 1024 * 1024 * 1024;
+  /** What POST /api/import answers (DMT-05); the archives it was sent, and what GET /api/import/progress says. */
+  importReply: { status: number; body: unknown } = {
+    status: 200,
+    body: {
+      kind: 'assets',
+      campaign: null,
+      sessions: 0,
+      scenes: 0,
+      tokens: 0,
+      assets: { added: 1, reused: 0 },
+      images: { added: 1, reused: 0 },
+    },
+  };
+  imports: unknown[] = [];
+  importProgress: ImportProgress = { running: false, stage: null, done: 0, total: 0 };
   /** The TV address chosen in Settings, null for Automatic (Q-110). */
   tvAddress: string | null = null;
   displaySize = 4096;
@@ -214,6 +243,7 @@ export class FakeServer {
       order,
       map_image_id: null,
       grid: { ...DEFAULT_GRID },
+      notes: '',
     };
     this.scenes.push(scene);
     this.tokens[scene.id] = tokens;
@@ -228,6 +258,8 @@ export class FakeServer {
       size: 'medium',
       default_hidden: fields.category === undefined || fields.category === 'monster',
       notes: '',
+      hp_max: null,
+      ac: null,
       tags: [],
       ...fields,
     };
@@ -252,7 +284,16 @@ export class FakeServer {
       z_order: top + 1,
       markers: [],
       character_id: null,
-      asset: { name: asset.name, image_id: asset.image_id, size: asset.size, category: asset.category },
+      // The asset's defaults, at full hit points, as the server copies them (DMT-01).
+      ...statsFromAsset(asset),
+      notes: '',
+      asset: {
+        name: asset.name,
+        image_id: asset.image_id,
+        size: asset.size,
+        category: asset.category,
+        notes: asset.notes,
+      },
       ...fields,
     };
     this.sceneTokens.push(token);
@@ -336,11 +377,17 @@ export class FakeServer {
       return json(204);
     }
     const { stack, ...fields } = b as Partial<SceneToken> & { stack?: 'front' | 'back' };
+    const statsBefore = statsOf(token);
     const revealed =
       token.hidden && fields.hidden === false && fields.label === undefined && token.label === token.asset.name;
     Object.assign(token, fields, typeof fields.label === 'string' ? { label: fields.label.trim() } : {});
     // Each condition once, in the order sent, as the server stores them (TBL-05).
     if (fields.markers) token.markers = normaliseMarkers(fields.markers);
+    // Hit points as the server keeps them, setting the markers they drive unless the body gives them (DMT-01).
+    Object.assign(token, withStats(statsBefore, statsOf(token)));
+    if (!fields.markers && hpChanged(statsBefore, token)) {
+      token.markers = markersForHp(token.asset.category, token, token.markers);
+    }
     const renamed = revealed ? this.numberAs(token) : undefined;
     if (stack) {
       const others = this.tokensOf(token.scene_id)
@@ -355,6 +402,28 @@ export class FakeServer {
       }
     }
     return json(200, { token: { ...token }, relabelled: renamed ? [{ ...renamed }] : [] });
+  }
+
+  // DM notes (DMT-04), as the server keeps them: on any scene, the live one included, the whole text; the live
+  // scene's reach every DM socket as `notes.updated`.
+  private handleNotes(method: string, kind: 'scene' | 'token', id: string, b: Record<string, unknown>): Reply {
+    if (method !== 'PUT') return failure(404, 'not_found');
+    if (!Value.Check(NotesBodySchema, b)) return failure(400, 'validation_failed');
+    const notes = b.notes;
+    if (kind === 'scene') {
+      const scene = this.scenes.find((each) => each.id === id);
+      if (!scene) return failure(404, 'not_found');
+      scene.notes = notes;
+      if (scene.id === this.liveSceneId) this.deliver('notes.updated', { scene_id: id, token_id: null, notes });
+      return json(200, { ...scene });
+    }
+    const token = this.sceneTokens.find((each) => each.id === id);
+    if (!token) return failure(404, 'not_found');
+    token.notes = notes;
+    if (token.scene_id === this.liveSceneId) {
+      this.deliver('notes.updated', { scene_id: token.scene_id, token_id: id, notes });
+    }
+    return json(200, this.withAsset(token));
   }
 
   addImage(fields: Partial<Image> = {}): Image {
@@ -422,7 +491,8 @@ export class FakeServer {
     this.calls.push(call);
     const intercepted = await this.before?.(call);
     if (intercepted) return intercepted;
-    if (call.method === 'GET') return this.handle(call);
+    // Notes tell the DM room by `notes.updated` alone, never by a snapshot (DMT-04).
+    if (call.method === 'GET' || /\/notes$/.test(call.path)) return this.handle(call);
     const before = this.dmSnapshot();
     const reply = this.handle(call);
     if (before.scene !== null && before.scene.scene.map_image_id !== this.liveMap()) {
@@ -516,7 +586,13 @@ export class FakeServer {
       asset
         ? {
             ...token,
-            asset: { name: asset.name, image_id: asset.image_id, size: asset.size, category: asset.category },
+            asset: {
+              name: asset.name,
+              image_id: asset.image_id,
+              size: asset.size,
+              category: asset.category,
+              notes: asset.notes,
+            },
           }
         : token,
     );
@@ -582,9 +658,15 @@ export class FakeServer {
               ? { type: 'token.setVisibility' as const, payload: { token_id: was.id, hidden: was.hidden } }
               : envelope.type === 'token.setMarkers' && was
                 ? { type: 'token.setMarkers' as const, payload: { token_id: was.id, markers: [...was.markers] } }
-                : envelope.type === 'token.delete' && was
-                  ? { type: 'restore' as const, token: was, ...(encounterBefore ? { encounter: encounterBefore } : {}) }
-                  : fogInverse);
+                : (envelope.type === 'token.setStats' || envelope.type === 'token.applyHp') && was
+                  ? { type: 'restoreStats' as const, tokenId: was.id, stats: statsOf(was), markers: [...was.markers] }
+                  : envelope.type === 'token.delete' && was
+                    ? {
+                        type: 'restore' as const,
+                        token: was,
+                        ...(encounterBefore ? { encounter: encounterBefore } : {}),
+                      }
+                    : fogInverse);
       if (inverse && live !== null) {
         if (this.undoScene !== live) this.undoHistory = [];
         this.undoScene = live;
@@ -602,6 +684,10 @@ export class FakeServer {
     if (inverse.type === 'restore') return { type: 'token.delete', payload: { token_id: inverse.token.id } };
     if (inverse.type === 'restoreFog')
       return { type: 'restoreFog', sceneId: inverse.sceneId, fog: this.fogOf(inverse.sceneId) };
+    if (inverse.type === 'restoreStats') {
+      const token = this.sceneTokens.find((each) => each.id === inverse.tokenId);
+      return token && { type: 'restoreStats', tokenId: token.id, stats: statsOf(token), markers: [...token.markers] };
+    }
     if (inverse.type === 'restoreEncounter') {
       return {
         type: 'restoreEncounter',
@@ -648,6 +734,14 @@ export class FakeServer {
   }
 
   private applyInverse(inverse: Undoable): CommandAck {
+    if (inverse.type === 'restoreStats') {
+      const token = this.sceneTokens.find((each) => each.id === inverse.tokenId);
+      if (!token) return { error: { code: 'not_found', message: 'test' } };
+      if (token.scene_id !== this.liveSceneId) return { error: { code: 'scene_not_live', message: 'test' } };
+      Object.assign(token, statsOf(inverse.stats), { markers: [...inverse.markers] });
+      this.deliver('token.updated', { token: this.withAsset(token), relabelled: [] });
+      return { ok: true };
+    }
     if (inverse.type === 'restoreEncounter') {
       if (inverse.sceneId !== this.liveSceneId) return { error: { code: 'scene_not_live', message: 'test' } };
       this.storeEncounter(inverse.sceneId, inverse.encounter);
@@ -754,6 +848,25 @@ export class FakeServer {
         this.deliver('token.updated', { token: this.withAsset(token), relabelled: [] });
         return { ok: true };
       }
+      case 'token.setStats':
+      case 'token.applyHp': {
+        // DMT-01, as the server applies them: the markers the hit points drive set in the same step.
+        const token = liveToken();
+        if (token === undefined) return refuse('not_found');
+        if (token === 'not_live') return refuse('scene_not_live');
+        const before = statsOf(token);
+        const { token_id: _id, delta, ...patch } = p as Partial<TokenStats> & { token_id: string; delta?: number };
+        void _id;
+        const next = type === 'token.applyHp' ? (delta ? applyHp(before, delta) : before) : withStats(before, patch);
+        if (next === undefined) return refuse('bad_request');
+        const markers = hpChanged(before, next)
+          ? markersForHp(token.asset.category, next, token.markers)
+          : token.markers;
+        if (sameStats(before, next) && JSON.stringify(markers) === JSON.stringify(token.markers)) return { ok: true };
+        Object.assign(token, statsOf(next), { markers });
+        this.deliver('token.updated', { token: this.withAsset(token), relabelled: [] });
+        return { ok: true };
+      }
       case 'fog.paint':
       case 'fog.fill': {
         if (this.liveSceneId === null || p.scene_id !== this.liveSceneId) return refuse('scene_not_live');
@@ -774,7 +887,7 @@ export class FakeServer {
         this.deliver('token.removed', { id: token.id });
         // Its initiative entry goes with it (TBL-06).
         const encounter = this.encounters[token.scene_id];
-        const at = encounter?.entries.findIndex((entry) => entry.kind === 'pc' && entry.token_id === token.id) ?? -1;
+        const at = encounter?.entries.findIndex((entry) => entry.token_id === token.id) ?? -1;
         if (encounter && at !== -1)
           this.storeEncounter(
             token.scene_id,
@@ -1003,6 +1116,8 @@ export class FakeServer {
         size: b.size as LibraryAsset['size'],
         default_hidden: typeof b.default_hidden === 'boolean' ? b.default_hidden : category === 'monster',
         notes: typeof b.notes === 'string' ? b.notes : '',
+        hp_max: typeof b.hp_max === 'number' ? b.hp_max : null,
+        ac: typeof b.ac === 'number' ? b.ac : null,
         tags: tags(b.tags),
       });
       return json(201, asset);
@@ -1088,6 +1203,7 @@ export class FakeServer {
         this.displaySize = update.display_variant_size ?? this.displaySize;
         this.rulerRule = update.ruler_rule ?? this.rulerRule;
         if (update.tv_address !== undefined) this.tvAddress = update.tv_address;
+        this.importLimit = update.import_limit_bytes ?? this.importLimit;
       }
       return json(200, {
         id: '00000000-0000-4000-8000-00000000ffff',
@@ -1096,8 +1212,14 @@ export class FakeServer {
         upload_limit_bytes: this.uploadLimit,
         display_variant_size: this.displaySize,
         tv_address: this.tvAddress,
+        import_limit_bytes: this.importLimit,
       });
     }
+    if (path === '/api/import' && method === 'POST') {
+      this.imports.push(body);
+      return json(this.importReply.status, this.importReply.body);
+    }
+    if (path === '/api/import/progress' && method === 'GET') return json(200, this.importProgress);
     if (path === '/api/settings/pin' && method === 'PUT') {
       if (!Value.Check(PinChangeBodySchema, b)) return failure(400, 'validation_failed');
       if (this.pausedFor !== undefined) return failure(429, 'pin_paused', { 'retry-after': String(this.pausedFor) });
@@ -1117,6 +1239,8 @@ export class FakeServer {
     }
     const asset = /^\/api\/assets(?:\/([^/]+))?$/.exec(path);
     if (asset) return this.handleAssets(method, asset[1], query, b);
+    const notes = /^\/api\/(scenes|tokens)\/([^/]+)\/notes$/.exec(path);
+    if (notes) return this.handleNotes(method, notes[1] === 'scenes' ? 'scene' : 'token', notes[2]!, b);
     const sceneTokens = /^\/api\/scenes\/([^/]+)\/tokens$/.exec(path);
     if (sceneTokens) return this.handleTokens(method, sceneTokens[1], undefined, b);
     const token = /^\/api\/tokens\/([^/]+)$/.exec(path);
@@ -1264,10 +1388,11 @@ export async function click(element: Element | null | undefined): Promise<void> 
 
 /** Types `value` into an input the way React sees a user's typing. */
 export function type(input: Element | null | undefined, value: string): Promise<void> {
-  if (!(input instanceof HTMLInputElement)) throw new Error('not an input');
+  if (!(input instanceof HTMLInputElement) && !(input instanceof HTMLTextAreaElement)) throw new Error('not an input');
   act(() => {
     // Through the prototype's setter, which React does not intercept.
-    Reflect.set(HTMLInputElement.prototype, 'value', value, input);
+    const prototype = input instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+    Reflect.set(prototype, 'value', value, input);
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
   return Promise.resolve();

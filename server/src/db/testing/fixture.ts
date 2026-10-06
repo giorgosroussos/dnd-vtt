@@ -184,24 +184,44 @@ export function readEntities(db: Database.Database): Entities {
       variants: JSON.parse(row.variants as string) as unknown,
       grid_preset: row.grid_preset_type === null ? null : grid(row, 'grid_preset_'),
     })) as Image[],
-    asset: all('asset').map((row) => ({ ...row, default_hidden: row.default_hidden === 1 })) as Asset[],
+    // Hit-point and armour-class defaults (migration 0010, DMT-01) are none on a database before it.
+    asset: all('asset').map((row) => ({
+      hp_max: null,
+      ac: null,
+      ...row,
+      default_hidden: row.default_hidden === 1,
+    })) as Asset[],
     asset_tag: all('asset_tag') as AssetTag[],
     campaign: all('campaign') as Campaign[],
     session: all('session') as Session[],
     // The token numbers a scene has issued are the server's own, not part of the record (Q-091), as is its
     // painted fog (migration 0006, TBL-04), which reaches the DM view by snapshot and its own route.
+    // Notes (migration 0012, DMT-04) are none on a database before it.
     scene: all('scene').map((row) => ({
+      notes: '',
       ...without(without(without(row, 'grid_'), 'token_numbers'), 'fog'),
       grid: grid(row, 'grid_'),
     })) as Scene[],
     // Whether players have seen a token is the server's own too (Q-096).
     // Markers (migration 0004, TBL-02) read as the array they are; a database before it carries none.
+    // Hit points and armour class (migration 0010, DMT-01) are none on a database before it, and so are notes
+    // (migration 0012, DMT-04).
     token: all('token').map((row) => ({
+      hp_current: null,
+      hp_max: null,
+      hp_temp: null,
+      ac: null,
+      notes: '',
       ...without(row, 'shown'),
       hidden: row.hidden === 1,
       markers: row.markers === undefined ? [] : (JSON.parse(row.markers as string) as unknown),
     })) as Token[],
-    // The TV address (migration 0009, Q-110) is Automatic, null, on a database before it.
-    settings: all('settings').map((row) => ({ tv_address: null, ...without(row, 'pin_hash') })) as Settings[],
+    // The TV address (migration 0009, Q-110) is Automatic, null, on a database before it, and the import limit
+    // (migration 0013, Q-119) its 2 GB default.
+    settings: all('settings').map((row) => ({
+      tv_address: null,
+      import_limit_bytes: 2 * 1024 ** 3,
+      ...without(row, 'pin_hash'),
+    })) as Settings[],
   };
 }

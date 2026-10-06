@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandAck, LibraryAsset, Scene, SceneToken } from '@emberglass/shared';
 import { t } from '../ui/messages.js';
 import { RAIL_INSET_PX } from '../canvas/MapCanvas.js';
+import { followRect, visibleBox } from '../canvas/geometry.js';
+import { FOLLOW_INTERVAL_MS } from './live/throttle.js';
 import { CONNECTION_NOTICE_DELAY_MS } from './LiveBar.js';
 import { installCanvas2d, installImageLoading, installResizeObserver } from '../ui/testing/canvas2d.js';
 import {
@@ -1061,6 +1063,208 @@ describe('the TV frame steers the player camera (LIV-06; 04 §9, 08 §2, Q-080, 
     expect(view.querySelector('.eg-scene [role="alert"]')?.textContent).toBe(
       t('scene.tvFailed', { reason: t('error.code.scene_not_live') }),
     );
+  });
+});
+
+describe('Follow my view (DMT-03; 04 §9, 08 §11, §13, Q-113, Q-120)', () => {
+  // The map's display version is 2000 × 1500 world pixels in an 800 × 600 viewport; no screen reported: 16:9.
+  const WORLD = { width: 2000, height: 1500 };
+  const VIEW = { width: 800, height: 600 };
+  const dmCamera = (view: HTMLElement) => {
+    const { cameraX, cameraY, cameraScale } = viewport(view).dataset;
+    return { x: Number(cameraX), y: Number(cameraY), scale: Number(cameraScale) };
+  };
+  /** What Follow my view sends for the DM's view now, on a TV of `aspect`. */
+  const followed = (view: HTMLElement, aspect = 16 / 9) => followRect(visibleBox(dmCamera(view), VIEW), WORLD, aspect);
+  const cameras = () =>
+    commands()
+      .filter((each) => each.type === 'camera.setPlayer')
+      .map(
+        (each) =>
+          (each.payload as { camera: { centre_x: number; centre_y: number; width: number; height: number } }).camera,
+      );
+  const followButton = (view: HTMLElement) => button(view, t('tvCamera.follow'));
+  const following = (view: HTMLElement) => followButton(view)?.getAttribute('aria-pressed');
+  const frameOnScreen = (view: HTMLElement) => viewport(view).dataset.tvFrame;
+  const note = (view: HTMLElement) => view.querySelector('.eg-live__follow')?.textContent;
+  const status = (view: HTMLElement) => view.querySelector('[role="status"].eg-scene__progress')?.textContent;
+  /** Lets the throttle's interval run out, so a trailing camera has gone. */
+  const quiet = async () => {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, FOLLOW_INTERVAL_MS * 2));
+    });
+    await settle();
+  };
+
+  function key(element: HTMLElement, name: string, init: KeyboardEventInit = {}) {
+    act(() => {
+      element.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true, ...init }));
+    });
+  }
+
+  async function followCave(): Promise<HTMLElement> {
+    server.liveSceneId = cave.id;
+    const view = await open();
+    await selectScene(view, cave);
+    expect(mode(view)).toBe('live');
+    expect(following(view)).toBe('false');
+    await click(followButton(view));
+    await settle();
+    expect(following(view)).toBe('true');
+    return view;
+  }
+
+  it('turned on, sends the DM’s whole view at once, hides the frame and says so in the live indicator', async () => {
+    const view = await followCave();
+    expect(cameras()).toEqual([followed(view)]);
+    expect(status(view)).toBe(t('tvCamera.followOn'));
+    expect(frameOnScreen(view)).toBeUndefined();
+    expect(viewport(view).dataset.tvFollow).toBe('on');
+    expect(stage().findOne('.tv-frame')).toBeUndefined();
+    expect(note(view)).toBe(t('liveBar.follows'));
+    expect(view.querySelector('.eg-shortcuts__note')?.textContent).toBe(t('shortcuts.noteFollow'));
+    // The toggle again turns it off, and the frame is back.
+    await click(followButton(view));
+    expect(following(view)).toBe('false');
+    expect(status(view)).toBe(t('tvCamera.followOff'));
+    expect(frameOnScreen(view)).toBeDefined();
+    expect(note(view)).toBeUndefined();
+  });
+
+  it('follows a pan and a zoom, throttled, and always sends the view they end on', async () => {
+    const view = await followCave();
+    await quiet();
+    const before = cameras().length;
+    // Ten quick steps of the DM's own view, within one interval.
+    for (const name of ['+', '+', 'ArrowRight', 'ArrowRight', 'ArrowDown', '+', 'ArrowLeft', 'ArrowUp', '-', '+']) {
+      key(viewport(view), name);
+    }
+    await settle();
+    // The first went at once; the rest wait for the interval.
+    expect(cameras().length - before).toBeLessThan(10);
+    await quiet();
+    expect(cameras().at(-1)).toEqual(followed(view));
+    expect(cameras().length - before).toBeLessThanOrEqual(3);
+    // The view not changing sends nothing more, its own echo included.
+    const sent = cameras().length;
+    await quiet();
+    expect(cameras()).toHaveLength(sent);
+    expect(following(view)).toBe('true');
+  });
+
+  it('the TV’s camera events, its own echo and another browser’s included, never turn it off or move the DM’s view', async () => {
+    const view = await followCave();
+    const mine = dmCamera(view);
+    act(() => server.steerElsewhere({ centre_x: 0.3, centre_y: 0.4, width: 0.2, height: 0.2 }));
+    await settle();
+    expect(following(view)).toBe('true');
+    expect(dmCamera(view)).toEqual(mine);
+  });
+
+  it('a new shape of the TV’s screen sends the view again, widened to it', async () => {
+    const view = await followCave();
+    // The DM's own view moved, so a new screen does not refit it.
+    key(viewport(view), '+');
+    await quiet();
+    act(() => server.steerElsewhere(undefined, { width: 1000, height: 1000 }));
+    await quiet();
+    expect(following(view)).toBe('true');
+    const square = followed(view, 1);
+    expect(cameras().at(-1)).toEqual(square);
+    expect(square.width * WORLD.width).toBeCloseTo(square.height * WORLD.height, 1);
+  });
+
+  for (const control of [t('tvCamera.sendView'), t('canvas.tvFit'), t('canvas.tvZoomIn'), t('canvas.tvZoomOut')]) {
+    it(`turns off when ${control} is used, and nothing waiting follows it`, async () => {
+      const view = await followCave();
+      await quiet();
+      // A pan whose trailing camera is still waiting when the control is used.
+      key(viewport(view), 'ArrowRight');
+      key(viewport(view), 'ArrowRight');
+      await click(button(view, control));
+      await settle();
+      expect(following(view)).toBe('false');
+      expect(frameOnScreen(view)).toBeDefined();
+      const sent = cameras().length;
+      await quiet();
+      expect(cameras()).toHaveLength(sent);
+    });
+  }
+
+  it('turns off when Lock TV camera is turned on, which disables the toggle', async () => {
+    const view = await followCave();
+    await click(button(view, t('tvCamera.lock')));
+    expect(following(view)).toBe('false');
+    expect(followButton(view)!.getAttribute('aria-disabled')).toBe('true');
+    const sent = cameras().length;
+    await click(followButton(view));
+    key(document.body, 'c');
+    expect(following(view)).toBe('false');
+    key(viewport(view), 'ArrowRight');
+    await quiet();
+    expect(cameras()).toHaveLength(sent);
+  });
+
+  it('turns on and off with C, from anywhere in the DM view but a text field, and lists C in the shortcut bar', async () => {
+    server.liveSceneId = cave.id;
+    const view = await open();
+    await selectScene(view, cave);
+    expect(view.querySelector('.eg-shortcuts')?.textContent).toContain(t('shortcuts.follow'));
+    key(document.body, 'c');
+    expect(following(view)).toBe('true');
+    key(document.body, 'C');
+    expect(following(view)).toBe('false');
+    // Not offered in prep mode.
+    await selectScene(view, hall);
+    expect(followButton(view)).toBeUndefined();
+    expect(view.querySelector('.eg-shortcuts')?.textContent).not.toContain(t('shortcuts.follow'));
+  });
+
+  it('turns off when another scene goes live, and when the TV goes idle', async () => {
+    const view = await followCave();
+    await selectScene(view, hall);
+    await goLive(view);
+    expect(mode(view)).toBe('live');
+    expect(following(view)).toBe('false');
+    expect(note(view)).toBeUndefined();
+    await click(followButton(view));
+    expect(following(view)).toBe('true');
+    await click(button(view, t('liveBar.blank')));
+    await settle();
+    // Back on the TV: still off, as at every activation.
+    await goLive(view);
+    expect(following(view)).toBe('false');
+  });
+
+  it('pauses while another scene is open to prepare, and sends the view at once on returning to the live scene', async () => {
+    const view = await followCave();
+    await quiet();
+    await selectScene(view, hall);
+    expect(mode(view)).toBe('prep');
+    expect(note(view)).toBe(t('liveBar.followPaused'));
+    const sent = cameras().length;
+    key(viewport(view), '+');
+    key(viewport(view), 'ArrowRight');
+    await quiet();
+    expect(cameras()).toHaveLength(sent);
+    await click(showLiveButton(view));
+    await settle();
+    expect(following(view)).toBe('true');
+    expect(note(view)).toBe(t('liveBar.follows'));
+    expect(cameras().length).toBeGreaterThan(sent);
+    expect(cameras().at(-1)).toEqual(followed(view));
+  });
+
+  it('sends nothing while not connected, and resumes when the connection is back', async () => {
+    const view = await followCave();
+    await quiet();
+    act(() => server.sockets[0]!.drop());
+    await settle();
+    const sent = cameras().length;
+    key(viewport(view), '+');
+    await quiet();
+    expect(cameras()).toHaveLength(sent);
+    expect(following(view)).toBe('true');
   });
 });
 

@@ -4,7 +4,9 @@ import {
   CELL_PX,
   DEFAULT_ASPECT,
   boundFrame,
+  cameraBetween,
   fitBox,
+  followRect,
   frameForKey,
   frameLimits,
   liveFitBox,
@@ -14,6 +16,7 @@ import {
   scaleBox,
   screenAspect,
   viewOf,
+  visibleBox,
   MAX_LINES_PER_AXIS,
   MAX_SCALE,
   MIN_SCALE,
@@ -272,5 +275,99 @@ describe('the player camera (LIV-06, specs/04-live-sync.md §9, Q-038, D-119)', 
     expect(screenAspect({ width: 1024, height: 768 })).toBeCloseTo(4 / 3, 9);
     expect(screenAspect({ width: 10_000, height: 10 })).toBe(4);
     expect(screenAspect({ width: 10, height: 10_000 })).toBe(0.25);
+  });
+});
+
+describe("Follow my view: the DM's whole view widened to the TV (DMT-03, specs/04-live-sync.md §9, Q-113)", () => {
+  const world = { width: 1000, height: 500 };
+  // The DM's view of 400 × 200 world pixels about (500, 250): a 2:1 view.
+  const visible = { x: 300, y: 150, width: 400, height: 200 };
+  const shows = (rect: ReturnType<typeof followRect>) => ({
+    left: (rect.centre_x - rect.width / 2) * world.width,
+    top: (rect.centre_y - rect.height / 2) * world.height,
+    width: rect.width * world.width,
+    height: rect.height * world.height,
+  });
+
+  it("keeps a view of the TV's own shape as it is", () => {
+    expect(followRect(visible, world, 2)).toEqual({ centre_x: 0.5, centre_y: 0.5, width: 0.4, height: 0.4 });
+  });
+
+  it('widens the width for a TV wider than the view, on the same centre, the height unchanged', () => {
+    const rect = followRect(visible, world, 3);
+    expect(shows(rect)).toEqual({ left: 200, top: 150, width: 600, height: 200 });
+    expect(rect.centre_x).toBe(0.5);
+    expect(rect.centre_y).toBe(0.5);
+  });
+
+  it('raises the height for a TV narrower than the view, on the same centre, the width unchanged', () => {
+    const rect = followRect(visible, world, 16 / 9);
+    expect(rect.width).toBeCloseTo(0.4, 6);
+    expect(rect.height * world.height).toBeCloseTo(400 / (16 / 9), 3);
+    expect(rect.centre_x).toBe(0.5);
+    expect(rect.centre_y).toBe(0.5);
+  });
+
+  it("never crops the DM's view: the TV drawing the camera shows all of it, whatever the TV's shape", () => {
+    for (const aspect of [0.5, 1, 4 / 3, 16 / 9, 2, 21 / 9]) {
+      const rect = followRect(visible, world, aspect);
+      const tv = { width: 1200, height: 1200 / aspect };
+      const camera = viewOf(rect, world, tv);
+      const seen = visibleBox(camera, tv);
+      expect(seen.x).toBeLessThanOrEqual(visible.x + 1e-3);
+      expect(seen.y).toBeLessThanOrEqual(visible.y + 1e-3);
+      expect(seen.x + seen.width).toBeGreaterThanOrEqual(visible.x + visible.width - 1e-3);
+      expect(seen.y + seen.height).toBeGreaterThanOrEqual(visible.y + visible.height - 1e-3);
+    }
+  });
+
+  it("keeps the camera within the contract's bounds by one factor, the shape and the centre held", () => {
+    // Zoomed out far beyond the world: more than CAMERA_BOUNDS.maxSize worlds wide.
+    const far = followRect({ x: -149_500, y: -37_250, width: 300_000, height: 75_000 }, world, 2);
+    expect(far.width).toBe(CAMERA_BOUNDS.maxSize);
+    expect(far.width / far.height).toBeCloseTo(300_000 / world.width / (150_000 / world.height), 6);
+    expect(far.centre_x).toBe(0.5);
+    expect(far.centre_y).toBe(0.5);
+    // Zoomed in below the smallest camera.
+    const near = followRect({ x: 499.9, y: 249.95, width: 0.2, height: 0.1 }, world, 2);
+    expect(Math.min(near.width, near.height)).toBe(CAMERA_BOUNDS.minSize);
+    expect(near.width).toBeCloseTo(near.height, 6);
+    expect(near.centre_x).toBe(0.5);
+    expect(near.centre_y).toBe(0.5);
+  });
+
+  it('keeps the centre on the world when the DM looks past its edge', () => {
+    const rect = followRect({ x: -900, y: -400, width: 400, height: 200 }, world, 2);
+    expect(rect.centre_x).toBe(0);
+    expect(rect.centre_y).toBe(0);
+    expect(rect.width).toBe(0.4);
+  });
+
+  it('answers fit-to-map for an empty view or world', () => {
+    expect(followRect({ x: 0, y: 0, width: 0, height: 0 }, world, 2)).toEqual(FIT_CAMERA);
+    expect(followRect(visible, { width: 0, height: 0 }, 2)).toEqual(FIT_CAMERA);
+  });
+});
+
+describe('the glide between two player cameras (DMT-03)', () => {
+  const viewport = { width: 1000, height: 500 };
+  const from = { x: 0, y: 0, scale: 1 };
+  const to = { x: -1500, y: -500, scale: 4 };
+  const centreOf = (camera: { x: number; y: number; scale: number }) => ({
+    x: (500 - camera.x) / camera.scale,
+    y: (250 - camera.y) / camera.scale,
+  });
+
+  it('starts on the first camera and ends exactly on the second', () => {
+    expect(cameraBetween(from, to, 0, viewport)).toEqual(from);
+    expect(cameraBetween(from, to, 1, viewport)).toEqual(to);
+  });
+
+  it('moves the centre in a straight line and the zoom evenly in proportion', () => {
+    const half = cameraBetween(from, to, 0.5, viewport);
+    expect(half.scale).toBeCloseTo(2, 9);
+    const [a, b, c] = [centreOf(from), centreOf(to), centreOf(half)];
+    expect(c.x).toBeCloseTo((a.x + b.x) / 2, 9);
+    expect(c.y).toBeCloseTo((a.y + b.y) / 2, 9);
   });
 });

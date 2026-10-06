@@ -54,19 +54,20 @@ flowchart LR
 
 The REST API MUST be served under `/api`, with JSON bodies validated against schemas derived from the `shared` contract types. [D-015]
 
-The REST API MUST offer these resources and operations: [input, Q-001, Q-007, Q-051, Q-058, Q-085, Q-100, Q-110]
+The REST API MUST offer these resources and operations: [input, Q-001, Q-007, Q-051, Q-058, Q-085, Q-100, Q-110, Q-112, Q-114, Q-115]
 
 | Resource | Operations |
 | --- | --- |
 | `/api/auth` | enter PIN, leave, current role (`07` §2) |
 | `/api/setup` | first-run PIN setup, localhost only (`07` §1) |
 | `/api/images` | upload, read metadata, update grid preset |
-| `/api/assets` | list with search and tag filter, create, update, delete, list usages |
+| `/api/assets` | list with search and tag filter, create, update (hit-point and AC defaults included, `03` §9), delete, list usages |
 | `/api/campaigns`, `/api/campaigns/:id/sessions` | CRUD, ordering |
 | `/api/sessions/:id/scenes` | CRUD, ordering, duplicate, each scene's token and hidden-token counts |
-| `/api/scenes/:id` | setup (map, grid), tokens and painted fog while not live |
-| `/api/settings` | ruler rule, upload limit, display variant size, TV address (`08` §5), PIN change |
+| `/api/scenes/:id` | setup (map, grid), tokens with their hit points and AC, and painted fog while not live; the scene's and its tokens' notes at any time (`04` §16) |
+| `/api/settings` | ruler rule, upload limit, display variant size, TV address (`08` §5), import limit (`09` §9), PIN change |
 | `/api/screens` | how many player views are connected now (`08` §11) |
+| `/api/export`, `/api/import` | a campaign or library assets as a zip, and importing one (`09` §9) |
 
 Every `/api` route except `/api/auth` (PIN entry) and `/api/setup` MUST require a DM session (`07` §2). [Q-046]
 

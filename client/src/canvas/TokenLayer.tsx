@@ -45,6 +45,10 @@ import {
 // the token, pulsing on the TV; Concentrating a dotted purple ring further out; Unconscious and Dead
 // desaturate the token, Dead also darkens it and strikes its label through; Invisible draws it semi-
 // transparent, players included, and is not the hide toggle. The hidden badge sits alone on its right edge.
+//
+// DM notes (DMT-04, specs/08-ux-journeys.md §13): on the DM's map only, a token with notes of its own or from its
+// asset carries a page badge on its left edge, whose hover text is their first lines, set on the canvas element as a
+// plain-text title. The player mode never draws it, and no player token carries notes.
 
 export const TOKEN_COLOURS = {
   hidden: THEME.hidden,
@@ -66,9 +70,8 @@ export const CATEGORY_COLOURS: Record<AssetCategory, { ring: string; fill: strin
 };
 
 export const HIDDEN_OPACITY = 0.6;
-/** The turn's rings (TBL-06): the glow of the current player character's, and a member's on the Enemies turn. */
+/** The turn's ring (TBL-06, DMT-02): the glow around the token whose entry has the turn. */
 export const TURN_GLOW_OPACITY = 0.35;
-export const TURN_MEMBER_OPACITY = 0.6;
 export const HIDDEN_UNDERLAY_OPACITY = 0.6;
 // The circle's radius as a share of half the footprint's side: a gap to the grid lines, as in the design.
 const CIRCLE_SHARE = 0.89;
@@ -91,6 +94,8 @@ export const BLOODIED_PULSE_MS = 1_600;
 export const BLOODIED_PULSES = 3;
 const reducedMotion = () =>
   typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+// The page of the notes badge (DMT-04), on a 24-unit grid, as the DM view's note icon.
+const NOTE_PAGE = 'M6 3h9l4 4v14H6zM15 3v4h4M9 12h6M9 16h6';
 // The crossed eye of the hidden badge, on a 24-unit grid.
 const EYE_OFF =
   'M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3 3.8M6.6 6.6C3.7 8.4 2 12 2 12s3.5 7 10 7a9.6 9.6 0 0 0 5.4-1.6';
@@ -174,7 +179,22 @@ export interface TokenControls {
   onOpenPopover: (id: string) => void;
   /** A token dragged, or another token pressed: the popover closes and stays closed after the drop. */
   onClosePopover: () => void;
+  /**
+   * Several tokens selected (UXR-02, specs/08-ux-journeys.md §14): every one of them, the primary
+   * (`selectedId`) last. A drag of any of them moves them all.
+   */
+  selectedIds?: readonly string[] | undefined;
+  /** Ctrl (Cmd on macOS) and a press: the token joins the selection, or leaves it. */
+  onToggle?: ((id: string) => void) | undefined;
+  /** A group dropped together: each token's new position, in grid units. */
+  onMoveMany?: ((moves: { id: string; at: Point }[]) => void) | undefined;
 }
+
+const layerOf = (node: Konva.Node) => node.getLayer();
+
+/** Whether a press adds to the selection rather than replacing it: Ctrl, or Cmd on macOS. */
+export const togglesSelection = (event: { ctrlKey: boolean; metaKey: boolean }): boolean =>
+  event.ctrlKey || event.metaKey;
 
 /** The bloodied ring: still in the DM view, pulsing on the TV unless reduced motion is asked for. */
 function BloodiedRing({ radius, width, pulse }: { radius: number; width: number; pulse: boolean }) {
@@ -305,13 +325,55 @@ export function TokenLayer({
   const onScreen = inverse * labelScale;
   // Where the press on a token went down, in screen pixels, to tell a click from a drag on release.
   const pressed = useRef<{ id: string; at: Point }>(undefined);
+  // The group being dragged (UXR-02): where each of the others started, in world pixels.
+  const group = useRef<{ id: string; start: Point; others: { node: Konva.Node; start: Point }[] }>(undefined);
+  const grouped = (id: string) => {
+    const ids = controls?.selectedIds;
+    return ids !== undefined && ids.length > 1 && ids.includes(id) && controls?.onMoveMany !== undefined;
+  };
+
+  function startGroup(token: CanvasToken, node: Konva.Node) {
+    const layer = node.getLayer();
+    const others = (controls?.selectedIds ?? [])
+      .filter((id) => id !== token.id)
+      .map((id) => layer?.findOne(`#token-${id}`))
+      .filter((each): each is Konva.Node => each !== undefined)
+      .map((each) => ({ node: each, start: each.position() }));
+    group.current = { id: token.id, start: node.position(), others };
+  }
+
+  function draggedGroup(node: Konva.Node) {
+    const moving = group.current;
+    if (!moving) return;
+    const at = node.position();
+    const dx = at.x - moving.start.x;
+    const dy = at.y - moving.start.y;
+    for (const other of moving.others) other.node.position({ x: other.start.x + dx, y: other.start.y + dy });
+  }
 
   function dropped(token: CanvasToken, event: Konva.KonvaEventObject<DragEvent>) {
     const node = event.target;
     const at = dropPosition(toGrid(frame, node.position()), token.size, event.evt.altKey);
     // Placed where it snapped at once, even when the stored position does not change.
     node.position(toWorld(frame, at));
-    controls?.onMove(token.id, at);
+    const moving = group.current;
+    group.current = undefined;
+    if (moving?.id !== token.id || !controls?.onMoveMany) {
+      controls?.onMove(token.id, at);
+      return;
+    }
+    // The others keep their offsets from it: moved by the same whole squares, or the same free amount with Alt.
+    const dx = at.x - token.x;
+    const dy = at.y - token.y;
+    const moves = [{ id: token.id, at }];
+    for (const id of controls.selectedIds ?? []) {
+      const other = tokens.find((each) => each.id === id);
+      if (!other || id === token.id) continue;
+      const next = { x: other.x + dx, y: other.y + dy };
+      layerOf(node)?.findOne(`#token-${id}`)?.position(toWorld(frame, next));
+      moves.push({ id, at: next });
+    }
+    controls.onMoveMany(moves);
   }
 
   return (
@@ -323,7 +385,7 @@ export function TokenLayer({
         const at = toWorld(frame, token);
         const image = images.get(token.image_id);
         const hidden = mode === 'dm' && token.hidden;
-        const selected = controls?.selectedId === token.id;
+        const selected = controls?.selectedIds?.includes(token.id) ?? controls?.selectedId === token.id;
         const colours = CATEGORY_COLOURS[token.category];
         const clip = (context: Konva.Context) => {
           context.arc(centre, centre, radius, 0, Math.PI * 2, false);
@@ -348,27 +410,43 @@ export function TokenLayer({
             dragDistance={DRAG_THRESHOLD_PX}
             onPointerDown={(event) => {
               event.cancelBubble = true;
+              // Ctrl or Cmd and a press: the token joins the selection or leaves it, and nothing is dragged (UXR-02).
+              if (controls?.onToggle && togglesSelection(event.evt)) {
+                pressed.current = undefined;
+                controls.onClosePopover();
+                controls.onToggle(token.id);
+                return;
+              }
               pressed.current = { id: token.id, at: { x: event.evt.clientX, y: event.evt.clientY } };
               // Pressing another token never carries the open popover over to it: only a click opens one.
               if (controls && controls.selectedId !== token.id) controls.onClosePopover();
-              controls?.onSelect(token.id);
+              // A press on one of a group keeps the group, which a drag then moves; a click selects it alone.
+              if (!grouped(token.id)) controls?.onSelect(token.id);
             }}
             onPointerUp={(event) => {
               const press = pressed.current;
               pressed.current = undefined;
               if (!controls || press?.id !== token.id) return;
-              if (!movedPast(press.at, { x: event.evt.clientX, y: event.evt.clientY }))
+              if (!movedPast(press.at, { x: event.evt.clientX, y: event.evt.clientY })) {
+                if (grouped(token.id)) controls.onSelect(token.id);
                 controls.onOpenPopover(token.id);
+              }
             }}
-            onDragStart={() => {
+            onDragStart={(event) => {
+              if (controls?.onToggle && togglesSelection(event.evt)) {
+                event.target.stopDrag();
+                return;
+              }
               pressed.current = undefined;
               controls?.onClosePopover();
-              controls?.onSelect(token.id);
+              if (grouped(token.id)) startGroup(token, event.target);
+              else controls?.onSelect(token.id);
             }}
+            onDragMove={(event) => draggedGroup(event.target)}
             onDragEnd={(event) => dropped(token, event)}
           >
             {token.turn === 'current' ? (
-              // The turn's player character (TBL-06): a wide ember ring with a soft glow, outside every other.
+              // The token whose turn it is (TBL-06, DMT-02): a wide ember ring with a soft glow, outside every other.
               <>
                 <Circle
                   name="token-turn-glow"
@@ -392,19 +470,6 @@ export function TokenLayer({
                   listening={false}
                 />
               </>
-            ) : token.turn === 'member' ? (
-              // A member of the Enemies entry on its turn: a thin, faint ring of the same colour.
-              <Circle
-                name="token-turn-member"
-                x={centre}
-                y={centre}
-                radius={radius + 10 * inverse}
-                stroke={TOKEN_COLOURS.accent}
-                strokeWidth={1.5}
-                opacity={TURN_MEMBER_OPACITY}
-                strokeScaleEnabled={false}
-                listening={false}
-              />
             ) : null}
             {selected ? (
               // The selection: a dark ring then an ember one around the token (UIX-01).
@@ -549,6 +614,42 @@ export function TokenLayer({
                   strokeWidth={3}
                   lineCap="round"
                   lineJoin="round"
+                />
+              </Group>
+            ) : null}
+            {mode === 'dm' && token.note ? (
+              <Group
+                name="token-note-marker"
+                x={centre - radius}
+                y={centre}
+                scaleX={inverse}
+                scaleY={inverse}
+                onMouseEnter={(event) => {
+                  const container = event.target.getStage()?.container();
+                  if (container) container.title = token.note ?? '';
+                }}
+                onMouseLeave={(event) => {
+                  const container = event.target.getStage()?.container();
+                  if (container) container.removeAttribute('title');
+                }}
+              >
+                <Circle
+                  radius={BADGE_PX}
+                  fill={TOKEN_COLOURS.labelBackground}
+                  stroke={TOKEN_COLOURS.text}
+                  strokeWidth={1}
+                />
+                <Path
+                  data={NOTE_PAGE}
+                  x={-4.5}
+                  y={-4.5}
+                  scaleX={9 / 24}
+                  scaleY={9 / 24}
+                  stroke={TOKEN_COLOURS.text}
+                  strokeWidth={2.5}
+                  lineCap="round"
+                  lineJoin="round"
+                  listening={false}
                 />
               </Group>
             ) : null}

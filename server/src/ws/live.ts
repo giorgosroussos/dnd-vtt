@@ -22,6 +22,7 @@ import {
   type SnapshotEvent,
   type UndoState,
   type ViewportAck,
+  type NotesUpdatedPayload,
 } from '@emberglass/shared';
 import { isLoopback, lockoutKey, normalizeAddress } from '../auth/lockout.js';
 import { readScene } from '../db/campaigns.js';
@@ -64,6 +65,8 @@ import { livePlayerEncounter, readSnapshot, type LiveMemory } from './snapshot.j
 // REST changes (LIV-04): a route that can change what a room sees of the live scene runs its change
 // through `refresh`, which sends each room a fresh snapshot of the live scene when its view changed,
 // or the idle state when the change cleared it (specs/04-live-sync.md §10, specs/03-domain-model.md §7).
+// A change of the live scene's notes or one of its tokens' (DMT-04) is told to the DM room alone, as
+// `notes.updated` from `notesChanged`, never as a snapshot: the players room hears nothing and keeps its version.
 //
 // Versions (Q-056, Q-093, D-104, D-108): each room has its own counter, which takes version 1
 // for the state at start-up; a snapshot sent to one socket carries its room's current version
@@ -146,6 +149,11 @@ export interface LiveSocket {
    * snapshot it changed, and nothing to a room whose view of the live scene stayed the same.
    */
   refresh: <T>(work: () => T) => T;
+  /**
+   * Tells the DM room of a change of notes (DMT-04, specs/04-live-sync.md §3, §16), when they are the live scene's or
+   * one of its tokens': the players room never hears of notes, and a scene not live reaches no client.
+   */
+  notesChanged: (payload: NotesUpdatedPayload) => void;
 }
 
 // A command or a snapshot request is small; nothing a DM sends comes near this.
@@ -571,7 +579,13 @@ export function attachLiveSocket(
     done();
   });
 
-  return { io, count: (room) => io.sockets.adapter.rooms.get(room)?.size ?? 0, refresh };
+  // Notes (DMT-04): the DM room's only, and only the live scene's; nothing else changes, so nothing else is sent.
+  const notesChanged = (payload: NotesUpdatedPayload): void => {
+    if (readSettings(db).live_scene_id !== payload.scene_id) return;
+    broadcast('dm', { type: 'notes.updated', payload: { ...payload } });
+  };
+
+  return { io, count: (room) => io.sockets.adapter.rooms.get(room)?.size ?? 0, refresh, notesChanged };
 }
 
 const validateScreen = compileSchema<Screen>(ScreenSchema);

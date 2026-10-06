@@ -16,7 +16,12 @@ const token = (id: string, z_order: number, fields: Partial<SceneToken> = {}): S
   z_order,
   markers: [],
   character_id: null,
-  asset: { name: 'Goblin', image_id: 'f'.repeat(64), size: 'medium', category: 'monster' },
+  hp_current: null,
+  hp_max: null,
+  hp_temp: null,
+  ac: null,
+  notes: '',
+  asset: { name: 'Goblin', image_id: 'f'.repeat(64), size: 'medium', category: 'monster', notes: '' },
   ...fields,
 });
 const snapshot = (tokens: SceneToken[]): DmSnapshot => ({
@@ -122,5 +127,28 @@ describe('the painted fog (TBL-04, specs/04-live-sync.md §3)', () => {
     expect(applyDmEvent(live, event('fog.updated', {}))).toBe(live);
     expect(applyDmEvent(live, event('fog.updated', { fog: [{ y: 0, runs: [8, 0] }] }))).toBe(live);
     expect(applyDmEvent(live, event('fog.updated', { fog: [] }))?.fog).toEqual([]);
+  });
+});
+
+describe('DM notes (DMT-04, specs/04-live-sync.md §3, §16)', () => {
+  it('replaces the scene’s notes or one token’s from notes.updated, skipping another scene’s and malformed ones', () => {
+    const live = fromDmSnapshot(snapshot([token('a', 0), token('b', 1)]));
+    const scened = applyDmEvent(live, event('notes.updated', { scene_id: scene.id, token_id: null, notes: 'Ambush' }));
+    expect(scened?.scene.notes).toBe('Ambush');
+    expect(scened?.tokens).toBe(live?.tokens);
+    const tokened = applyDmEvent(
+      scened,
+      event('notes.updated', { scene_id: scene.id, token_id: 'b', notes: 'Leader' }),
+    );
+    expect(tokened?.tokens.map((each) => each.notes)).toEqual(['', 'Leader']);
+    expect(tokened?.scene.notes).toBe('Ambush');
+    const other = '00000000-0000-4000-8000-000000000009';
+    expect(applyDmEvent(tokened, event('notes.updated', { scene_id: other, token_id: null, notes: 'x' }))).toBe(
+      tokened,
+    );
+    expect(applyDmEvent(tokened, event('notes.updated', { scene_id: scene.id, token_id: 'z', notes: 'x' }))).toBe(
+      tokened,
+    );
+    expect(applyDmEvent(tokened, event('notes.updated', { scene_id: scene.id, token_id: null }))).toBe(tokened);
   });
 });

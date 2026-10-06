@@ -17,13 +17,16 @@ import {
   SceneSchema,
   SessionSchema,
   SettingsSchema,
+  EncounterEntrySchema,
   EncounterSchema,
   TokenSchema,
 } from '@emberglass/shared';
+import { Value } from 'typebox/value';
 import { MIGRATIONS_DIR } from '../paths.js';
 import { compileSchema } from '../validation.js';
 import { DATABASE_FILE, databasePath, openDatabase } from './database.js';
 import { loadMigrations, migrateDataDirectory } from './migrate.js';
+import { expandEnemiesEntry, type StoredEncounter } from './migration-steps.js';
 import {
   FIXTURE_VERSION,
   SCHEMA_TABLES,
@@ -92,6 +95,10 @@ function specEntities(): { entity: string; fields: string[]; notes: string[]; te
     });
 }
 
+// Fields of specs/03-domain-model.md §1 that a Phase 7 package still to come adds (specs/13-implementation-plan.md
+// §12): none since DMT-04. The package that adds a column removes it here.
+const PLANNED: Partial<Record<SchemaTable, string[]>> = {};
+
 const TABLE_OF: Record<string, SchemaTable> = {
   Image: 'image',
   Asset: 'asset',
@@ -104,12 +111,13 @@ const TABLE_OF: Record<string, SchemaTable> = {
   Settings: 'settings',
 };
 
-// Settings lists four of its fields in prose; these are their columns.
+// Settings lists five of its fields in prose; these are their columns.
 const SETTINGS_PROSE: Record<string, string> = {
   'ruler rule': 'ruler_rule',
   'upload limit': 'upload_limit_bytes',
   'display variant size': 'display_variant_size',
   'TV address': 'tv_address',
+  'import limit': 'import_limit_bytes',
   'PIN hash': 'pin_hash',
 };
 
@@ -147,6 +155,8 @@ describe('migration 0001 on a fresh database', () => {
           expected.add(field);
         }
       }
+      // Fields the spec names for a package not built yet, each removed from here by the package that adds it.
+      for (const field of PLANNED[table] ?? []) expected.delete(field);
       if (entity === 'Settings') {
         for (const [phrase, column] of Object.entries(SETTINGS_PROSE)) {
           expect(text).toContain(phrase);
@@ -191,6 +201,9 @@ describe('migration 0001 on a fresh database', () => {
         'size TEXT NOT NULL',
         'default_hidden INTEGER NOT NULL',
         "notes TEXT NOT NULL DEFAULT ''",
+        // Migration 0010 (DMT-01, Q-112).
+        'hp_max INTEGER NULL',
+        'ac INTEGER NULL',
       ],
       asset_tag: ['id TEXT NOT NULL', 'asset_id TEXT NOT NULL', 'tag TEXT NOT NULL'],
       campaign: [
@@ -224,6 +237,8 @@ describe('migration 0001 on a fresh database', () => {
         "token_numbers TEXT NOT NULL DEFAULT '{}'",
         // Migration 0006 (TBL-04, D-154).
         "fog TEXT NOT NULL DEFAULT '[]'",
+        // Migration 0012 (DMT-04, Q-114).
+        "notes TEXT NOT NULL DEFAULT ''",
       ],
       token: [
         'id TEXT NOT NULL',
@@ -239,6 +254,13 @@ describe('migration 0001 on a fresh database', () => {
         'shown INTEGER NOT NULL DEFAULT 0',
         // Migration 0004 (TBL-02, Q-099).
         "markers TEXT NOT NULL DEFAULT '[]'",
+        // Migration 0010 (DMT-01, Q-112).
+        'hp_current INTEGER NULL',
+        'hp_max INTEGER NULL',
+        'hp_temp INTEGER NULL',
+        'ac INTEGER NULL',
+        // Migration 0012 (DMT-04, Q-114).
+        "notes TEXT NOT NULL DEFAULT ''",
       ],
       // Migration 0008 (TBL-06, D-160).
       encounter: [
@@ -259,6 +281,8 @@ describe('migration 0001 on a fresh database', () => {
         'pin_hash TEXT NULL',
         // Migration 0009 (PKG-01, Q-110).
         'tv_address TEXT NULL',
+        // Migration 0013 (DMT-05, Q-119).
+        'import_limit_bytes INTEGER NOT NULL DEFAULT 2147483648',
       ],
     });
   });
@@ -1052,6 +1076,208 @@ describe('migrations on the generated fixture database (specs/14-agent-playbook.
     for (const bad of ['192.168.1', '192.168.1.1.1', 'emberglass.local', '192.168.1.13a', '1.2.3.4 ', '', 'a.b.c.d']) {
       expect(() => set.run(bad), bad).toThrow(/CHECK constraint failed/);
     }
+  });
+
+  it('adds hit points and armour class at migration 0010, none on existing data, refusing values out of bounds (Q-112)', () => {
+    createFixtureDatabase(dataDir);
+    migrateDataDirectory(dataDir, MIGRATIONS_DIR, new Date(), 9);
+    db = openDatabase(dataDir);
+    const columns = (table: string) =>
+      (db!.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
+    expect(columns('token')).not.toContain('hp_current');
+    const tokens = db.prepare('SELECT count(*) FROM token').pluck().get() as number;
+    db.close();
+
+    const result = migrateDataDirectory(dataDir, MIGRATIONS_DIR);
+
+    expect(result).toMatchObject({ from: 9, to: LATEST });
+    expect(result.backup).not.toBeNull();
+    db = openDatabase(dataDir);
+    expect(columns('token')).toEqual(expect.arrayContaining(['hp_current', 'hp_max', 'hp_temp', 'ac']));
+    expect(columns('asset')).toEqual(expect.arrayContaining(['hp_max', 'ac']));
+    const none = 'hp_current IS NULL AND hp_max IS NULL AND hp_temp IS NULL AND ac IS NULL';
+    expect(db.prepare(`SELECT count(*) FROM token WHERE ${none}`).pluck().get()).toBe(tokens);
+    expect(db.prepare('SELECT count(*) FROM asset WHERE hp_max IS NOT NULL OR ac IS NOT NULL').pluck().get()).toBe(0);
+    const id = db.prepare('SELECT id FROM token LIMIT 1').pluck().get() as string;
+    const set = (column: string, value: number | null) =>
+      db!.prepare(`UPDATE token SET ${column} = ? WHERE id = ?`).run(value, id);
+    for (const [column, value] of [
+      ['hp_current', 0],
+      ['hp_max', 1],
+      ['hp_temp', 9999],
+      ['ac', 99],
+      ['ac', null],
+    ] as const) {
+      expect(() => set(column, value)).not.toThrow();
+    }
+    for (const [column, value] of [
+      ['hp_current', -1],
+      ['hp_max', 0],
+      ['hp_temp', 10000],
+      ['ac', 100],
+    ] as const) {
+      expect(() => set(column, value), `${column} ${value}`).toThrow(/CHECK constraint failed/);
+    }
+  });
+
+  it('adds notes to scenes and tokens at migration 0012, empty on existing data, refusing more than the limit (Q-114)', () => {
+    createFixtureDatabase(dataDir);
+    migrateDataDirectory(dataDir, MIGRATIONS_DIR, new Date(), 11);
+    db = openDatabase(dataDir);
+    const columns = (table: string) =>
+      (db!.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
+    expect(columns('scene')).not.toContain('notes');
+    expect(columns('token')).not.toContain('notes');
+    const counts = countRows(db);
+    db.close();
+
+    const result = migrateDataDirectory(dataDir, MIGRATIONS_DIR);
+
+    expect(result).toMatchObject({ from: 11, to: LATEST });
+    expect(result.backup).not.toBeNull();
+    db = openDatabase(dataDir);
+    expect(countRows(db)).toEqual(counts);
+    for (const table of ['scene', 'token']) {
+      expect(db.prepare(`SELECT DISTINCT notes FROM ${table}`).pluck().all(), table).toEqual(['']);
+      const id = db.prepare(`SELECT id FROM ${table} LIMIT 1`).pluck().get() as string;
+      const set = (notes: string) => db!.prepare(`UPDATE ${table} SET notes = ? WHERE id = ?`).run(notes, id);
+      // Characters, not bytes: 20,000 dragons are 80,000 bytes and still within the limit.
+      expect(() => set('🐉'.repeat(20_000))).not.toThrow();
+      expect(() => set('Line one\nline two')).not.toThrow();
+      expect(() => set('x'.repeat(20_001)), table).toThrow(/CHECK constraint failed/);
+      expect(() => db!.prepare(`UPDATE ${table} SET notes = NULL WHERE id = ?`).run(id)).toThrow(/NOT NULL/);
+    }
+  });
+
+  it('adds the import limit at migration 0013, 2 GB on existing data, refusing one that is not positive (Q-119)', () => {
+    createFixtureDatabase(dataDir);
+    migrateDataDirectory(dataDir, MIGRATIONS_DIR, new Date(), 12);
+    db = openDatabase(dataDir);
+    const columns = () => (db!.prepare('PRAGMA table_info(settings)').all() as { name: string }[]).map((c) => c.name);
+    expect(columns()).not.toContain('import_limit_bytes');
+    const before = db.prepare('SELECT live_scene_id, ruler_rule, upload_limit_bytes, tv_address FROM settings').get();
+    db.close();
+
+    const result = migrateDataDirectory(dataDir, MIGRATIONS_DIR);
+
+    expect(result).toMatchObject({ from: 12, to: LATEST });
+    expect(result.backup).not.toBeNull();
+    db = openDatabase(dataDir);
+    expect(db.prepare('SELECT import_limit_bytes FROM settings').pluck().get()).toBe(2 * 1024 ** 3);
+    expect(db.prepare('SELECT live_scene_id, ruler_rule, upload_limit_bytes, tv_address FROM settings').get()).toEqual(
+      before,
+    );
+    const set = db.prepare('UPDATE settings SET import_limit_bytes = ?');
+    expect(() => set.run(64 * 1024 ** 3)).not.toThrow();
+    for (const bad of [0, -1]) expect(() => set.run(bad), String(bad)).toThrow(/CHECK constraint failed/);
+    expect(() => set.run(null)).toThrow(/NOT NULL/);
+  });
+
+  it('expands a stored Enemies entry in place at migration 0011, the turn following it, an empty one dropped (DMT-02)', () => {
+    createFixtureDatabase(dataDir);
+    migrateDataDirectory(dataDir, MIGRATIONS_DIR, new Date(), 10);
+    db = openDatabase(dataDir);
+    const [first, second] = db.prepare('SELECT id FROM scene ORDER BY id LIMIT 2').pluck().all() as [string, string];
+    const assetOf = (category: string) =>
+      db!.prepare('SELECT id FROM asset WHERE category = ? LIMIT 1').pluck().get(category) as string;
+    const insertToken = db.prepare(
+      `INSERT INTO token (id, scene_id, asset_id, label, x, y, hidden, z_order, markers)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    db.prepare('DELETE FROM token WHERE scene_id IN (?, ?)').run(first, second);
+    // Scene one: a player character, two living bandits (z 3 and 1), an npc, a hidden bandit, a dead one, an object.
+    const placed: [number, string, string, number, number, string][] = [
+      [8101, 'pc', 'Aria', 0, 0, '[]'],
+      [8102, 'monster', 'Bandit 2', 0, 3, '[]'],
+      [8103, 'monster', 'Bandit 1', 0, 1, '[]'],
+      [8104, 'npc', 'Guide', 0, 2, '[{"id":"unconscious"}]'],
+      [8105, 'monster', 'Lurker', 1, 4, '[]'],
+      [8106, 'monster', 'Bandit 3', 0, 5, '[{"id":"dead"}]'],
+      [8107, 'object', 'Chest', 0, 6, '[]'],
+      [8108, 'pc', 'Brom', 0, 7, '[]'],
+    ];
+    for (const [n, category, label, hidden, z, markers] of placed) {
+      insertToken.run(fixtureUuid(n), first, assetOf(category), label, z * 2, 0, hidden, 100 + z, markers);
+    }
+    // Scene two: a player character only, so its Enemies entry has no member.
+    insertToken.run(fixtureUuid(8201), second, assetOf('pc'), 'Cade', 0, 0, 0, 100, '[]');
+    const pc = (n: number, initiative: number | null) => ({
+      id: fixtureUuid(n + 1000),
+      kind: 'pc',
+      token_id: fixtureUuid(n),
+      initiative,
+    });
+    const enemies = { id: fixtureUuid(9199), kind: 'dm', initiative: 15 };
+    const insert = db.prepare(
+      `INSERT INTO encounter (id, scene_id, active, round, current_index, enemies_seen, entries)
+       VALUES (?, ?, 1, ?, ?, 1, ?)`,
+    );
+    // Mid-combat, round 3, the turn on the Enemies entry.
+    insert.run(fixtureUuid(9101), first, 3, 1, JSON.stringify([pc(8101, 18), enemies, pc(8108, 9)]));
+    // The turn on the Enemies entry, which has no member: it passes on past the last entry, a round more.
+    insert.run(fixtureUuid(9102), second, 2, 1, JSON.stringify([pc(8201, 12), { ...enemies, id: fixtureUuid(9299) }]));
+    db.close();
+
+    const result = migrateDataDirectory(dataDir, MIGRATIONS_DIR);
+
+    expect(result).toMatchObject({ from: 10, to: LATEST });
+    expect(result.backup).not.toBeNull();
+    db = openDatabase(dataDir);
+    const read = (scene: string) =>
+      db!
+        .prepare('SELECT round, current_index, enemies_seen, entries FROM encounter WHERE scene_id = ?')
+        .get(scene) as { round: number; current_index: number; enemies_seen: number; entries: string };
+    const one = read(first);
+    const entries = JSON.parse(one.entries) as { id: string; kind: string; token_id: string; initiative: number }[];
+    expect(entries.map((entry) => [entry.kind, entry.token_id, entry.initiative])).toEqual([
+      ['pc', fixtureUuid(8101), 18],
+      ['monster', fixtureUuid(8103), 15],
+      ['monster', fixtureUuid(8104), 15],
+      ['monster', fixtureUuid(8102), 15],
+      ['pc', fixtureUuid(8108), 9],
+    ]);
+    expect(new Set(entries.map((entry) => entry.id)).size).toBe(5);
+    expect(entries.some((entry) => entry.id === enemies.id)).toBe(false);
+    // The turn is on the first expanded entry, in the same round.
+    expect(one).toMatchObject({ round: 3, current_index: 1, enemies_seen: 1 });
+    for (const entry of entries) expect(Value.Check(EncounterEntrySchema, entry), JSON.stringify(entry)).toBe(true);
+    const two = read(second);
+    expect(JSON.parse(two.entries)).toEqual([pc(8201, 12)]);
+    expect(two).toMatchObject({ round: 3, current_index: 0 });
+  });
+
+  it('shifts the turn by the entries the expansion added, and leaves the order untouched without an Enemies entry', () => {
+    const uuid = (n: number) => fixtureUuid(n);
+    const tokens = [1, 2, 3].map((n) => ({
+      id: uuid(n),
+      x: n * 2,
+      y: 0,
+      hidden: false,
+      z_order: n,
+      markers: [],
+      asset: { size: 'medium' as const, category: 'monster' as const },
+    }));
+    const pc = (n: number) => ({ id: uuid(100 + n), kind: 'pc' as const, token_id: uuid(n + 50), initiative: null });
+    let n = 700;
+    const newId = () => uuid((n += 1));
+    const stored = (current: number, entries: StoredEncounter['entries']) => ({
+      current_index: current,
+      round: 1,
+      active: true,
+      enemies_seen: true,
+      entries,
+    });
+    const enemies = { id: uuid(199), kind: 'dm' as const, initiative: null };
+    const after = expandEnemiesEntry(stored(2, [pc(1), enemies, pc(2)]), tokens, [], newId);
+    expect(after.entries.map((entry) => entry.kind)).toEqual(['pc', 'monster', 'monster', 'monster', 'pc']);
+    expect(after.current_index).toBe(4);
+    const before = expandEnemiesEntry(stored(0, [pc(1), enemies, pc(2)]), tokens, [], newId);
+    expect(before.current_index).toBe(0);
+    const none = expandEnemiesEntry(stored(1, [pc(1), pc(2)]), tokens, [], newId);
+    expect(none).toEqual(stored(1, [pc(1), pc(2)]));
+    // An empty Enemies entry before the turn: the turn moves back one, staying with its entry.
+    const empty = expandEnemiesEntry(stored(2, [pc(1), enemies, pc(2)]), [], [], newId);
+    expect(empty).toMatchObject({ current_index: 1, round: 1, entries: [pc(1), pc(2)] });
   });
 
   it('migrates the fixture to the latest version, keeping every row and every reference', () => {

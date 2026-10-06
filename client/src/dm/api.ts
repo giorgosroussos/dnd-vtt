@@ -1,4 +1,13 @@
-import { API_IMAGE_PATHS, type AssetUsage, type ErrorCode, type ErrorEnvelope, type Image } from '@emberglass/shared';
+import {
+  API_ARCHIVE_PATHS,
+  API_IMAGE_PATHS,
+  type AssetUsage,
+  type ErrorCode,
+  type ErrorDetail,
+  type ErrorEnvelope,
+  type Image,
+  type ImportSummary,
+} from '@emberglass/shared';
 
 // The DM view's REST client (specs/02-architecture.md §5, D-085). Same origin and
 // JSON only; the session is the HttpOnly cookie the browser sends by itself, which
@@ -16,6 +25,10 @@ export class ApiError extends Error {
     readonly retryAfter: number | undefined = undefined,
     /** The scenes that use an asset, sent with `asset_in_use` (D-083). */
     readonly usages: readonly AssetUsage[] = [],
+    /** What the server says about the refusal, in English: the entry of an archive an import refused (DMT-05). */
+    readonly details: readonly ErrorDetail[] = [],
+    /** The format a refused archive names, sent with `import_newer_format` (DMT-05). */
+    readonly formatVersion: number | undefined = undefined,
   ) {
     super(`request failed: ${code}`);
   }
@@ -57,9 +70,18 @@ export async function request<T>(
  * the fraction sent, from 0 to 1 (G-017, D-090).
  */
 export function upload(file: Blob, onProgress?: (fraction: number) => void): Promise<Image> {
-  return new Promise<Image>((resolve, reject) => {
+  return sendFile<Image>(API_IMAGE_PATHS.images, file, onProgress);
+}
+
+/** Uploads an export to import it (DMT-05, specs/09-operations.md §9), as `upload` sends an image. */
+export function uploadArchive(file: Blob, onProgress?: (fraction: number) => void): Promise<ImportSummary> {
+  return sendFile<ImportSummary>(API_ARCHIVE_PATHS.import, file, onProgress);
+}
+
+function sendFile<T>(path: string, file: Blob, onProgress?: (fraction: number) => void): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', API_IMAGE_PATHS.images);
+    xhr.open('POST', path);
     xhr.setRequestHeader('accept', 'application/json');
     if (onProgress) {
       xhr.upload.onprogress = (event) => {
@@ -71,7 +93,7 @@ export function upload(file: Blob, onProgress?: (fraction: number) => void): Pro
         status: xhr.status,
         headers: parseHeaders(xhr.getAllResponseHeaders()),
       });
-      answer<Image>(Promise.resolve(response)).then(resolve, reject);
+      answer<T>(Promise.resolve(response)).then(resolve, reject);
     };
     xhr.onerror = () => reject(new ApiError(0, 'network'));
     xhr.onabort = () => reject(new ApiError(0, 'network'));
@@ -110,6 +132,8 @@ async function answer<T>(pending: Promise<Response>): Promise<T> {
     code,
     Number.isFinite(seconds) && seconds > 0 ? seconds : undefined,
     envelope?.usages ?? [],
+    envelope?.details ?? [],
+    envelope?.format_version,
   );
   if (code === 'unauthorized') onUnauthorized?.();
   throw error;

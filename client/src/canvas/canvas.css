@@ -46,6 +46,17 @@
   cursor: grab;
 }
 
+/* Follow my view (DMT-03): the TV shows the whole view, so the view's own edge is the TV's frame. */
+.eg-canvas__viewport[data-tv-follow='on']::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border: 2px solid var(--color-accent);
+  border-radius: inherit;
+  pointer-events: none;
+}
+
 /* The Konva stage fills the viewport, which is measured; it must not size it. */
 .eg-canvas__viewport > div {
   position: absolute;

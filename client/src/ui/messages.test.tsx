@@ -290,7 +290,9 @@ it('show only catalogue text: the Settings dialog in each of its states', async 
     const dialog = () => container.querySelector('dialog')!;
     expectCatalogueOnly(dialog());
     const inputs = () => [...dialog().querySelectorAll<HTMLInputElement>('input')];
-    await type(inputs()[1], '2048');
+    const byLabel = (key: 'settings.displaySize') =>
+      inputs().find((input) => input.labels?.[0]?.textContent === t(key));
+    await type(byLabel('settings.displaySize'), '2048');
     await submit(dialog().querySelectorAll('form')[0]);
     expect(dialog().textContent).toContain(t('settings.savedRegenerating'));
     expectCatalogueOnly(dialog());

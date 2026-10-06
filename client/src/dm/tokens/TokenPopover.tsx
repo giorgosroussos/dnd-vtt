@@ -1,21 +1,33 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
-import { CONDITIONS, EXHAUSTION, EXHAUSTION_LEVELS, hasMarker, markerLevel, type SceneToken } from '@emberglass/shared';
+import {
+  CONDITIONS,
+  EXHAUSTION,
+  EXHAUSTION_LEVELS,
+  hasMarker,
+  markerLevel,
+  type HpEntry,
+  type SceneToken,
+  type TokenStats,
+} from '@emberglass/shared';
 import type { TokenAnchor } from '../../canvas/MapCanvas.js';
 import { ConditionIcon, conditionHelp } from '../../ui/conditions.js';
 import { Icon } from '../../ui/icons.js';
 import { Menu } from '../../ui/Menu.js';
 import { t } from '../../ui/messages.js';
+import { HitPoints } from './HitPoints.js';
+import { TokenNotes } from '../notes/Notes.js';
 
 const WIDTH = 272;
 const GAP = 14;
 
 /** Beside the token, on its right when there is room and on its left otherwise, kept inside the canvas. */
-function placement(anchor: TokenAnchor): { left: number; top: number; side: 'left' | 'right' } {
+function placement(anchor: TokenAnchor): { left: number; top: number; maxHeight: number; side: 'left' | 'right' } {
   const right = anchor.left + anchor.side + GAP;
   const fitsRight = right + WIDTH <= anchor.viewport.width - 8;
   const left = fitsRight ? right : Math.max(8, anchor.left - GAP - WIDTH);
   const top = Math.min(Math.max(8, anchor.top + anchor.side / 2 - 70), Math.max(8, anchor.viewport.height - 340));
-  return { left, top, side: fitsRight ? 'right' : 'left' };
+  // Taller than the room below it (long notes), it scrolls rather than run past the canvas.
+  return { left, top, maxHeight: Math.max(200, anchor.viewport.height - top - 8), side: fitsRight ? 'right' : 'left' };
 }
 
 // The selected token's popover (UIX-01, specs/08-ux-journeys.md §11, specs/04-live-sync.md §2): its name,
@@ -26,6 +38,9 @@ function placement(anchor: TokenAnchor): { left: number; top: number; side: 'lef
 // Below, the condition markers (TBL-05, D-157): the pinned ones as toggle chips, then any other one the token
 // carries, pressed, so it comes off without the list; More… opens a searchable list of the others. Exhaustion's
 // chip, while on, carries a stepper for its level. Each chip's hover text is its rule text (D-158).
+// Between them, the token's hit points and armour class (DMT-01, HitPoints.tsx). While combat runs, the menu
+// adds a player character, monster or npc without an entry to the initiative order, or says why it cannot
+// (DMT-02). Last, the token's notes, saved as they are typed, with its asset's under them, read-only (DMT-04).
 export function TokenPopover({
   token,
   anchor,
@@ -37,6 +52,12 @@ export function TokenPopover({
   onDelete,
   onToggleMarker,
   onExhaustion,
+  onHpEntry,
+  onStats,
+  initiative,
+  focusHp = 0,
+  focusNotes = 0,
+  onNotesSaved,
 }: {
   token: SceneToken;
   anchor: TokenAnchor;
@@ -48,13 +69,23 @@ export function TokenPopover({
   onDelete: () => void;
   onToggleMarker: (id: string) => void;
   onExhaustion: (level: number) => void;
+  onHpEntry: (entry: HpEntry) => void;
+  onStats: (stats: Partial<TokenStats>) => void;
+  /** Add to initiative, while combat runs and the token has no entry: why it cannot, or how it is added. */
+  initiative?: { disabledReason?: string | undefined; onAdd: () => void } | undefined;
+  /** Raised each time D asks for the hit-point field. */
+  focusHp?: number;
+  /** Raised each time the notes field is asked for: from the initiative order (DMT-04). */
+  focusNotes?: number;
+  /** The token as the server stored its notes. */
+  onNotesSaved: (token: SceneToken) => void;
 }) {
-  const { left, top, side } = placement(anchor);
+  const { left, top, maxHeight, side } = placement(anchor);
   const prepOnly = live ? t('tokens.prepOnly') : undefined;
   return (
     <section
       className={`eg-popover eg-popover--${side}`}
-      style={{ left, top, width: WIDTH }}
+      style={{ left, top, width: WIDTH, maxHeight, overflowX: 'hidden', overflowY: 'auto' }}
       aria-label={t('tokens.popoverOf', { label: token.label })}
     >
       <div className="eg-popover__head">
@@ -93,6 +124,15 @@ export function TokenPopover({
           icon={<Icon name="more" />}
           className="eg-icon-button eg-icon-button--bordered"
           items={[
+            ...(initiative
+              ? [
+                  {
+                    label: t('initiative.addToOrder'),
+                    disabledReason: initiative.disabledReason,
+                    onSelect: initiative.onAdd,
+                  },
+                ]
+              : []),
             { label: t('tokens.duplicate'), onSelect: onDuplicate },
             { label: t('tokens.front'), disabledReason: prepOnly, onSelect: () => onStack('front') },
             { label: t('tokens.back'), disabledReason: prepOnly, onSelect: () => onStack('back') },
@@ -100,6 +140,7 @@ export function TokenPopover({
           ]}
         />
       </div>
+      <HitPoints token={token} focus={focusHp} onEntry={onHpEntry} onStats={onStats} />
       <div className="eg-popover__conditions" role="group" aria-labelledby={`${token.id}-conditions`}>
         <h3 id={`${token.id}-conditions`} className="eg-popover__label">
           {t('tokens.conditions')}
@@ -122,6 +163,7 @@ export function TokenPopover({
           <MoreConditions token={token} onToggle={onToggleMarker} />
         </div>
       </div>
+      <TokenNotes token={token} focus={focusNotes} onSaved={onNotesSaved} />
       {live ? <p className="eg-popover__note">{t('tokens.prepOnlyNote')}</p> : null}
     </section>
   );
@@ -209,6 +251,8 @@ function MoreConditions({ token, onToggle }: { token: SceneToken; onToggle: (id:
   useEffect(() => {
     if (!open) return;
     search.current?.focus();
+    // The list opens under the chips: the popover scrolls it into view when it would open below its edge.
+    box.current?.scrollIntoView?.({ block: 'nearest' });
     const outside = (event: PointerEvent) => {
       const target = event.target as Node;
       if (!box.current?.contains(target) && !button.current?.contains(target)) setOpen(false);

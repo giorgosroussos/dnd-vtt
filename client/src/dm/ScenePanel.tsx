@@ -3,7 +3,7 @@ import {
   EXHAUSTION,
   EXHAUSTION_LEVELS,
   hasMarker,
-  membersOf,
+  hasNotes,
   API_IMAGE_PATHS,
   FEET_PER_SQUARE_BOUNDS,
   FIT_CAMERA,
@@ -18,8 +18,16 @@ import {
   type SceneGridUpdate,
   type SceneToken,
   FOG_BRUSH_RADIUS,
+  applyHp,
+  canEnter,
+  compactHp,
+  entryKindOf,
+  seenByPlayers,
+  type HpEntry,
   type TokenMarker,
+  type TokenStats,
   type TokenUpdateBody,
+  type BatchedCommand,
 } from '@emberglass/shared';
 import { formatDecimal, formatNumber } from '../canvas/calibration.js';
 import {
@@ -28,12 +36,14 @@ import {
   type CanvasRail,
   type CanvasTokenControls,
   type Measure,
+  type AssetDrop,
   type Placing,
   type FogTool,
   type PingTool,
   type RulerTool,
   type TvFrame,
 } from '../canvas/MapCanvas.js';
+import { sameRect } from '../canvas/geometry.js';
 import { samePath, type RulerPath } from '../canvas/ruler.js';
 import { Button } from '../ui/Button.js';
 import { Dialog } from '../ui/Dialog.js';
@@ -49,19 +59,24 @@ import { SidePanel, type SideTab } from './SidePanel.js';
 import { CalibrationPanel } from './calibration/CalibrationPanel.js';
 import { CornerMagnifier } from './calibration/CornerMagnifier.js';
 import { startDraft, withRect, type Draft } from './calibration/draft.js';
+import { ASSET_DRAG_TYPE, assetDrag } from './library/assetDrag.js';
 import { megabytes } from './library/labels.js';
 import type { DmScene } from './live/dmScene.js';
 import type { DmLive } from './live/useDmLive.js';
+import { FOLLOW_INTERVAL_MS, throttle, type Throttle } from './live/throttle.js';
 import { entityPath } from './tree/paths.js';
-import { DeleteTokenDialog, RenameDialog } from './tokens/TokenBar.js';
+import { DeleteGroupDialog, DeleteTokenDialog, RenameDialog } from './tokens/TokenBar.js';
+import { GroupBar } from './tokens/GroupBar.js';
+import { deleteCommands, hideCommands, hpCommands, markerCommands, moveCommands } from './tokens/group.js';
 import { TokenList } from './tokens/TokenList.js';
 import { TokenPicker } from './tokens/TokenPicker.js';
 import { FillFogDialog, FogBrushBar, FogPanel } from './fog/FogPanel.js';
 import { useSceneFog } from './fog/useSceneFog.js';
 import { TokenPopover } from './tokens/TokenPopover.js';
-import { markerName } from '../ui/conditions.js';
+import { conditionLabel, markerName } from '../ui/conditions.js';
 import { toCanvasToken, useSceneTokens } from './tokens/useSceneTokens.js';
 import { InitiativePanel } from './initiative/InitiativePanel.js';
+import { SceneNotes } from './notes/Notes.js';
 
 // The selected scene in the centre of the workspace (PRP-02, specs/08-ux-journeys.md §1, §3,
 // specs/06-grid-and-measurement.md §2, specs/03-domain-model.md §6, D-090, D-093): its setup and
@@ -117,6 +132,15 @@ import { InitiativePanel } from './initiative/InitiativePanel.js';
 // view does not move. Setting the TV camera is not undoable (specs/04-live-sync.md §2). Lock TV camera,
 // kept by the workspace for this DM view only (D-140), refuses the buttons and the frame.
 //
+// Follow my view (DMT-03, specs/04-live-sync.md §9, specs/08-ux-journeys.md §13, Q-113, Q-120): a toggle among
+// the TV camera controls, or C. The workspace keeps whether it is on, for the live scene it was turned on
+// for. While it is on, the canvas reports the DM's whole view widened to the TV's shape, and it goes out as
+// `camera.setPlayer` through a throttle (FOLLOW_INTERVAL_MS), the first change at once and the last one a
+// pan or zoom ends on always; the frame is not drawn. Send my view, Fit map, TV zoom and Lock TV camera turn
+// it off, and the workspace turns it off when another scene goes live or the TV goes idle; the TV camera's
+// own events never do. Another scene opened to prepare pauses it: this panel is not the live scene's, so
+// nothing is sent, and the live scene's panel, opened again, sends its view at once. Nothing is undoable.
+//
 // The ruler (LIV-07, specs/06-grid-and-measurement.md §5, specs/04-live-sync.md §11, Q-027, Q-086, D-121):
 // the canvas's Ruler measures between square centres by the server-wide diagonal rule and the scene's feet
 // per square, which the setup sets. In prep mode the measurement stays in this view: nothing is sent. In
@@ -127,8 +151,13 @@ import { InitiativePanel } from './initiative/InitiativePanel.js';
 // selected token take the pointer and the keys in turn.
 //
 // Shortcuts (UIX-01, specs/08-ux-journeys.md §11): V selects, M measures, T adds a token, H hides or
-// reveals the selected token, Ctrl+Z undoes and Ctrl+Shift+Z or Ctrl+Y redoes, from anywhere in the DM
-// view but a text field or an open dialog; none acts while typing.
+// reveals the selected token, N opens the scene's notes, Ctrl+Z undoes and Ctrl+Shift+Z or Ctrl+Y redoes, from
+// anywhere in the DM view but a text field or an open dialog; none acts while typing.
+//
+// DM notes (DMT-04, specs/04-live-sync.md §16, specs/08-ux-journeys.md §13, Q-114): the scene's in the right-hand
+// panel's Notes tab, reached with N, which also puts the cursor in them; a token's in its popover, with its asset's
+// beside them, and opened from the initiative order on the token's turn. Saved over REST as they are typed, on this
+// scene live or not; on the live scene another DM window's change arrives as `notes.updated`. Not undoable.
 //
 // The workspace keys this panel by scene: a request still running when another scene is
 // selected ends in a panel that is gone, so its answer changes nothing on screen. One change
@@ -215,9 +244,12 @@ export function ScenePanel({
   library,
   tvLocked = false,
   onTvLocked = () => {},
+  tvFollow = false,
+  onTvFollow = () => {},
   setupOpen: setupOpenProp,
   onSetupOpen,
   onTokensChanged,
+  onNotesChanged,
 }: {
   sceneId: string;
   name: string;
@@ -232,11 +264,16 @@ export function ScenePanel({
   /** Lock TV camera, kept by the workspace for this DM view (D-140). */
   tvLocked?: boolean | undefined;
   onTvLocked?: ((locked: boolean) => void) | undefined;
+  /** Follow my view (DMT-03), kept by the workspace: on for the live scene, off at every activation. */
+  tvFollow?: boolean | undefined;
+  onTvFollow?: ((on: boolean) => void) | undefined;
   /** Whether the Scene setup is open, kept by the workspace across scenes; the panel keeps its own without. */
   setupOpen?: boolean | undefined;
   onSetupOpen?: ((open: boolean) => void) | undefined;
   /** Told after a change to the scene's tokens or map, so the scene list's counts and thumbnail are read again. */
   onTokensChanged?: (() => void) | undefined;
+  /** Told when the scene's notes become empty or stop being empty, so the scene list's mark is read again. */
+  onNotesChanged?: (() => void) | undefined;
   /** The server-wide diagonal rule the ruler measures by (specs/06-grid-and-measurement.md §5, Q-037). */
   rulerRule?: RulerRule | undefined;
   /** Told when measuring starts, so the workspace reads the rule again: another browser may have changed it (G-036). */
@@ -337,10 +374,26 @@ export function ScenePanel({
     rulerQueue.current.next = undefined;
     toAnnounce.current = undefined;
   }
-  const [selectedToken, setSelectedToken] = useState<string>();
+  // The selected tokens (UXR-02): one by a click, more by Ctrl or Cmd and a click; the last is the primary, whose
+  // popover opens and which the keys act on when it is alone.
+  const [selection, setSelection] = useState<readonly string[]>([]);
+  const selectedToken = selection.at(-1);
+  const setSelectedToken = (id: string | undefined) => setSelection(id === undefined ? [] : [id]);
+  const [deletingGroup, setDeletingGroup] = useState<readonly SceneToken[]>();
   // Whether the selected token's popover is open: a click on the token, a choice in the list or a token
   // just placed opens it; a drag of the token or a pan closes it, and the token stays selected (D-156).
   const [popoverOpen, setPopoverOpen] = useState(false);
+  // Raised by D: the popover's hit-point field takes focus (DMT-01).
+  const [focusHp, setFocusHp] = useState(0);
+  // Raised from the initiative order: that token's popover notes field takes focus (DMT-04).
+  const [notesFocus, setNotesFocus] = useState<{ id: string; n: number }>();
+  // Raised by N: the Notes tab's field takes focus (DMT-04).
+  const [focusSceneNotes, setFocusSceneNotes] = useState(0);
+  // A request is for the popover or tab it opened, and the token it was for: one opened again later, or another
+  // token's, takes no focus of itself.
+  if (!popoverOpen && focusHp !== 0) setFocusHp(0);
+  if (notesFocus !== undefined && (!popoverOpen || notesFocus.id !== selectedToken)) setNotesFocus(undefined);
+  if (sideTab !== 'notes' && focusSceneNotes !== 0) setFocusSceneNotes(0);
   // Choosing a token gives the arrow keys back to it and ends measuring.
   const selectToken = (id: string | undefined) => {
     setSelectedToken(id);
@@ -350,6 +403,14 @@ export function ScenePanel({
       setPingOn(false);
       setFogOn(false);
     }
+  };
+  // Ctrl or Cmd and a click: the token joins the selection or leaves it; no popover for a group (UXR-02).
+  const toggleToken = (id: string) => {
+    setSelection((now) => (now.includes(id) ? now.filter((each) => each !== id) : [...now, id]));
+    setPopoverOpen(false);
+    stopMeasuring();
+    setPingOn(false);
+    setFogOn(false);
   };
   const [picking, setPicking] = useState(false);
   const [placingAsset, setPlacingAsset] = useState<LibraryAsset>();
@@ -554,6 +615,9 @@ export function ScenePanel({
     ? liveScene.tokens.map((token) => ({ ...token, ...pending[token.id]?.fields }))
     : sceneTokens.tokens;
   const selected = tokens?.find((token) => token.id === selectedToken);
+  // The group, in the order selected, of the tokens still on the scene; a group of one is a plain selection.
+  const group = selection.flatMap((id) => tokens?.filter((token) => token.id === id) ?? []);
+  const grouped = group.length > 1;
 
   const openDialog = (open: () => void) => {
     opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -641,6 +705,43 @@ export function ScenePanel({
     if (ok && updated) announce(done(updated));
   }
 
+  // Follow my view (DMT-03): sent while it is on for this, the live scene, unlocked, connected and not
+  // calibrating; the throttle drops what waits as soon as it stops, so nothing follows a manual control.
+  const followOn = isLive && tvFollow && !tvLocked && !offline && !draft;
+  const followNow = useRef(followOn);
+  followNow.current = followOn;
+  const sendFollowed = async (camera: PlayerCamera) => {
+    if (!live || !followNow.current) return;
+    const outcome = await live.command('camera.setPlayer', { scene_id: sceneId, camera });
+    if (!outcome.ok && followNow.current) setLiveFailure(t('scene.tvFailed', { reason: errorMessage(outcome.code) }));
+  };
+  const latestSend = useRef(sendFollowed);
+  latestSend.current = sendFollowed;
+  const follower = useRef<Throttle<PlayerCamera>>(undefined);
+  follower.current ??= throttle((camera) => void latestSend.current(camera), FOLLOW_INTERVAL_MS, sameRect);
+  useEffect(() => {
+    if (!followOn) follower.current?.cancel();
+  }, [followOn]);
+  useEffect(() => () => follower.current?.cancel(), []);
+  /** Turns Follow my view off before a manual TV camera control acts, so nothing waiting follows it. */
+  const stopFollowing = () => {
+    if (!tvFollow) return;
+    followNow.current = false;
+    follower.current?.cancel();
+    onTvFollow(false);
+  };
+  const toggleFollow = () => {
+    if (tvLocked) return;
+    if (tvFollow) {
+      stopFollowing();
+      return announce(t('tvCamera.followOff'));
+    }
+    if (offline) return announce(t('scene.tvOffline'));
+    follower.current?.cancel();
+    onTvFollow(true);
+    announce(t('tvCamera.followOn'));
+  };
+
   // The TV camera from the frame: shown at once, settled by the answer, whose event brought the live
   // scene's camera in step (D-111), or whose refusal leaves the frame where it was.
   async function steerTv(camera: PlayerCamera) {
@@ -662,7 +763,11 @@ export function ScenePanel({
           // The frame locks at once: a drag while down would reach no TV.
           offline,
           locked: tvLocked,
-          onChange: (camera) => void steerTv(camera),
+          onChange: (camera) => {
+            stopFollowing();
+            void steerTv(camera);
+          },
+          follow: followOn ? (camera) => follower.current?.push(camera) : undefined,
         }
       : undefined;
 
@@ -818,17 +923,28 @@ export function ScenePanel({
   });
   const fog = sceneFog.fog ?? [];
 
-  // The initiative tracker (TBL-06, specs/08-ux-journeys.md §12): the live scene's encounter, whose turn it is
-  // and, on the Enemies turn, its members, ringed on the map.
+  // The initiative tracker (TBL-06, DMT-02, specs/08-ux-journeys.md §12): the live scene's encounter and the
+  // token whose turn it is, a player character or a monster, ringed on the map.
   const encounter = liveScene?.encounter ?? null;
   const combat = isLive && encounter !== null && encounter.active;
-  const turnEntry = combat ? encounter.entries[encounter.current_index] : undefined;
-  const turnTokenId = turnEntry?.kind === 'pc' ? turnEntry.token_id : undefined;
-  const turnMembers = new Set(turnEntry?.kind === 'dm' ? membersOf(tokens ?? [], fog).map((member) => member.id) : []);
-  const turnOf = (token: SceneToken): 'current' | 'member' | undefined =>
-    token.id === turnTokenId ? 'current' : turnMembers.has(token.id) ? 'member' : undefined;
-  // The DM's camera centres on the player character whose turn comes up, not on one already shown when the
-  // view opened.
+  const turnTokenId = combat ? encounter.entries[encounter.current_index]?.token_id : undefined;
+  const turnOf = (token: SceneToken): 'current' | undefined => (token.id === turnTokenId ? 'current' : undefined);
+  // The popover's Add to initiative (DMT-02): while combat runs, for a player character, monster or npc without
+  // an entry; refused with its reason when players cannot see it or a monster carries Dead (Q-117).
+  const initiativeAction = (token: SceneToken) => {
+    if (!combat || entryKindOf(token) === undefined) return undefined;
+    if (encounter.entries.some((entry) => entry.token_id === token.id)) return undefined;
+    const reason = !seenByPlayers(token, token.asset.size, fog)
+      ? t('initiative.addUnseen')
+      : canEnter(token, fog)
+        ? undefined
+        : t('initiative.addDead');
+    return {
+      disabledReason: reason,
+      onAdd: () => void command('encounter.addEntry', { scene_id: sceneId, token_id: token.id }, 'initiative.failed'),
+    };
+  };
+  // The DM's camera centres on the token whose turn comes up, not on one already shown when the view opened.
   const turnShown = useRef(turnTokenId);
   useEffect(() => {
     if (turnShown.current === turnTokenId) return;
@@ -969,12 +1085,29 @@ export function ScenePanel({
       event.preventDefault();
       const step = key === '[' ? -FOG_BRUSH_RADIUS.step : FOG_BRUSH_RADIUS.step;
       fogTool.onRadius(Math.min(FOG_BRUSH_RADIUS.max, Math.max(FOG_BRUSH_RADIUS.min, fogRadius + step)));
+    } else if (key === 'c' && liveScene && !draft) {
+      // Follow my view (DMT-03), on the live scene only, and not while the TV camera is locked.
+      event.preventDefault();
+      toggleFollow();
     } else if (key === 't' && canAddToken) {
       event.preventDefault();
       openPicker();
+    } else if (key === 'h' && grouped && tokenControls) {
+      event.preventDefault();
+      hideGroup();
     } else if (key === 'h' && selected && tokenControls) {
       event.preventDefault();
       toggleHidden(selected);
+    } else if (key === 'n' && scene) {
+      // The scene's notes (DMT-04): the Notes tab, its field focused.
+      event.preventDefault();
+      onSideTab('notes');
+      setFocusSceneNotes((n) => n + 1);
+    } else if (key === 'd' && selected && !grouped && tokenControls && !placingAsset) {
+      // Damage or healing (DMT-01): the selected token's popover, its hit-point field focused.
+      event.preventDefault();
+      setPopoverOpen(true);
+      setFocusHp((n) => n + 1);
     }
   };
   useEffect(() => {
@@ -982,6 +1115,14 @@ export function ScenePanel({
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
   }, []);
+
+  // A token's notes from the initiative order (DMT-04): its popover open on the map, centred, the cursor in its notes.
+  function openTokenNotes(id: string) {
+    selectToken(id);
+    setPopoverOpen(true);
+    setNotesFocus((current) => ({ id, n: (current?.n ?? 0) + 1 }));
+    canvas.current?.centreOn(id);
+  }
 
   // Moves are announced too, since the canvas says nothing to assistive technology (review).
   const moved = (updated: SceneToken) =>
@@ -998,6 +1139,17 @@ export function ScenePanel({
         onCancel: cancelPlacing,
       }
     : undefined;
+  // A library asset dragged onto the map is placed where it is dropped, as a click places a chosen one (UXR-03).
+  const assetDrop: AssetDrop | undefined = draft
+    ? undefined
+    : {
+        sizeOf: (types) => assetDrag.of(types)?.size,
+        onDrop: (at) => {
+          const asset = assetDrag.of([ASSET_DRAG_TYPE]);
+          assetDrag.end();
+          if (asset) void placeToken(asset, at);
+        },
+      };
   const tokenControls: CanvasTokenControls | undefined = draft
     ? undefined
     : {
@@ -1013,7 +1165,15 @@ export function ScenePanel({
           const token = tokens?.find((each) => each.id === id);
           if (token) void changeToken(token, at, moved);
         },
-        onDelete: (id) => openDialog(() => setDeleting(tokens?.find((token) => token.id === id))),
+        onDelete: (id) =>
+          openDialog(() =>
+            grouped && group.some((token) => token.id === id)
+              ? setDeletingGroup(group)
+              : setDeleting(tokens?.find((token) => token.id === id)),
+          ),
+        selectedIds: grouped ? group.map((token) => token.id) : undefined,
+        onToggle: toggleToken,
+        onMoveMany: (moves) => void runGroup(moveCommands(group, moves), (count) => t('group.moved', { count })),
       };
 
   // The token controls: neither while calibrating nor before the tokens have arrived.
@@ -1056,6 +1216,35 @@ export function ScenePanel({
     );
   }
 
+  // Hit points and armour class (DMT-01, specs/04-live-sync.md §15): on the live scene `token.setStats` and
+  // `token.applyHp`, each one undoable step with the markers they set; in preparation the same fields over REST, the
+  // server setting the same markers. The event or the answer brings the token in step; nothing is shown before it.
+  const hpSaid = (token: SceneToken) => {
+    const hp = compactHp(token);
+    return hp === undefined
+      ? t('hp.changedNone', { label: token.label })
+      : t('hp.changed', { label: token.label, hp: t('hp.compact', { hp }) });
+  };
+  async function changeStats(token: SceneToken, stats: Partial<TokenStats>) {
+    if (isLive) {
+      const ok = await command('token.setStats', { token_id: token.id, ...stats }, 'hp.failed');
+      const updated = live?.current()?.tokens.find((each) => each.id === token.id);
+      if (ok && updated) announce(hpSaid(updated));
+      return;
+    }
+    const result = await sceneTokens.change(token.id, stats);
+    if (result.ok) announce(hpSaid(result.token));
+  }
+  async function enterHp(token: SceneToken, entry: HpEntry) {
+    if (entry.kind === 'set') return changeStats(token, { hp_current: entry.hp_current });
+    const next = applyHp(token, entry.delta);
+    if (next === undefined) return announce(t('hp.noCurrent', { label: token.label }));
+    if (!isLive) return changeStats(token, { hp_current: next.hp_current, hp_temp: next.hp_temp });
+    const ok = await command('token.applyHp', { token_id: token.id, delta: entry.delta }, 'hp.failed');
+    const updated = live?.current()?.tokens.find((each) => each.id === token.id);
+    if (ok && updated) announce(hpSaid(updated));
+  }
+
   // Exhaustion's level, stepped from its chip: 0 takes it off, any other level replaces it where it stands.
   function setExhaustion(token: SceneToken, level: number) {
     if (level < EXHAUSTION_LEVELS.min) return toggleMarker(token, EXHAUSTION);
@@ -1063,6 +1252,83 @@ export function ScenePanel({
       each.id === EXHAUSTION ? { id: EXHAUSTION, level: Math.min(level, EXHAUSTION_LEVELS.max) } : each,
     );
     void changeToken(token, { markers }, (updated) => t('tokens.exhaustionSet', { label: updated.label, level }));
+  }
+
+  // Actions on the selected group (UXR-02, specs/08-ux-journeys.md §14): on the live scene one `token.batch`, one
+  // undo step, its moves, visibility and markers shown at once until the answer (Q-123); in preparation the same
+  // changes over REST, one token at a time. A refusal of the batch changes nothing and says why.
+  async function runGroup(commands: BatchedCommand[], said: (count: number) => string) {
+    if (commands.length === 0) return;
+    if (isLive) {
+      const seq = ++pendingSeq.current;
+      const shown = (each: BatchedCommand) =>
+        each.type === 'token.move'
+          ? { x: each.payload.x, y: each.payload.y }
+          : each.type === 'token.setVisibility'
+            ? { hidden: each.payload.hidden }
+            : each.type === 'token.setMarkers'
+              ? { markers: each.payload.markers }
+              : undefined;
+      setPending((current) => {
+        const next = { ...current };
+        for (const each of commands) {
+          const fields = shown(each);
+          if (fields)
+            next[each.payload.token_id] = { seq, fields: { ...current[each.payload.token_id]?.fields, ...fields } };
+        }
+        return next;
+      });
+      const ok = await command('token.batch', { commands }, 'group.failed');
+      setPending((current) => Object.fromEntries(Object.entries(current).filter(([, each]) => each.seq !== seq)));
+      if (ok) announce(said(commands.length));
+    } else {
+      let done = 0;
+      for (const each of commands) {
+        const token = tokens?.find((one) => one.id === each.payload.token_id);
+        if (!token) continue;
+        if (each.type === 'token.delete') {
+          if (await sceneTokens.remove(token.id)) done++;
+          continue;
+        }
+        // Damage or healing as the popover sends it in preparation: the hit points it leaves, the server setting
+        // the markers they drive (DMT-01).
+        const healed = each.type === 'token.applyHp' ? applyHp(token, each.payload.delta) : undefined;
+        const body: TokenUpdateBody | undefined =
+          each.type === 'token.move'
+            ? { x: each.payload.x, y: each.payload.y }
+            : each.type === 'token.setVisibility'
+              ? { hidden: each.payload.hidden }
+              : each.type === 'token.setMarkers'
+                ? { markers: each.payload.markers }
+                : healed && { hp_current: healed.hp_current, hp_temp: healed.hp_temp };
+        if (body && (await sceneTokens.change(token.id, body)).ok) done++;
+      }
+      if (done > 0) announce(said(done));
+    }
+    onTokensChanged?.();
+  }
+  function hideGroup() {
+    const { hidden, commands } = hideCommands(group);
+    void runGroup(commands, (count) => t(hidden ? 'group.hidden' : 'group.revealed', { count }));
+  }
+  function markGroup(id: string) {
+    const { on, commands } = markerCommands(group, id);
+    const marker = conditionLabel(id);
+    void runGroup(commands, (count) => t(on ? 'group.markerOn' : 'group.markerOff', { marker, count }));
+  }
+  function hpGroup(delta: number) {
+    const { skipped, commands } = hpCommands(group, delta);
+    if (commands.length === 0) return announce(t('group.hpNone'));
+    const amount = delta > 0 ? `+${delta}` : `−${-delta}`;
+    void runGroup(commands, (count) =>
+      skipped > 0 ? t('group.hpSkipped', { amount, count, skipped }) : t('group.hpApplied', { amount, count }),
+    );
+  }
+  async function deleteGroup(doomed: readonly SceneToken[]) {
+    setDeletingGroup(undefined);
+    refocus.current = 'add';
+    await runGroup(deleteCommands(doomed), (count) => t('group.deleted', { count }));
+    setSelectedToken(undefined);
   }
 
   // Reveal all hidden monsters: one change each, in turn (UIX-01); on the live scene each is its own
@@ -1107,7 +1373,7 @@ export function ScenePanel({
     </>
   ) : null;
   const popover =
-    tokens && !placingAsset && popoverOpen
+    tokens && !placingAsset && popoverOpen && !grouped
       ? (anchor: Parameters<NonNullable<Parameters<typeof MapCanvas>[0]['popover']>>[0]) =>
           selected ? (
             <TokenPopover
@@ -1125,6 +1391,14 @@ export function ScenePanel({
               onDelete={() => openDialog(() => setDeleting(selected))}
               onToggleMarker={(id) => toggleMarker(selected, id)}
               onExhaustion={(level) => setExhaustion(selected, level)}
+              onHpEntry={(entry) => void enterHp(selected, entry)}
+              onStats={(stats) => void changeStats(selected, stats)}
+              initiative={initiativeAction(selected)}
+              focusHp={focusHp}
+              focusNotes={notesFocus?.id === selected.id ? notesFocus.n : 0}
+              onNotesSaved={(token) => {
+                if (!isLive) sceneTokens.stored(token);
+              }}
             />
           ) : null
       : undefined;
@@ -1132,6 +1406,8 @@ export function ScenePanel({
     <TokenList
       tokens={tokens}
       selectedId={selected?.id}
+      selectedIds={grouped ? group.map((token) => token.id) : undefined}
+      onToggle={draft ? undefined : (token) => toggleToken(token.id)}
       onSelect={(token) => {
         selectToken(token.id);
         setPopoverOpen(true);
@@ -1255,7 +1531,10 @@ export function ScenePanel({
           className="eg-button eg-button--small"
           aria-label={t('tvCamera.sendView')}
           aria-disabled={tvLocked || undefined}
-          onClick={() => canvas.current?.sendView()}
+          onClick={() => {
+            stopFollowing();
+            canvas.current?.sendView();
+          }}
         >
           {t('tvCamera.sendViewShort')}
         </button>
@@ -1264,7 +1543,10 @@ export function ScenePanel({
           className="eg-button eg-button--small"
           aria-label={t('canvas.tvFit')}
           aria-disabled={tvLocked || undefined}
-          onClick={() => canvas.current?.tvFit()}
+          onClick={() => {
+            stopFollowing();
+            canvas.current?.tvFit();
+          }}
         >
           {t('canvas.fit')}
         </button>
@@ -1273,7 +1555,10 @@ export function ScenePanel({
           className="eg-icon-button eg-icon-button--bordered"
           aria-label={t('canvas.tvZoomOut')}
           aria-disabled={tvLocked || undefined}
-          onClick={() => canvas.current?.tvZoom('out')}
+          onClick={() => {
+            stopFollowing();
+            canvas.current?.tvZoom('out');
+          }}
         >
           <Icon name="minus" size={14} strokeWidth={2} />
         </button>
@@ -1282,9 +1567,24 @@ export function ScenePanel({
           className="eg-icon-button eg-icon-button--bordered"
           aria-label={t('canvas.tvZoomIn')}
           aria-disabled={tvLocked || undefined}
-          onClick={() => canvas.current?.tvZoom('in')}
+          onClick={() => {
+            stopFollowing();
+            canvas.current?.tvZoom('in');
+          }}
         >
           <Icon name="plus" size={14} strokeWidth={2} />
+        </button>
+        <button
+          type="button"
+          className="eg-button eg-button--small eg-tv__follow"
+          aria-pressed={tvFollow}
+          aria-disabled={tvLocked || undefined}
+          aria-keyshortcuts="C"
+          title={t(tvLocked ? 'tvCamera.followLocked' : 'tvCamera.followHint')}
+          onClick={toggleFollow}
+        >
+          <Icon name="follow" size={14} strokeWidth={2} />
+          {t('tvCamera.follow')}
         </button>
         <button
           type="button"
@@ -1425,18 +1725,30 @@ export function ScenePanel({
                     tokens={tokens?.map((token) => ({ ...toCanvasToken(token), turn: turnOf(token) })) ?? []}
                     tokenControls={tokenControls}
                     placing={placing}
+                    assetDrop={assetDrop}
                     tvFrame={tvFrame}
                     ruler={{ shown: shownRuler, tool: rulerTool }}
                     ping={{ shown: isLive && live ? live.pings : [], tool: pingTool }}
                     fog={{ fog, tool: fogTool }}
                   />
                   {map && draft ? <CornerMagnifier map={map} calibration={draft.calibration} /> : null}
+                  {grouped && tokenControls ? (
+                    <GroupBar
+                      count={group.length}
+                      allHidden={group.every((token) => token.hidden)}
+                      onHide={hideGroup}
+                      onMarker={markGroup}
+                      onHp={hpGroup}
+                      onDelete={() => openDialog(() => setDeletingGroup(group))}
+                      onClear={() => setSelectedToken(undefined)}
+                    />
+                  ) : null}
                 </div>
               </div>
             ) : failure ? null : (
               loading
             )}
-            <ShortcutBar live={isLive} combat={combat} />
+            <ShortcutBar live={isLive} combat={combat} following={followOn} />
             {picking ? (
               <TokenPicker
                 onPick={pick}
@@ -1475,6 +1787,16 @@ export function ScenePanel({
                 }}
                 onClose={() => {
                   setFilling(undefined);
+                  refocus.current = 'opener';
+                }}
+              />
+            ) : null}
+            {deletingGroup ? (
+              <DeleteGroupDialog
+                count={deletingGroup.length}
+                onConfirm={() => void deleteGroup(deletingGroup)}
+                onClose={() => {
+                  setDeletingGroup(undefined);
                   refocus.current = 'opener';
                 }}
               />
@@ -1537,11 +1859,20 @@ export function ScenePanel({
             tokens={tokens ?? []}
             fog={fog}
             onCommand={(type, payload) => command(type, payload, 'initiative.failed')}
-            onShowToken={(token) => {
-              selectToken(token.id);
-              canvas.current?.centreOn(token.id);
-            }}
+            onOpenNotes={openTokenNotes}
           />
+        }
+        notes={
+          scene ? (
+            <SceneNotes
+              scene={scene}
+              focus={focusSceneNotes}
+              onSaved={(saved) => {
+                if (hasNotes(saved.notes) !== hasNotes(scene.notes)) onNotesChanged?.();
+                if (!isLive) setScene(saved);
+              }}
+            />
+          ) : undefined
         }
         round={combat ? encounter.round : undefined}
         library={library}
@@ -1551,13 +1882,24 @@ export function ScenePanel({
 }
 
 /** The shortcut bar along the bottom of the map area (UIX-01, specs/08-ux-journeys.md §11). */
-function ShortcutBar({ live, combat = false }: { live: boolean; combat?: boolean }) {
+function ShortcutBar({
+  live,
+  combat = false,
+  following = false,
+}: {
+  live: boolean;
+  combat?: boolean;
+  following?: boolean;
+}) {
   const keys: [MessageKey, MessageKey][] = [
     ['shortcuts.keyV', 'shortcuts.select'],
     ['shortcuts.keyM', 'shortcuts.ruler'],
     ['shortcuts.keyP', 'shortcuts.ping'],
     ['shortcuts.keyH', 'shortcuts.hide'],
+    ['shortcuts.keyD', 'shortcuts.hp'],
+    ['shortcuts.keyN', 'shortcuts.notes'],
     ['shortcuts.keyUndo', 'shortcuts.undo'],
+    ...(live ? ([['shortcuts.keyC', 'shortcuts.follow']] as [MessageKey, MessageKey][]) : []),
     ...(combat ? ([['shortcuts.keyEnter', 'shortcuts.nextTurn']] as [MessageKey, MessageKey][]) : []),
     ['shortcuts.keySpace', 'shortcuts.pan'],
   ];
@@ -1569,7 +1911,9 @@ function ShortcutBar({ live, combat = false }: { live: boolean; combat?: boolean
           {t(action)}
         </span>
       ))}
-      <span className="eg-shortcuts__note">{t(live ? 'shortcuts.noteLive' : 'shortcuts.notePrep')}</span>
+      <span className="eg-shortcuts__note">
+        {t(following ? 'shortcuts.noteFollow' : live ? 'shortcuts.noteLive' : 'shortcuts.notePrep')}
+      </span>
     </div>
   );
 }

@@ -3,6 +3,7 @@ import type { PlayerSnapshot } from '@emberglass/shared';
 import { connectLive, type LiveStatus } from '../live/connection.js';
 import { usePings, type Ping } from '../live/pings.js';
 import { applyPlayerEvent, fromSnapshot, type PlayerScene } from './scene.js';
+import { isHandheld } from './useHandheld.js';
 
 /** How long the window must keep its size before it is reported: a resize fires many events. */
 export const VIEWPORT_SETTLE_MS = 250;
@@ -48,7 +49,10 @@ export function usePlayerLive(): PlayerLive {
         );
       },
     });
-    const report = () => connection.reportViewport({ width: window.innerWidth, height: window.innerHeight });
+    // A handheld reports no size (UXR-05, Q-125): the TV frame keeps the TV's shape, whichever screen came first.
+    const report = () => {
+      if (!isHandheld()) connection.reportViewport({ width: window.innerWidth, height: window.innerHeight });
+    };
     report();
     let settling: ReturnType<typeof setTimeout> | undefined;
     const onResize = () => {

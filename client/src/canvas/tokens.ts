@@ -28,10 +28,15 @@ export interface CanvasToken {
   /** The condition markers drawn on it (TBL-02); none when absent. */
   markers?: readonly TokenMarker[] | undefined;
   /**
-   * Its part in the turn, on the DM's map only (TBL-06, specs/08-ux-journeys.md §12): the player character
-   * whose turn it is, or a member of the Enemies entry on the Enemies turn; none when absent.
+   * Its part in the turn, on the DM's map only (TBL-06, DMT-02, specs/08-ux-journeys.md §12): the token
+   * whose entry has the turn, a player character's or a monster's; none when absent.
    */
-  turn?: 'current' | 'member' | undefined;
+  turn?: 'current' | undefined;
+  /**
+   * The first lines of its notes and its asset's, on the DM's map only (DMT-04): drawn as a page badge whose hover text
+   * they are; none when it has no notes. A player token never carries it.
+   */
+  note?: string | undefined;
 }
 
 /** World pixels per square, and where grid unit (0, 0) lies. */

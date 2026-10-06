@@ -19,8 +19,8 @@ import {
 import { render, type Rendered } from '../../ui/testing/render.js';
 import { Workspace } from '../Workspace.js';
 
-// The Initiative tab of the DM view (TBL-06, specs/08-ux-journeys.md §12, specs/04-live-sync.md §14, Q-104,
-// Q-106), against the scripted server, which applies the same encounter rules as the server
+// The Initiative tab of the DM view (TBL-06, DMT-02, specs/08-ux-journeys.md §12, specs/04-live-sync.md §14,
+// Q-111, Q-117, Q-118), against the scripted server, which applies the same encounter rules as the server
 // (shared/src/encounter.ts).
 
 let server: FakeServer;
@@ -88,6 +88,22 @@ const field = (view: HTMLElement, name: string) =>
   view.querySelector<HTMLInputElement>(`input[aria-label="${t('initiative.numberOf', { name })}"]`)!;
 const encounter = () => server.encounters[cave.id]!;
 const stage = () => Konva.stages.filter((each) => each.findOne('.tokens')).at(-1)!;
+const offer = (view: HTMLElement) => view.querySelector<HTMLElement>('.eg-initiative__offer');
+const rowOf = (view: HTMLElement, name: string) =>
+  [...view.querySelectorAll<HTMLElement>('.eg-initiative__row')].find(
+    (row) => row.querySelector('.eg-initiative__name')!.textContent === name,
+  )!;
+/** Delivers a token change the server made elsewhere, as another DM browser's command would. */
+function changed(token: SceneToken, fields: Partial<SceneToken>) {
+  Object.assign(token, fields);
+  server.deliver('token.updated', { token: structuredClone(token), relabelled: [] });
+}
+function revealed(...tokens: SceneToken[]) {
+  for (const token of tokens) {
+    token.hidden = false;
+    server.deliver('token.added', { token: structuredClone(token), relabelled: [] });
+  }
+}
 const ringed = (name: string) =>
   stage()
     .find(`.${name}`)
@@ -106,31 +122,33 @@ async function commit(input: HTMLInputElement, value: string) {
 }
 
 describe('the Initiative tab (08 §12)', () => {
-  it('asks for the live scene, and starts combat from the visible player characters and one Enemies row', async () => {
+  it('asks for the live scene, and starts combat from the visible player characters and monsters', async () => {
     const view = await open(hall);
     expect(view.textContent).toContain(t('initiative.notLive'));
     await click(view.querySelector(`[data-scene="${cave.id}"] .eg-scenes__select`));
     await click(button(view, t('initiative.start')));
     expect(commands()).toContainEqual({ type: 'encounter.start', payload: { scene_id: cave.id } });
-    expect(rows(view)).toEqual(['Tamsin', 'Wren', t('initiative.enemies')]);
+    expect(rows(view)).toEqual(['Tamsin', 'Wren', 'Goblin']);
+    // A monster's row is a row like the others, in the monster ring colour.
+    expect(rowOf(view, 'Goblin').dataset.kind).toBe('monster');
+    expect(rowOf(view, 'Goblin').querySelector('.eg-avatar--monster img')).not.toBeNull();
+    expect(field(view, 'Goblin')).not.toBeNull();
     expect(currentRow(view)?.textContent).toContain('Tamsin');
     expect(view.querySelector('[role="tab"][aria-selected="true"]')!.textContent).toBe(
       t('side.initiativeRound', { round: 1 }),
     );
   });
 
-  it('sorts by the numbers typed, with the unnumbered below, and a drag stands until a number is typed', async () => {
+  it('sorts by the numbers typed, keeps a tie in its order, and a drag stands until a number is typed', async () => {
     const view = await open();
     await click(button(view, t('initiative.start')));
     await commit(field(view, 'Wren'), '17');
-    expect(rows(view)).toEqual(['Wren', 'Tamsin', t('initiative.enemies')]);
-    await commit(field(view, t('initiative.enemies')), '12');
-    expect(rows(view)).toEqual(['Wren', t('initiative.enemies'), 'Tamsin']);
-    // Move Tamsin up above the Enemies, as a drag to fix a tie would.
-    await click(button(view, t('initiative.moveUpOf', { name: 'Tamsin' })));
-    expect(rows(view)).toEqual(['Wren', 'Tamsin', t('initiative.enemies')]);
-    // A drag and drop: the Enemies dropped on Wren's row go first.
-    const [wrenRow, , enemiesRow] = [...view.querySelectorAll<HTMLElement>('.eg-initiative__row')];
+    expect(rows(view)).toEqual(['Wren', 'Tamsin', 'Goblin']);
+    // A tie: the goblin's 17 keeps it below Wren, as it stood.
+    await commit(field(view, 'Goblin'), '17');
+    expect(rows(view)).toEqual(['Wren', 'Goblin', 'Tamsin']);
+    // A drag breaks the tie: the goblin dropped on Wren's row goes first.
+    const [wrenRow, goblinRow] = [...view.querySelectorAll<HTMLElement>('.eg-initiative__row')];
     const data = { effectAllowed: '', dropEffect: '', setData: () => {}, getData: () => '' };
     const drag = (target: HTMLElement, name: string) =>
       act(() => {
@@ -138,19 +156,23 @@ describe('the Initiative tab (08 §12)', () => {
         Object.assign(event, { dataTransfer: data });
         target.dispatchEvent(event);
       });
-    drag(enemiesRow!, 'dragstart');
+    drag(goblinRow!, 'dragstart');
     drag(wrenRow!, 'dragover');
     drag(wrenRow!, 'drop');
     await settle();
-    expect(rows(view)).toEqual([t('initiative.enemies'), 'Wren', 'Tamsin']);
-    // Typing a number sorts again: Wren's 17 first, the Enemies' 12, then Tamsin without one.
-    await commit(field(view, 'Tamsin'), '');
-    await commit(field(view, 'Wren'), '18');
-    expect(rows(view)).toEqual(['Wren', t('initiative.enemies'), 'Tamsin']);
+    expect(rows(view)).toEqual(['Goblin', 'Wren', 'Tamsin']);
+    // Typing another number sorts again, and the tie keeps the dragged order.
+    await commit(field(view, 'Tamsin'), '5');
+    expect(rows(view)).toEqual(['Goblin', 'Wren', 'Tamsin']);
+    // Move Tamsin up, as a drag would: the order stands until a number is typed.
+    await click(button(view, t('initiative.moveUpOf', { name: 'Tamsin' })));
+    expect(rows(view)).toEqual(['Goblin', 'Tamsin', 'Wren']);
+    await commit(field(view, 'Tamsin'), '4');
+    expect(rows(view)).toEqual(['Goblin', 'Wren', 'Tamsin']);
     // What is not a whole number goes back to the number stored, sending nothing.
     const sent = commands().length;
     await commit(field(view, 'Wren'), 'twelve');
-    expect(field(view, 'Wren').value).toBe('18');
+    expect(field(view, 'Wren').value).toBe('17');
     expect(commands()).toHaveLength(sent);
   });
 
@@ -178,39 +200,129 @@ describe('the Initiative tab (08 §12)', () => {
     expect(encounter()).toMatchObject({ current_index: 2, round: 1 });
   });
 
-  it('rings the turn’s player character on the map, and the Enemies’ members on their turn, listed with their conditions', async () => {
+  it('rings the token whose turn it is on the map, a monster’s as a player character’s', async () => {
     const view = await open();
     await click(button(view, t('initiative.start')));
     await settle();
     expect(ringed('token-turn')).toEqual([`token-${tamsin.id}`]);
-    expect(ringed('token-turn-member')).toEqual([]);
     key(document.body, { key: 'Enter' });
     key(document.body, { key: 'Enter' });
     await settle();
-    expect(ringed('token-turn')).toEqual([]);
-    expect(ringed('token-turn-member')).toEqual([`token-${goblin.id}`]);
-    const members = view.querySelector('.eg-initiative__members')!;
-    expect(members.textContent).toContain('Goblin');
-    // A member chosen is selected on the map.
-    await click(members.querySelector('button'));
-    expect(ringed('token-selected')).toEqual([`token-${goblin.id}`]);
+    expect(ringed('token-turn')).toEqual([`token-${goblin.id}`]);
+    expect(currentRow(view)?.textContent).toContain('Goblin');
   });
 
-  it('asks whether to end combat when the Enemies’ turn comes with none left, and Continue passes it', async () => {
+  it('greys a Dead monster and passes it over, removes the dead, and asks whether to end combat', async () => {
     const view = await open();
     await click(button(view, t('initiative.start')));
-    goblin.markers = [{ id: 'dead' }];
-    server.deliver('token.updated', { token: structuredClone(goblin), relabelled: [] });
-    server.encounterElsewhere({ ...encounter(), current_index: 2 });
+    changed(goblin, { markers: [{ id: 'dead' }] });
     await settle();
+    expect(rowOf(view, 'Goblin').classList).toContain('eg-initiative__row--dead');
+    expect(rowOf(view, 'Goblin').textContent).toContain(t('initiative.passedDead'));
+    // Asked only once the turn passes.
+    expect(view.textContent).not.toContain(t('initiative.noEnemies'));
+    key(document.body, { key: 'Enter' });
+    await settle();
+    expect(encounter().current_index).toBe(1);
     expect(view.textContent).toContain(t('initiative.noEnemies'));
+    // Continue leaves combat running; the dead goblin is passed over.
     await click(button(view.querySelector('.eg-initiative__prompt')!, t('initiative.continue')));
+    expect(view.textContent).not.toContain(t('initiative.noEnemies'));
+    key(document.body, { key: 'Enter' });
+    await settle();
     expect(encounter()).toMatchObject({ current_index: 0, round: 2 });
-    server.encounterElsewhere({ ...encounter(), current_index: 2 });
+    // Remove dead takes the goblin's row; the encounter still had an enemy.
+    await click(button(view.querySelector('.eg-initiative__head')!, t('initiative.removeDead')));
+    expect(rows(view)).toEqual(['Tamsin', 'Wren']);
+    expect(button(view.querySelector('.eg-initiative__head')!, t('initiative.removeDead'))).toBeUndefined();
+    key(document.body, { key: 'Enter' });
     await settle();
     await click(button(view.querySelector('.eg-initiative__prompt')!, t('initiative.end')));
     expect(encounter().active).toBe(false);
     expect(view.textContent).toContain(t('initiative.start'));
+  });
+
+  it('never asks to end combat in an encounter that never had a monster entry', async () => {
+    changed(goblin, { hidden: true });
+    const view = await open();
+    await click(button(view, t('initiative.start')));
+    expect(rows(view)).toEqual(['Tamsin', 'Wren']);
+    for (let turn = 0; turn < 3; turn += 1) key(document.body, { key: 'Enter' });
+    await settle();
+    expect(encounter().round).toBe(2);
+    expect(view.textContent).not.toContain(t('initiative.noEnemies'));
+  });
+
+  it('dims a monster players cannot see, and passes it over', async () => {
+    const view = await open();
+    await click(button(view, t('initiative.start')));
+    changed(goblin, { hidden: true });
+    await settle();
+    expect(rowOf(view, 'Goblin').classList).toContain('eg-initiative__row--unseen');
+    expect(rowOf(view, 'Goblin').textContent).toContain(t('initiative.passed'));
+    key(document.body, { key: 'Enter' });
+    key(document.body, { key: 'Enter' });
+    await settle();
+    expect(encounter()).toMatchObject({ current_index: 0, round: 2 });
+  });
+
+  it('offers the monsters a reveal shows in one prompt, each with its number, and Skip adds none', async () => {
+    const view = await open();
+    await click(button(view, t('initiative.start')));
+    await commit(field(view, 'Tamsin'), '18');
+    await commit(field(view, 'Wren'), '10');
+    const bandit = server.addAsset({ name: 'Bandit', category: 'monster', default_hidden: true });
+    const bandits = [1, 2, 3].map((n) =>
+      server.addToken(cave.id, bandit, { x: 10 + n, y: 4, label: `Bandit ${n}`, hidden: true }),
+    );
+    revealed(...bandits);
+    await settle();
+    // One prompt for all three, each with its own number field.
+    expect(view.querySelectorAll('.eg-initiative__offer')).toHaveLength(1);
+    expect(offer(view)!.textContent).toContain(t('initiative.offerMany', { count: 3 }));
+    expect([...offer(view)!.querySelectorAll('[data-offer-token]')].map((row) => row.textContent)).toEqual([
+      'Bandit 1',
+      'Bandit 2',
+      'Bandit 3',
+    ]);
+    await click(button(offer(view)!, t('initiative.skip')));
+    expect(offer(view)).toBeNull();
+    expect(rows(view)).toEqual(['Tamsin', 'Wren', 'Goblin']);
+    expect(commands().some((command) => command.type === 'encounter.addEntry')).toBe(false);
+    // Hidden and revealed again, they are not offered a second time in this browser.
+    revealed(...bandits);
+    await settle();
+    expect(offer(view)).toBeNull();
+  });
+
+  it('adds the monsters a reveal shows by the numbers typed, and the others at the end', async () => {
+    const view = await open();
+    await click(button(view, t('initiative.start')));
+    await commit(field(view, 'Tamsin'), '18');
+    await commit(field(view, 'Wren'), '10');
+    const bandit = server.addAsset({ name: 'Bandit', category: 'monster', default_hidden: true });
+    const bandits = [1, 2, 3].map((n) =>
+      server.addToken(cave.id, bandit, { x: 10 + n, y: 4, label: `Bandit ${n}`, hidden: true }),
+    );
+    revealed(...bandits);
+    await settle();
+    const numberOf = (name: string) =>
+      offer(view)!.querySelector<HTMLInputElement>(`input[aria-label="${t('initiative.numberOf', { name })}"]`)!;
+    await type(numberOf('Bandit 1'), '12');
+    await type(numberOf('Bandit 3'), '10');
+    // What is not a number keeps the offer from being sent.
+    await type(numberOf('Bandit 2'), 'x');
+    expect(button(offer(view)!, t('initiative.addAll'))!.disabled).toBe(true);
+    await type(numberOf('Bandit 2'), '');
+    await click(button(offer(view)!, t('initiative.addAll')));
+    // Bandit 1 by its 12, Bandit 3 after Wren's equal 10, Bandit 2 at the end.
+    expect(rows(view)).toEqual(['Tamsin', 'Bandit 1', 'Wren', 'Bandit 3', 'Goblin', 'Bandit 2']);
+    expect(offer(view)).toBeNull();
+    expect(commands().filter((command) => command.type === 'encounter.addEntry')).toEqual([
+      { type: 'encounter.addEntry', payload: { scene_id: cave.id, token_id: bandits[0]!.id, initiative: 12 } },
+      { type: 'encounter.addEntry', payload: { scene_id: cave.id, token_id: bandits[1]!.id } },
+      { type: 'encounter.addEntry', payload: { scene_id: cave.id, token_id: bandits[2]!.id, initiative: 10 } },
+    ]);
   });
 
   it('offers a player character players can now see, at the end of the order', async () => {
@@ -222,10 +334,38 @@ describe('the Initiative tab (08 §12)', () => {
     });
     server.deliver('token.added', { token: structuredClone(oren), relabelled: [] });
     await settle();
-    expect(view.textContent).toContain(t('initiative.offer', { name: 'Oren' }));
-    await click(button(view.querySelector(`[data-offer="${oren.id}"]`)!, t('initiative.add')));
-    expect(rows(view)).toEqual(['Tamsin', 'Wren', t('initiative.enemies'), 'Oren']);
-    expect(view.textContent).not.toContain(t('initiative.offer', { name: 'Oren' }));
+    expect(offer(view)!.textContent).toContain(t('initiative.offer', { name: 'Oren' }));
+    await click(button(offer(view)!, t('initiative.add')));
+    expect(rows(view)).toEqual(['Tamsin', 'Wren', 'Goblin', 'Oren']);
+    expect(offer(view)).toBeNull();
+  });
+
+  it('removes a row, and the token’s popover adds it back to the order', async () => {
+    const view = await open();
+    await click(button(view, t('initiative.start')));
+    await click(button(view, t('initiative.removeOf', { name: 'Goblin' })));
+    expect(rows(view)).toEqual(['Tamsin', 'Wren']);
+    // Removed by the DM, it is not offered back.
+    expect(offer(view)).toBeNull();
+    await click(view.querySelector('[role="tab"]:nth-child(1)'));
+    await selectTokenRow(view, 'Goblin');
+    await tokenMenu(view, 'Goblin', t('initiative.addToOrder'));
+    await click(view.querySelector('[role="tab"]:nth-child(2)'));
+    expect(rows(view)).toEqual(['Tamsin', 'Wren', 'Goblin']);
+    // A token with an entry has no such action; a Dead monster's says why it cannot.
+    await click(view.querySelector('[role="tab"]:nth-child(1)'));
+    await selectTokenRow(view, 'Goblin');
+    await expect(tokenMenu(view, 'Goblin', t('initiative.addToOrder'))).rejects.toThrow(/no menu item/);
+    key(document.activeElement ?? document.body, { key: 'Escape' });
+    changed(goblin, { markers: [{ id: 'dead' }] });
+    await click(view.querySelector('[role="tab"]:nth-child(2)'));
+    await click(button(view.querySelector('.eg-initiative__head')!, t('initiative.removeDead')));
+    await click(view.querySelector('[role="tab"]:nth-child(1)'));
+    await selectTokenRow(view, 'Goblin');
+    const sent = commands().length;
+    await tokenMenu(view, 'Goblin', t('initiative.addToOrder'));
+    expect(document.body.textContent).toContain(t('initiative.addDead'));
+    expect(commands()).toHaveLength(sent);
   });
 
   it('asks before ending combat, and ends it only when confirmed', async () => {
@@ -242,7 +382,7 @@ describe('the Initiative tab (08 §12)', () => {
     expect(commands().at(-1)).toEqual({ type: 'encounter.end', payload: { scene_id: cave.id } });
   });
 
-  it('removes a deleted player character’s row, and undo puts it back', async () => {
+  it('removes a deleted token’s row, and undo puts it back', async () => {
     const view = await open();
     await click(button(view, t('initiative.start')));
     // The token list is on the first tab.
@@ -251,9 +391,9 @@ describe('the Initiative tab (08 §12)', () => {
     await tokenMenu(view, 'Wren', t('tokens.delete'));
     await click(button(document.querySelector('dialog[open]')!, t('tokens.deleteDialog.confirm')));
     await click(view.querySelector('[role="tab"]:nth-child(2)'));
-    expect(rows(view)).toEqual(['Tamsin', t('initiative.enemies')]);
+    expect(rows(view)).toEqual(['Tamsin', 'Goblin']);
     key(document.body, { key: 'z', ctrlKey: true });
     await settle();
-    expect(rows(view)).toEqual(['Tamsin', 'Wren', t('initiative.enemies')]);
+    expect(rows(view)).toEqual(['Tamsin', 'Wren', 'Goblin']);
   });
 });

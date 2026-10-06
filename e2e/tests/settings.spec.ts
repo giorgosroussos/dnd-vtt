@@ -107,7 +107,8 @@ test('settings saved in the DM view take effect with no restart: the upload limi
     // The header's live indicator keeps one line with the long name and its buttons.
     expect((await liveBar(dm).boundingBox())!.height).toBeLessThanOrEqual(42);
     await saveSettings(dm, async (dialog) => {
-      // Tab to the rule, arrow to DMG, back to a text field and Enter.
+      // Tab past the import limit and the display size to the rule, arrow to DMG, back to a text field and Enter.
+      await dm.keyboard.press('Tab');
       await dm.keyboard.press('Tab');
       await dm.keyboard.press('Tab');
       await expect(dialog.getByLabel('Every diagonal square counts 5 ft (PHB)')).toBeFocused();

@@ -1,5 +1,12 @@
 import type Database from 'better-sqlite3';
-import type { DmEvent, EventType, PlayerEvent, PlayerToken, SceneToken } from '@emberglass/shared';
+import {
+  sameMarkers,
+  type DmEvent,
+  type EventType,
+  type PlayerEvent,
+  type PlayerToken,
+  type SceneToken,
+} from '@emberglass/shared';
 import { readFog, sightOf } from '../db/fog.js';
 import { readSettings } from '../db/settings.js';
 import { listTokens } from '../db/tokens.js';
@@ -84,6 +91,10 @@ export function project(db: Database.Database, effect: LiveEffect, memory: LiveM
       if (!was && !is) return { dm };
       if (!was) return { dm, players: { type: 'token.added', payload: shown(db, token, effect.relabelled) } };
       if (!is) return { dm, players: { type: 'token.removed', payload: { id: token.id } } };
+      // Hit points and armour class are the DM's only (DMT-01, specs/04-live-sync.md §4): a change of them alone
+      // sends players nothing, not even an unchanged token, so their version counter cannot count it. A change
+      // that moved, renamed or marked the token reaches them as before.
+      if (dmOnlyChange(before, token)) return { dm };
       return {
         dm,
         players: { type: 'token.updated', payload: { token: playerTokens(db, token.scene_id, [token])[0]! } },
@@ -114,6 +125,19 @@ export function project(db: Database.Database, effect: LiveEffect, memory: LiveM
       // only when it changed, whatever command changed it: compared around each command in ws/live.ts.
       return { dm: { type: 'encounter.updated', payload: { encounter: readEncounter(db, effect.sceneId) } } };
   }
+}
+
+/** Whether only fields players never receive changed: hit points or armour class, nothing they see. */
+function dmOnlyChange(before: SceneToken, token: SceneToken): boolean {
+  const stats = (['hp_current', 'hp_max', 'hp_temp', 'ac'] as const).some((field) => before[field] !== token[field]);
+  return (
+    stats &&
+    before.x === token.x &&
+    before.y === token.y &&
+    before.label === token.label &&
+    before.z_order === token.z_order &&
+    sameMarkers(before.markers, token.markers)
+  );
 }
 
 /** A token shown to players, with the visible token it renamed, if any (G-023). */

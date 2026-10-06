@@ -24,7 +24,12 @@ const token = (fields: Partial<SceneToken> = {}): SceneToken => ({
   z_order: 4,
   markers: [],
   character_id: null,
-  asset: { name: 'Lurker', image_id: 'a'.repeat(64), size: 'medium', category: 'monster' },
+  hp_current: null,
+  hp_max: null,
+  hp_temp: null,
+  ac: null,
+  notes: '',
+  asset: { name: 'Lurker', image_id: 'a'.repeat(64), size: 'medium', category: 'monster', notes: '' },
   ...fields,
 });
 const command = (type: CommandEnvelope['type'], payload: Record<string, unknown> = {}): CommandEnvelope => ({

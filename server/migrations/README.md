@@ -29,3 +29,11 @@ Numbered SQL migrations, applied in order by `src/db/migrate.ts` before the serv
 `0008_encounter.sql` adds `encounter`, the initiative tracker of a scene, at most one per scene and deleted with it, its entries a JSON array; additive (TBL-06, Q-104, Q-105, D-160).
 
 `0009_settings_tv_address.sql` adds `settings.tv_address`, the TV address the DM chose in Settings for the connect panel, or NULL for Automatic, which every existing database keeps; additive (PKG-01, Q-110, D-169).
+
+`0010_hit_points.sql` adds `token.hp_current`, `hp_max`, `hp_temp` and `ac`, and `asset.hp_max` and `ac`, the defaults copied to new tokens, each NULL for none, which every existing token and asset keeps; additive (DMT-01, Q-112, D-180).
+
+`0011_enemy_entries.sql` expands every stored encounter's Enemies entry in place into one monster entry per member it had (visible monster and npc tokens without Dead), in the order of the DM's token list with its number; one without members is removed. The expansion reads the fog, so it is the step in code that `src/db/migration-steps.ts` gives this file, in the same transaction; no schema change. Not reversible in place: the dated backup is its rollback (DMT-02, Q-111, D-180).
+
+`0012_notes.sql` adds `scene.notes` and `token.notes`, the DM's plain-text notes, empty on every existing scene and token, each at most 20,000 characters; additive (DMT-04, Q-114, D-186).
+
+`0013_settings_import_limit.sql` adds `settings.import_limit_bytes`, the import limit of `specs/09-operations.md` §9, 2 GB on every existing database; additive (DMT-05, Q-119).

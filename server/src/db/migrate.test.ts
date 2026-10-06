@@ -221,10 +221,16 @@ describe('migrateDataDirectory against a real SQLite file', () => {
       first.exec('BEGIN IMMEDIATE');
       first.exec('UPDATE a SET n = n + 1');
       first.pragma('user_version = 2');
+      // The development condition resolves @emberglass/shared to its sources, as
+      // the test runner does: CI's test job builds no dist.
       const second = new Promise<string>((resolve, reject) => {
-        const proc = spawn(process.execPath, ['--import', 'tsx', child, dataDir, migrationsDir], {
-          cwd: fileURLToPath(new URL('../..', import.meta.url)),
-        });
+        const proc = spawn(
+          process.execPath,
+          ['--conditions=development', '--import', 'tsx', child, dataDir, migrationsDir],
+          {
+            cwd: fileURLToPath(new URL('../..', import.meta.url)),
+          },
+        );
         let out = '';
         let err = '';
         proc.stdout.on('data', (chunk: Buffer) => (out += chunk.toString()));

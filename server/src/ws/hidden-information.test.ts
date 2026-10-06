@@ -17,7 +17,8 @@ import { applyPlayerEvent, PACKAGE_DIR, startLive, type LiveHarness, type Player
 // TV camera and screens reporting their viewports, and since LIV-07 measuring with the ruler on the live
 // scene, and on a scene that is not live, which reaches players not at all, since TBL-01 pinging both, since TBL-02 marking a hidden token and a visible one, since TBL-06 an encounter run with hidden enemies about, and since TBL-04 fog
 // painted, erased, painted again, undone and redone, and the whole map fogged and cleared, with tokens
-// placed, revealed, moved and deleted under it. It asserts that no hidden
+// placed, revealed, moved and deleted under it, and since UXR-02 a batch mixing a hidden token and a visible one,
+// and its undo. It asserts that no hidden
 // token's id, asset, image or name appears, and that the count of hidden tokens cannot be learnt
 // either: the whole recording is identical, byte for byte once identifiers are numbered by first
 // appearance, to the recording of the same session without any of the hidden-only steps
@@ -244,6 +245,89 @@ async function record(hidden: boolean): Promise<Recording> {
   await step('undo the mark of the goblin', undo);
   await step('undo the second mark of the hidden boss', undo, true);
   await step('undo the mark of the hidden boss', undo, true);
+  // Hit points and armour class (DMT-01, specs/04-live-sync.md §4, §15): never sent to players. A hidden token's
+  // reach them not at all, nor the markers they set; a visible token's reach them only as the markers they set.
+  await step(
+    'give the hidden boss hit points and armour class',
+    () => send('token.setStats', { token_id: boss!.id, hp_current: 7, hp_max: 7, ac: 13 }),
+    true,
+  );
+  await step(
+    'bring the hidden boss to 0 hit points',
+    () => send('token.applyHp', { token_id: boss!.id, delta: -7 }),
+    true,
+  );
+  await step('give the visible goblin hit points and armour class', () =>
+    send('token.setStats', { token_id: firstGoblin.id, hp_current: 12, hp_max: 12, hp_temp: 3, ac: 15 }),
+  );
+  await step('damage the visible goblin to bloodied', () =>
+    send('token.applyHp', { token_id: firstGoblin.id, delta: -9 }),
+  );
+  await step('undo the damage of the goblin', undo);
+  await step('undo the hit points of the goblin', undo);
+  await step('undo the 0 hit points of the hidden boss', undo, true);
+  await step('undo the hit points of the hidden boss', undo, true);
+  // A batch (UXR-02, specs/04-live-sync.md §2, §4, §8, Q-123): the hidden boss and the visible goblin moved, marked
+  // and hidden together in one command each, then undone. Players hear what the goblin's commands alone would send,
+  // nothing of the boss nor of how many commands the batch held: in the session without hidden tokens the same
+  // batches hold the goblin's commands alone, and the recordings must be the same.
+  const together = (each: (token: string, n: number) => { type: string; payload: object }) => ({
+    commands: [...(hidden ? [each(boss!.id, 0)] : []), each(firstGoblin.id, 1)],
+  });
+  await step('move the hidden boss and the visible goblin together', () =>
+    send(
+      'token.batch',
+      together((token_id, n) => ({ type: 'token.move', payload: { token_id, x: 4 + n, y: 4 } })),
+    ),
+  );
+  await step('mark the hidden boss and the visible goblin prone together', () =>
+    send(
+      'token.batch',
+      together((token_id) => ({ type: 'token.setMarkers', payload: { token_id, markers: [{ id: 'prone' }] } })),
+    ),
+  );
+  await step('hide the hidden boss and the visible goblin together', () =>
+    send(
+      'token.batch',
+      together((token_id) => ({ type: 'token.setVisibility', payload: { token_id, hidden: true } })),
+    ),
+  );
+  await step('undo hiding them together', undo);
+  await step('undo marking them together', undo);
+  await step('undo moving them together', undo);
+  // DM notes (DMT-04, specs/04-live-sync.md §4, §16): over REST on the live scene and on a scene that is not live, a
+  // hidden token's and a visible one's, and an asset's beside them. The DM room hears `notes.updated` for the live
+  // scene's; players hear nothing of any of them, and B's reach them not when B goes live.
+  const notes = async (url: string, text: string, method: 'PUT' | 'PATCH' = 'PUT'): Promise<string[]> => {
+    secrets.push(text);
+    const response = await live.inject({ method, url, payload: { notes: text } });
+    expect(response.statusCode, response.body).toBe(200);
+    return (await dm.settle()).map((event) => event.type);
+  };
+  await step('write notes on the live scene', async () => {
+    expect(await notes(`/api/scenes/${sceneA.id}/notes`, 'Note A: the floor gives way on round 3')).toEqual([
+      'notes.updated',
+    ]);
+  });
+  await step(
+    'write notes on the hidden boss',
+    async () =>
+      expect(await notes(`/api/tokens/${boss!.id}/notes`, 'Note boss: a doppelganger')).toEqual(['notes.updated']),
+    true,
+  );
+  await step('write notes on the visible goblin', async () => {
+    const said = await notes(`/api/tokens/${firstGoblin.id}/notes`, 'Note goblin:\nflees at half HP');
+    expect(said).toEqual(['notes.updated']);
+  });
+  await step('write notes on the goblin asset', async () => {
+    // Shown beside its live tokens' notes, so the DM room gets a fresh snapshot, and players nothing.
+    expect(await notes(`/api/assets/${goblin.id}`, 'Note goblins: cowards', 'PATCH')).toEqual(['scene.snapshot']);
+  });
+  await step('write notes on a scene that is not live, and on a token of it', async () => {
+    expect(await notes(`/api/scenes/${sceneB.id}/notes`, 'Note B: the troll under the bridge')).toEqual([]);
+    const [token] = (await live.inject({ method: 'GET', url: `/api/scenes/${sceneB.id}/tokens` })).json<SceneToken[]>();
+    expect(await notes(`/api/tokens/${token!.id}/notes`, 'Note B token: pays the toll')).toEqual([]);
+  });
   await step('activate B', () => send('scene.activate', { scene_id: sceneB.id }));
   await step('a second screen reports its viewport and the DM steers the TV on B', async () => {
     const second = await live.connect();
@@ -355,10 +439,11 @@ async function record(hidden: boolean): Promise<Recording> {
     await send('fog.fill', { scene_id: sceneA.id, fogged: false });
   });
   await step('paint the vault once more', () => fog(vault));
-  // The initiative tracker (TBL-06, specs/04-live-sync.md §4, §14): players see the round, the player
-  // characters they see and one Enemies entry, whose turn it is and which is next; never a number, a member
-  // or a count. A hidden enemy added, moved, marked Dead or deleted mid-combat changes nothing they receive,
-  // and the Enemies entry takes or skips its turn by what they can see alone.
+  // The initiative tracker (TBL-06, DMT-02, specs/04-live-sync.md §4, §14): players see the round, the entries
+  // whose token they see, whose turn it is and which is next; never a number. A hidden monster takes no entry
+  // at the start and cannot be given one; added, moved, marked Dead or deleted mid-combat it changes nothing
+  // they receive. A monster with an entry hidden again leaves the strip, and its number, place and markers
+  // then change nothing they receive either.
   const wren = await live.asset('Wren', { category: 'pc', default_hidden: false });
   const ghoul = await live.asset('Ghoul', { category: 'monster', default_hidden: true });
   secrets.push(wren.id, ghoul.id);
@@ -383,8 +468,12 @@ async function record(hidden: boolean): Promise<Recording> {
   );
   await step(
     'add a hidden lurker mid-fight',
-    async () =>
-      secrets.push(tokenOf(await send('token.add', { scene_id: sceneA.id, asset_id: lurker!.id, x: 6, y: 8 })).id),
+    async () => {
+      const id = tokenOf(await send('token.add', { scene_id: sceneA.id, asset_id: lurker!.id, x: 6, y: 8 })).id;
+      secrets.push(id);
+      const ack = await live.command(dm, 'encounter.addEntry', { scene_id: sceneA.id, token_id: id, initiative: 30 });
+      expect((ack as { error: { code: string } }).error.code).toBe('bad_request');
+    },
     true,
   );
   await step('pass several turns', async () => {
@@ -400,11 +489,25 @@ async function record(hidden: boolean): Promise<Recording> {
     true,
   );
   await step('reveal the ghoul mid-fight', () => send('token.setVisibility', { token_id: ghoulToken, hidden: false }));
+  await step('add the ghoul to initiative by its number', () =>
+    send('encounter.addEntry', { scene_id: sceneA.id, token_id: ghoulToken, initiative: 12 }),
+  );
   await step('pass a turn with the ghoul up', () => send('encounter.next', { scene_id: sceneA.id }));
-  await step('mark the ghoul dead and pass turns until the Enemies', async () => {
+  await step('mark the ghoul dead and pass turns over it', async () => {
     await send('token.setMarkers', { token_id: ghoulToken, markers: [{ id: 'dead' }] });
     for (let turn = 0; turn < 3; turn += 1) await send('encounter.next', { scene_id: sceneA.id });
   });
+  await step('hide the dead ghoul', () => send('token.setVisibility', { token_id: ghoulToken, hidden: true }));
+  await step(
+    'number, move and heal the hidden ghoul',
+    async () => {
+      const entry = encounterEntries().find((each) => each.token_id === ghoulToken)!.id;
+      await send('encounter.setInitiative', { scene_id: sceneA.id, entry_id: entry, initiative: 25 });
+      await send('token.move', { token_id: ghoulToken, x: 4, y: 7 });
+      await send('token.setMarkers', { token_id: ghoulToken, markers: [] });
+    },
+    true,
+  );
   await step('hide Wren', () => send('token.setVisibility', { token_id: wrenToken, hidden: true }));
   await step('reveal Wren', () => send('token.setVisibility', { token_id: wrenToken, hidden: false }));
   await step('delete the hidden lurker', () => send('token.delete', { token_id: secrets.at(-1)! }), true);
@@ -481,7 +584,18 @@ describe('what a player view receives across a live session (specs/10-testing-ac
     expect(during('activate B', 'deactivate')).not.toContain('The crypt');
     expect(during('deactivate', 'activate A again')).not.toMatch(/The crypt|The bridge/);
     expect(during('activate A again')).not.toContain('The bridge');
-    for (const forbidden of ['"hidden"', '"notes"', '"asset', '"scene_id"', '"session_id"', 'thumbnail', 'original']) {
+    // Nor any hit points or armour class (DMT-01), nor notes (DMT-04).
+    for (const forbidden of [
+      '"hidden"',
+      '"notes"',
+      '"asset',
+      '"scene_id"',
+      '"session_id"',
+      'thumbnail',
+      'original',
+      '"hp_',
+      '"ac"',
+    ]) {
       expect(text, forbidden).not.toContain(forbidden);
     }
     // A token placed hidden is unknown to players until the step that reveals it.
@@ -510,6 +624,40 @@ describe('what a player view receives across a live session (specs/10-testing-ac
     expect(eventsOf('the DM clears the measurement')).toEqual(['ruler.cleared', 'scene.snapshot']);
     expect(eventsOf('the DM pings the live scene')).toEqual(['ping', 'scene.snapshot']);
     expect(eventsOf('mark the hidden boss dead')).toEqual(['scene.snapshot']);
+    // Hit points alone send players nothing; the Bloodied they set on a visible token reaches them (DMT-01).
+    expect(eventsOf('bring the hidden boss to 0 hit points')).toEqual(['scene.snapshot']);
+    expect(eventsOf('give the visible goblin hit points and armour class')).toEqual(['scene.snapshot']);
+    expect(eventsOf('damage the visible goblin to bloodied')).toEqual(['token.updated', 'scene.snapshot']);
+    expect(eventsOf('undo the damage of the goblin')).toEqual(['token.updated', 'scene.snapshot']);
+    expect(eventsOf('undo the hit points of the goblin')).toEqual(['scene.snapshot']);
+    // A batch reaches players as the visible token's commands would, one event each, never as a batch (UXR-02).
+    expect(eventsOf('move the hidden boss and the visible goblin together')).toEqual([
+      'token.updated',
+      'scene.snapshot',
+    ]);
+    expect(eventsOf('mark the hidden boss and the visible goblin prone together')).toEqual([
+      'token.updated',
+      'scene.snapshot',
+    ]);
+    expect(eventsOf('hide the hidden boss and the visible goblin together')).toEqual([
+      'token.removed',
+      'scene.snapshot',
+    ]);
+    expect(eventsOf('undo hiding them together')).toEqual(['token.added', 'scene.snapshot']);
+    expect(eventsOf('undo moving them together')).toEqual(['token.updated', 'scene.snapshot']);
+    expect(text).not.toContain('token.batch');
+    expect(text).not.toContain('"commands"');
+    // Notes send players nothing at all, the live scene's and a visible token's included (DMT-04).
+    for (const name of [
+      'write notes on the live scene',
+      'write notes on the hidden boss',
+      'write notes on the visible goblin',
+      'write notes on the goblin asset',
+      'write notes on a scene that is not live, and on a token of it',
+    ]) {
+      expect(eventsOf(name), name).toEqual(['scene.snapshot']);
+    }
+    expect(text).not.toContain('Note ');
     expect(eventsOf('paint the vault')).toEqual(['fog.updated', 'scene.snapshot']);
     expect(eventsOf('place a lone sentry')).toEqual(['token.added', 'scene.snapshot']);
     expect(eventsOf('place a second sentry under the fog and delete it there')).toEqual(['scene.snapshot']);
@@ -545,7 +693,14 @@ describe('what a player view receives across a live session (specs/10-testing-ac
     expect(eventsOf('add a hidden lurker mid-fight')).toEqual(['scene.snapshot']);
     expect(eventsOf('mark the hidden lurker dead and move it')).toEqual(['scene.snapshot']);
     expect(eventsOf('delete the hidden lurker')).toEqual(['scene.snapshot']);
-    expect(eventsOf('reveal the ghoul mid-fight')[0]).toBe('token.added');
+    // Revealed, the ghoul is offered to the DM, never added by itself (Q-117): the strip does not change.
+    expect(eventsOf('reveal the ghoul mid-fight')).toEqual(['token.added', 'scene.snapshot']);
+    expect(eventsOf('add the ghoul to initiative by its number')).toEqual(['encounter.updated', 'scene.snapshot']);
+    // Dead, it stays on the strip (Q-118); hidden, it leaves it.
+    const ghoulToken = withHidden.shownFrom.find((each) => each.step === 'reveal the ghoul mid-fight')!.id;
+    const deadGhoul = withHidden.steps.find((each) => each.step === 'mark the ghoul dead and pass turns over it');
+    expect(JSON.stringify(deadGhoul)).toContain(`"kind":"monster","token_id":"${ghoulToken}"`);
+    expect(eventsOf('hide the dead ghoul')).toEqual(['token.removed', 'encounter.updated', 'scene.snapshot']);
     expect(eventsOf('hide Wren')).toEqual(['token.removed', 'encounter.updated', 'scene.snapshot']);
     expect(eventsOf('end combat')).toEqual(['encounter.updated', 'scene.snapshot']);
     const combat = during('start combat', 'end combat');

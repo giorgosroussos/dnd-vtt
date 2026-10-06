@@ -55,3 +55,9 @@ Who can do what, how the DM proves it, and what the server never reveals or trus
 
 - Logs MUST NOT contain a PIN, a session identifier or a cookie. [Q-044]
 - Logs record start-up, the LAN addresses served, connections by role, failed PIN attempts with the client address, lockouts and errors (`09` §6). [Q-041]
+
+## 9. Export and import
+
+- Export and import MUST require a DM session like every other `/api` route (`02` §5); an export carries the DM's notes, hit points and hidden tokens and is never offered to the player view. [Q-115]
+- An import MUST be refused, storing nothing, when its `manifest.json` names a format version newer than the server's, when an entry's path would land outside the folder it is unpacked to ("zip slip"), or when the archive or the total of its entries once unpacked exceeds the import limit, 2 GB by default (`09` §7). [Q-115, Q-119]
+- Every image in an archive MUST pass the checks of an upload (`05` §6) and have the sha256 it is named by, or the import is refused and stores nothing. [Q-115]

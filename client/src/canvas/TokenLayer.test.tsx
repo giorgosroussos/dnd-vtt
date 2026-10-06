@@ -200,7 +200,7 @@ describe('drawing tokens (specs/05-assets-and-images.md §2, specs/03-domain-mod
     // What the end-to-end tests read (LIV-03): the visible tokens drawn, with no hidden flag.
     const listed = JSON.parse(view.querySelector<HTMLElement>('[data-tokens]')!.dataset.tokens!) as object[];
     expect(listed.map((box) => (box as { id: string }).id)).toEqual(['g1', 'h1']);
-    expect(listed.every((box) => !('hidden' in box))).toBe(true);
+    expect(listed.every((box) => !('hidden' in box) && !('note' in box))).toBe(true);
   });
 });
 
@@ -364,6 +364,146 @@ describe('moving tokens in the DM mode (specs/06-grid-and-measurement.md §4, D-
     expect(boxes.map((box) => box.id)).toEqual(['g1', 'g2']);
     expect(boxes[0]!.left).toBeCloseTo(stage.x() + (15 + 2 * 50) * stage.scaleX(), 9);
     expect(boxes[0]!.side).toBeCloseTo(50 * stage.scaleX(), 9);
+  });
+});
+
+describe('several tokens at once (UXR-02, specs/08-ux-journeys.md §14)', () => {
+  const press = (stage: Konva.Stage, id: string, type: 'pointerdown' | 'pointerup', init: MouseEventInit = {}) => {
+    const group = groupOf(stage, id)!;
+    act(() => {
+      group.fire(type, { target: group, evt: new MouseEvent(type, { clientX: 100, clientY: 100, ...init }) }, true);
+    });
+  };
+
+  it('Ctrl or Cmd and a press toggles a token in the selection without selecting it alone, and outlines every one', async () => {
+    const tokenControls = controls({ selectedId: 'g2', selectedIds: ['g1', 'g2'], onToggle: vi.fn() });
+    const { stage } = await draw({ grid: GRID, map: MAP, mode: 'dm', tokens: [GOBLIN, HIDDEN, GIANT], tokenControls });
+    expect(groupOf(stage, 'g1')!.findOne('.token-selected')).toBeDefined();
+    expect(groupOf(stage, 'g2')!.findOne('.token-selected')).toBeDefined();
+    expect(groupOf(stage, 'h1')!.findOne('.token-selected')).toBeUndefined();
+    press(stage, 'h1', 'pointerdown', { ctrlKey: true });
+    press(stage, 'g1', 'pointerdown', { metaKey: true });
+    expect(tokenControls.onToggle).toHaveBeenNthCalledWith(1, 'h1');
+    expect(tokenControls.onToggle).toHaveBeenNthCalledWith(2, 'g1');
+    expect(tokenControls.onSelect).not.toHaveBeenCalled();
+  });
+
+  it('a press on one of the group keeps the group; a click without a drag selects that token alone', async () => {
+    const tokenControls = controls({
+      selectedId: 'g2',
+      selectedIds: ['g1', 'g2'],
+      onToggle: vi.fn(),
+      onMoveMany: vi.fn(),
+    });
+    const { stage } = await draw({ grid: GRID, map: MAP, mode: 'dm', tokens: [GOBLIN, HIDDEN], tokenControls });
+    press(stage, 'g1', 'pointerdown');
+    expect(tokenControls.onSelect).not.toHaveBeenCalled();
+    press(stage, 'g1', 'pointerup');
+    expect(tokenControls.onSelect).toHaveBeenCalledWith('g1');
+    expect(tokenControls.onOpenPopover).toHaveBeenCalledWith('g1');
+  });
+
+  it('a drag of one of the group moves them all by the same snapped squares, as one move of the group', async () => {
+    const onMoveMany = vi.fn();
+    const onMove = vi.fn();
+    const tokenControls = controls({ selectedId: 'g1', selectedIds: ['g2', 'g1'], onMoveMany, onMove });
+    const { stage } = await draw({ grid: GRID, map: MAP, mode: 'dm', tokens: [GOBLIN, HIDDEN, GIANT], tokenControls });
+    const goblin = groupOf(stage, 'g1')!;
+    act(() => {
+      goblin.fire('dragstart', { target: goblin, evt: new MouseEvent('mousedown') });
+      // Grid 2, 3 to 4.4, 3.2: the others follow as it moves.
+      goblin.position({ x: 15 + 4.4 * 50, y: 125 + 3.2 * 50 });
+      goblin.fire('dragmove', { target: goblin, evt: new MouseEvent('mousemove') });
+    });
+    expect(groupOf(stage, 'g2')!.position().x).toBeCloseTo(15 + (4.5 + 2.4) * 50, 6);
+    expect(groupOf(stage, 'h1')!.position()).toEqual({ x: 15 + 6 * 50, y: 125 + 6 * 50 });
+    act(() => {
+      goblin.fire('dragend', { target: goblin, evt: new MouseEvent('mouseup') });
+    });
+    // Snapped to 4, 3: two squares right, none down; the hidden goblin keeps its offset, half squares and all.
+    expect(onMoveMany).toHaveBeenCalledWith([
+      { id: 'g1', at: { x: 4, y: 3 } },
+      { id: 'g2', at: { x: 6.5, y: 1.25 } },
+    ]);
+    expect(onMove).not.toHaveBeenCalled();
+    expect(groupOf(stage, 'g2')!.position()).toEqual({ x: 15 + 6.5 * 50, y: 125 + 1.25 * 50 });
+    expect(tokenControls.onSelect).not.toHaveBeenCalled();
+  });
+
+  it('the arrow keys nudge every token of the group', async () => {
+    const onMoveMany = vi.fn();
+    const tokenControls = controls({ selectedId: 'g1', selectedIds: ['g2', 'g1'], onMoveMany });
+    const { view } = await draw({ grid: GRID, map: MAP, mode: 'dm', tokens: [GOBLIN, HIDDEN], tokenControls });
+    act(() => {
+      viewport(view).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+    });
+    expect(onMoveMany).toHaveBeenCalledWith([
+      { id: 'g2', at: { x: 5, y: 2 } },
+      { id: 'g1', at: { x: 2, y: 4 } },
+    ]);
+  });
+});
+
+describe('dragging a library asset onto the map (UXR-03, specs/05-assets-and-images.md §5)', () => {
+  const TYPE = 'application/x-emberglass-asset';
+  // A drag event as a browser sends it; jsdom has no DragEvent, so the data transfer is attached.
+  function drag(view: HTMLElement, type: string, x: number, y: number, types: string[] = [TYPE], altKey = false) {
+    const evt = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, altKey });
+    Object.defineProperty(evt, 'dataTransfer', { value: { types, dropEffect: 'none' } });
+    act(() => {
+      viewport(view).dispatchEvent(evt);
+    });
+    return evt;
+  }
+  const assetDrop = (size: 'medium' | 'large' = 'medium') => ({
+    sizeOf: vi.fn((types: readonly string[]) => (types.includes(TYPE) ? size : undefined)),
+    onDrop: vi.fn(),
+  });
+
+  it('shows the footprint where it would land, snapped, and places it there on the drop', async () => {
+    const drop = assetDrop();
+    const { view, stage } = await draw({ grid: GRID, map: MAP, mode: 'dm', assetDrop: drop });
+    const screen = (gx: number, gy: number) =>
+      [stage.x() + (15 + gx * 50) * stage.scaleX(), stage.y() + (125 + gy * 50) * stage.scaleY()] as const;
+    const over = drag(view, 'dragover', ...screen(5.5, 7.5));
+    expect(over.defaultPrevented).toBe(true);
+    expect(JSON.parse(viewport(view).dataset.dropping!)).toEqual({ x: 5, y: 7 });
+    const ghost = stage.findOne<Konva.Rect>('.drop-target')!;
+    expect(ghost.x()).toBeCloseTo(15 + 5 * 50, 6);
+    expect(ghost.width()).toBeCloseTo(50, 6);
+    drag(view, 'drop', ...screen(5.5, 7.5));
+    expect(drop.onDrop).toHaveBeenCalledWith({ x: 5, y: 7 });
+    expect(viewport(view).dataset.dropping).toBeUndefined();
+    expect(stage.findOne('.drop-target')).toBeUndefined();
+  });
+
+  it('centres a Large asset on the pointer, and Alt drops it off the grid', async () => {
+    const drop = assetDrop('large');
+    const { view, stage } = await draw({ grid: GRID, map: MAP, mode: 'dm', assetDrop: drop });
+    const x = stage.x() + (15 + 5 * 50) * stage.scaleX();
+    const y = stage.y() + (125 + 7 * 50) * stage.scaleY();
+    drag(view, 'drop', x, y);
+    expect(drop.onDrop).toHaveBeenLastCalledWith({ x: 4, y: 6 });
+    drag(view, 'drop', x + 0.3 * 50 * stage.scaleX(), y, [TYPE], true);
+    const [at] = drop.onDrop.mock.calls[1]! as [{ x: number; y: number }];
+    expect(at.x).toBeCloseTo(4.3, 2);
+    expect(at.y).toBeCloseTo(6, 2);
+  });
+
+  it('takes no other drag, and none in the player mode or while calibrating', async () => {
+    const drop = assetDrop();
+    const { view } = await draw({ grid: GRID, map: MAP, mode: 'dm', assetDrop: drop });
+    expect(drag(view, 'dragover', 300, 300, ['Files']).defaultPrevented).toBe(false);
+    drag(view, 'drop', 300, 300, ['Files']);
+    expect(drop.onDrop).not.toHaveBeenCalled();
+    rendered!.unmount();
+    const player = await draw({ grid: GRID, map: MAP, mode: 'player', assetDrop: drop });
+    const evt = new MouseEvent('dragover', { bubbles: true, cancelable: true });
+    Object.defineProperty(evt, 'dataTransfer', { value: { types: [TYPE] } });
+    act(() => {
+      player.view.querySelector('.eg-canvas')!.dispatchEvent(evt);
+    });
+    expect(evt.defaultPrevented).toBe(false);
   });
 });
 
@@ -649,5 +789,36 @@ describe('initials (UIX-01)', () => {
     expect(initialsOf('Λύκος 12')).toBe('Λ12');
     expect(initialsOf('όφις')).toBe('ΌΦ');
     expect(initialsOf('Deadeye 1790780094125')).toBe('D1');
+  });
+});
+
+describe('the notes badge (DMT-04, specs/08-ux-journeys.md §13)', () => {
+  const NOTED = token({ id: 'n1', label: 'Bandit 1', x: 5, y: 5, note: 'Leader: flees at half HP' });
+
+  it('marks a token with notes on the DM’s map only, on its left edge, its hover text the notes', async () => {
+    const { stage } = await draw({
+      grid: GRID,
+      map: MAP,
+      mode: 'dm',
+      tokens: [NOTED, GOBLIN],
+      tokenControls: controls(),
+    });
+    expect(stage.find('.token-note-marker').map((badge) => badge.getParent()!.id())).toEqual(['token-n1']);
+    const badge = groupOf(stage, 'n1')!.findOne('.token-note-marker')!;
+    expect(badge.x()).toBeLessThan(groupOf(stage, 'n1')!.findOne<Konva.Circle>('.token-ring')!.x());
+    act(() => {
+      badge.fire('mouseenter', { evt: new MouseEvent('mouseenter') });
+    });
+    expect(stage.container().title).toBe('Leader: flees at half HP');
+    act(() => {
+      badge.fire('mouseleave', { evt: new MouseEvent('mouseleave') });
+    });
+    expect(stage.container().hasAttribute('title')).toBe(false);
+  });
+
+  it('never draws it on the player view, whatever a token carries', async () => {
+    const { stage } = await draw({ grid: GRID, map: MAP, mode: 'player', tokens: [NOTED, GOBLIN] });
+    expect(groups(stage)).toHaveLength(2);
+    expect(stage.find('.token-note-marker')).toHaveLength(0);
   });
 });

@@ -6,6 +6,7 @@ The shared asset library, how tokens are made from assets, and how uploaded imag
 
 - The asset library MUST be shared by all campaigns: an asset is the template, a token an instance of it on a scene. [input]
 - An asset MUST have a name, an image, a category (`pc`, `npc`, `monster`, `object`), a size, free tags and DM notes. [input]
+- An asset MAY also have a default maximum of hit points and an armour class, copied to its new tokens (`03` §9). [Q-112]
 - The library and the token picker MUST support search and filtering: substring search over name and tags, filters by category and by tags (all selected tags must match), sorted by name. [input, Q-064, D-022]
 
 ## 2. Token sizes
@@ -23,6 +24,7 @@ Token footprint MUST follow the asset's size: [input]
 ## 3. Tokens
 
 - A token MUST hold only its own state: position, visibility, label and stacking order; name, image, size and category come from its asset. [input]
+- Beside that state, a token MUST hold its own condition markers, hit points, armour class and DM notes (`03` §1, §9, §10), none of them changed by a later edit of its asset. [Q-099, Q-112, Q-114]
 - Adding several tokens of the same asset to a scene MUST number their labels automatically ("Goblin 1" to "Goblin 4"). [input]
 - Numbering MUST be per scene; a single token keeps the bare name, and freed numbers are not reused. [Q-063]
 - Only the first token of an asset placed on a scene takes the bare name; a later token of that asset is numbered even when it is alone. The highest number issued for each asset MUST be stored with the scene (`03` §1), so that no number, the highest included, is issued twice on it. [Q-091]
@@ -38,6 +40,7 @@ Token footprint MUST follow the asset's size: [input]
 ## 5. Adding tokens and deleting assets
 
 - Adding a token MUST follow the flow: an add button, a picker with search and filter, then a click on the map where the token is placed. [input]
+- An asset of the library MUST also be addable by dragging it onto the map, placed where it is dropped and snapped as a placed token is, Alt placing it off the grid (`06` §4); the picker stays the keyboard path. [Q-124]
 - Deleting an asset used by any token MUST be refused, listing the scenes that use it (`03` §7). [input]
 - Changing an asset's image MUST update every token of that asset, including on the live scene. [input]
 

@@ -35,7 +35,7 @@ How a DM installs, starts, configures and backs up Emberglass.
 
 - All state MUST live in one data directory: the SQLite database and the images folder (`02` §7). [input, Q-039]
 - A backup MUST be a copy of the data directory, with no database server to set up. [input]
-- In the MVP, moving a campaign to another PC means copying the whole data directory; there is no per-campaign export (`01` §4). [Q-013, recommendation accepted]
+- A campaign moves to another PC by its export and import (§9), or with everything else by copying the whole data directory (`01` §4). [Q-115]
 - The default location is the per-user application data folder of each system, holding `emberglass.db`, `images/` and `logs/`; the README says to stop the server before copying it. [Q-039]
 
 ## 6. Logging
@@ -46,6 +46,7 @@ How a DM installs, starts, configures and backs up Emberglass.
 
 - The upload size limit (`05` §6), the display-version size (`05` §7) and the ruler rule (`06` §5) MUST be settings the DM changes from the DM view without restarting. [Q-051]
 - The TV address of the connect panel (`08` §5) MUST be a setting the DM changes from the DM view without restarting, Automatic by default. [Q-110]
+- The import limit (§9) MUST be a setting the DM changes from the DM view without restarting, 2 GB by default. [Q-119]
 - Port and data directory are set with `EMBERGLASS_PORT` and `EMBERGLASS_DATA_DIR`. [D-034]
 
 ## 8. Repository documents
@@ -53,3 +54,12 @@ How a DM installs, starts, configures and backs up Emberglass.
 - The repository MUST ship the AGPL-3.0 licence text as `LICENSE` (`01` §8). [Q-021]
 - The README MUST describe the product as compatible with 5th edition (SRD 5.1) without using "D&D" in the product name (`01` §8). [Q-022]
 - The README MUST state the network exposure of `07` §4. [Q-011, recommendation accepted]
+
+## 9. Export and import
+
+- The DM MUST be able to export, as one zip, either a whole campaign, with its sessions, scenes, tokens, fog, encounters and notes and the assets and images they use, or library assets, the ones selected or all, with their tags and images. [Q-115]
+- The zip MUST hold a `manifest.json` naming its format version and its scope, the data as JSON, and every image file named by its sha256 (`05` §7). [Q-115]
+- Importing a campaign MUST always create a new copy with new identifiers for the campaign and everything in it, never merging into an existing one. [Q-115]
+- On import, an image whose sha256 the server already holds MUST be reused, and an asset whose identifier already exists MUST be reused as it is, not overwritten. [Q-115]
+- An import MUST be refused, storing nothing, as `07` §9 states. [Q-115, Q-119]
+- Live state (the player camera, the undo history, the live scene) and the settings are neither exported nor imported; image variants are produced again on import, never read from the archive; an imported asset the server does not hold keeps its identifier. [D-181]

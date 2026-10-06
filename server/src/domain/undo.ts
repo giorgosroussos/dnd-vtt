@@ -7,13 +7,15 @@ import type {
   TokenMovePayload,
   TokenSetMarkersPayload,
   TokenSetVisibilityPayload,
+  TokenMarker,
+  TokenStats,
 } from '@emberglass/shared';
 import type { LiveEffect } from './live.js';
 
 // The DM's undo history (LIV-05; specs/04-live-sync.md §8, Q-005, Q-050, D-040, D-117). The server
 // keeps, in memory only, the inverse of every undoable command applied to the live scene: `token.add`,
 // `token.move`, `token.setVisibility`, `token.setMarkers` (TBL-02), `token.delete`, the fog commands
-// (TBL-04) and the encounter commands (TBL-06). Setup edits over REST are not commands and
+// (TBL-04), the encounter commands (TBL-06), the hit-point commands (DMT-01) and `token.batch` (UXR-02), one step. Setup edits over REST are not commands and
 // never enter it (Q-050). It belongs to one live scene and is emptied whenever the live scene changes
 // (another scene activated, Blank TV, the live scene deleted), holds the last 100 inverses, and dies
 // with the process. One history serves every DM browser: undo takes back the most recent command on
@@ -35,6 +37,9 @@ export type Inverse =
   | { type: 'token.move'; payload: TokenMovePayload }
   | { type: 'token.setVisibility'; payload: TokenSetVisibilityPayload }
   | { type: 'token.setMarkers'; payload: TokenSetMarkersPayload }
+  // `token.setStats` and `token.applyHp` (DMT-01): undone by putting the four fields and the markers back together,
+  // so one undo takes back the markers the hit points set; not on the wire.
+  | { type: 'token.restoreStats'; payload: { token_id: string; stats: TokenStats; markers: TokenMarker[] } }
   | { type: 'token.delete'; payload: TokenDeletePayload }
   // `encounter`: the scene's encounter before the deletion took the token's entry, put back with it (TBL-06).
   | { type: 'token.add'; restore: SceneToken; shown: boolean; encounter?: Encounter }
@@ -43,7 +48,10 @@ export type Inverse =
   | { type: 'fog.restore'; scene_id: string; restore: FogMask }
   // The encounter (TBL-06): every encounter command is undone by putting the whole encounter back as it
   // was, or taking it away when the scene had none; not on the wire either.
-  | { type: 'encounter.restore'; scene_id: string; restore: Encounter | null };
+  | { type: 'encounter.restore'; scene_id: string; restore: Encounter | null }
+  // A `token.batch` (UXR-02, Q-123): the inverses of its commands in their order, replayed last first in one
+  // transaction, so one undo takes back the whole group; not on the wire.
+  | { type: 'batch'; inverses: Inverse[] };
 
 export const UNDO_LIMIT = 100;
 
@@ -75,6 +83,24 @@ export function inverseOf(command: CommandEnvelope, effects: readonly LiveEffect
       // The markers it carried before: a set that changed nothing never gets here, as it has no effect.
       return effect.type === 'token.updated'
         ? { type: 'token.setMarkers', payload: { token_id: effect.token.id, markers: [...effect.before.markers] } }
+        : undefined;
+    case 'token.setStats':
+    case 'token.applyHp':
+    case 'token.restoreStats' as CommandEnvelope['type']:
+      return effect.type === 'token.updated'
+        ? {
+            type: 'token.restoreStats',
+            payload: {
+              token_id: effect.token.id,
+              stats: {
+                hp_current: effect.before.hp_current,
+                hp_max: effect.before.hp_max,
+                hp_temp: effect.before.hp_temp,
+                ac: effect.before.ac,
+              },
+              markers: [...effect.before.markers],
+            },
+          }
         : undefined;
     case 'fog.paint':
     case 'fog.fill':

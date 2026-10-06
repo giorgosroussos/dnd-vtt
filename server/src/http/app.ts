@@ -8,12 +8,14 @@ import { VIEW_PATHS } from '@emberglass/shared';
 import type { Logger } from '../log/logger.js';
 import { compileSchema } from '../validation.js';
 import type { ScryptParams } from '../auth/pin-hash.js';
+import { registerArchive } from './archive.js';
 import { registerAssets } from './assets.js';
 import { registerAuth, type Auth } from './auth.js';
 import { registerCampaigns } from './campaigns.js';
 import { registerConnect } from './connect.js';
 import type { NetworkInterfaces } from '../connect.js';
 import { registerFog } from './fog.js';
+import { registerNotes } from './notes.js';
 import { registerTokens } from './tokens.js';
 import { imageFileRemover, registerImages } from './images.js';
 import { createDisplayRegenerator, type DisplayRegenerator } from '../images/regenerator.js';
@@ -131,6 +133,7 @@ export async function buildApp({
   registerCampaigns(app, db, removeImages, live.refresh);
   registerAssets(app, db, removeImages, live.refresh);
   registerTokens(app, db);
+  registerNotes(app, db, live.notesChanged);
   registerFog(app, db);
   registerConnect(
     app,
@@ -143,6 +146,7 @@ export async function buildApp({
   app.addHook('preClose', () => regenerator.stop());
   registerSettings(app, { db, logger, live, regenerator });
   await registerImages(app, { db, imagesDir, auth, regenerator, refresh: live.refresh });
+  await registerArchive(app, { db, imagesDir, logger, regenerator });
   const sendIndex = client.kind === 'static' ? await serveBuild(app, client.dist) : await serveVite(app, client.root);
 
   // Both views come from one client build: the player view at /, the DM view at /dm.

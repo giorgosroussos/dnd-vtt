@@ -119,6 +119,28 @@ export function zoomAt(camera: Camera, factor: number, at: { x: number; y: numbe
   return { scale, x: at.x - (at.x - camera.x) * ratio, y: at.y - (at.y - camera.y) * ratio };
 }
 
+/**
+ * The camera a share `progress` (0 to 1) of the way from `from` to `to` (DMT-03): the world point at the
+ * viewport's centre moves in a straight line and the zoom changes evenly in proportion, so a glide between
+ * two cameras neither swings aside nor rushes the zoom.
+ */
+export function cameraBetween(from: Camera, to: Camera, progress: number, viewport: Size): Camera {
+  if (progress <= 0) return from;
+  if (progress >= 1 || !(from.scale > 0) || !(to.scale > 0)) return to;
+  const centre = { x: viewport.width / 2, y: viewport.height / 2 };
+  const world = (camera: Camera) => ({
+    x: (centre.x - camera.x) / camera.scale,
+    y: (centre.y - camera.y) / camera.scale,
+  });
+  const [a, b] = [world(from), world(to)];
+  const scale = Math.exp(Math.log(from.scale) + (Math.log(to.scale) - Math.log(from.scale)) * progress);
+  return {
+    scale,
+    x: centre.x - (a.x + (b.x - a.x) * progress) * scale,
+    y: centre.y - (a.y + (b.y - a.y) * progress) * scale,
+  };
+}
+
 export function panBy(camera: Camera, dx: number, dy: number): Camera {
   return { ...camera, x: camera.x + dx, y: camera.y + dy };
 }
@@ -279,6 +301,33 @@ export function coverBox(box: Box, aspect: number): Box {
   const width = Math.max(box.width, box.height * aspect);
   const height = width / aspect;
   return { x: box.x + (box.width - width) / 2, y: box.y + (box.height - height) / 2, width, height };
+}
+
+/**
+ * The player camera Follow my view sends (DMT-03, specs/04-live-sync.md §9, Q-113): the whole of `visible`,
+ * the part of the world the DM's view shows, widened about its centre to the TV's shape so that the TV crops
+ * none of it. A TV wider than the DM's view widens it, a narrower one raises it; neither side ever shrinks.
+ * It is then kept within the contract's bounds by one factor on both sides, so the shape holds, and its
+ * centre on the world.
+ */
+export function followRect(visible: Box, world: Size, aspect: number): PlayerCamera {
+  if (world.width <= 0 || world.height <= 0 || !(visible.width > 0) || !(visible.height > 0) || !(aspect > 0)) {
+    return FIT_CAMERA;
+  }
+  const cover = coverBox(visible, aspect);
+  const width = cover.width / world.width;
+  const height = cover.height / world.height;
+  const over = Math.max(width, height) / CAMERA_BOUNDS.maxSize;
+  const under = CAMERA_BOUNDS.minSize / Math.min(width, height);
+  // A shape too extreme to fit the bounds at any size is clamped side by side, as rectOf does.
+  const factor = over > 1 && under > 1 ? 1 : over > 1 ? 1 / over : under > 1 ? under : 1;
+  const size = (value: number) => round(within(value * factor, CAMERA_BOUNDS.minSize, CAMERA_BOUNDS.maxSize));
+  return {
+    centre_x: round(within((cover.x + cover.width / 2) / world.width, 0, 1)),
+    centre_y: round(within((cover.y + cover.height / 2) / world.height, 0, 1)),
+    width: size(width),
+    height: size(height),
+  };
 }
 
 /** The smallest frame, as a share of the world's larger side: about two squares of a 30-square map. */

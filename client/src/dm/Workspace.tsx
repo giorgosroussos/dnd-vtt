@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react';
 import {
   API_PATHS,
+  imageFileUrl,
   DEFAULT_SETTINGS,
+  hasNotes,
   type AuthState,
   type Campaign,
   type Scene,
@@ -20,6 +22,7 @@ import { ScenePanel } from './ScenePanel.js';
 import { AboutDialog } from './AboutDialog.js';
 import { SettingsDialog } from './SettingsDialog.js';
 import { SidePanel, type SideTab } from './SidePanel.js';
+import { SidebarDock } from './SidebarDock.js';
 import { Library } from './library/Library.js';
 import { useDmLive } from './live/useDmLive.js';
 import { nextScene, SceneList, useSessionScenes } from './scenes/SceneList.js';
@@ -100,8 +103,9 @@ export function Workspace({
   // The session chosen now, once its record has arrived.
   const shown = current && current.session.id === sessionId ? current : undefined;
   // The live scene's tokens changed: the scene list's counts are read again.
+  // And its notes' mark, which another DM window may have changed (DMT-04).
   const liveSignature = live.scene
-    ? `${live.scene.scene.id}:${live.scene.tokens.length}:${live.scene.tokens.filter((token) => token.hidden).length}:${live.scene.scene.name}`
+    ? `${live.scene.scene.id}:${live.scene.tokens.length}:${live.scene.tokens.filter((token) => token.hidden).length}:${live.scene.scene.name}:${hasNotes(live.scene.scene.notes)}`
     : 'none';
   const sessionScenes = useSessionScenes(shown?.session.id, `${scenesVersion}:${liveSignature}`);
 
@@ -191,6 +195,17 @@ export function Workspace({
   const liveId = liveScene?.scene.id;
   const showingLive = liveScene != null && selected?.id === liveScene.scene.id;
   const connected = live.status === 'connected';
+  // Follow my view (DMT-03, specs/04-live-sync.md §9, Q-113, Q-120), for this DM view only: the live scene it
+  // was turned on for. Another scene going live or the TV going idle turns it off, so every activation starts
+  // with it off; a snapshot of the same live scene (a reconnection, a setup change) leaves it on. On while
+  // another scene is open to prepare, it is paused: only the live scene's panel sends the view.
+  const [followScene, setFollowScene] = useState<string | null>(null);
+  if (followScene !== null && liveScene !== undefined && followScene !== liveId) setFollowScene(null);
+  const following = followScene !== null && followScene === liveId;
+  const lockTv = (locked: boolean) => {
+    setTvLocked(locked);
+    if (locked) setFollowScene(null);
+  };
 
   // The first snapshot shows the live scene and its session, when nothing was chosen yet.
   const [placed, setPlaced] = useState(false);
@@ -344,6 +359,7 @@ export function Workspace({
                 : undefined
             }
             goLiveRef={goLiveButton}
+            following={following}
           />
         }
         screens={screens}
@@ -397,44 +413,57 @@ export function Workspace({
       {failure ? <Notice>{failure}</Notice> : null}
       {barMessage ? <Notice>{barMessage}</Notice> : null}
       <div className="eg-workspace__columns">
-        <div className="eg-workspace__sidebar">
-          <SceneList
-            session={shown?.session}
-            scenes={sessionScenes}
-            selectedId={selected?.id}
-            liveId={liveId}
-            connected={connected}
-            onSelect={setSelected}
-            onPutOnTv={(scene) => void goLive(scene)}
-            onChanged={bumpScenes}
-            onScenesRemoved={removed}
-            onSceneRenamed={renamed}
-            onChooseSession={() => setSwitcherOpen(true)}
-          />
-          {shown ? (
-            <section className="eg-next" aria-label={t('next.label')}>
-              <h2 className="eg-next__heading">{t('next.heading')}</h2>
-              {next ? (
-                <div className="eg-next__row">
-                  <span className="eg-next__name">{next.name}</span>
-                  <button
-                    type="button"
-                    className="eg-button eg-button--primary eg-button--small"
-                    aria-label={t('next.goLiveOf', { name: next.name })}
-                    aria-keyshortcuts="Shift+N"
-                    aria-disabled={!connected || undefined}
-                    onClick={() => void goLive(next)}
-                  >
-                    {t('liveBar.goLive')}
-                    <kbd>{t('next.key')}</kbd>
-                  </button>
-                </div>
-              ) : (
-                <p className="eg-next__none">{t('next.none')}</p>
-              )}
-            </section>
-          ) : null}
-        </div>
+        <SidebarDock
+          scenes={(sessionScenes.scenes ?? []).map((scene) => ({
+            id: scene.id,
+            name: scene.name,
+            thumbnail: scene.map_image_id ? imageFileUrl(scene.map_image_id, 'thumbnail') : undefined,
+            live: scene.id === liveId,
+            selected: scene.id === selected?.id,
+          }))}
+        >
+          {(pin) => (
+            <>
+              <SceneList
+                actions={pin}
+                session={shown?.session}
+                scenes={sessionScenes}
+                selectedId={selected?.id}
+                liveId={liveId}
+                connected={connected}
+                onSelect={setSelected}
+                onPutOnTv={(scene) => void goLive(scene)}
+                onChanged={bumpScenes}
+                onScenesRemoved={removed}
+                onSceneRenamed={renamed}
+                onChooseSession={() => setSwitcherOpen(true)}
+              />
+              {shown ? (
+                <section className="eg-next" aria-label={t('next.label')}>
+                  <h2 className="eg-next__heading">{t('next.heading')}</h2>
+                  {next ? (
+                    <div className="eg-next__row">
+                      <span className="eg-next__name">{next.name}</span>
+                      <button
+                        type="button"
+                        className="eg-button eg-button--primary eg-button--small"
+                        aria-label={t('next.goLiveOf', { name: next.name })}
+                        aria-keyshortcuts="Shift+N"
+                        aria-disabled={!connected || undefined}
+                        onClick={() => void goLive(next)}
+                      >
+                        {t('liveBar.goLive')}
+                        <kbd>{t('next.key')}</kbd>
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="eg-next__none">{t('next.none')}</p>
+                  )}
+                </section>
+              ) : null}
+            </>
+          )}
+        </SidebarDock>
         {selected ? (
           <ScenePanel
             key={selected.id}
@@ -449,10 +478,13 @@ export function Workspace({
             onSideTab={setSideTab}
             library={library}
             tvLocked={tvLocked}
-            onTvLocked={setTvLocked}
+            onTvLocked={lockTv}
+            tvFollow={following}
+            onTvFollow={(on) => setFollowScene(on && liveId !== undefined ? liveId : null)}
             setupOpen={setupOpen}
             onSetupOpen={setSetupOpen}
             onTokensChanged={bumpScenes}
+            onNotesChanged={bumpScenes}
           />
         ) : (
           <>

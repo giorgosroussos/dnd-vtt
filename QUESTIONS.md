@@ -35,7 +35,7 @@ Every card opens `Blocking` and is answered before the specification proceeds. `
 - Q-010 — Who may open the player view — security — Resolved
 - Q-011 — Plain HTTP or HTTPS on the LAN — security — Resolved
 - Q-012 — Who may fetch image files — security — Resolved
-- Q-013 — Campaign export/import: MVP or Phase 2 — scope — Resolved
+- Q-013 — Campaign export/import: MVP or Phase 2 — scope — Resolved — superseded by Q-115
 - Q-014 — Token operations available on the live scene — scope — Resolved
 - Q-015 — Editing the live scene's setup while it is live — scope — Resolved
 - Q-016 — Table tools beyond the ruler — scope — Resolved — superseded by Q-099
@@ -126,13 +126,28 @@ Every card opens `Blocking` and is answered before the specification proceeds. `
 - Q-101 — Painted fog in place of fog regions — scope — Resolved
 - Q-102 — The token popover while the DM drags a token — ux — Resolved
 - Q-103 — Eighteen condition markers with their rule text — scope — Resolved
-- Q-104 — An initiative tracker before the release — scope — Resolved
-- Q-105 — Where an encounter is kept — data — Resolved
-- Q-106 — An empty Enemies entry on Next — ux — Resolved
+- Q-104 — An initiative tracker before the release — scope — Resolved — superseded by Q-111
+- Q-105 — Where an encounter is kept — data — Resolved — superseded by Q-111
+- Q-106 — An empty Enemies entry on Next — ux — Resolved — superseded by Q-111
 - Q-107 — A Windows package before the release — scope — Resolved
 - Q-108 — Installing for every user with a firewall rule, or for one user without administrator rights — security — Resolved
 - Q-109 — Signing the Windows package — external — Resolved
 - Q-110 — Which LAN address the connect panel and the QR code use on a PC with virtual adapters — ux — Resolved
+- Q-111 — Per-enemy initiative replacing the one Enemies entry — scope — Resolved
+- Q-112 — Hit points and armour class on every token — data — Resolved
+- Q-113 — Follow my view: the TV camera mirroring the DM's — ux — Resolved
+- Q-114 — DM notes per scene and per token — security — Resolved
+- Q-115 — Campaign and library export and import as a zip — scope — Resolved
+- Q-116 — Dead and Unconscious when hit points rise above 0 — ux — Resolved
+- Q-117 — A monster or npc that players first see after combat started — ux — Resolved
+- Q-118 — A monster or npc entry whose token is Dead or unseen — ux — Resolved
+- Q-119 — The size limit of an import archive — security — Resolved
+- Q-120 — Follow my view while the DM opens another scene to prepare — ux — Resolved
+- Q-121 — A collapsible scene sidebar — ux — Resolved
+- Q-122 — Selecting several tokens at once — ux — Resolved
+- Q-123 — One undo step for an action on a group of tokens — data — Resolved
+- Q-124 — Dragging a token from the library onto the map — ux — Resolved
+- Q-125 — The player view on phones, tablets and large screens — scope — Resolved
 
 ## Blocking
 
@@ -294,6 +309,7 @@ None.
 - Recommendation: A, because the roadmap checklist is the more specific statement and the data model already prepares for it.
 - Blocks: specification
 - Answer: A (2026-09-23; recommendation accepted)
+- Superseded by: Q-115
 
 ### Q-014 — Token operations available on the live scene
 - Surface: scope
@@ -1324,6 +1340,7 @@ None.
 - Recommendation: A, because the owner asked for it in detail and approved overriding the register.
 - Blocks: specification
 - Answer: A (2026-10-01; recommendation accepted)
+- Superseded by: Q-111
 
 ### Q-105 — Where an encounter is kept
 - Surface: data
@@ -1335,6 +1352,7 @@ None.
 - Recommendation: A, because the owner's request gives the encounter a scene and a lifetime beyond the live session, and the migration is additive.
 - Blocks: specification
 - Answer: A (2026-10-01; recommendation accepted)
+- Superseded by: Q-111
 
 ### Q-106 — An empty Enemies entry on Next
 - Surface: ux
@@ -1347,6 +1365,7 @@ None.
 - Recommendation: A, because it keeps both of the owner's sentences: the prompt when the enemies are gone, the skip while none has appeared.
 - Blocks: specification
 - Answer: A (2026-10-01; recommendation accepted)
+- Superseded by: Q-111
 
 ### Q-107 — A Windows package before the release
 - Surface: scope
@@ -1393,3 +1412,172 @@ None.
 - Recommendation: A, because it fixes the case the owner hit and the common ones with no stored setting and no contract change, and B's picker can be added later if a DM still meets a wrong guess.
 - Blocks: specification
 - Answer: B, with A as the way it works by default: the server ranks the addresses by adapter so that the right one is highlighted with no chore for the DM, and a TV address chosen in Settings from the detected addresses, with their adapter names, is the emergency correction for a PC where the ranking guesses wrong, falling back to the automatic choice when the chosen address is gone (2026-10-02)
+
+### Q-111 — Per-enemy initiative replacing the one Enemies entry
+- Surface: scope
+- Source: The owner's brief for the DM toolkit, 2026-10-04: «Every visible monster or NPC in the combat gets its own entry (`kind: "monster"`, `token_id`, optional initiative number), ordered like PC entries»; «The TV strip shows enemies by their token label, exactly like PCs (e.g. "Bandit 1"). Only tokens visible to players appear (existing visibility rule, `04`)»; «An encounter in progress at upgrade time has its DM entry expanded in place into one entry per member»; «Supersedes the "one DM entry / never reveal enemies on the TV" decisions (Q-104 to Q-106, D-160 to D-162)». `01` §4 and §9 keep per-monster initiative in Phase 2 and `04` §4 forbids any monster or npc in the players' encounter (Q-104).
+- Question: Does every visible monster and npc in combat get its own initiative entry, shown on the TV by its label, replacing the one Enemies entry?
+- Options:
+  - A) As the owner wrote it: one entry per visible monster or npc token (`kind: monster`, `token_id`, an initiative number or none), sorted and dragged like player characters' entries; the strip names each by its token label, only for tokens players can see (`04` §4); an encounter in progress at upgrade has its Enemies entry expanded in place into one entry per member; the encounter stays one per scene in SQLite → effect on scope: per-monster initiative leaves Phase 2; Q-104, Q-105 and Q-106 and D-160 to D-162 are superseded; players see the labels of visible enemies in turn order, which they already see on the map.
+  - B) Keep the one Enemies entry → effect on scope: no change.
+- Recommendation: A, because the owner decided it and approved superseding the earlier cards.
+- Blocks: specification
+- Answer: A (2026-10-04; recommendation accepted)
+
+### Q-112 — Hit points and armour class on every token
+- Surface: data
+- Source: The owner's brief for the DM toolkit, 2026-10-04: «Fields `hp_current`, `hp_max`, `hp_temp`, `ac`, all nullable. The DM may fill them for any token, PCs included»; «Asset gets optional default `hp_max` and `ac`, copied to new tokens»; «DM-only: never in any player snapshot or event»; «Automation only when `hp_max` is set: Bloodied on at hp_current ≤ hp_max / 2 (rounded down), off above it; at 0 HP a monster/NPC becomes Dead, a PC becomes Unconscious. Temp HP absorbs damage first»; «Moves "hit points" out of Phase 2 in `01`». `01` §1 puts no game rules in code, `01` §4 keeps hit points in Phase 2, and `04` §2 fixes the live token commands.
+- Question: Do tokens carry optional hit points and armour class, DM-only, with Bloodied, Dead and Unconscious set from the hit points?
+- Options:
+  - A) As the owner wrote it: four nullable fields on every token, optional `hp_max` and `ac` defaults on the asset copied to new tokens, never sent to players; with `hp_max` set, Bloodied at or below half (rounded down) and off above it, Dead for a monster or npc and Unconscious for a player character at 0, temporary hit points taking damage first; set live by undoable token commands → effect on data: an additive migration on `token` and `asset`; hit points leave Phase 2; the automation is the one game rule in code beside the size table and the ruler.
+  - B) Keep hit points in Phase 2 → effect on data: no change.
+- Recommendation: A, because the owner decided it.
+- Blocks: specification
+- Answer: A (2026-10-04; recommendation accepted)
+
+### Q-113 — Follow my view: the TV camera mirroring the DM's
+- Surface: ux
+- Source: The owner's brief for the DM toolkit, 2026-10-04: «A toggle on the live scene. While on, the player camera continuously mirrors the DM camera (throttled), fitting the DM's whole visible area inside the TV's aspect ratio, never cropping it»; «Turned off by Lock TV camera, by any manual TV camera control, or by switching the live scene»; «Amends `04` §9 (the reset-to-fit on activation still holds; follow starts off)». `04` §9 sets the player camera only by an explicit DM action.
+- Question: Is there a Follow my view toggle that keeps the TV camera on the DM's view?
+- Options:
+  - A) As the owner wrote it: a toggle on the live scene, off at every activation; while on, the DM view sends its whole visible area as the player camera, throttled, widened to the TV's aspect ratio and never cropped; Lock TV camera, any manual TV camera control and a change of live scene turn it off → effect on ux: the TV follows the DM's pans and zooms without a click; no new command or stored state.
+  - B) Keep the explicit Send my view only → effect on ux: no change.
+- Recommendation: A, because the owner decided it.
+- Blocks: specification
+- Answer: A (2026-10-04; recommendation accepted)
+
+### Q-114 — DM notes per scene and per token
+- Surface: security
+- Source: The owner's brief for the DM toolkit, 2026-10-04: «A note per scene and a note per token. A token also shows its asset's `notes` read-only»; «DM-only, filtered on the server like hidden tokens»; «Moves "DM notes per scene" out of Phase 2 in `01`». `01` §4 keeps DM notes per scene in Phase 2; `04` §4 already keeps asset notes from players.
+- Question: Do scenes and tokens carry DM notes, kept from players on the server?
+- Options:
+  - A) As the owner wrote it: a `notes` text on every scene and every token, the token's view also showing its asset's notes read-only; never in a player snapshot or event → effect on security: two more DM-only fields the players' projection must drop, covered by the hidden-information suite; DM notes per scene leave Phase 2.
+  - B) Keep DM notes in Phase 2 → effect on security: no change.
+- Recommendation: A, because the owner decided it.
+- Blocks: specification
+- Answer: A (2026-10-04; recommendation accepted)
+
+### Q-115 — Campaign and library export and import as a zip
+- Surface: scope
+- Source: The owner's brief for the DM toolkit, 2026-10-04: «Two scopes: a whole campaign (with the assets and images it uses), or library assets (selected or all)»; «Zip with a versioned `manifest.json`, data as JSON, and images named by hash»; «A campaign always imports as a new copy with new ids. Images are deduplicated by hash, and assets with an existing id are reused»; «Reject newer format versions, oversized archives and paths that escape the target ("zip slip")»; «Supersedes Q-013 (copy the data folder) as the only way to move a campaign». `01` §4, `09` §5 and `12` keep export and import in Phase 2 (Q-013), and AGENTS.md lists it among the red lines.
+- Question: Can the DM export a campaign or library assets to a zip and import it on another Emberglass?
+- Options:
+  - A) As the owner wrote it: a campaign with the assets and images it uses, or library assets (selected or all), exported as a zip holding a versioned `manifest.json`, the data as JSON and the images named by their sha256; a campaign always imported as a new copy with new identifiers, images deduplicated by hash, assets whose identifier exists reused; newer format versions, oversized archives and paths escaping the target refused → effect on scope: export and import leave Phase 2 and Q-013 is superseded; copying the data folder stays the backup.
+  - B) Keep export and import in Phase 2 (Q-013) → effect on scope: no change.
+- Recommendation: A, because the owner decided it.
+- Blocks: specification
+- Answer: A (2026-10-04; recommendation accepted)
+
+### Q-116 — Dead and Unconscious when hit points rise above 0
+- Surface: ux
+- Source: Asked on 2026-10-04 while writing Q-112 into the specs: the owner's brief says what the automation sets at 0 hit points and that Bloodied goes off above half, but not whether healing above 0 takes Dead or Unconscious away.
+- Question: When a token's hit points rise above 0, does the automation clear the Dead or Unconscious it set at 0?
+- Options:
+  - A) Clear Unconscious only; Dead is never cleared by the automation → effect on ux: a healed player character is up again without a click; a monster's Dead stays until the DM removes it.
+  - B) Never clear either; the automation only sets them at 0 → effect on ux: the DM removes Dead or Unconscious by hand after healing.
+  - C) Clear both → effect on ux: healing a token by mistake can bring a dead monster back on the TV.
+- Recommendation: A, because a healed player character is conscious by the rules, and a monster's death is the DM's call.
+- Blocks: specification
+- Answer: B (2026-10-04)
+
+### Q-117 — A monster or npc that players first see after combat started
+- Surface: ux
+- Source: Asked on 2026-10-04 while writing Q-111 into the specs: the brief gives every visible monster or npc an entry, but not what happens to one revealed mid-combat. `08` §12 already offers to add a player character players can now see.
+- Question: When a monster or npc token becomes visible to players during combat, does it get an entry automatically or is the DM offered to add it?
+- Options:
+  - A) Offered, as player characters are: «Add Bandit 3 to initiative?», at the end of the order; nothing reaches the TV until the DM accepts → effect on ux: one click per late enemy; an enemy revealed for a moment never enters the order by accident.
+  - B) Added automatically at the end of the order → effect on ux: no click; the strip shows it at once, also for a token revealed by mistake.
+- Recommendation: A, because it matches the offer the tracker already makes for player characters.
+- Blocks: specification
+- Answer: A (2026-10-04; recommendation accepted)
+
+### Q-118 — A monster or npc entry whose token is Dead or unseen
+- Surface: ux
+- Source: Asked on 2026-10-04 while writing Q-111 into the specs: with one entry per enemy, the brief does not say what happens to an entry whose token is marked Dead or that players can no longer see, nor what becomes of the «No enemies left. End combat?» prompt of Q-106.
+- Question: Is an entry whose monster or npc is Dead or unseen kept and passed over, or removed?
+- Options:
+  - A) Kept, its turns passed over; the strip drops an unseen one and greys a Dead one; when no monster or npc entry can take a turn, once the encounter has had one, the DM is asked «No enemies left. End combat?» → effect on ux: undo and a mistaken Dead are easy to put right; the end-of-combat prompt survives.
+  - B) Removed, undo bringing it back → effect on ux: the list shrinks as enemies fall; a revived enemy needs adding again.
+- Recommendation: A, because the entry keeps its place for a mistake put right, and the prompt the owner asked for in Q-106 keeps working.
+- Blocks: specification
+- Answer: A (2026-10-04; recommendation accepted)
+
+### Q-119 — The size limit of an import archive
+- Surface: security
+- Source: Asked on 2026-10-04 while writing Q-115 into the specs: the brief rejects «oversized archives» without a size. The upload limit of `05` §6 is 50 MB by default, too small for a campaign with its maps.
+- Question: What limit decides that an import archive is oversized?
+- Options:
+  - A) A setting of its own, 2 GB by default, applying to the archive and to the total of its entries once unpacked → effect on security: a zip bomb is refused before it fills the disk; the DM can raise it for a large campaign.
+  - B) Fixed at 2 GB → effect on security: the same protection, no setting to change.
+  - C) The upload limit → effect on security: most campaigns with maps are refused at the default.
+- Recommendation: A, because the DM can raise it without a new release, and the unpacked total is what protects the disk.
+- Blocks: specification
+- Answer: A (2026-10-04; recommendation accepted)
+
+### Q-120 — Follow my view while the DM opens another scene to prepare
+- Surface: ux
+- Source: Asked on 2026-10-05 while implementing DMT-03: `04` §9 and `08` §13 (Q-113) say what turns Follow my view off (Lock TV camera, another TV camera control, another scene going live, the TV going idle) but not what it does while the DM view shows a scene that is not live, where the DM's camera is not on the live scene's world.
+- Question: While Follow my view is on and the DM opens a non-live scene to prepare, what happens to it?
+- Options:
+  - A) It pauses: nothing is sent and the TV stays where it was; on returning to the live scene it resumes and sends the DM's view at once; the live indicator says it is paused → effect on ux: the DM can prepare the next scene mid-session without the TV moving, and following picks up again without a click.
+  - B) It turns off, like a manual TV camera control → effect on ux: the DM turns it on again after every look at another scene.
+  - C) It keeps sending the last view of the live scene → effect on ux: nothing changes on the TV, but the toggle looks on while nothing follows.
+- Recommendation: A, because preparing the next scene is not a decision about the TV, and the TV should neither jump nor stop following because of it.
+- Blocks: specification
+- Answer: A (2026-10-05; recommendation accepted)
+
+### Q-121 — A collapsible scene sidebar
+- Surface: ux
+- Source: The owner's brief of 2026-10-05 (UI/UX refinements), asked in the planning session of that day.
+- Question: How should the DM view's left sidebar (the session's scenes and Next up) make room for the map?
+- Options:
+  - A) It collapses to a strip at the left edge by default; hovering near that edge opens it over the map and moving away closes it; a toggle opens it on click and a pin docks it in its column, remembered per browser → effect on ux: the map gains the sidebar's width, the scenes stay a hover away.
+  - B) Both side panels collapse the same way → effect on ux: more map, but the Library tab, the source of a drag to the map, hides too.
+  - C) The same mechanics, docked by default → effect on ux: nothing changes until the DM unpins it.
+- Recommendation: A, because the scene list is consulted between scenes while the right panel is in use all the time.
+- Blocks: specification
+- Answer: A (2026-10-05; recommendation accepted)
+
+### Q-122 — Selecting several tokens at once
+- Surface: ux
+- Source: The owner's brief of 2026-10-05 (UI/UX refinements), asked in the planning session of that day.
+- Question: Can the DM select several tokens and act on them together, and with what?
+- Options:
+  - A) Ctrl (Cmd on macOS) and a click add or remove a token from the selection, on the map and in the token list; a drag of any selected token moves them all, keeping their offsets, the arrow keys nudge them all; a bar offers Hide or Reveal, a condition toggled on all, one amount of damage or healing on each, and Delete with one confirmation → effect on ux: groups of monsters handled in one gesture.
+  - B) Only moving together → effect on ux: the other actions stay one token at a time.
+- Recommendation: A, as the owner asked.
+- Blocks: specification
+- Answer: A (2026-10-05; recommendation accepted)
+
+### Q-123 — One undo step for an action on a group of tokens
+- Surface: data
+- Source: The owner's brief of 2026-10-05 (UI/UX refinements), asked in the planning session of that day.
+- Question: On the live scene, how does undo treat an action on several selected tokens?
+- Options:
+  - A) One batched command, `token.batch`, carrying the move, visibility, marker, hit-point and delete commands of the group, applied all or nothing in one transaction and undone and redone as one step; each effect projected to the players room as its single command's → effect on data: one new live command and a compound inverse; the hidden-information suite covers it.
+  - B) One command per token → effect on data: no contract change, but undoing a group of five takes five Ctrl+Z.
+- Recommendation: A, because a group action is one decision of the DM and the history is bounded to 100 steps.
+- Blocks: specification
+- Answer: A (2026-10-05; recommendation accepted)
+
+### Q-124 — Dragging a token from the library onto the map
+- Surface: ux
+- Source: The owner's brief of 2026-10-05 (UI/UX refinements), asked in the planning session of that day.
+- Question: Can the DM add a token by dragging an asset from the Library tab onto the map, and what becomes of the picker?
+- Options:
+  - A) Yes, beside the picker: a library asset dragged onto the map is placed where it is dropped, snapped as a placed token is, Alt for no snapping; the picker stays, keyboard-operable, its rows laid out with the thumbnail, the name and the Choose button on one line → effect on ux: the drag `01` §6 put off arrives, and the keyboard flow is kept.
+  - B) No, the picker alone → effect on ux: no change.
+- Recommendation: A, as the owner asked, keeping the picker as the keyboard alternative.
+- Blocks: specification
+- Answer: A (2026-10-05; recommendation accepted)
+
+### Q-125 — The player view on phones, tablets and large screens
+- Surface: scope
+- Source: The owner's brief of 2026-10-05 (UI/UX refinements), asked in the planning session of that day.
+- Question: Can the read-only player view be opened on phones and tablets, and what may it offer there?
+- Options:
+  - A) The player view lays out for any screen from a phone to a large desktop; on a touch device without hover it offers a fullscreen button where the browser supports it and pinch and drag to zoom and pan its own view, with a button and a double tap returning to the DM's camera; it still sends no command, a handheld reports no viewport so the TV frame keeps the TV's shape, and the TV keeps no controls → effect on scope: phones become screens of the table, still read-only, still filtered on the server; the DM's camera is a handheld's starting view, not its limit.
+  - B) TV and projector only, as Q-054 and `01` §4 say → effect on scope: no change.
+- Recommendation: A, as the owner asked; nothing hidden reaches a handheld, which receives exactly what the TV does.
+- Blocks: specification
+- Answer: A (2026-10-05; recommendation accepted)

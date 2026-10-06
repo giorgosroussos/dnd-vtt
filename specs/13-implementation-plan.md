@@ -18,11 +18,17 @@ flowchart LR
   P3 --> P5["Phase 5<br/>Redesign and table tools"]
   P5 --> P4
   P4 --> P6["Phase 6<br/>Windows package"]
+  P6 --> P7["Phase 7<br/>DM toolkit"]
+  P7 --> P8["Phase 8<br/>UI/UX refinements"]
 ```
 
 Phase 5 was added after Phases 0 to 3 and REL-01, REL-02 were done (Q-099, Q-100): it runs before REL-03, so the owner's TV run accepts what ships.
 
 Phase 6 was added after every earlier package was done (Q-107): it packages what Phase 4 accepted, and its exit criteria join the release gate.
+
+Phase 7 was added after every earlier package was done (Q-111 to Q-119): its packages run in order, hit points first because per-enemy initiative passes over a monster its hit points made Dead, and export and import last so that its format carries every field the others add.
+
+Phase 8 was added while Phase 7 awaited its review (Q-121 to Q-125): its packages change no stored data, and the one contract change, `token.batch`, is covered by the hidden-information suite.
 
 ## 3. Phase 0 — Foundations
 
@@ -83,7 +89,7 @@ Goal: the server stores and serves everything the DM prepares, behind the PIN, w
 
 - The eight entities, identifiers, nullable map and grid extent, prepared fields (`03` §1, `03` §2, `03` §3, `03` §6, `03` §8).
 - Token positions in grid units (`03` §4).
-- Surfaces: data
+- Surfaces: data, scope
 - Touches red line: yes
 - Contract change: yes
 
@@ -100,7 +106,7 @@ Goal: the server stores and serves everything the DM prepares, behind the PIN, w
 
 - CRUD and ordering, scene duplication, deletion cascades with confirmation data, live-scene deletion clearing the live pointer (`03` §7).
 - Grid presets copied on scene creation and updated on calibration (`03` §5).
-- Surfaces: data
+- Surfaces: data, scope
 - Touches red line: yes
 - Contract change: yes
 
@@ -117,7 +123,7 @@ Goal: the server stores and serves everything the DM prepares, behind the PIN, w
 
 - Assets, categories, sizes, tags, notes, default visibility, search and filters (`05` §1, `05` §2, `05` §4).
 - Usage listing and refusal to delete an asset in use; image change propagating to tokens (`05` §5).
-- Surfaces: security, ux
+- Surfaces: data, security, ux
 - Touches red line: no
 - Contract change: yes
 
@@ -141,7 +147,7 @@ Goal: the DM prepares a whole session in the browser: campaigns, scenes, calibra
 `PRP-02` Canvas and grid overlay
 
 - Map background with zoom and pan in both views, grid overlay with player visibility, map-less scenes (`08` §3, `06` §2, `03` §6).
-- Surfaces: data
+- Surfaces: data, ux
 - Touches red line: yes
 - Contract change: no
 
@@ -184,7 +190,7 @@ Goal: the DM runs a prepared session on the TV with hidden information never lea
 - `token.add`, `token.move`, `token.setVisibility`, `token.delete`, last-write-wins, rejection of player commands (`04` §2).
 - Server-side filtering, reveal as add and hide as remove, player field allowlist with labels (`04` §3, `04` §4).
 - Image entitlement for players following the live scene (`07` §5).
-- Surfaces: security, scope, ux
+- Surfaces: data, security, scope, ux
 - Touches red line: yes
 - Contract change: yes
 
@@ -192,7 +198,7 @@ Goal: the DM runs a prepared session on the TV with hidden information never lea
 
 - Idle screen, fit-to-map on activation, rendering of visible tokens and labels, no controls (`08` §4, `08` §9).
 - Console and "Connect a screen" QR and URL for the player view; LAN address listing (`08` §5).
-- Surfaces: data, security, ux
+- Surfaces: data, security, scope, ux
 - Touches red line: no
 - Contract change: no
 
@@ -200,7 +206,7 @@ Goal: the DM runs a prepared session on the TV with hidden information never lea
 
 - One canvas with live indicator, live bar return, "Go live" and "Blank TV" (`08` §2, `04` §2).
 - Setup edits on the live scene pushed as snapshots (`04` §10).
-- Surfaces: security, scope, ux
+- Surfaces: data, security, scope, ux
 - Touches red line: yes
 - Contract change: yes
 
@@ -302,7 +308,7 @@ Goal: both views in the 2026-09-30 redesign, and the three table tools the owner
 `TBL-01` Ping
 
 - A ping on the live scene, in grid units, shown on every view and stored nowhere (`01` §9, `04` §2, `04` §3).
-- Surfaces: security, scope, external, ux
+- Surfaces: data, security, scope, external, ux
 - Touches red line: yes
 - Contract change: yes
 
@@ -377,3 +383,116 @@ Goal: a DM installs Emberglass on a Windows PC without Node, Git or a terminal, 
 ### Exit criteria
 
 The release workflow on a release-candidate tag publishes the installer and the zip only after the package gates pass; the manual install record is handed back by the owner.
+
+## 12. Phase 7 — DM toolkit
+
+Goal: the DM tracks hit points and armour class, runs initiative per enemy, lets the TV follow their view, keeps notes, and moves campaigns and assets between Emberglass installs, with hidden information still never leaving the server (`01` §10).
+
+### Work packages
+
+`DMT-01` Hit points and armour class
+
+- An additive migration: nullable `hp_current`, `hp_max`, `hp_temp` and `ac` on tokens, `hp_max` and `ac` defaults on assets, copied to new tokens (`03` §1, `03` §9, `05` §1, `05` §3).
+- `token.setStats` and `token.applyHp` on the live scene, undoable, temporary hit points first; REST edits in preparation; Bloodied, Dead and Unconscious set from the hit points in the same step, never removed by rising above 0 (`01` §1, `04` §2, `04` §3, `04` §8, `04` §15).
+- Hit points and armour class filtered from every players' snapshot and event; the hidden-information script extended with them (`04` §4, `10` §3).
+- The token's hit points, armour class and damage or healing, and the asset editor's defaults, in the DM view (`08` §13).
+- Exit: integration tests on a real SQLite file cover the commands, their undo and redo, the automation at each threshold with and without `hp_max`, temporary hit points and the asset defaults; the hidden-information suite passes with hit points in its script and finds none in any player message.
+- Surfaces: data, security, scope, external, ux
+- Touches red line: yes
+- Contract change: yes
+
+`DMT-02` Per-enemy initiative
+
+- An entry per visible monster and npc token (`kind: monster`), sorted, dragged, added and removed like a player character's; the one Enemies entry and its computed members removed (`03` §1, `03` §2, `03` §7, `04` §2, `04` §14).
+- A migration expanding a stored encounter's Enemies entry in place into one entry per member it had (`04` §14).
+- Entries of Dead or unseen monsters and npcs kept and passed over; the offer to add a monster or npc players first see mid-combat; "No enemies left. End combat?" when no such entry can act (`04` §14, `08` §12).
+- The players' projection carrying the entries of tokens they can see, the strip showing each by its token's label, a Dead one greyed (`04` §4, `08` §12, `10` §3).
+- Exit: the encounter's rule tests and its integration tests cover start, sorting, turns passing over Dead and unseen entries, the late-enemy offer and the expansion of a stored encounter; the hidden-information suite passes with a hidden monster in the encounter and never records its entry; an end-to-end test shows a monster's label on the TV strip.
+- Surfaces: data, security, scope, external, ux
+- Touches red line: yes
+- Contract change: yes
+
+`DMT-03` Follow my view
+
+- A Follow my view toggle among the live scene's TV camera controls, off at every activation; while on, the DM's whole visible area sent as the player camera, throttled and widened to the TV's aspect ratio; Lock TV camera, any other TV camera control and a change of live scene turning it off (`04` §9, `08` §11, `08` §13).
+- Exit: unit tests cover the widening for wider and narrower screens and the throttle; an end-to-end test with a DM and a player context shows the TV following a pan and a zoom without cropping, and each of the three ways of turning it off.
+- Surfaces: data, security, scope, ux
+- Touches red line: no
+- Contract change: no
+
+`DMT-04` DM notes
+
+- An additive migration: `notes` on scenes and tokens; edited over REST on any scene, live included, the DM room told by `notes.updated`; copied when a scene is duplicated (`02` §5, `03` §1, `03` §7, `03` §10, `04` §3, `04` §16).
+- The scene's notes and a token's notes with its asset's notes read-only in the DM view (`08` §13).
+- Notes filtered from every players' snapshot and event; the hidden-information script extended with them (`04` §4, `10` §3).
+- Exit: integration tests cover the REST edits on a live and a prepared scene and the duplication; the hidden-information suite passes with notes in its script and finds none in any player message.
+- Surfaces: data, security, scope, external, ux
+- Touches red line: yes
+- Contract change: yes
+
+`DMT-05` Export and import
+
+- Export of a campaign with the assets and images it uses, or of library assets selected or all, as a zip with a versioned `manifest.json`, the data as JSON and images named by sha256, carrying every field the earlier packages added (`09` §9, `02` §5).
+- Import of either: a campaign always as a new copy with new identifiers, images reused by hash, assets reused by identifier; refused with nothing stored for a newer format version, a path escaping the target, an archive or unpacked total over the import limit, or an image failing the upload checks (`07` §9, `05` §6, `09` §9).
+- The import limit in Settings, 2 GB by default (`03` §1, `09` §7); Export and Import in the DM view (`08` §13).
+- Exit: the export and import test of `10` §3 passes, a round trip of the large-scene fixture reloads unchanged on a second data directory, and each refusal is tested to store nothing.
+- Surfaces: data, security, scope, external, ux
+- Touches red line: yes
+- Contract change: yes
+
+### Exit criteria
+
+The hidden-information suite of `10` §3 passes with hit points, notes and per-enemy entries in its script; the run journey of `10` §5 passes with combat run per enemy; a campaign exported on one data directory imports on another and runs there.
+
+## 13. Phase 8 — UI/UX refinements
+
+Goal: the DM reaches more of the map, acts on groups of tokens and drags tokens from the library, and the player view opens on any screen from a phone to a large desktop, with hidden information still never leaving the server (`01` §11).
+
+### Work packages
+
+`UXR-01` Collapsible scene sidebar
+
+- The scene sidebar collapsed to an edge strip, opened over the map by hover or its toggle, closed on leaving, kept open by focus, docked by a pin remembered by the browser (`08` §1, `08` §14).
+- Exit: unit tests cover the toggle, the pin and the remembered state; an end-to-end test covers the hover and the widths collapsed and docked.
+- Surfaces: data, scope, ux
+- Touches red line: no
+- Contract change: no
+
+`UXR-02` Several tokens at once
+
+- Ctrl or Cmd and a click building a selection on the map and in the token list; the group moved by a drag or the arrow keys; the group bar's Hide or Reveal, condition, damage or healing and Delete (`08` §3, `08` §14).
+- `token.batch` on the live scene, all or nothing, one undo step, its effects projected as the single commands' (`04` §2, `04` §4, `04` §8).
+- The hidden-information script extended with a batch (`10` §3).
+- Exit: integration tests on a real SQLite file cover the batch, its refusal with nothing changed, its undo and redo as one step; the hidden-information suite passes with a batch in its script; an end-to-end test with a DM and a player context moves a group and undoes it in one step.
+- Surfaces: data, security, scope, external, ux
+- Touches red line: yes
+- Contract change: yes
+
+`UXR-03` Drag from the library
+
+- A library asset dragged onto the map placed where it is dropped, snapped, Alt for none, on a prepared and on the live scene; the picker's rows on one line (`05` §5, `08` §14).
+- Exit: unit tests cover the drop position and the picker's rows; an end-to-end test drags an asset onto a prepared and a live scene.
+- Surfaces: data, scope, ux
+- Touches red line: no
+- Contract change: no
+
+`UXR-04` Compact campaigns menu
+
+- The session switcher's row actions as icon buttons with tooltips, their accessible names unchanged; New campaign and Import side by side (`08` §14).
+- Exit: unit tests cover the tooltip on hover and on focus and the names; the tree's end-to-end tests pass unchanged.
+- Surfaces: data, scope, ux
+- Touches red line: no
+- Contract change: no
+
+`UXR-05` The player view on any screen
+
+- The player view laid out from a phone to a large desktop; on a coarse pointer without hover, fullscreen where supported, the screen's own pinch zoom and pan with its reset, and no size reported (`01` §2, `08` §7, `08` §9, `08` §14, `04` §9).
+- Exit: unit tests cover the zoom geometry and the handheld controls, and that a fine-pointer screen still has nothing that takes focus; end-to-end tests on an emulated phone and tablet cover the layout, the fullscreen button, a pinch, its reset and the TV frame's shape.
+- Surfaces: data, security, scope, ux
+- Touches red line: no
+- Contract change: no
+
+### Exit criteria
+
+The hidden-information suite of `10` §3 passes with a batch in its script; the run journey of `10` §5 passes with a group of tokens moved and undone; the player view passes its end-to-end tests on an emulated phone and tablet.
+

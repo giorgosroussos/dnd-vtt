@@ -3,6 +3,7 @@ import { API_TOKEN_PATHS, type SceneToken, type TokenChange, type TokenUpdateBod
 import type { CanvasToken } from '../../canvas/tokens.js';
 import { errorMessage } from '../../ui/errorMessage.js';
 import { errorCode, request } from '../api.js';
+import { tokenNotesPreview } from '../notes/Notes.js';
 
 // The tokens of the selected scene in the DM view (PRP-04, D-100), read from the server when the
 // scene is selected and changed over REST. A move is shown at once and sent. The writes of one
@@ -32,6 +33,7 @@ export const toCanvasToken = (token: SceneToken): CanvasToken => ({
   image_id: token.asset.image_id,
   category: token.asset.category,
   markers: token.markers,
+  note: tokenNotesPreview(token),
 });
 
 export type ChangeResult =
@@ -49,6 +51,8 @@ export interface SceneTokens {
   /** `inline`: the caller shows a refusal itself, and the page does not. */
   change: (id: string, body: TokenUpdateBody, options?: { inline?: boolean }) => Promise<ChangeResult>;
   remove: (id: string) => Promise<boolean>;
+  /** Shows a token as the server answered a write made elsewhere: its notes (DMT-04). */
+  stored: (token: SceneToken) => void;
 }
 
 export function useSceneTokens(sceneId: string, live = false): SceneTokens {
@@ -155,5 +159,9 @@ export function useSceneTokens(sceneId: string, live = false): SceneTokens {
     }
   }
 
-  return { tokens, loadFailure, retry: reload, failure, place, change, remove };
+  // Only the notes are taken: a write of the token's own state queued meanwhile answers with the rest.
+  const stored = (token: SceneToken) =>
+    setTokens((list) => list?.map((each) => (each.id === token.id ? { ...each, notes: token.notes } : each)));
+
+  return { tokens, loadFailure, retry: reload, failure, place, change, remove, stored };
 }

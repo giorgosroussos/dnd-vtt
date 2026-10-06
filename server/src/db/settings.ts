@@ -6,15 +6,22 @@ import type { Settings, SettingsUpdate } from '@emberglass/shared';
 // route returns, so no query here that reads settings for a response names it,
 // and the hash is read and written by its own functions (G-008).
 
-const SETTINGS_COLUMNS = 'id, live_scene_id, ruler_rule, upload_limit_bytes, display_variant_size, tv_address';
+const SETTINGS_COLUMNS =
+  'id, live_scene_id, ruler_rule, upload_limit_bytes, display_variant_size, tv_address, import_limit_bytes';
 
 export function readSettings(db: Database.Database): Settings {
   return db.prepare(`SELECT ${SETTINGS_COLUMNS} FROM settings`).get() as Settings;
 }
 
 // The columns an update may write, named here so that no request can name another (REL-01).
-// The TV address may be written as null, which is Automatic (Q-110).
-const UPDATABLE = ['upload_limit_bytes', 'display_variant_size', 'ruler_rule', 'tv_address'] as const;
+// The TV address may be written as null, which is Automatic (Q-110); the import limit is DMT-05's (Q-119).
+export const UPDATABLE = [
+  'upload_limit_bytes',
+  'display_variant_size',
+  'ruler_rule',
+  'tv_address',
+  'import_limit_bytes',
+] as const;
 
 /** Writes the settings `update` names, in one statement, and answers them all. */
 export function updateSettings(db: Database.Database, update: SettingsUpdate): Settings {

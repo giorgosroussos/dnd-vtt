@@ -19,6 +19,8 @@ Commands flow from a DM socket to the server; the server MUST reject any command
 | `token.delete` | remove a token from the live scene | yes |
 | `token.setVisibility` | hide or reveal a token | yes |
 | `token.setMarkers` | set the condition markers a token carries (`03` §1) | yes |
+| `token.setStats` | set or clear a token's hit points, maximum, temporary hit points and armour class (§15) | yes |
+| `token.applyHp` | apply a signed amount to a token's hit points, negative for damage and positive for healing (§15) | yes |
 | `fog.paint` | one stroke of the brush on the live scene, painting fog or erasing it (§13) | yes |
 | `fog.fill` | fog the live scene's whole map, or clear all its fog | yes |
 | `scene.activate` | make a scene the live scene | no |
@@ -29,24 +31,26 @@ Commands flow from a DM socket to the server; the server MUST reject any command
 | `encounter.start`, `encounter.end` | start the live scene's combat from its player characters, or end it (§14) | yes |
 | `encounter.reorder`, `encounter.setInitiative` | set the order of the entries by dragging, or an entry's initiative number, which sorts them (§14) | yes |
 | `encounter.next`, `encounter.previous` | pass the turn to the next or the previous entry, counting rounds (§14) | yes |
-| `encounter.addEntry`, `encounter.removeEntry` | add a player character's entry, or remove one (§14) | yes |
+| `encounter.addEntry`, `encounter.removeEntry` | add a player character's, a monster's or an npc's entry, or remove one (§14) | yes |
+| `token.batch` | apply 1 to 50 `token.move`, `token.setVisibility`, `token.setMarkers`, `token.applyHp` and `token.delete` commands together, all or nothing (`08` §14) | yes, as one step |
 | `undo` | apply the most recent inverse command | — |
 | `redo` | apply again the most recently undone command | — |
 
-- The token commands on the live scene MUST be exactly `token.add`, `token.move`, `token.setVisibility`, `token.setMarkers` and `token.delete`; label and stacking order are edited only on scenes that are not live; deleting a token also removes its initiative entry, and undoing the delete puts the entry back (§14). [input, Q-014, Q-099, Q-104]
+- The token commands on the live scene MUST be exactly `token.add`, `token.move`, `token.setVisibility`, `token.setMarkers`, `token.setStats`, `token.applyHp` and `token.delete`, and `token.batch` grouping some of them; label and stacking order are edited only on scenes that are not live, notes at any time over REST (§16); deleting a token also removes its initiative entry, and undoing the delete puts the entry back (§14). [input, Q-014, Q-099, Q-111, Q-112, Q-114, Q-123]
+- `token.batch` MUST apply its commands in order in one transaction, refusing the whole batch, with nothing changed, when any of them is refused; it MUST NOT nest. Its effects MUST be projected to each room exactly as the same commands sent one by one would be, so that nothing a player receives names the batch or counts its commands (§4). [Q-123]
 - Clearing the live scene MUST be possible at any time with `scene.deactivate`. [Q-025]
 - Conflicting commands MUST resolve last-write-wins. [input]
 - Several DM sockets MAY be connected at once, each receiving every `dm` event. [Q-008, recommendation accepted]
 
 ## 3. Events
 
-Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-027, Q-038, Q-047, Q-083, D-049, Q-104]
+Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-027, Q-038, Q-047, Q-083, D-049, Q-111, Q-112, Q-114]
 
 | Event | `dm` room | `players` room |
 | --- | --- | --- |
 | `scene.snapshot` | full scene, all tokens | visible tokens only, player fields only |
 | `token.added` | on add | on add of a visible token, on reveal, and when a token leaves the fog or the fog over it lifts |
-| `token.updated` | on move, visibility or markers change | on move or markers change of a visible token |
+| `token.updated` | on move, visibility, markers, hit points or armour class change | on move or markers change of a visible token, markers set by its hit points included (§15) |
 | `token.removed` | on delete | on delete of a visible token, on hide, and when the fog covers a token |
 | `scene.cleared` | on deactivate | on deactivate |
 | `camera.player` | on change | on change |
@@ -55,6 +59,7 @@ Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-02
 | `history.changed` | when whether undo or redo would change anything changes | never |
 | `fog.updated` | when the fog changes: the whole mask | when the fog changes: the whole mask |
 | `encounter.updated` | when the encounter changes: the whole encounter | when what players see of it changes: its projection (§14) |
+| `notes.updated` | when the live scene's or one of its tokens' notes change (§16) | never |
 
 ## 4. Role-filtered projection
 
@@ -63,9 +68,10 @@ Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-02
 - Filtering MUST happen on the server before emitting, never in the player client. [input]
 - Revealing a token MUST reach players as `token.added`, and hiding it as `token.removed`. [input]
 - A player client MUST NOT receive anything from which the existence of a hidden token can be learnt: no hidden token, no hidden token's ID, asset or image, no count. [input]
-- A player-room token MUST carry only what rendering needs: ID, position, size, image reference, stacking order, label, its asset's category, which colours its ring, and its condition markers; asset notes and defaults are never sent, and a hidden token's markers never reach players. [Q-047, Q-032, Q-100, Q-099]
+- A player-room token MUST carry only what rendering needs: ID, position, size, image reference, stacking order, label, its asset's category, which colours its ring, and its condition markers; asset notes and defaults are never sent, nor a token's hit points, armour class or notes, nor the scene's notes, and a hidden token's markers never reach players. [Q-047, Q-032, Q-100, Q-099, Q-112, Q-114]
 - The players' snapshot MUST carry the live scene's name, shown on the TV (`08` §11), and its painted fog, the mask alone; the undo state MUST NOT reach players, nor the count of connected player views, which the DM view reads over REST (`02` §5). [input, Q-100]
-- The players' encounter MUST carry only the round, the entries of player characters players can see and the one Enemies entry, in order, and which of them has the turn and which is next; never an initiative number, an Enemies entry's members, their count, or anything else of a monster or npc token (§14). [Q-104]
+- The players' encounter MUST carry only the round and, in order, the entries whose token players can see, each naming that token, which they already render with its label, and which of them has the turn and which is next; never an initiative number, nor an entry whose token they cannot see, nor anything from which such an entry can be counted; while the turn is an entry they cannot see, neither the turn nor the next is named (§14). [Q-111]
+- Hit points, armour class and notes MUST be filtered on the server like hidden tokens: a change of them alone sends the players room nothing and moves its version counter by nothing, and a change of hit points reaches players only as the markers it sets or removes on a token they can see (§15, §16). [Q-112, Q-114]
 - The grid overlay MUST NOT be drawn on the player view when the scene's grid is set hidden for players (`06` §2). [input]
 
 ## 5. Snapshot and versioning
@@ -87,7 +93,7 @@ Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-02
 
 ## 8. Undo
 
-- The server MUST keep the inverse of every undoable DM command on the live scene: move, add, delete, visibility, markers, the fog commands, each stroke one step, and the encounter commands (§14). [input, Q-099, Q-101, Q-104]
+- The server MUST keep the inverse of every undoable DM command on the live scene: move, add, delete, visibility, markers, hit points and armour class with the markers they set (§15), the fog commands, each stroke one step, and the encounter commands (§14); a `token.batch` is one step, undone and redone whole. [input, Q-099, Q-101, Q-111, Q-112, Q-123]
 - Ctrl+Z in the DM view MUST cause the most recent inverse command to be applied as an ordinary command, so synchronisation does not change. [input]
 - Ctrl+Z sends `undo`; the server applies the inverse from its history through the ordinary command path. [D-040]
 - The undo history MUST be held in memory only, cleared when another scene is activated or the server restarts, and bounded to the last 100 commands. [Q-005]
@@ -100,6 +106,9 @@ Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-02
 - The player view MUST start fitted to the map. [input]
 - The DM MUST be able to set the player camera from the DM view, which shows a frame of what the TV sees, without changing the DM's own camera. [input]
 - The player camera MUST be held in server memory and reset to fit-to-map on every activation. [Q-038]
+- The DM view MUST offer Follow my view on the live scene, off at every activation: while it is on, the player camera continuously mirrors the DM's camera, sent as `camera.setPlayer` and throttled, the DM's whole visible area widened to the TV's aspect ratio so that nothing the DM sees is cropped. [Q-113]
+- Follow my view MUST turn off when Lock TV camera is turned on, when any other TV camera control is used (Send my view, Fit map, TV zoom, the TV frame), and when another scene goes live or the TV goes idle. [Q-113]
+- While Follow my view is on and the DM view shows a scene that is not live, it MUST pause: nothing is sent and the TV stays where it was; on returning to the live scene it MUST resume, sending the DM's view at once. [Q-120]
 
 ## 10. Editing the live scene's setup
 
@@ -126,13 +135,28 @@ Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-02
 
 ## 14. Initiative
 
-- A scene MUST hold at most one encounter (`03` §1); the encounter commands MUST name the live scene and are refused when it is not live, as the ping is (§12). [Q-104, Q-105]
-- The DM records the order; the table rolls physical dice, and the server MUST NOT roll, compute or suggest an initiative number. [Q-104]
-- `encounter.start` MUST build the entries from the scene's player character tokens players can see, in the order of the DM's token list, then one Enemies entry; the round is 1 and the turn the first entry that can take it. Starting an encounter already active MUST be refused. [Q-104]
-- The Enemies entry MUST be exactly one per encounter and cannot be removed; its members are the scene's monster and npc tokens that players can see (§4) and that do not carry Dead (`03` §1), computed whenever needed and never stored. Object tokens are never part of the encounter. [Q-104]
-- Setting an initiative number, or clearing it, MUST sort the entries with the highest number first and the entries without one below them, keeping their order among themselves; ties keep their order. `encounter.reorder` MUST set the order exactly as given, and that order stands until a number is set again. [Q-104]
-- `encounter.next` MUST pass the turn to the next entry that can take it, and past the last entry back to the first, counting one more round; `encounter.previous` MUST do the reverse, and does nothing on round 1's first turn. [Q-104]
-- A player character's entry MUST take its turn whatever markers its token carries, Unconscious and Dead included, but MUST be passed over while players cannot see its token. The Enemies entry MUST take its turn while it has members; with none, it MUST still take its turn once the encounter has had a member, so that the DM is asked whether to end combat, and MUST be passed over while it has never had one. [Q-104, Q-106]
-- `encounter.addEntry` MUST add a player character token players can see and that has no entry yet, at the end; `encounter.removeEntry` removes a player character's entry. [Q-104]
-- `encounter.end` MUST clear the encounter: no entries, round 1, not active. [Q-104]
-- The encounter MUST be carried in both rooms' snapshots, so a view that connects or reconnects shows it, and players' projection (§4) MUST be sent to them only when it changes, whatever command changed it. [Q-104]
+- A scene MUST hold at most one encounter (`03` §1); the encounter commands MUST name the live scene and are refused when it is not live, as the ping is (§12). [Q-111]
+- The DM records the order; the table rolls physical dice, and the server MUST NOT roll, compute or suggest an initiative number. [Q-111]
+- `encounter.start` MUST build one entry per player character, monster and npc token of the scene that players can see, monster and npc tokens carrying Dead left out, in the order of the DM's token list; the round is 1 and the turn the first entry that can take it. Starting an encounter already active MUST be refused. [Q-111]
+- Every entry MUST name one token of the scene: a player character's (`kind: pc`), or a monster's or npc's (`kind: monster`), at most one entry per token; object tokens are never part of the encounter. [Q-111]
+- Setting an initiative number, or clearing it, MUST sort the entries with the highest number first and the entries without one below them, keeping their order among themselves; ties keep their order. `encounter.reorder` MUST set the order exactly as given, and that order stands until a number is set again. [Q-111]
+- `encounter.next` MUST pass the turn to the next entry that can take it, and past the last entry back to the first, counting one more round; `encounter.previous` MUST do the reverse, and does nothing on round 1's first turn. [Q-111]
+- A player character's entry MUST take its turn whatever markers its token carries, Unconscious and Dead included, but MUST be passed over while players cannot see its token. A monster's or npc's entry MUST stay in the order but be passed over while its token carries Dead or players cannot see it. [Q-111, Q-118]
+- `encounter.addEntry` MUST add a token players can see that has no entry yet: a player character, or a monster or npc not carrying Dead; at the end, or, given the number the table rolled for it, before the first entry with a lower number or none, the rest of the order left as it stands. `encounter.removeEntry` removes any entry. [Q-111, Q-117, D-183]
+- `encounter.end` MUST clear the encounter: no entries, round 1, not active. [Q-111]
+- The encounter MUST be carried in both rooms' snapshots, so a view that connects or reconnects shows it, and players' projection (§4) MUST be sent to them only when it changes, whatever command changed it. [Q-111]
+- An encounter stored with the one Enemies entry of before MUST have that entry expanded in place, at upgrade, into one monster entry per member it had: the scene's monster and npc tokens players could see, without Dead. [Q-111]
+- The expanded entries take the Enemies entry's initiative number and the order of the DM's token list; the turn, if the Enemies entry had it, passes to the first of them; an Enemies entry with no member is removed, its turn passing as on removal. [D-181]
+
+## 15. Hit points
+
+- `token.setStats` MUST set or clear any of a token's `hp_current`, `hp_max`, `hp_temp` and `ac` (`03` §9); `token.applyHp` MUST apply a signed amount, negative for damage and positive for healing, damage taking the temporary hit points first. [Q-112, D-182]
+- Damage MUST stop `hp_current` at 0, and healing MUST stop it at `hp_max` when one is set; healing never adds temporary hit points. [D-181]
+- While a token has `hp_max`, every change of its hit points, live, in preparation, undone or redone, MUST set Bloodied when `hp_current` is at most `hp_max` / 2 rounded down and remove it above that; at 0 a monster or npc token MUST gain Dead and a player character token Unconscious. Without `hp_max`, nothing is set. [Q-112]
+- Hit points rising above 0 MUST NOT remove Dead or Unconscious; the DM removes them. [Q-116]
+- The markers the hit points set or remove belong to the same undoable step as the change, an object token gains neither Dead nor Unconscious, and a Dead set this way takes a monster's entry out of the turns as any Dead does (§14). [D-181]
+
+## 16. DM notes
+
+- A scene's and a token's notes MUST be seen and edited only by the DM, and never reach the players room (§4). [Q-114]
+- Notes are edited over REST on any scene, live included, and are not undoable; on the live scene the change reaches the `dm` room as `notes.updated`. [D-181]

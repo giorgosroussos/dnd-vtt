@@ -4,19 +4,19 @@ The stored entities, how they relate, and what deleting them does.
 
 ## 1. Entities
 
-The MVP MUST store exactly these nine entities in SQLite: [input, Q-006, Q-037, Q-042, Q-051, Q-091, Q-099, Q-105]
+The MVP MUST store exactly these nine entities in SQLite: [input, Q-006, Q-037, Q-042, Q-051, Q-091, Q-099, Q-111, Q-112, Q-114, Q-119]
 
 | Entity | Key fields | Notes |
 | --- | --- | --- |
 | Image | `id` = sha256, `mime`, `width`, `height`, `variants`, `grid_preset` | duplicates recognised by hash (`05` §7) |
-| Asset | `name`, `category`, `image_id`, `size`, `default_hidden`, `notes` | shared library for all campaigns (`05` §1) |
+| Asset | `name`, `category`, `image_id`, `size`, `default_hidden`, `notes`, `hp_max`, `ac` | shared library for all campaigns (`05` §1); `hp_max` and `ac`: optional defaults copied to its new tokens (§9) |
 | AssetTag | `asset_id`, `tag` | free tags for filtering and search |
 | Campaign | `name`, `description`, `rules_version` | `rules_version = 5e-2014` |
 | Session | `campaign_id`, `title`, `order`, `date` | |
-| Scene | `session_id`, `name`, `order`, `map_image_id`, `grid`, `token_numbers`, `fog` | grid: `type`, `size`, `offset_x`, `offset_y`, `visible`, `feet_per_square`, `columns`, `rows` (`06` §2); token numbers: the highest number issued per asset on the scene, never sent to a client (`05` §3); fog: the fog the DM painted (`01` §9), cells of a quarter square in grid units, players seeing neither them nor the tokens whose centre they cover (`04` §4, §13), sent only in a live snapshot and its events and, to the DM, over its own route |
-| Token | `scene_id`, `asset_id`, `label`, `x`, `y`, `hidden`, `z_order`, `markers`, `shown`, `character_id` | `character_id` empty in the MVP; `shown`: whether players have seen the token, set when it is first shown and never cleared, never sent to a client (`05` §3); `markers`: the condition markers it carries, each condition at most once, in the order applied, Exhaustion with its level from 1 to 6 (`01` §9, Q-103) |
-| Encounter | `scene_id`, `active`, `round`, `current_index`, `enemies_seen`, `entries` | at most one per scene (`04` §14); `entries` in turn order, each a player character's (`token_id`) or the one Enemies entry, with its initiative number or none; the Enemies entry's members are never stored; `enemies_seen`: whether the encounter has had a member, never sent to players (Q-104, Q-106) |
-| Settings | `live_scene_id`, ruler rule, upload limit, display variant size, TV address, PIN hash | one game per server; the TV address is an IPv4 address the DM chose for the connect panel, or none for Automatic (`08` §5, Q-110) |
+| Scene | `session_id`, `name`, `order`, `map_image_id`, `grid`, `token_numbers`, `fog`, `notes` | grid: `type`, `size`, `offset_x`, `offset_y`, `visible`, `feet_per_square`, `columns`, `rows` (`06` §2); token numbers: the highest number issued per asset on the scene, never sent to a client (`05` §3); fog: the fog the DM painted (`01` §9), cells of a quarter square in grid units, players seeing neither them nor the tokens whose centre they cover (`04` §4, §13), sent only in a live snapshot and its events and, to the DM, over its own route; notes: the DM's (§10) |
+| Token | `scene_id`, `asset_id`, `label`, `x`, `y`, `hidden`, `z_order`, `markers`, `shown`, `character_id`, `hp_current`, `hp_max`, `hp_temp`, `ac`, `notes` | `character_id` empty in the MVP; `shown`: whether players have seen the token, set when it is first shown and never cleared, never sent to a client (`05` §3); `markers`: the condition markers it carries, each condition at most once, in the order applied, Exhaustion with its level from 1 to 6 (`01` §9, Q-103); hit points and armour class optional (§9), notes the DM's (§10) |
+| Encounter | `scene_id`, `active`, `round`, `current_index`, `enemies_seen`, `entries` | at most one per scene (`04` §14); `entries` in turn order, each a player character's (`kind: pc`) or a monster's or npc's (`kind: monster`), naming its token (`token_id`), with its initiative number or none; `enemies_seen`: whether the encounter has had a monster or npc entry that could take its turn, never sent to players (Q-111, Q-118) |
+| Settings | `live_scene_id`, ruler rule, upload limit, display variant size, TV address, import limit, PIN hash | one game per server; the TV address is an IPv4 address the DM chose for the connect panel, or none for Automatic (`08` §5, Q-110); the import limit bounds an archive and its unpacked entries (`09` §9, Q-119) |
 
 ## 2. Relationships
 
@@ -35,7 +35,7 @@ erDiagram
 - A token MUST reference exactly one scene and one asset; an asset is the template, a token its instance on a scene. [input]
 - A scene MAY have no map image; `map_image_id` is nullable. [Q-006]
 - A scene MUST hold one painted fog, none on a new scene; the fog regions of TBL-03 are no longer an entity. [D-154]
-- An encounter MUST reference exactly one scene, and each of its player character entries a token of that scene. [Q-105]
+- An encounter MUST reference exactly one scene, and each of its entries a token of that scene. [Q-111]
 - Sessions within a campaign and scenes within a session MUST keep an `order`. [input]
 
 ## 3. Identifiers
@@ -63,18 +63,30 @@ erDiagram
 ## 7. Deletion and duplication
 
 - Deleting a session MUST delete its scenes and their tokens. [input]
-- Deleting a scene MUST delete its tokens, its fog and its encounter. [input, D-139, D-154, Q-105]
-- Deleting a token MUST remove its initiative entry. [Q-105]
+- Deleting a scene MUST delete its tokens, its fog and its encounter. [input, D-139, D-154, Q-111]
+- Deleting a token MUST remove its initiative entry. [Q-111]
 - Deleting a campaign MUST delete its sessions, scenes and tokens, after a confirmation that states what will be removed. [Q-003]
 - Deleting an asset used by any token MUST be refused, with the list of scenes that use it. [input]
 - Every deletion is permanent once confirmed; there is no trash and no restore outside the live-scene undo (`04` §8). [Q-004]
 - When no asset and no scene references an image any more, its files and its grid preset MUST be removed. [Q-002]
 - Deleting the live scene, or a session or campaign that contains it, MUST be allowed after a confirmation that warns it is live, and MUST clear the live scene so the player view shows the idle screen (`08` §4). [Q-031, recommendation accepted]
 - Changing an asset's image MUST change the image of every token of that asset. [input]
-- Duplicating a scene MUST create a new scene with its own copies of all its tokens and its fog, and no encounter. [input, D-139, D-154, Q-105]
+- Duplicating a scene MUST create a new scene with its own copies of all its tokens, their hit points, armour class and notes included, its fog and its notes, and no encounter. [input, D-139, D-154, Q-111, Q-112, Q-114]
 
 ## 8. Prepared for later phases
 
 - `Token.character_id` MUST exist and MUST stay empty in the MVP; Phase 2 links tokens to characters through it. [input]
 - `grid.type` MUST exist and MUST accept only `square` in the MVP. [input]
 - `Campaign.rules_version` MUST be `5e-2014` for every campaign in the MVP. [input]
+
+## 9. Hit points and armour class
+
+- Every token, whatever its category, MUST carry `hp_current`, `hp_max`, `hp_temp` and `ac`, each a whole number or none, none by default; the DM MAY fill any of them, player characters' included. [Q-112]
+- An asset MAY carry a default `hp_max` and `ac`, copied to every new token placed from it. [Q-112]
+- A token placed from such an asset starts with its `hp_current` equal to that `hp_max` and no temporary hit points; a later change of the asset's defaults changes no existing token. [D-181]
+- A token's hit points and armour class and an asset's defaults MUST be seen only by the DM (`04` §4); the automation they drive is `04` §15. [Q-112]
+
+## 10. DM notes
+
+- Every scene and every token MUST carry a `notes` text, empty by default, seen only by the DM (`04` §4, `04` §16). [Q-114]
+- Wherever the DM reads or edits a token's notes, its asset's `notes` MUST be shown beside them, read-only. [Q-114]

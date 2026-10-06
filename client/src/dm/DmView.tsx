@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { API_PATHS, type AuthState, type SetupState } from '@emberglass/shared';
 import { Button } from '../ui/Button.js';
-import { Icon } from '../ui/icons.js';
+import { Logo } from '../ui/Logo.js';
 import { Notice } from '../ui/Notice.js';
 import { SkipLink } from '../ui/SkipLink.js';
 import { errorMessage } from '../ui/errorMessage.js';
@@ -87,7 +87,7 @@ export function DmView() {
       {screen.kind === 'workspace' ? null : (
         <header className="eg-dm__banner">
           <span className="eg-dm__logo" aria-hidden="true">
-            <Icon name="logo" size={22} />
+            <Logo size={22} />
           </span>
           <span className="eg-dm__product">{t('app.name')}</span>
           <span className="eg-dm__role">{t('dm.role')}</span>

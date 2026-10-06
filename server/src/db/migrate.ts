@@ -1,8 +1,10 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { databasePath, openDatabase } from './database.js';
+import { MIGRATION_STEPS } from './migration-steps.js';
 
-// Numbered SQL migrations applied in order (specs/09-operations.md §2, D-009).
+// Numbered SQL migrations applied in order (specs/09-operations.md §2, D-009), each with the step in code
+// that `migration-steps.ts` gives its file, if any.
 // The applied version is SQLite's `PRAGMA user_version`, so the runner adds no
 // table of its own to the schema of specs/03-domain-model.md §1.
 
@@ -101,6 +103,8 @@ export function migrateDataDirectory(
       db.transaction(() => {
         if (version() >= migration.version) return;
         db.exec(migration.sql);
+        // A step in code, when the migration has one, in the same transaction (DMT-02, D-180).
+        MIGRATION_STEPS[migration.name]?.(db);
         const dangling = db.pragma('foreign_key_check') as { table: string }[];
         if (dangling.length > 0) {
           const tables = [...new Set(dangling.map((row) => row.table))].join(', ');

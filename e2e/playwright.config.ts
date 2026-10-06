@@ -84,7 +84,20 @@ export default defineConfig({
   // On CI a failure also becomes an annotation on the run, which can be read without the log.
   reporter: process.env.CI ? [['list'], ['github']] : [['list']],
   // A failed test keeps its trace and a screenshot in test-results/, which CI uploads.
-  use: { baseURL: `http://127.0.0.1:${port}`, proxy, trace: 'retain-on-failure', screenshot: 'only-on-failure' },
+  // Every context starts with the scene sidebar docked (UXR-01, D-190): the tests written before it reach the
+  // scene list in its column, as a DM who pinned it does; redesign.spec.ts covers the collapsed default.
+  use: {
+    baseURL: `http://127.0.0.1:${port}`,
+    proxy,
+    trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
+    storageState: {
+      cookies: [],
+      origins: [
+        { origin: `http://127.0.0.1:${port}`, localStorage: [{ name: 'emberglass.sidebar', value: 'pinned' }] },
+      ],
+    },
+  },
   // The First run journey needs the fresh data directory, before any other test
   // sets the PIN; the rest depend on it (D-086). The offline check runs after all.
   projects: [

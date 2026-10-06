@@ -37,6 +37,19 @@ export const ERROR_CODES = [
   'scene_live',
   // LIV-02 (specs/04-live-sync.md §2): a live command for a scene or token that is not live.
   'scene_not_live',
+  // DMT-05 (specs/07-security-and-access.md §9, specs/09-operations.md §9): an import refused, storing nothing.
+  // Another import is running; only one runs at a time.
+  'import_busy',
+  // The archive, or its entries once unpacked, are over the import limit.
+  'import_too_large',
+  // Its manifest names a format newer than this server reads; `format_version` says which.
+  'import_newer_format',
+  // An entry that could land outside its folder, a link, an encrypted, duplicated or unexpected entry, or too many.
+  'import_unsafe_entry',
+  // Not a zip this server reads, or its manifest or data malformed, against their schemas or referring to nothing.
+  'import_invalid',
+  // An image failing the checks of an upload, or whose bytes are not the sha256 it is named by.
+  'import_image_refused',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -59,6 +72,8 @@ export const ErrorEnvelopeSchema = Type.Object(
         details: Type.Optional(Type.Array(ErrorDetailSchema)),
         // Only with `asset_in_use`: every scene whose tokens use the asset (D-083).
         usages: Type.Optional(Type.Array(AssetUsageSchema)),
+        // Only with `import_newer_format`: the format the archive's manifest names (DMT-05).
+        format_version: Type.Optional(Type.Integer({ minimum: 1 })),
       },
       { additionalProperties: false },
     ),
@@ -74,6 +89,7 @@ export function errorEnvelope(
   message: string,
   details?: ErrorDetail[],
   usages?: AssetUsage[],
+  formatVersion?: number,
 ): ErrorEnvelope {
   return {
     error: {
@@ -81,6 +97,7 @@ export function errorEnvelope(
       message,
       ...(details && details.length > 0 ? { details } : {}),
       ...(usages ? { usages } : {}),
+      ...(formatVersion !== undefined ? { format_version: formatVersion } : {}),
     },
   };
 }

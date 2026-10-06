@@ -654,6 +654,14 @@ describe('player commands (specs/10-testing-acceptance.md §3, specs/07-security
       'token.add': { scene_id: w.sceneA.id, asset_id: w.goblin.id, x: 1, y: 1 },
       'token.move': { token_id: w.goblins[0]!.id, x: 9, y: 9 },
       'token.setMarkers': { token_id: w.goblins[0]!.id, markers: ['bloodied'] },
+      'token.setStats': { token_id: w.goblins[0]!.id, hp_current: 3, hp_max: 7, ac: 12 },
+      'token.applyHp': { token_id: w.goblins[0]!.id, delta: -2 },
+      'token.batch': {
+        commands: [
+          { type: 'token.move', payload: { token_id: w.goblins[0]!.id, x: 9, y: 9 } },
+          { type: 'token.setVisibility', payload: { token_id: w.hidden.id, hidden: false } },
+        ],
+      },
       'fog.paint': { scene_id: w.sceneA.id, stroke: { mode: 'paint', radius: 2, points: [{ x: 1, y: 1 }] } },
       'fog.fill': { scene_id: w.sceneA.id, fogged: true },
       'token.delete': { token_id: w.goblins[0]!.id },

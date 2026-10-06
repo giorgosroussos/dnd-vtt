@@ -25,8 +25,11 @@ import { listTokens } from './tokens.js';
 const CAMPAIGN_COLUMNS = 'id, name, description, rules_version';
 const SESSION_COLUMNS = 'id, campaign_id, title, "order", date';
 const SCENE_COLUMNS = `id, session_id, name, "order", map_image_id, grid_type, grid_size, grid_offset_x,
-  grid_offset_y, grid_visible, grid_feet_per_square, grid_columns, grid_rows`;
-const TOKEN_COLUMNS = 'id, scene_id, asset_id, label, x, y, hidden, z_order, markers, character_id';
+  grid_offset_y, grid_visible, grid_feet_per_square, grid_columns, grid_rows, notes`;
+// What a duplicated scene's tokens copy: all of their own state but whether players have seen them, which the copy,
+// never live yet, starts without (Q-096); hit points, armour class and notes included (specs/03-domain-model.md §7).
+const TOKEN_COLUMNS = `id, scene_id, asset_id, label, x, y, hidden, z_order, markers, character_id, hp_current, hp_max,
+  hp_temp, ac, notes`;
 
 interface SceneRow {
   id: string;
@@ -42,6 +45,7 @@ interface SceneRow {
   grid_feet_per_square: number;
   grid_columns: number;
   grid_rows: number;
+  notes: string;
 }
 
 interface TokenRow {
@@ -55,6 +59,11 @@ interface TokenRow {
   z_order: number;
   markers: string;
   character_id: null;
+  hp_current: number | null;
+  hp_max: number | null;
+  hp_temp: number | null;
+  ac: number | null;
+  notes: string;
 }
 
 const toScene = (row: SceneRow): Scene => ({
@@ -73,6 +82,7 @@ const toScene = (row: SceneRow): Scene => ({
     columns: row.grid_columns,
     rows: row.grid_rows,
   },
+  notes: row.notes,
 });
 
 // The children of a parent that carry an order.
@@ -423,6 +433,15 @@ function transactUpdate(
   })();
 }
 
+/**
+ * Sets the scene's notes, the whole text, whether or not it is live (DMT-04, specs/04-live-sync.md §16): notes are
+ * no setup and no live command. Undefined when the scene does not exist.
+ */
+export function updateSceneNotes(db: Database.Database, id: string, notes: string): Scene | undefined {
+  db.prepare('UPDATE scene SET notes = ? WHERE id = ?').run(notes, id);
+  return readScene(db, id);
+}
+
 /** False, changing nothing, unless `ids` names every scene of the session exactly once. */
 export function reorderScenes(db: Database.Database, sessionId: string, ids: readonly string[]): boolean {
   return db.transaction(() => {
@@ -434,7 +453,8 @@ export function reorderScenes(db: Database.Database, sessionId: string, ids: rea
 
 /**
  * A copy of the scene, right after it in its session, with its own copy of
- * every token under new identifiers (specs/03-domain-model.md §7). The grid is
+ * every token under new identifiers, their hit points, armour class and notes included, and of its fog and its
+ * notes (specs/03-domain-model.md §7). The grid is
  * the scene's own, not its image's preset, and so are the token numbers issued (Q-091).
  */
 export function duplicateScene(db: Database.Database, id: string, name: string): Scene | undefined {
@@ -462,7 +482,9 @@ export function duplicateScene(db: Database.Database, id: string, name: string):
     const tokens = db
       .prepare(`SELECT ${TOKEN_COLUMNS} FROM token WHERE scene_id = ? ORDER BY z_order, id`)
       .all(id) as TokenRow[];
-    const insert = db.prepare(`INSERT INTO token (${TOKEN_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const insert = db.prepare(
+      `INSERT INTO token (${TOKEN_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
     for (const token of tokens) {
       insert.run(
         randomUUID(),
@@ -475,10 +497,18 @@ export function duplicateScene(db: Database.Database, id: string, name: string):
         token.z_order,
         token.markers,
         token.character_id,
+        token.hp_current,
+        token.hp_max,
+        token.hp_temp,
+        token.ac,
+        token.notes,
       );
     }
-    // And its own copy of its painted fog (TBL-04).
-    db.prepare('UPDATE scene SET fog = (SELECT fog FROM scene WHERE id = ?) WHERE id = ?').run(id, copyId);
+    // And its own copy of its painted fog (TBL-04) and of its notes (DMT-04).
+    db.prepare('UPDATE scene SET (fog, notes) = (SELECT fog, notes FROM scene WHERE id = ?) WHERE id = ?').run(
+      id,
+      copyId,
+    );
     return true;
   })();
   return done ? readScene(db, copyId) : undefined;

@@ -2,7 +2,7 @@
 
 This matrix maps the commercial and product intent in `docs/inputs/` to the specified implementation and prevents both omissions and scope expansion. It is owner-maintained. Implementation status per work package lives in the root `TRACEABILITY.md`.
 
-Each row's status restates the tagged statement it cites in `01`. [input, Q-013, Q-099]
+Each row's status restates the tagged statement it cites in `01`. [input, Q-099, Q-115, Q-125]
 
 | Original intent / requirement | Implemented feature/spec | Status |
 | --- | --- | --- |
@@ -33,14 +33,16 @@ Each row's status restates the tagged statement it cites in `01`. [input, Q-013,
 | Smaller image versions on upload; display size to be tested on the owner's TV | `05` §7, `10` §4 | MVP |
 | Deletion cascades; asset in use restricted | `03` §7 | MVP |
 | Add flow: button → picker → click on map | `05` §5 | MVP |
-| Drag from sidebar | `01` §6 | Future |
-| Export/import campaign as zip | `01` §4 | Future (Phase 2) |
+| Drag from sidebar | `01` §6, `01` §11 | UI/UX refinements (Q-124) |
+| Export/import campaign as zip, and library assets | `01` §10, `09` §9 | DM toolkit (Q-115) |
 | Characters with join link/QR; per-player permissions | `01` §4 | Future (Phase 2) |
 | Mobile UI | `01` §4 | Future (Phase 2) |
-| HP, DM-defined markers and condition durations; dice; per-monster initiative; automatic fog of war | `01` §4 | Future (Phase 2) |
-| Ping, eighteen condition markers with their rule text, manual fog painted by the DM, the initiative tracker | `01` §9 | Before the release (Q-099, Q-101, Q-103, Q-104) |
+| The read-only player view on phones and tablets, with fullscreen and its own pinch zoom; a collapsible scene sidebar; several tokens selected and acted on together; a compact campaigns menu | `01` §11 | UI/UX refinements (Q-121, Q-122, Q-123, Q-125) |
+| DM-defined markers and condition durations; dice; automatic fog of war | `01` §4 | Future (Phase 2) |
+| Hit points and armour class on tokens, with Bloodied, Dead and Unconscious from them; an initiative entry per visible enemy; Follow my view; DM notes per scene and per token | `01` §10 | DM toolkit (Q-111, Q-112, Q-113, Q-114) |
+| Ping, eighteen condition markers with their rule text, manual fog painted by the DM, the initiative tracker | `01` §9 | Before the release (Q-099, Q-101, Q-103, Q-111) |
 | The 2026-09-30 redesign of both views | `01` §9, `08` §11 | Before the release (Q-100) |
-| DM notes per scene; handouts | `01` §4 | Future (Phase 2) |
+| Handouts | `01` §4 | Future (Phase 2) |
 | Character sheet with derived values; data-driven rules, SRD 5.1 import | `01` §4 | Future (Phase 2) |
 | Guided level-up; personal screen per player | `01` §5 | Future (Phase 3) |
 | Tauri or Electron packaging | `01` §5, `02` §8 | Future (Phase 3) |

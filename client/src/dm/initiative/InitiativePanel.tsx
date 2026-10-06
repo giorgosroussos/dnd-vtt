@@ -2,9 +2,10 @@ import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 
 import {
   imageFileUrl,
   INITIATIVE_BOUNDS,
-  membersOf,
   missingTokens,
   nextIndex,
+  noEnemiesLeft,
+  takesTurn,
   turnView,
   type CommandType,
   type Encounter,
@@ -19,14 +20,18 @@ import { Dialog } from '../../ui/Dialog.js';
 import { Icon } from '../../ui/icons.js';
 import { t } from '../../ui/messages.js';
 import { useFocusLater } from '../../ui/useFocusLater.js';
+import { TokenStatsBadge } from '../tokens/TokenStats.js';
+import { tokenHasNotes, tokenNotesPreview } from '../notes/Notes.js';
 
-// The Initiative tab of the DM view (TBL-06, specs/08-ux-journeys.md §12, specs/04-live-sync.md §14, Q-104,
-// Q-106, D-160). The table rolls physical dice; this records the order. Start combat builds it from the
-// player characters players see and one Enemies entry; each row has a drag handle, the token's avatar, its
-// name and a number field. Typing a number sorts the rows (the server does), a drag sets the order, and Move
-// up and Move down do what a drag does from the keyboard. The turn's row is highlighted and the next one
-// marked; on the Enemies turn its row opens to list its members, computed here from the tokens as the server
-// computes them. Every change is a live command; the panel holds no order of its own.
+// The Initiative tab of the DM view (TBL-06, DMT-02, specs/08-ux-journeys.md §12, specs/04-live-sync.md §14,
+// Q-111, Q-117, Q-118, D-180). The table rolls physical dice; this records the order. Start combat builds it
+// from the player characters, monsters and npcs players see; each row has a drag handle, the token's avatar,
+// its name and a number field. Typing a number sorts the rows (the server does), a drag sets the order, and
+// Move up and Move down do what a drag does from the keyboard. The turn's row is highlighted and the next one
+// marked; a row passed over is dimmed, a Dead monster's greyed. The turn's row, when its token has notes, has a
+// button that opens them (DMT-04). Tokens players can now see without an entry
+// are offered together, each with an optional number. Every change is a live command; the panel holds no
+// order of its own.
 
 export interface InitiativePanelProps {
   sceneId: string;
@@ -37,8 +42,8 @@ export interface InitiativePanelProps {
   fog: FogMask;
   /** Sends a live command; true when the server applied it. */
   onCommand: (type: CommandType, payload: object) => Promise<boolean>;
-  /** Selects and centres a token on the map. */
-  onShowToken: (token: SceneToken) => void;
+  /** Opens the token's notes (DMT-04): from the turn's row, when its token has any. */
+  onOpenNotes?: ((tokenId: string) => void) | undefined;
 }
 
 /** `ids` with `id` moved to where `target` is. */
@@ -64,13 +69,25 @@ export function InitiativePanel({
   tokens,
   fog,
   onCommand,
-  onShowToken,
+  onOpenNotes,
 }: InitiativePanelProps) {
   const [confirmingEnd, setConfirmingEnd] = useState(false);
-  // The offers to add a player character the DM said "Not now" to, in this browser only.
+  // The tokens the DM skipped adding, or removed, in this browser only: not offered again.
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(new Set());
   const [dragging, setDragging] = useState<string>();
   const [over, setOver] = useState<string>();
+  // "No enemies left. End combat?": asked when the turn passes while no monster or npc entry can act (Q-118),
+  // until the DM answers it or one can act again.
+  const [askEnd, setAskEnd] = useState(false);
+  const turnKey = encounter?.active ? `${encounter.id}:${encounter.round}:${encounter.current_index}` : undefined;
+  const [turnSeen, setTurnSeen] = useState(turnKey);
+  const view = turnView(tokens, fog);
+  const enemiesGone = noEnemiesLeft(encounter, view);
+  if (turnKey !== turnSeen) {
+    setTurnSeen(turnKey);
+    if (turnSeen !== undefined && turnKey !== undefined && enemiesGone) setAskEnd(true);
+  }
+  if (askEnd && !enemiesGone) setAskEnd(false);
   const focusLater = useFocusLater();
   const list = useRef<HTMLOListElement>(null);
   const send = (type: CommandType, payload: object = {}) => onCommand(type, { scene_id: sceneId, ...payload });
@@ -87,16 +104,13 @@ export function InitiativePanel({
     );
   }
 
-  const view = turnView(tokens, fog);
-  const members = membersOf(tokens, fog);
   const byId = new Map(tokens.map((token) => [token.id, token]));
   const next = nextIndex(encounter, view);
-  const current = encounter.entries[encounter.current_index];
-  const enemiesTurn = current?.kind === 'dm';
   const ids = encounter.entries.map((entry) => entry.id);
   const offers = missingTokens(encounter, tokens, fog).filter((token) => !dismissed.has(token.id));
-  const nameOf = (entry: EncounterEntry) =>
-    entry.kind === 'dm' ? t('initiative.enemies') : (byId.get(entry.token_id)?.label ?? t('initiative.gone'));
+  const dead = encounter.entries.filter((entry) => entry.kind === 'monster' && view.dead.has(entry.token_id));
+  const dismiss = (tokenIds: readonly string[]) => setDismissed(new Set([...dismissed, ...tokenIds]));
+  const nameOf = (entry: EncounterEntry) => byId.get(entry.token_id)?.label ?? t('initiative.gone');
   // After a move, focus stays on the row moved: on its Move button that still works at the row's new place.
   const focusRow = (id: string) =>
     focusLater(() =>
@@ -108,48 +122,65 @@ export function InitiativePanel({
       if (focus !== undefined) focusRow(focus);
     }
   };
+  const remove = (entries: readonly EncounterEntry[]) => {
+    // A token removed is not offered back at once.
+    dismiss(entries.map((entry) => entry.token_id));
+    void (async () => {
+      for (const entry of entries) if (!(await send('encounter.removeEntry', { entry_id: entry.id }))) return;
+    })();
+  };
 
   return (
     <section className="eg-initiative" aria-label={t('initiative.label')}>
       <div className="eg-initiative__head">
         <h2 className="eg-initiative__round">{t('initiative.round', { round: encounter.round })}</h2>
-        <Button size="small" onClick={() => setConfirmingEnd(true)}>
-          {t('initiative.end')}
-        </Button>
+        <span className="eg-initiative__head-actions">
+          {dead.length > 0 ? (
+            <Button size="small" onClick={() => remove(dead)}>
+              {t('initiative.removeDead')}
+            </Button>
+          ) : null}
+          <Button size="small" onClick={() => setConfirmingEnd(true)}>
+            {t('initiative.end')}
+          </Button>
+        </span>
       </div>
-      {enemiesTurn && members.length === 0 ? (
+      {askEnd ? (
         <div className="eg-initiative__prompt" role="status">
           <p>{t('initiative.noEnemies')}</p>
           <div className="eg-initiative__prompt-actions">
             <Button variant="primary" size="small" onClick={() => void send('encounter.end')}>
               {t('initiative.end')}
             </Button>
-            <Button size="small" onClick={() => void send('encounter.next')}>
+            <Button size="small" onClick={() => setAskEnd(false)}>
               {t('initiative.continue')}
             </Button>
           </div>
         </div>
       ) : null}
-      {offers.map((token) => (
-        <div key={token.id} className="eg-initiative__offer" role="status" data-offer={token.id}>
-          <p>{t('initiative.offer', { name: token.label })}</p>
-          <div className="eg-initiative__prompt-actions">
-            <Button size="small" onClick={() => void send('encounter.addEntry', { token_id: token.id })}>
-              {t('initiative.add')}
-            </Button>
-            <Button size="small" onClick={() => setDismissed(new Set([...dismissed, token.id]))}>
-              {t('initiative.notNow')}
-            </Button>
-          </div>
-        </div>
-      ))}
+      {offers.length > 0 ? (
+        <Offer
+          // A new set of tokens is a new offer, its fields empty.
+          key={offers.map((token) => token.id).join()}
+          tokens={offers}
+          onAdd={async (added) => {
+            for (const { token, initiative } of added) {
+              const payload = initiative === null ? { token_id: token.id } : { token_id: token.id, initiative };
+              if (!(await send('encounter.addEntry', payload))) return;
+            }
+          }}
+          onSkip={() => dismiss(offers.map((token) => token.id))}
+        />
+      ) : null}
       <ol ref={list} className="eg-initiative__list" aria-label={t('initiative.order')}>
         {encounter.entries.map((entry, index) => {
-          const token = entry.kind === 'pc' ? byId.get(entry.token_id) : undefined;
+          const token = byId.get(entry.token_id);
           const name = nameOf(entry);
           const isCurrent = index === encounter.current_index;
           const isNext = index === next;
-          const passed = entry.kind === 'pc' && !view.seen.has(entry.token_id);
+          const unseen = !view.seen.has(entry.token_id);
+          const isDead = entry.kind === 'monster' && view.dead.has(entry.token_id);
+          const passed = !takesTurn(entry, view);
           const drop =
             dragging !== undefined && dragging !== entry.id
               ? {
@@ -174,6 +205,8 @@ export function InitiativePanel({
             isCurrent ? 'eg-initiative__row--current' : '',
             over === entry.id ? 'eg-initiative__row--drop' : '',
             passed ? 'eg-initiative__row--passed' : '',
+            unseen ? 'eg-initiative__row--unseen' : '',
+            isDead ? 'eg-initiative__row--dead' : '',
           ]
             .filter(Boolean)
             .join(' ');
@@ -200,16 +233,7 @@ export function InitiativePanel({
                 <span className="eg-initiative__grip" aria-hidden="true">
                   <Icon name="grip" size={16} />
                 </span>
-                {entry.kind === 'dm' ? (
-                  <span className="eg-avatar eg-avatar--monster" aria-hidden="true">
-                    <Icon name="swords" size={16} />
-                  </span>
-                ) : (
-                  <span className="eg-avatar eg-avatar--pc" aria-hidden="true">
-                    {token ? <img src={imageFileUrl(token.asset.image_id, 'thumbnail')} alt="" /> : null}
-                    {token ? null : initialsOf(name)}
-                  </span>
-                )}
+                <Avatar token={token} name={name} kind={entry.kind} />
                 <span className="eg-initiative__text">
                   <span className="eg-initiative__name">{name}</span>
                   <span className="eg-initiative__status">
@@ -217,10 +241,23 @@ export function InitiativePanel({
                     {isNext ? (
                       <span className="eg-initiative__tag eg-initiative__tag--next">{t('initiative.next')}</span>
                     ) : null}
-                    {passed ? t('initiative.passed') : null}
+                    {unseen ? t('initiative.passed') : isDead ? t('initiative.passedDead') : null}
                     {token ? <Markers token={token} /> : null}
                   </span>
                 </span>
+                {token ? <TokenStatsBadge stats={token} /> : null}
+                {isCurrent && token && onOpenNotes && tokenHasNotes(token) ? (
+                  // The turn's token has notes: that is when "flees at half HP" matters (DMT-04).
+                  <button
+                    type="button"
+                    className="eg-note-button"
+                    aria-label={t('notes.openOf', { name })}
+                    title={tokenNotesPreview(token)}
+                    onClick={() => onOpenNotes(token.id)}
+                  >
+                    <Icon name="note" size={14} />
+                  </button>
+                ) : null}
                 <InitiativeField
                   name={name}
                   value={entry.initiative}
@@ -245,33 +282,16 @@ export function InitiativePanel({
                   >
                     <Icon name="chevron" size={14} />
                   </button>
-                  {entry.kind === 'pc' ? (
-                    <button
-                      type="button"
-                      className="eg-icon-button"
-                      aria-label={t('initiative.removeOf', { name })}
-                      onClick={() => void send('encounter.removeEntry', { entry_id: entry.id })}
-                    >
-                      <Icon name="minus" size={14} />
-                    </button>
-                  ) : null}
+                  <button
+                    type="button"
+                    className="eg-icon-button"
+                    aria-label={t('initiative.removeOf', { name })}
+                    onClick={() => remove([entry])}
+                  >
+                    <Icon name="minus" size={14} />
+                  </button>
                 </span>
               </div>
-              {entry.kind === 'dm' && isCurrent && members.length > 0 ? (
-                <ul className="eg-initiative__members" aria-label={t('initiative.membersOf')}>
-                  {members.map((member) => (
-                    <li key={member.id}>
-                      <button type="button" className="eg-initiative__member" onClick={() => onShowToken(member)}>
-                        <span className={`eg-avatar eg-avatar--${member.asset.category}`} aria-hidden="true">
-                          {initialsOf(member.label)}
-                        </span>
-                        <span className="eg-initiative__name">{member.label}</span>
-                        <Markers token={member} />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
             </li>
           );
         })}
@@ -296,6 +316,80 @@ export function InitiativePanel({
         />
       ) : null}
     </section>
+  );
+}
+
+/** A row's avatar: the token's picture in the ring of its side, its initials while there is none. */
+function Avatar({ token, name, kind }: { token: SceneToken | undefined; name: string; kind: EncounterEntry['kind'] }) {
+  return (
+    <span className={`eg-avatar eg-avatar--${token?.asset.category ?? kind}`} aria-hidden="true">
+      {token ? <img src={imageFileUrl(token.asset.image_id, 'thumbnail')} alt="" /> : initialsOf(name)}
+    </span>
+  );
+}
+
+/**
+ * The offer to add the tokens players can now see that have no entry (Q-117, DMT-02): one prompt for all of
+ * them, a fog region revealing four goblins included, each with an optional number; with a number an entry
+ * goes in by it, without one at the end. Add all adds them in the order listed; Skip adds none.
+ */
+function Offer({
+  tokens,
+  onAdd,
+  onSkip,
+}: {
+  tokens: readonly SceneToken[];
+  onAdd: (added: { token: SceneToken; initiative: number | null }[]) => Promise<void>;
+  onSkip: () => void;
+}) {
+  const [numbers, setNumbers] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const parsed = tokens.map((token) => ({ token, initiative: initiativeOf(numbers[token.id] ?? '') }));
+  const valid = parsed.every((each) => each.initiative !== undefined);
+  const add = () => {
+    if (!valid || busy) return;
+    setBusy(true);
+    void onAdd(parsed as { token: SceneToken; initiative: number | null }[]).finally(() => setBusy(false));
+  };
+  const single = tokens.length === 1 ? tokens[0]! : undefined;
+  return (
+    <div className="eg-initiative__offer" role="group" aria-label={t('initiative.offerLabel')} data-offer>
+      <p>
+        {single ? t('initiative.offer', { name: single.label }) : t('initiative.offerMany', { count: tokens.length })}
+      </p>
+      <ul className="eg-initiative__offer-list">
+        {parsed.map(({ token, initiative }) => (
+          <li key={token.id} className="eg-initiative__offer-row" data-offer-token={token.id}>
+            <Avatar token={token} name={token.label} kind={token.asset.category === 'pc' ? 'pc' : 'monster'} />
+            <span className="eg-initiative__name">{token.label}</span>
+            <input
+              className="eg-field__input eg-initiative__number"
+              type="text"
+              inputMode="numeric"
+              aria-label={t('initiative.numberOf', { name: token.label })}
+              aria-invalid={initiative === undefined || undefined}
+              placeholder={t('initiative.numberPlaceholder')}
+              value={numbers[token.id] ?? ''}
+              onChange={(event) => setNumbers({ ...numbers, [token.id]: event.target.value })}
+              onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  add();
+                }
+              }}
+            />
+          </li>
+        ))}
+      </ul>
+      <div className="eg-initiative__prompt-actions">
+        <Button size="small" variant="primary" disabled={!valid || busy} onClick={add}>
+          {t(single ? 'initiative.add' : 'initiative.addAll')}
+        </Button>
+        <Button size="small" onClick={onSkip}>
+          {t('initiative.skip')}
+        </Button>
+      </div>
+    </div>
   );
 }
 

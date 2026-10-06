@@ -8,7 +8,7 @@ import { AssetFilters, useAssetSearch } from '../library/useAssetSearch.js';
 // The token picker (PRP-04, specs/05-assets-and-images.md §5): the second step of adding a token,
 // after the add button and before the click on the map. It searches and filters the library as the
 // library panel does (useAssetSearch, D-022); choosing an asset closes it and the map then takes the
-// click that places the token.
+// click that places the token. Each row is one line: the thumbnail, the name and Choose (UXR-03).
 
 export function TokenPicker({ onPick, onClose }: { onPick: (asset: LibraryAsset) => void; onClose: () => void }) {
   const search = useAssetSearch(0);
@@ -26,7 +26,8 @@ export function TokenPicker({ onPick, onClose }: { onPick: (asset: LibraryAsset)
         ) : (
           <ul className="eg-picker__list" aria-label={t('tokens.picker.results')}>
             {results.map((asset) => (
-              <li key={asset.id} className="eg-library__item" data-asset={asset.id}>
+              // The whole row chooses, for the pointer; its Choose button is the keyboard's and the screen reader's.
+              <li key={asset.id} className="eg-picker__item" data-asset={asset.id} onClick={() => onPick(asset)}>
                 {/* Decorative: the name beside it says what it is. */}
                 <img className="eg-library__thumb" src={imageFileUrl(asset.image_id, 'thumbnail')} alt="" />
                 <div className="eg-library__text">
@@ -39,7 +40,10 @@ export function TokenPicker({ onPick, onClose }: { onPick: (asset: LibraryAsset)
                 <Button
                   size="small"
                   aria-label={t('tokens.picker.chooseOf', { name: asset.name })}
-                  onClick={() => onPick(asset)}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onPick(asset);
+                  }}
                 >
                   {t('tokens.picker.choose')}
                 </Button>

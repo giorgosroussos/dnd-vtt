@@ -44,6 +44,25 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return prototype === Object.prototype || prototype === null;
 }
 
+// The same, all the way down: a payload that nests objects (`token.batch`, UXR-02) holds only plain objects,
+// arrays and JSON's scalars, so no binary attachment hides inside it. Answers the path of the first that is not.
+function firstNotPlain(value: unknown, path: string): string | undefined {
+  if (Array.isArray(value)) {
+    for (const [index, each] of value.entries()) {
+      const found = firstNotPlain(each, `${path}/${index}`);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+  if (typeof value !== 'object' || value === null) return undefined;
+  if (!isPlainObject(value)) return path;
+  for (const [key, each] of Object.entries(value)) {
+    const found = firstNotPlain(each, `${path}/${key}`);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
 const notPlain = (path: string): CommandValidation => ({
   ok: false,
   error: errorEnvelope('validation_failed', 'The command envelope does not match its schema.', [
@@ -61,6 +80,8 @@ export function createCommandValidator(payloadSchemas: CommandPayloadSchemas): C
   return (raw) => {
     if (!isPlainObject(raw)) return notPlain('');
     if ('payload' in raw && !isPlainObject(raw.payload)) return notPlain('/payload');
+    const nested = 'payload' in raw ? firstNotPlain(raw.payload, '/payload') : undefined;
+    if (nested !== undefined) return notPlain(nested);
     if (!validateEnvelope(raw)) {
       return {
         ok: false,

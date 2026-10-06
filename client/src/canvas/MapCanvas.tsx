@@ -5,6 +5,7 @@ import {
   useImperativeHandle,
   useRef,
   useState,
+  type DragEvent as ReactDragEvent,
   type KeyboardEvent,
   type ReactNode,
   type Ref,
@@ -36,7 +37,9 @@ import { t } from '../ui/messages.js';
 import {
   boundFrame,
   cameraForKey,
+  cameraBetween,
   coverBox,
+  followRect,
   fitBox,
   fitCamera,
   frameLimits,
@@ -64,6 +67,8 @@ import { labelOffset, rulerForKey, sameSquare, squareAt, squareCentre, type Rule
 import { FogLayer } from './FogLayer.js';
 import { PingLayer, type PingPoint } from './PingLayer.js';
 import { TokenLayer, type TokenControls } from './TokenLayer.js';
+import { bounded, compose, type TouchView } from '../player/touchView.js';
+import { useTouchGestures } from '../player/useTouchGestures.js';
 import {
   clampToWorld,
   footprint,
@@ -94,7 +99,10 @@ import './canvas.css';
 // shape, and the camera is sent on the drop. The DM's own camera never moves with it. The scene's TV
 // camera buttons (UIX-01, specs/08-ux-journeys.md §11) act through the canvas's handle: Send my view
 // frames what the DM's view shows, TV zoom scales the frame, Fit map fits it; while the TV camera is
-// locked the frame does not move and the handle sends nothing.
+// locked the frame does not move and the handle sends nothing. While Follow my view is on (DMT-03,
+// specs/04-live-sync.md §9, Q-113), the frame and the dimming are not drawn, the canvas edge is ringed in the
+// accent colour instead, and every change of the DM's view or of the TV's shape reports the camera that
+// shows the whole view on the TV (`followRect`); how often it is sent is the caller's.
 //
 // The DM mode's chrome (UIX-01): a floating tool rail (Select, Ruler, Ping, Fog regions, Add token,
 // Undo, Redo), the grid and diagonal rule bottom left, and the DM's own zoom bottom right. Space held
@@ -131,6 +139,8 @@ export const CANVAS_COLOURS = {
   tvFrame: THEME.accent,
   tvFrameText: THEME.onAccent,
   tvDim: 'rgba(8, 6, 4, 0.42)',
+  // The footprint of a library asset dragged over the map (UXR-03): the accent, lightly filled.
+  dropFill: 'rgba(232, 152, 72, 0.22)',
 } as const;
 // The TV frame's corner handles and the width of its border's grip, in screen pixels.
 const HANDLE_PX = 12;
@@ -154,6 +164,47 @@ type Mode = 'dm' | 'player';
 export function overlayOpacity(mode: Mode, visible: boolean): number {
   if (visible) return GRID_OPACITY.shown;
   return mode === 'dm' ? GRID_OPACITY.faint : 0;
+}
+
+/** How long the player view takes to glide to a new camera (DMT-03): short, so Send my view stays immediate. */
+export const GLIDE_MS = 120;
+
+const reducedMotion = () =>
+  typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/**
+ * `target`, reached by a short glide from the camera drawn before it (DMT-03): Follow my view sends the
+ * DM's view about ten times a second, and a TV that jumped to each would step. A new world or viewport
+ * (`key`), the first camera and reduced motion take the target at once.
+ */
+function useGlide(target: Camera, viewport: Size, key: string, enabled: boolean): Camera {
+  const [drawn, setDrawn] = useState<{ key: string; camera: Camera }>({ key, camera: target });
+  const latest = useRef(drawn);
+  latest.current = drawn;
+  const targetKey = `${target.x}:${target.y}:${target.scale}`;
+  const to = useRef({ target, viewport });
+  to.current = { target, viewport };
+  useEffect(() => {
+    const { target: goal, viewport: within } = to.current;
+    const start = latest.current;
+    const same = start.camera.x === goal.x && start.camera.y === goal.y && start.camera.scale === goal.scale;
+    if (same && start.key === key) return;
+    if (!enabled || start.key !== key || reducedMotion() || typeof requestAnimationFrame !== 'function') {
+      setDrawn({ key, camera: goal });
+      return;
+    }
+    let began: number | undefined;
+    let frame = requestAnimationFrame(function step(now) {
+      began ??= now;
+      const progress = Math.min(1, (now - began) / GLIDE_MS);
+      // Ease out: quick to leave, gentle to arrive.
+      const eased = 1 - (1 - progress) ** 3;
+      setDrawn({ key, camera: progress >= 1 ? goal : cameraBetween(start.camera, goal, eased, within) });
+      if (progress < 1) frame = requestAnimationFrame(step);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [key, targetKey, enabled]);
+  return enabled && drawn.key === key ? drawn.camera : target;
 }
 
 function useViewport(): [React.RefObject<HTMLDivElement | null>, Size] {
@@ -222,6 +273,14 @@ export interface Placing {
   onCancel: () => void;
 }
 
+/** A library asset dragged onto the map (UXR-03, specs/05-assets-and-images.md §5). */
+export interface AssetDrop {
+  /** The dragged asset's size, or undefined when the drag is not an asset the map takes. */
+  sizeOf: (types: readonly string[]) => TokenSize | undefined;
+  /** Where the token goes, in grid units, snapped unless Alt was held. */
+  onDrop: (at: Point) => void;
+}
+
 /** The DM's token controls: selection, moves and the deletion request. */
 export interface CanvasTokenControls extends TokenControls {
   onDeselect: () => void;
@@ -239,6 +298,11 @@ export interface TvFrame {
   locked: boolean;
   /** A new player camera: on a drop or one of the TV camera buttons. */
   onChange: (camera: PlayerCamera) => void;
+  /**
+   * Follow my view (DMT-03): while set, the frame is not drawn, since the TV shows the DM's whole view, and
+   * the canvas reports the camera that shows all of it, widened to the TV's shape, whenever it changes.
+   */
+  follow?: ((camera: PlayerCamera) => void) | undefined;
 }
 
 /** What the scene's controls outside the canvas ask of it (UIX-01). */
@@ -377,12 +441,14 @@ export function MapCanvas({
   tokens = [],
   tokenControls,
   placing,
+  assetDrop,
   rail,
   status,
   popover,
   ref,
   labelScale = 1,
   camera: playerCamera,
+  touch,
   tvFrame,
   ruler,
   ping,
@@ -403,6 +469,8 @@ export function MapCanvas({
   tokenControls?: CanvasTokenControls | undefined;
   /** DM view only: a token being placed by a click on the map. */
   placing?: Placing | undefined;
+  /** DM view only: a library asset dragged onto the map. */
+  assetDrop?: AssetDrop | undefined;
   /** DM view only: the tool rail (UIX-01). */
   rail?: CanvasRail | undefined;
   /** DM view only: the grid and diagonal rule, bottom left (UIX-01). */
@@ -415,6 +483,8 @@ export function MapCanvas({
   labelScale?: number;
   /** Player view only: the player camera; fitted to the map when absent. */
   camera?: PlayerCamera | undefined;
+  /** Player view on a handheld only (UXR-05): the screen's own pinch zoom and pan over the player camera. */
+  touch?: { view: TouchView; onView: (view: TouchView) => void } | undefined;
   /** DM view in live mode only: the frame of what the TV sees, which steers it. */
   tvFrame?: TvFrame | undefined;
   /** The measurement drawn, and in the DM view the ruler tool (LIV-07). */
@@ -448,14 +518,32 @@ export function MapCanvas({
   const fittedInArea =
     liveAspect === undefined ? fitCamera(world, fitArea) : fitBox(liveFitBox(world, liveAspect), fitArea);
   const fitted = { ...fittedInArea, x: fittedInArea.x + inset };
+  // The player mode glides to each new camera (DMT-03), so a TV following the DM's view moves smoothly.
+  const glided = useGlide(
+    playerCamera ? viewOf(playerCamera, world, viewport) : fitted,
+    viewport,
+    `${worldKey}:${viewport.width}x${viewport.height}`,
+    mode === 'player',
+  );
+  // A handheld's own view over the player camera (UXR-05): between the whole map and eight times the DM's camera.
+  const touchMin = Math.min(1, fitted.scale / glided.scale);
   const camera =
     mode === 'dm'
       ? manual?.key === worldKey
         ? manual.camera
         : fitted
-      : playerCamera
-        ? viewOf(playerCamera, world, viewport)
-        : fitted;
+      : touch
+        ? compose(glided, bounded(touch.view, glided, world, viewport, touchMin))
+        : glided;
+  const gestures = useTouchGestures(
+    touch && ready
+      ? {
+          view: touch.view,
+          onView: (view) => touch.onView(bounded(view, glided, world, viewport, touchMin)),
+          min: touchMin,
+        }
+      : undefined,
+  );
   // From the latest camera, not this render's: wheel and drag events arrive outside React's
   // synchronous updates, and several can land before the next render (D-093).
   const changeCamera = (change: (current: Camera) => Camera) =>
@@ -514,9 +602,12 @@ export function MapCanvas({
   // The frame is never narrower than the TV can zoom to, nor wider than it can show (review C-M1, C-M2).
   const limits = tv ? frameLimits(world, aspect, tv.screen) : undefined;
   const frameBox = tv && limits ? boundFrame(frameOf(tv.camera, world, aspect), aspect, limits) : undefined;
-  const shownFrame = tv ? (frameDraft ?? frameBox) : undefined;
+  // Follow my view (DMT-03): the TV shows the DM's whole view, so there is no frame to show or move.
+  const following = tv?.follow !== undefined;
+  const shownFrame = tv && !following ? (frameDraft ?? frameBox) : undefined;
   const frameMovable =
     tv !== undefined &&
+    !following &&
     !tv.offline &&
     !tv.locked &&
     !measuring &&
@@ -533,6 +624,18 @@ export function MapCanvas({
     const next = cameraFor(box);
     if (!sameRect(next, tv.camera)) tv.onChange(next);
   };
+
+  // Follow my view (DMT-03): the camera that shows the DM's whole view on the TV, reported when it changes.
+  const followed =
+    following && viewport.width > 0 && viewport.height > 0
+      ? followRect(visibleBox(camera, viewport), world, aspect)
+      : undefined;
+  const followKey = followed && `${followed.centre_x}:${followed.centre_y}:${followed.width}:${followed.height}`;
+  const toFollow = useRef<{ camera: PlayerCamera; report: (camera: PlayerCamera) => void }>(undefined);
+  toFollow.current = followed && tv?.follow ? { camera: followed, report: tv.follow } : undefined;
+  useEffect(() => {
+    if (followKey !== undefined) toFollow.current?.report(toFollow.current.camera);
+  }, [followKey]);
 
   // The scene's TV camera buttons and token list (UIX-01).
   useImperativeHandle(ref, () => ({
@@ -588,6 +691,43 @@ export function MapCanvas({
   // Centred on `at`, snapped unless Alt, and kept on the map.
   const placeAt = (target: Placing & { frame: typeof frame & object }, at: Point, alt: boolean): Point =>
     clampToWorld(target.frame, world, placePosition(target.frame, at, target.size, alt), target.size, !alt);
+
+  // A library asset dragged over the map: its footprint where it would land (UXR-03).
+  const [dropping, setDropping] = useState<{ at: Point; size: TokenSize }>();
+  const dropTarget = dm && !measuring && frame ? assetDrop : undefined;
+  const dropPoint = (event: ReactDragEvent<HTMLDivElement>): { at: Point; size: TokenSize } | undefined => {
+    const size = dropTarget?.sizeOf([...event.dataTransfer.types]);
+    if (!size || !frame) return undefined;
+    const box = event.currentTarget.getBoundingClientRect();
+    const pointer = {
+      x: (event.clientX - box.left - camera.x) / camera.scale,
+      y: (event.clientY - box.top - camera.y) / camera.scale,
+    };
+    return { at: placeAt({ size, frame, onPlace: () => {}, onCancel: () => {} }, pointer, event.altKey), size };
+  };
+  const dropHandlers = dropTarget
+    ? {
+        onDragOver: (event: ReactDragEvent<HTMLDivElement>) => {
+          const point = dropPoint(event);
+          if (!point) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'copy';
+          setDropping((now) =>
+            now && now.size === point.size && now.at.x === point.at.x && now.at.y === point.at.y ? now : point,
+          );
+        },
+        onDragLeave: (event: ReactDragEvent<HTMLDivElement>) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropping(undefined);
+        },
+        onDrop: (event: ReactDragEvent<HTMLDivElement>) => {
+          const point = dropPoint(event);
+          setDropping(undefined);
+          if (!point) return;
+          event.preventDefault();
+          dropTarget.onDrop(point.at);
+        },
+      }
+    : {};
 
   // The world point at the centre of the view, where Enter places a token.
   const centreWorld = (): Point => ({
@@ -739,6 +879,13 @@ export function MapCanvas({
     }
     if (controls && selected) {
       const arrow = ARROWS[event.key];
+      // A group moves together, each token by its own step (UXR-02).
+      const group = (controls.selectedIds ?? []).flatMap((id) => tokens.filter((token) => token.id === id));
+      if (arrow && group.length > 1 && controls.onMoveMany) {
+        event.preventDefault();
+        controls.onMoveMany(group.map((token) => ({ id: token.id, at: nudge(token, token.size, arrow[0], arrow[1]) })));
+        return;
+      }
       if (arrow) {
         event.preventDefault();
         controls.onMove(selected.id, nudge(selected, selected.size, arrow[0], arrow[1]));
@@ -1326,6 +1473,22 @@ export function MapCanvas({
       {frame && ping ? (
         <PingLayer pings={ping.shown} frame={frame} scale={camera.scale} labelScale={labelScale} />
       ) : null}
+      {dropping && frame ? (
+        // The footprint of the asset dragged over the map, where it would land (UXR-03).
+        <Layer listening={false}>
+          <Rect
+            name="drop-target"
+            {...toWorld(frame, dropping.at)}
+            width={footprint(dropping.size) * frame.square}
+            height={footprint(dropping.size) * frame.square}
+            cornerRadius={(footprint(dropping.size) * frame.square) / 2}
+            fill={CANVAS_COLOURS.dropFill}
+            stroke={CANVAS_COLOURS.measure}
+            strokeWidth={2 / camera.scale}
+            dash={[6 / camera.scale, 4 / camera.scale]}
+          />
+        </Layer>
+      ) : null}
       {place ? (
         // Where Enter places the token: the centre of the view, marked while placing (review).
         <Layer listening={false}>
@@ -1359,7 +1522,9 @@ export function MapCanvas({
         }),
         'data-tv-locked': tv?.locked ? 'on' : 'off',
       }
-    : {};
+    : following
+      ? { 'data-tv-follow': 'on' }
+      : {};
   // The measurement drawn, its squares, distance and ends in screen pixels, for the end-to-end tests (LIV-07).
   const rulerState =
     shownRuler && rulerEnds.length === 2
@@ -1403,7 +1568,8 @@ export function MapCanvas({
           return {
             id: token.id,
             label: token.label,
-            ...(dm ? { hidden: token.hidden } : {}),
+            // Whether the DM's map draws its notes badge (DMT-04); the player mode has none.
+            ...(dm ? { hidden: token.hidden, note: token.note !== undefined } : {}),
             markers: token.markers ?? [],
             x: token.x,
             y: token.y,
@@ -1419,7 +1585,8 @@ export function MapCanvas({
     return (
       <div
         ref={viewportRef}
-        className="eg-canvas eg-canvas--player"
+        className={touch ? 'eg-canvas eg-canvas--player eg-canvas--touch' : 'eg-canvas eg-canvas--player'}
+        {...gestures}
         {...state}
         {...rulerState}
         {...pingState}
@@ -1487,6 +1654,8 @@ export function MapCanvas({
         {...fogState}
         // A right-button drag pans while measuring, so it opens no context menu (review U-M2).
         onContextMenu={rulerOn || fogOn ? (event) => event.preventDefault() : undefined}
+        {...dropHandlers}
+        data-dropping={dropping ? JSON.stringify(dropping.at) : undefined}
         data-tokens={tokenBoxes}
       >
         {stage}

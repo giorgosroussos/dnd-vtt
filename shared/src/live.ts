@@ -1,4 +1,4 @@
-import { Type, type Static } from 'typebox';
+import { Type, type Static, type TSchema } from 'typebox';
 import {
   GridSchema,
   ImageSchema,
@@ -11,6 +11,8 @@ import {
 import { EncounterSchema, InitiativeSchema, MAX_ENCOUNTER_ENTRIES, PlayerEncounterSchema } from './encounter.js';
 import type { ErrorEnvelope } from './errors.js';
 import { FogMaskSchema, FogStrokeSchema } from './fog.js';
+import { HpDeltaSchema } from './hp.js';
+import type { NotesUpdatedPayload } from './notes.js';
 import { SceneTokenSchema, TokenChangeSchema, TokenCreateBodySchema } from './tokens.js';
 
 // WebSocket envelopes (specs/04-live-sync.md §2, §3, §5; D-047, D-064).
@@ -67,6 +69,9 @@ export const COMMAND_TYPES = [
   'token.delete',
   'token.setVisibility',
   'token.setMarkers',
+  'token.setStats',
+  'token.applyHp',
+  'token.batch',
   'fog.paint',
   'fog.fill',
   'scene.activate',
@@ -101,6 +106,7 @@ export const EVENT_TYPES = [
   'history.changed',
   'fog.updated',
   'encounter.updated',
+  'notes.updated',
 ] as const;
 
 export type CommandType = (typeof COMMAND_TYPES)[number];
@@ -324,6 +330,44 @@ export const TokenSetMarkersPayloadSchema = Type.Object(
   { token_id: UuidSchema, markers: TokenSchema.properties.markers },
   strict,
 );
+// `token.setStats` and `token.applyHp` (DMT-01, specs/04-live-sync.md §2, §15): set or clear any of the four fields,
+// or apply a signed amount, negative for damage; each one undoable step with the markers the hit points set.
+export const TokenSetStatsPayloadSchema = Type.Object(
+  {
+    token_id: UuidSchema,
+    hp_current: Type.Optional(TokenSchema.properties.hp_current),
+    hp_max: Type.Optional(TokenSchema.properties.hp_max),
+    hp_temp: Type.Optional(TokenSchema.properties.hp_temp),
+    ac: Type.Optional(TokenSchema.properties.ac),
+  },
+  { ...strict, minProperties: 2 },
+);
+export const TokenApplyHpPayloadSchema = Type.Object({ token_id: UuidSchema, delta: HpDeltaSchema }, strict);
+// `token.batch` (UXR-02, specs/04-live-sync.md §2, §8, Q-123): the commands of a group of selected tokens, applied in
+// order, all or nothing, and undone as one step. Each is a token command the batch may hold, checked against that
+// command's own payload schema; a batch never holds another.
+export const MAX_BATCH_COMMANDS = 50;
+export const BATCH_COMMAND_TYPES = [
+  'token.move',
+  'token.setVisibility',
+  'token.setMarkers',
+  'token.applyHp',
+  'token.delete',
+] as const satisfies readonly CommandType[];
+export type BatchCommandType = (typeof BATCH_COMMAND_TYPES)[number];
+const batched = <T extends BatchCommandType, P extends TSchema>(type: T, payload: P) =>
+  Type.Object({ type: Type.Literal(type), payload }, strict);
+export const BatchedCommandSchema = Type.Union([
+  batched('token.move', TokenMovePayloadSchema),
+  batched('token.setVisibility', TokenSetVisibilityPayloadSchema),
+  batched('token.setMarkers', TokenSetMarkersPayloadSchema),
+  batched('token.applyHp', TokenApplyHpPayloadSchema),
+  batched('token.delete', TokenDeletePayloadSchema),
+]);
+export const TokenBatchPayloadSchema = Type.Object(
+  { commands: Type.Array(BatchedCommandSchema, { minItems: 1, maxItems: MAX_BATCH_COMMANDS }) },
+  strict,
+);
 export const SceneActivatePayloadSchema = Type.Object({ scene_id: UuidSchema }, strict);
 export const SceneDeactivatePayloadSchema = Type.Object({}, strict);
 export const UndoPayloadSchema = Type.Object({}, strict);
@@ -353,7 +397,12 @@ export const EncounterSetInitiativePayloadSchema = Type.Object(
   { scene_id: UuidSchema, entry_id: UuidSchema, initiative: InitiativeSchema },
   strict,
 );
-export const EncounterAddEntryPayloadSchema = Type.Object({ scene_id: UuidSchema, token_id: UuidSchema }, strict);
+// `encounter.addEntry` may carry the number the table rolled for the token (DMT-02): the entry then goes in
+// by it, before the first entry with a lower number or none; without one, at the end.
+export const EncounterAddEntryPayloadSchema = Type.Object(
+  { scene_id: UuidSchema, token_id: UuidSchema, initiative: Type.Optional(InitiativeSchema) },
+  strict,
+);
 export const EncounterRemoveEntryPayloadSchema = Type.Object({ scene_id: UuidSchema, entry_id: UuidSchema }, strict);
 
 /** The payload schema of every live command implemented so far; the server registers exactly these. */
@@ -363,6 +412,9 @@ export const LIVE_COMMAND_PAYLOAD_SCHEMAS = {
   'token.setVisibility': TokenSetVisibilityPayloadSchema,
   'token.delete': TokenDeletePayloadSchema,
   'token.setMarkers': TokenSetMarkersPayloadSchema,
+  'token.setStats': TokenSetStatsPayloadSchema,
+  'token.applyHp': TokenApplyHpPayloadSchema,
+  'token.batch': TokenBatchPayloadSchema,
   'scene.activate': SceneActivatePayloadSchema,
   'scene.deactivate': SceneDeactivatePayloadSchema,
   'camera.setPlayer': CameraSetPlayerPayloadSchema,
@@ -388,6 +440,10 @@ export type TokenMovePayload = Static<typeof TokenMovePayloadSchema>;
 export type TokenSetVisibilityPayload = Static<typeof TokenSetVisibilityPayloadSchema>;
 export type TokenDeletePayload = Static<typeof TokenDeletePayloadSchema>;
 export type TokenSetMarkersPayload = Static<typeof TokenSetMarkersPayloadSchema>;
+export type TokenSetStatsPayload = Static<typeof TokenSetStatsPayloadSchema>;
+export type TokenApplyHpPayload = Static<typeof TokenApplyHpPayloadSchema>;
+export type BatchedCommand = Static<typeof BatchedCommandSchema>;
+export type TokenBatchPayload = Static<typeof TokenBatchPayloadSchema>;
 export type SceneActivatePayload = Static<typeof SceneActivatePayloadSchema>;
 export type SceneDeactivatePayload = Static<typeof SceneDeactivatePayloadSchema>;
 export type UndoPayload = Static<typeof UndoPayloadSchema>;
@@ -484,7 +540,9 @@ export type DmEvent =
   | EventEnvelope<'ping', PingShownPayload>
   | EventEnvelope<'history.changed', HistoryChangedPayload>
   | EventEnvelope<'fog.updated', FogUpdatedPayload>
-  | EventEnvelope<'encounter.updated', DmEncounterPayload>;
+  | EventEnvelope<'encounter.updated', DmEncounterPayload>
+  // DM notes (DMT-04): the DM room's only, never the players'.
+  | EventEnvelope<'notes.updated', NotesUpdatedPayload>;
 
 /** Every event of the players room with its payload: nothing here names a hidden token. */
 export type PlayerEvent =
