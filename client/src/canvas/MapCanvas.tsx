@@ -445,6 +445,7 @@ export function MapCanvas({
   rail,
   status,
   popover,
+  preview,
   ref,
   labelScale = 1,
   camera: playerCamera,
@@ -477,6 +478,8 @@ export function MapCanvas({
   status?: ReactNode;
   /** DM view only: the selected token's popover, placed beside it (UIX-01). */
   popover?: ((anchor: TokenAnchor) => ReactNode) | undefined;
+  /** DM view only: the read-only preview of a token the mouse rests on, placed beside it (UXR-06). */
+  preview?: ((tokenId: string, anchor: TokenAnchor) => ReactNode) | undefined;
   /** DM view only: what the scene's TV camera buttons and token list ask of the canvas. */
   ref?: Ref<CanvasHandle> | undefined;
   /** Player view only: how much larger than the DM's labels and badges are drawn, to read across a room. */
@@ -591,8 +594,17 @@ export function MapCanvas({
   const [spaceHeld, setSpaceHeld] = useState(false);
   const panning = dm && spaceHeld;
   // Tokens are selected and dragged only when nothing else uses the pointer.
+  const selecting = dm && !measuring && !placingNow && !rulerOn && !pingOn && !fogOn && !panning;
+  // The token the mouse rests on, previewed only while tokens may be selected (UXR-06).
+  const [previewId, setPreviewId] = useState<string>();
+  const previewing = selecting && tokenControls !== undefined && preview !== undefined;
+  if (!previewing && previewId !== undefined) setPreviewId(undefined);
   const controls =
-    dm && !measuring && !placingNow && !rulerOn && !pingOn && !fogOn && !panning ? tokenControls : undefined;
+    selecting && tokenControls
+      ? previewing
+        ? { ...tokenControls, onPreview: setPreviewId }
+        : tokenControls
+      : undefined;
   const selected = controls && tokens.find((token) => token.id === controls.selectedId);
   // The TV frame, in world pixels: the one being dragged, or the player camera widened to the TV's shape.
   const [frameDraft, setFrameDraft] = useState<WorldBox>();
@@ -1597,18 +1609,19 @@ export function MapCanvas({
       </div>
     );
   }
-  const selectedAnchor =
-    popover && selected && frame
-      ? (() => {
-          const at = toWorld(frame, selected);
-          return {
-            left: camera.x + at.x * camera.scale,
-            top: camera.y + at.y * camera.scale,
-            side: footprint(selected.size) * frame.square * camera.scale,
-            viewport,
-          };
-        })()
-      : undefined;
+  const anchorOf = (token: CanvasToken | undefined): TokenAnchor | undefined => {
+    if (!token || !frame) return undefined;
+    const at = toWorld(frame, token);
+    return {
+      left: camera.x + at.x * camera.scale,
+      top: camera.y + at.y * camera.scale,
+      side: footprint(token.size) * frame.square * camera.scale,
+      viewport,
+    };
+  };
+  const selectedAnchor = popover ? anchorOf(selected) : undefined;
+  const previewAnchor =
+    previewing && previewId !== undefined ? anchorOf(tokens.find((token) => token.id === previewId)) : undefined;
   const help = measuring
     ? t('canvas.helpMeasure')
     : placingNow
@@ -1780,6 +1793,7 @@ export function MapCanvas({
         </button>
       </div>
       {selectedAnchor && popover ? popover(selectedAnchor) : null}
+      {previewAnchor && previewId !== undefined && preview ? preview(previewId, previewAnchor) : null}
     </div>
   );
 }

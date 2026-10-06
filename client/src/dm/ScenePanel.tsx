@@ -73,6 +73,7 @@ import { TokenPicker } from './tokens/TokenPicker.js';
 import { FillFogDialog, FogBrushBar, FogPanel } from './fog/FogPanel.js';
 import { useSceneFog } from './fog/useSceneFog.js';
 import { TokenPopover } from './tokens/TokenPopover.js';
+import { TokenPreview } from './tokens/TokenPreview.js';
 import { conditionLabel, markerName } from '../ui/conditions.js';
 import { toCanvasToken, useSceneTokens } from './tokens/useSceneTokens.js';
 import { InitiativePanel } from './initiative/InitiativePanel.js';
@@ -1156,7 +1157,12 @@ export function ScenePanel({
         selectedId: selectedToken,
         onSelect: selectToken,
         onDeselect: () => setSelectedToken(undefined),
+        // A click on the token whose popover is open closes it, the token staying selected (UXR-06).
         onOpenPopover: (id) => {
+          if (popoverOpen && selectedToken === id && !grouped) {
+            setPopoverOpen(false);
+            return;
+          }
           selectToken(id);
           setPopoverOpen(true);
         },
@@ -1402,6 +1408,14 @@ export function ScenePanel({
             />
           ) : null
       : undefined;
+  // The read-only preview of the token the mouse rests on (UXR-06); none for the token whose popover is open.
+  const preview = tokens
+    ? (id: string, anchor: Parameters<NonNullable<Parameters<typeof MapCanvas>[0]['preview']>>[1]) => {
+        const token = tokens.find((each) => each.id === id);
+        if (!token || (popover && token.id === selected?.id)) return null;
+        return <TokenPreview token={token} anchor={anchor} />;
+      }
+    : undefined;
   const tokenList = tokens ? (
     <TokenList
       tokens={tokens}
@@ -1722,6 +1736,7 @@ export function ScenePanel({
                     rail={draft ? undefined : rail}
                     status={gridStatus}
                     popover={draft ? undefined : popover}
+                    preview={draft || placingAsset ? undefined : preview}
                     tokens={tokens?.map((token) => ({ ...toCanvasToken(token), turn: turnOf(token) })) ?? []}
                     tokenControls={tokenControls}
                     placing={placing}
