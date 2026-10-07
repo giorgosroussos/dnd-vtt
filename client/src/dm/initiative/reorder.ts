@@ -11,6 +11,19 @@ export function moved(ids: readonly string[], id: string, target: string): strin
 }
 
 /**
+ * A drag's order brought up to the encounter's entries `ids`, which may change while a row is held (another DM
+ * browser, a reveal's offer): an entry gone is dropped, a new one goes at the end, as the server adds it. The same
+ * array when nothing changed.
+ */
+export function reconciled(order: readonly string[], ids: readonly string[]): readonly string[] {
+  const present = new Set(ids);
+  const kept = order.filter((id) => present.has(id));
+  const held = new Set(kept);
+  const added = ids.filter((id) => !held.has(id));
+  return kept.length === order.length && added.length === 0 ? order : [...kept, ...added];
+}
+
+/**
  * The order shown while `dragged` is over the row `target`: it takes that row's place once the pointer has crossed
  * the row's middle in the direction it travels, so a row sliding away under the pointer never sends it back.
  * `rect` is where the target row is drawn and `y` the pointer; without a size (no layout), the place is taken at once.
@@ -39,19 +52,23 @@ const reducedMotion = () =>
 
 /**
  * Slides each row of the list from where it was drawn last to where it is now (`[data-entry]` children, by their
- * layout position, which a running slide does not change). No slide under reduced motion or where the browser
- * cannot animate an element.
+ * layout position within the list, which a running slide does not change and content appearing above the list
+ * does not either). No slide under reduced motion or where the browser cannot animate an element.
  */
 export function useSlidingRows(list: RefObject<HTMLElement | null>): void {
   const tops = useRef(new Map<string, number>());
   useLayoutEffect(() => {
     const rows = list.current?.querySelectorAll<HTMLElement>('[data-entry]') ?? [];
+    // A row's place in the list: its offset less the list's, both from the same positioned ancestor, unless the
+    // list is that ancestor itself.
+    const listTop = list.current?.offsetTop ?? 0;
+    const placeOf = (row: HTMLElement) => (row.offsetParent === list.current ? row.offsetTop : row.offsetTop - listTop);
     const before = tops.current;
     const now = new Map<string, number>();
     const slide = !reducedMotion();
     for (const row of rows) {
       const id = row.dataset.entry!;
-      const top = row.offsetTop;
+      const top = placeOf(row);
       now.set(id, top);
       const was = before.get(id);
       if (slide && was !== undefined && was !== top && typeof row.animate === 'function') {

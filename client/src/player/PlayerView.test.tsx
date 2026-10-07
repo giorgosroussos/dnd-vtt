@@ -615,11 +615,13 @@ describe('the initiative strip (TBL-06, DMT-02, specs/08-ux-journeys.md §12)', 
     expect(cards()).toHaveLength(2);
   });
 
-  it('shows the next alone on a turn players cannot see, and one card for a lone combatant (Q-127)', async () => {
+  it('shows the round alone on a turn players cannot see, and one card for a lone combatant (Q-127)', async () => {
     const tokens = [pc(1, 'Tamsin', 0), pc(2, 'Wren', 1), token(3, 'Goblin', 2)];
     await open(snapshot(tokens));
-    await deliver('encounter.updated', 2, { encounter: { ...encounter(0, 2), current: null } });
-    expect(cards()).toEqual([['Wren', 'next']]);
+    // The projection the server sends on an unseen turn: neither the turn nor the next (shared/src/encounter.ts).
+    await deliver('encounter.updated', 2, { encounter: { ...encounter(0, 2, 2), current: null, next: null } });
+    expect(cards()).toEqual([]);
+    expect(strip()!.textContent).toContain(t('initiative.tvRound', { round: 2 }));
     await deliver('encounter.updated', 3, {
       encounter: { round: 2, entries: encounter(0, 0).entries.slice(0, 1), current: 0, next: 0 },
     });

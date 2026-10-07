@@ -22,8 +22,8 @@ import { t } from '../../ui/messages.js';
 import { useFocusLater } from '../../ui/useFocusLater.js';
 import { TokenStatsBadge } from '../tokens/TokenStats.js';
 import { tokenHasNotes, tokenNotesPreview } from '../notes/Notes.js';
-import { dragOrder, moved, useSlidingRows } from './reorder.js';
-import { createWheelStepper } from './wheel.js';
+import { dragOrder, moved, reconciled, useSlidingRows } from './reorder.js';
+import { createWheelStepper, type WheelStepper } from './wheel.js';
 
 // The Initiative tab of the DM view (TBL-06, DMT-02, specs/08-ux-journeys.md §12, specs/04-live-sync.md §14,
 // Q-111, Q-117, Q-118, D-180). The table rolls physical dice; this records the order. Start combat builds it
@@ -108,7 +108,9 @@ export function InitiativePanel({
   const next = nextIndex(encounter, view);
   const ids = encounter.entries.map((entry) => entry.id);
   if (dropped && dropped.base !== ids.join()) setDropped(undefined);
-  const shown = drag?.order ?? dropped?.order ?? ids;
+  // The order held by a drag, kept up with entries added or removed meanwhile, so the drop sends every entry.
+  const dragged = drag ? reconciled(drag.order, ids) : undefined;
+  const shown = dragged ?? dropped?.order ?? ids;
   const entryById = new Map(encounter.entries.map((entry) => [entry.id, entry]));
   const currentId = encounter.entries[encounter.current_index]?.id;
   const nextId = next === null ? undefined : encounter.entries[next]?.id;
@@ -128,11 +130,11 @@ export function InitiativePanel({
     return applied;
   };
   const drop = () => {
-    if (!drag) return;
+    if (!dragged) return;
     setDrag(undefined);
-    if (drag.order.join() === ids.join()) return;
-    setDropped({ order: drag.order, base: ids.join() });
-    void reorder(drag.order).then((applied) => {
+    if (dragged.join() === ids.join()) return;
+    setDropped({ order: dragged, base: ids.join() });
+    void reorder(dragged).then((applied) => {
       // Applied, the encounter's new order replaces it when it arrives; refused, the order goes back at once.
       if (!applied) setDropped(undefined);
     });
@@ -217,17 +219,17 @@ export function InitiativePanel({
           const passed = !takesTurn(entry, view);
           // Over another row, the dragged one takes its place once past its middle; the others slide aside.
           const makeRoom =
-            drag !== undefined && drag.id !== entry.id
+            drag !== undefined && dragged !== undefined && drag.id !== entry.id
               ? {
                   onDragOver: (event: DragEvent) => {
                     const order = dragOrder(
-                      drag.order,
+                      dragged,
                       drag.id,
                       entry.id,
                       event.currentTarget.getBoundingClientRect(),
                       event.clientY,
                     );
-                    if (order !== drag.order) setDrag({ ...drag, order });
+                    if (order !== dragged) setDrag({ ...drag, order });
                   },
                 }
               : {};
@@ -479,6 +481,7 @@ function InitiativeField({
   // The mouse wheel over the field steps the number (`wheel.ts`); it is sent once the wheel rests, so the row does
   // not sort away from under the pointer while the DM is still turning it.
   const field = useRef<HTMLInputElement>(null);
+  const stepper = useRef<WheelStepper>(undefined);
   const latest = useRef({ draft, send });
   useEffect(() => {
     latest.current = { draft, send };
@@ -491,6 +494,7 @@ function InitiativeField({
       onStep: (next) => setDraft(String(next)),
       onRest: (next) => latest.current.send(next),
     });
+    stepper.current = wheel;
     const onWheel = (event: WheelEvent) => {
       // Ctrl and the wheel stays the browser's zoom.
       if (event.ctrlKey) return;
@@ -526,6 +530,8 @@ function InitiativeField({
           commit();
         } else if (event.key === 'Escape') {
           event.preventDefault();
+          // The steps the wheel has not sent yet go too.
+          stepper.current?.cancel();
           setDraft(shown);
         }
       }}

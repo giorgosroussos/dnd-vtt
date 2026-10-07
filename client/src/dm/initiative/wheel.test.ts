@@ -66,8 +66,32 @@ describe('createWheelStepper', () => {
     expect(steps).toEqual([]);
     wheel.turn(-2, 0);
     expect(steps).toEqual([11]);
-    wheel.turn(-WHEEL_STEP_PX * 3, 0);
-    expect(steps).toEqual([11, 14]);
+    for (let i = 0; i < 5; i++) wheel.turn(20, 0);
+    expect(steps).toEqual([11, 10, 9]);
+  });
+
+  it("counts one pixel-mode notch as one step, Chromium's 100 px and a scaled 250 px alike", () => {
+    const { wheel, steps } = stepper(10);
+    wheel.turn(-100, 0);
+    expect(steps).toEqual([11]);
+    wheel.turn(-250, 0);
+    expect(steps).toEqual([11, 12]);
+    wheel.turn(WHEEL_STEP_PX, 0);
+    expect(steps).toEqual([11, 12, 11]);
+  });
+
+  it('sends nothing once cancelled, then steps afresh', () => {
+    const { wheel, steps, rests } = stepper(12);
+    wheel.turn(-1, 1);
+    wheel.turn(-1, 1);
+    wheel.cancel();
+    vi.advanceTimersByTime(5 * WHEEL_REST_MS);
+    wheel.rest();
+    expect(rests).toEqual([]);
+    wheel.turn(1, 1);
+    expect(steps).toEqual([13, 14, 11]);
+    wheel.rest();
+    expect(rests).toEqual([11]);
   });
 
   it('keeps within the bounds', () => {

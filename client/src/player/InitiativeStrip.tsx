@@ -8,8 +8,9 @@ import { t } from '../ui/messages.js';
 // is and the next one, player characters and enemies alike, each with its portrait and its token's label as the
 // map shows it, in its side's ring colour; a Dead one greyed, the turn's card highlighted, the next one marked,
 // the round at the left end. Each turn replaces them, the new cards fading in; a turn players cannot see shows the
-// next card alone. It draws only what the players' projection carries and the tokens players
-// already see. It fades in when combat starts and out when it ends, as scene changes do.
+// round only, no cards, as the players' projection then carries neither (shared/src/encounter.ts). It draws only
+// what the players' projection carries and the tokens players already see. It fades in when combat starts and out
+// when it ends, as scene changes do.
 
 /** How long the strip takes to fade out when combat ends: the scene fade's length. */
 export const STRIP_FADE_MS = 400;

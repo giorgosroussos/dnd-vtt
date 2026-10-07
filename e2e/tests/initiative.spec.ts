@@ -134,17 +134,18 @@ test('a combat runs end to end: every bandit its own row, a tie, the dead passed
       await field(dm, name).press('Enter');
     }
     await expect(rows(dm)).toHaveText([tamsin, wren, b1, b2, b3]);
-    // The mouse wheel over a number steps it, the panel unscrolled: two notches down take the last bandit's 5 to 1,
-    // sent once the pointer leaves, so the panel opened again shows it from the server (Q-127).
+    // The mouse wheel over a number steps it, the panel unscrolled: two notches down, each Chromium's 100 px and one
+    // step, take the last bandit's 5 to 3, sent once the pointer leaves, so the panel opened again shows it from the
+    // server (Q-127).
     const box = (await field(dm, b3).boundingBox())!;
     await dm.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await dm.mouse.wheel(0, 100);
     await dm.mouse.wheel(0, 100);
-    await expect(field(dm, b3)).toHaveValue('1');
+    await expect(field(dm, b3)).toHaveValue('3');
     await dm.mouse.move(box.x - 200, box.y);
     await dm.getByRole('tab', { name: 'In this scene' }).click();
     await initiativeTab(dm).click();
-    await expect(field(dm, b3)).toHaveValue('1');
+    await expect(field(dm, b3)).toHaveValue('3');
     await expect(rows(dm)).toHaveText([tamsin, wren, b1, b2, b3]);
     await rowOf(dm, b1).dragTo(rowOf(dm, wren));
     await expect(rows(dm)).toHaveText([tamsin, b1, wren, b2, b3]);

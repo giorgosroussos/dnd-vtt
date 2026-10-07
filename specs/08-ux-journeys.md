@@ -102,7 +102,7 @@ The DM view MUST add, on the live scene (`04` §14): [Q-111]
 - while combat runs, Add to initiative in the popover of a player character, monster or npc without an entry, saying why when players cannot see it or it carries Dead; a remove action on each row, and Remove dead beside the round, removing every Dead monster's and npc's entry; [Q-111, Q-118, D-183]
 - End combat asked first, saying that it cannot be undone once another scene goes live or the server restarts.
 
-While combat runs, the player view MUST show a strip along its top edge, readable from 2–3 m and no taller than it must be: two cards only, the entry whose turn it is and the next one, each when players can see its token, player characters and enemies alike, with its portrait and its token's label as the map shows it ("Bandit 1"), a Dead one greyed, the turn's card highlighted, the next one marked, and the round at one end; both replaced on every turn; it shows no entry players cannot see, and fades in and out as scene changes do. [Q-111, Q-118, Q-127]
+While combat runs, the player view MUST show a strip along its top edge, readable from 2–3 m and no taller than it must be: two cards only, the entry whose turn it is and the next one, each when players can see its token, player characters and enemies alike, with its portrait and its token's label as the map shows it ("Bandit 1"), a Dead one greyed, the turn's card highlighted, the next one marked, and the round at one end; both replaced on every turn; it shows no entry players cannot see, and while the turn is an entry players cannot see it shows the round alone, naming neither the turn nor the next (`04` §4); it fades in and out as scene changes do. [Q-111, Q-118, Q-127]
 
 ## 13. The DM toolkit
 
