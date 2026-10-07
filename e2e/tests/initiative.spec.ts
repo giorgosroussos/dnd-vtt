@@ -117,9 +117,9 @@ test('a combat runs end to end: every bandit its own row, a tie, the dead passed
     await dm.getByRole('button', { name: 'Start combat' }).click();
     await expect(rows(dm)).toHaveText([tamsin, wren, b1, b2, b3]);
     await expect(strip(tv)).toBeVisible();
-    // The TV names each bandit by its label, in the monster ring colour.
-    await expect(cards(tv)).toHaveText([tamsin, wren, b1, b2, b3]);
-    await expect(tv.locator('.eg-player__initiative-card--monster')).toHaveCount(3);
+    // The TV shows only the turn and the next (Q-127).
+    await expect(cards(tv)).toHaveText([tamsin, wren]);
+    await expect(stripTurn(tv)).toHaveText(tamsin);
     await expect(initiativeTab(dm)).toHaveText('Initiative · R1');
 
     // Numbers, with a tie at 12 between Wren and the first bandit: they keep their order until the DM drags.
@@ -134,21 +134,54 @@ test('a combat runs end to end: every bandit its own row, a tie, the dead passed
       await field(dm, name).press('Enter');
     }
     await expect(rows(dm)).toHaveText([tamsin, wren, b1, b2, b3]);
+    // The mouse wheel over a number steps it, the panel unscrolled: two notches down, each Chromium's 100 px and one
+    // step, take the last bandit's 5 to 3, sent once the pointer leaves, so the panel opened again shows it from the
+    // server (Q-127).
+    const box = (await field(dm, b3).boundingBox())!;
+    await dm.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await dm.mouse.wheel(0, 100);
+    await dm.mouse.wheel(0, 100);
+    await expect(field(dm, b3)).toHaveValue('3');
+    await dm.mouse.move(box.x - 200, box.y);
+    await dm.getByRole('tab', { name: 'In this scene' }).click();
+    await initiativeTab(dm).click();
+    await expect(field(dm, b3)).toHaveValue('3');
+    await expect(rows(dm)).toHaveText([tamsin, wren, b1, b2, b3]);
     await rowOf(dm, b1).dragTo(rowOf(dm, wren));
     await expect(rows(dm)).toHaveText([tamsin, b1, wren, b2, b3]);
-    await expect(cards(tv)).toHaveText([tamsin, b1, wren, b2, b3]);
+    // While a row is dragged, the others make room before it is dropped, its slot marked; let go outside the list,
+    // the order goes back and nothing is sent.
+    // Measured once the drop's rows have finished sliding into place.
+    await dm.waitForFunction(() =>
+      [...document.querySelectorAll('.eg-initiative__row')].every((row) => row.getAnimations().length === 0),
+    );
+    const grab = (await rowOf(dm, b3).boundingBox())!;
+    const target = (await rowOf(dm, b1).boundingBox())!;
+    await dm.mouse.move(grab.x + 40, grab.y + grab.height / 2);
+    await dm.mouse.down();
+    await dm.mouse.move(target.x + 40, target.y + target.height / 2 - 4, { steps: 12 });
+    await expect(rows(dm)).toHaveText([tamsin, b3, b1, wren, b2]);
+    await expect(dm.locator('.eg-initiative__row--dragging .eg-initiative__name')).toHaveText(b3);
+    await dm.mouse.move(target.x + 40, target.y - 400, { steps: 6 });
+    await dm.mouse.up();
+    await expect(rows(dm)).toHaveText([tamsin, b1, wren, b2, b3]);
+    await expect(dm.locator('.eg-initiative__row--dragging')).toHaveCount(0);
+    await expect(cards(tv)).toHaveText([tamsin, b1]);
 
     // The bandit's turn: its token is the turn's on the TV too.
     await expect(currentRow(dm)).toHaveText(tamsin);
     await next();
     await expect(currentRow(dm)).toHaveText(b1);
     await expect(stripTurn(tv)).toHaveText(b1);
+    // The TV names the bandit by its label, in the monster ring colour; each turn replaces the two cards.
+    await expect(cards(tv)).toHaveText([b1, wren]);
+    await expect(tv.locator('.eg-player__initiative-card--monster')).toHaveCount(1);
 
-    // The second bandit falls to its hit points: it stays, greyed on the TV, and its turn is passed over.
+    // The second bandit falls to its hit points: its turn is passed over, so the TV never names it next.
     await kill(b2);
-    await expect(tv.locator('.eg-player__initiative-card--dead .eg-player__initiative-name')).toHaveText([b2]);
     await next();
     await expect(currentRow(dm)).toHaveText(wren);
+    await expect(cards(tv)).toHaveText([wren, b3]);
     await next();
     await expect(currentRow(dm)).toHaveText(b3);
     await expect(stripTurn(tv)).toHaveText(b3);
@@ -167,13 +200,13 @@ test('a combat runs end to end: every bandit its own row, a tie, the dead passed
     await offer.getByRole('textbox', { name: `Initiative of ${b4}` }).fill('10');
     await offer.getByRole('button', { name: 'Add', exact: true }).click();
     await expect(rows(dm)).toHaveText([tamsin, b1, wren, b4, b2, b3]);
-    await expect(cards(tv)).toHaveText([tamsin, b1, wren, b4, b2, b3]);
+    await expect(cards(tv)).toHaveText([b3, tamsin]);
     await expect(offer).toHaveCount(0);
 
     // The TV reloads: the strip comes back from its snapshot, in the same order and turn.
     await tv.reload();
     await expect(player(tv)).toHaveAttribute('data-scene', 'live');
-    await expect(cards(tv)).toHaveText([tamsin, b1, wren, b4, b2, b3]);
+    await expect(cards(tv)).toHaveText([b3, tamsin]);
     await expect(stripTurn(tv)).toHaveText(b3);
 
     // The rest fall; when the turn next passes, the DM is asked, and ends combat.

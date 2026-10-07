@@ -38,6 +38,7 @@ import {
   type Measure,
   type AssetDrop,
   type Placing,
+  type TokenAnchor,
   type FogTool,
   type PingTool,
   type RulerTool,
@@ -73,10 +74,15 @@ import { TokenPicker } from './tokens/TokenPicker.js';
 import { FillFogDialog, FogBrushBar, FogPanel } from './fog/FogPanel.js';
 import { useSceneFog } from './fog/useSceneFog.js';
 import { TokenPopover } from './tokens/TokenPopover.js';
+import { TokenPreview } from './tokens/TokenPreview.js';
 import { conditionLabel, markerName } from '../ui/conditions.js';
 import { toCanvasToken, useSceneTokens } from './tokens/useSceneTokens.js';
 import { InitiativePanel } from './initiative/InitiativePanel.js';
 import { SceneNotes } from './notes/Notes.js';
+import { MapNotePopover, MapNotePreview, mapNoteTarget } from './notes/MapNotes.js';
+import { unsavedText } from './notes/NotesEditor.js';
+import { useMapNotes } from './notes/useMapNotes.js';
+import type { MapNoteControls } from '../canvas/MapNoteLayer.js';
 
 // The selected scene in the centre of the workspace (PRP-02, specs/08-ux-journeys.md §1, §3,
 // specs/06-grid-and-measurement.md §2, specs/03-domain-model.md §6, D-090, D-093): its setup and
@@ -150,8 +156,8 @@ import { SceneNotes } from './notes/Notes.js';
 // browser's measurement included. Turning the ruler off clears the measurement. The ruler, placing and a
 // selected token take the pointer and the keys in turn.
 //
-// Shortcuts (UIX-01, specs/08-ux-journeys.md §11): V selects, M measures, T adds a token, H hides or
-// reveals the selected token, N opens the scene's notes, Ctrl+Z undoes and Ctrl+Shift+Z or Ctrl+Y redoes, from
+// Shortcuts (UIX-01, specs/08-ux-journeys.md §11): V selects, M measures, T adds a token, O places a map note (UXR-08),
+// H hides or reveals the selected token, N opens the scene's notes, Ctrl+Z undoes and Ctrl+Shift+Z or Ctrl+Y redoes, from
 // anywhere in the DM view but a text field or an open dialog; none acts while typing.
 //
 // DM notes (DMT-04, specs/04-live-sync.md §16, specs/08-ux-journeys.md §13, Q-114): the scene's in the right-hand
@@ -397,6 +403,8 @@ export function ScenePanel({
   // Choosing a token gives the arrow keys back to it and ends measuring.
   const selectToken = (id: string | undefined) => {
     setSelectedToken(id);
+    // A token's popover and a map note's are never open together (UXR-08).
+    if (id !== undefined) closeNote();
     // Ending measuring takes the measurement off, on the TV too (review C-M1).
     if (id !== undefined) {
       stopMeasuring();
@@ -414,6 +422,13 @@ export function ScenePanel({
   };
   const [picking, setPicking] = useState(false);
   const [placingAsset, setPlacingAsset] = useState<LibraryAsset>();
+  // Map notes (UXR-08, specs/08-ux-journeys.md §14): the scene's, whether one is being placed, the one whose popover
+  // is open, and a request for its text to take focus (a note just placed). One popover at a time: a note's or a
+  // token's.
+  const mapNotes = useMapNotes(sceneId, liveScene?.map_notes);
+  const [placingNote, setPlacingNote] = useState(false);
+  const [openNote, setOpenNote] = useState<string>();
+  const [focusNote, setFocusNote] = useState(0);
   const [renaming, setRenaming] = useState<SceneToken>();
   const [deleting, setDeleting] = useState<SceneToken>();
   const formRef = useRef<HTMLFormElement>(null);
@@ -627,6 +642,7 @@ export function ScenePanel({
   function pick(asset: LibraryAsset) {
     setPicking(false);
     setStatus(undefined);
+    setPlacingNote(false);
     setPlacingAsset(asset);
     stopMeasuring();
     refocus.current = 'canvas';
@@ -905,6 +921,7 @@ export function ScenePanel({
               setFogOn(false);
               setSelectedToken(undefined);
               if (placingAsset) setPlacingAsset(undefined);
+              setPlacingNote(false);
             }
             setPingOn(on);
           },
@@ -974,6 +991,7 @@ export function ScenePanel({
               setPingOn(false);
               setSelectedToken(undefined);
               if (placingAsset) setPlacingAsset(undefined);
+              setPlacingNote(false);
             }
             setFogOn(on);
           },
@@ -1092,6 +1110,10 @@ export function ScenePanel({
     } else if (key === 't' && canAddToken) {
       event.preventDefault();
       openPicker();
+    } else if (key === 'o' && canAddNote) {
+      // A map note (UXR-08): the next click on the map places it.
+      event.preventDefault();
+      startNote();
     } else if (key === 'h' && grouped && tokenControls) {
       event.preventDefault();
       hideGroup();
@@ -1138,7 +1160,15 @@ export function ScenePanel({
         onPlace: (at) => void placeToken(placingAsset, at),
         onCancel: cancelPlacing,
       }
-    : undefined;
+    : placingNote
+      ? {
+          // A map note sits at the centre of the square a one-square footprint covers, or where Alt put it.
+          size: 'medium',
+          kind: 'note',
+          onPlace: (at) => void placeNote({ x: at.x + 0.5, y: at.y + 0.5 }),
+          onCancel: cancelNote,
+        }
+      : undefined;
   // A library asset dragged onto the map is placed where it is dropped, as a click places a chosen one (UXR-03).
   const assetDrop: AssetDrop | undefined = draft
     ? undefined
@@ -1156,7 +1186,12 @@ export function ScenePanel({
         selectedId: selectedToken,
         onSelect: selectToken,
         onDeselect: () => setSelectedToken(undefined),
+        // A click on the token whose popover is open closes it, the token staying selected (UXR-06).
         onOpenPopover: (id) => {
+          if (popoverOpen && selectedToken === id && !grouped) {
+            setPopoverOpen(false);
+            return;
+          }
           selectToken(id);
           setPopoverOpen(true);
         },
@@ -1180,6 +1215,91 @@ export function ScenePanel({
   const tokenFailure =
     !isLive && sceneTokens.loadFailure ? t('tokens.loadFailed', { reason: sceneTokens.loadFailure }) : undefined;
   const canAddToken = !draft && tokens !== undefined && !placingAsset;
+  const canAddNote = !draft && mapNotes.notes !== undefined && !placingNote;
+
+  // Map notes (UXR-08). Placing one: the rail's Add note or O, then a click on the map or Enter.
+  function startNote() {
+    stopMeasuring();
+    setPingOn(false);
+    setFogOn(false);
+    setPlacingAsset(undefined);
+    setPopoverOpen(false);
+    // The keys are the map's while a note is placed: no token stays selected for them to move (UXR-08).
+    setSelectedToken(undefined);
+    closeNote();
+    setStatus(undefined);
+    setPlacingNote(true);
+    refocus.current = 'canvas';
+  }
+  function cancelNote() {
+    setPlacingNote(false);
+  }
+  async function placeNote(at: { x: number; y: number }) {
+    setPlacingNote(false);
+    const note = await mapNotes.create(at);
+    if (!note) return;
+    setPopoverOpen(false);
+    setOpenNote(note.id);
+    setFocusNote((n) => n + 1);
+    announce(t('mapNotes.placed'));
+  }
+  // Closing a note's popover; one left empty, with nothing typed waiting to be saved, is removed, so a stray click
+  // leaves nothing behind. Empty as this view last heard it: the server removes it only if it holds it empty too, so
+  // a note another window has written into since is kept (`if_empty`).
+  const removeIfEmpty = (id: string | undefined) => {
+    const note = mapNotes.notes?.find((each) => each.id === id);
+    if (note && !hasNotes(note.notes) && !hasNotes(unsavedText(mapNoteTarget(note.id))))
+      void mapNotes.removeIfEmpty(note.id);
+  };
+  function closeNote() {
+    if (openNote === undefined) return;
+    setOpenNote(undefined);
+    removeIfEmpty(openNote);
+  }
+  // The same when the panel goes with a note open: another scene chosen, or the view left.
+  const leaving = useRef<() => void>(undefined);
+  useEffect(() => {
+    leaving.current = () => removeIfEmpty(openNote);
+  });
+  useEffect(() => () => leaving.current?.(), []);
+  // Escape in the popover, or Delete confirmed: focus goes back to the map, not to the page.
+  function closeNotePopover() {
+    refocus.current = 'canvas';
+    closeNote();
+  }
+  function toggleNote(id: string) {
+    if (openNote === id) return closeNote();
+    closeNote();
+    setPopoverOpen(false);
+    // One popover at a time, and the keys no longer the token's: it is let go (UXR-08).
+    setSelectedToken(undefined);
+    setOpenNote(id);
+  }
+  async function deleteNote(id: string) {
+    setOpenNote(undefined);
+    refocus.current = 'canvas';
+    if (await mapNotes.remove(id)) announce(t('mapNotes.deleted'));
+  }
+  const openedNote = mapNotes.notes?.find((note) => note.id === openNote);
+  const mapNoteControls: MapNoteControls | undefined = draft
+    ? undefined
+    : { openId: openedNote?.id, onToggle: toggleNote, onMove: mapNotes.move, onClosePopover: closeNote };
+  const notePopover = openedNote
+    ? (anchor: TokenAnchor) => (
+        <MapNotePopover
+          note={openedNote}
+          anchor={anchor}
+          focus={focusNote}
+          onSave={(text) => mapNotes.saveText(openedNote.id, text)}
+          onDelete={() => void deleteNote(openedNote.id)}
+          onClose={closeNotePopover}
+        />
+      )
+    : undefined;
+  const notePreview = (id: string, anchor: TokenAnchor) => {
+    const note = mapNotes.notes?.find((each) => each.id === id);
+    return note && note.id !== openNote ? <MapNotePreview note={note} anchor={anchor} /> : null;
+  };
 
   function openPicker() {
     setStatus(undefined);
@@ -1194,6 +1314,7 @@ export function ScenePanel({
     setPingOn(false);
     setFogOn(false);
     if (placingAsset) setPlacingAsset(undefined);
+    setPlacingNote(false);
   }
 
   function toggleHidden(token: SceneToken) {
@@ -1355,6 +1476,7 @@ export function ScenePanel({
   const rail: CanvasRail = {
     onSelect: selectTool,
     onAddToken: canAddToken ? openPicker : undefined,
+    onAddNote: canAddNote ? startNote : undefined,
     history:
       liveScene && !draft
         ? {
@@ -1402,6 +1524,14 @@ export function ScenePanel({
             />
           ) : null
       : undefined;
+  // The read-only preview of the token the mouse rests on (UXR-06); none for the token whose popover is open.
+  const preview = tokens
+    ? (id: string, anchor: Parameters<NonNullable<Parameters<typeof MapCanvas>[0]['preview']>>[1]) => {
+        const token = tokens.find((each) => each.id === id);
+        if (!token || (popover && token.id === selected?.id)) return null;
+        return <TokenPreview token={token} anchor={anchor} />;
+      }
+    : undefined;
   const tokenList = tokens ? (
     <TokenList
       tokens={tokens}
@@ -1653,6 +1783,15 @@ export function ScenePanel({
         {failure ? <Notice>{failure}</Notice> : null}
         {liveFailure ? <Notice>{liveFailure}</Notice> : null}
         {!isLive && sceneTokens.failure ? <Notice>{sceneTokens.failure}</Notice> : null}
+        {mapNotes.failure ? <Notice>{t('mapNotes.failed', { reason: mapNotes.failure })}</Notice> : null}
+        {mapNotes.loadFailure ? (
+          <div className="eg-tokens__failure">
+            <Notice>{t('mapNotes.loadFailed', { reason: mapNotes.loadFailure })}</Notice>
+            <Button size="small" onClick={mapNotes.retry}>
+              {t('mapNotes.retry')}
+            </Button>
+          </div>
+        ) : null}
         {mapFailedFor !== undefined && mapFailedFor === mapId ? <Notice>{t('sceneMap.loadFailed')}</Notice> : null}
         {scene ? (
           <>
@@ -1679,6 +1818,24 @@ export function ScenePanel({
               >
                 <p className="eg-tokens__placing">{t('tokens.placing', { name: placingAsset.name })}</p>
                 <Button size="small" onClick={cancelPlacing}>
+                  {t('tokens.cancelPlacing')}
+                </Button>
+              </div>
+            ) : null}
+            {placingNote ? (
+              <div
+                className="eg-tokens"
+                role="group"
+                aria-label={t('mapNotes.placingBar')}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    event.preventDefault();
+                    cancelNote();
+                  }
+                }}
+              >
+                <p className="eg-tokens__placing">{t('mapNotes.placing')}</p>
+                <Button size="small" onClick={cancelNote}>
                   {t('tokens.cancelPlacing')}
                 </Button>
               </div>
@@ -1722,6 +1879,11 @@ export function ScenePanel({
                     rail={draft ? undefined : rail}
                     status={gridStatus}
                     popover={draft ? undefined : popover}
+                    preview={draft || placingAsset ? undefined : preview}
+                    mapNotes={draft ? [] : (mapNotes.notes ?? [])}
+                    mapNoteControls={mapNoteControls}
+                    notePopover={draft ? undefined : notePopover}
+                    notePreview={draft || placing ? undefined : notePreview}
                     tokens={tokens?.map((token) => ({ ...toCanvasToken(token), turn: turnOf(token) })) ?? []}
                     tokenControls={tokenControls}
                     placing={placing}
@@ -1898,6 +2060,7 @@ function ShortcutBar({
     ['shortcuts.keyH', 'shortcuts.hide'],
     ['shortcuts.keyD', 'shortcuts.hp'],
     ['shortcuts.keyN', 'shortcuts.notes'],
+    ['shortcuts.keyO', 'shortcuts.addNote'],
     ['shortcuts.keyUndo', 'shortcuts.undo'],
     ...(live ? ([['shortcuts.keyC', 'shortcuts.follow']] as [MessageKey, MessageKey][]) : []),
     ...(combat ? ([['shortcuts.keyEnter', 'shortcuts.nextTurn']] as [MessageKey, MessageKey][]) : []),

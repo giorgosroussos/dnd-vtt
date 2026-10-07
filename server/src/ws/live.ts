@@ -27,6 +27,7 @@ import {
 import { isLoopback, lockoutKey, normalizeAddress } from '../auth/lockout.js';
 import { readScene } from '../db/campaigns.js';
 import { readSettings } from '../db/settings.js';
+import { listMapNotes } from '../db/mapNotes.js';
 import { PlayerCameraState, ScreenRegistry, sameScreen } from '../domain/camera.js';
 import { dispatchCommand, validateCommand, type CommandValidator } from '../domain/commands.js';
 import { createLiveCommands, type LiveEffect, type LiveResult } from '../domain/live.js';
@@ -67,6 +68,7 @@ import { livePlayerEncounter, readSnapshot, type LiveMemory } from './snapshot.j
 // or the idle state when the change cleared it (specs/04-live-sync.md §10, specs/03-domain-model.md §7).
 // A change of the live scene's notes or one of its tokens' (DMT-04) is told to the DM room alone, as
 // `notes.updated` from `notesChanged`, never as a snapshot: the players room hears nothing and keeps its version.
+// A change of the live scene's map notes (UXR-08) likewise reaches the DM room alone, as `mapNotes.updated`.
 //
 // Versions (Q-056, Q-093, D-104, D-108): each room has its own counter, which takes version 1
 // for the state at start-up; a snapshot sent to one socket carries its room's current version
@@ -154,6 +156,11 @@ export interface LiveSocket {
    * one of its tokens': the players room never hears of notes, and a scene not live reaches no client.
    */
   notesChanged: (payload: NotesUpdatedPayload) => void;
+  /**
+   * Tells the DM room of a change of a scene's map notes (UXR-08, specs/04-live-sync.md §3, §16), when it is the
+   * live scene: `mapNotes.updated` with all of them. The players room never hears of map notes.
+   */
+  mapNotesChanged: (sceneId: string) => void;
 }
 
 // A command or a snapshot request is small; nothing a DM sends comes near this.
@@ -585,7 +592,22 @@ export function attachLiveSocket(
     broadcast('dm', { type: 'notes.updated', payload: { ...payload } });
   };
 
-  return { io, count: (room) => io.sockets.adapter.rooms.get(room)?.size ?? 0, refresh, notesChanged };
+  // Map notes (UXR-08): likewise the DM room's only, the live scene's whole list after each change.
+  const mapNotesChanged = (sceneId: string): void => {
+    if (readSettings(db).live_scene_id !== sceneId) return;
+    broadcast('dm', {
+      type: 'mapNotes.updated',
+      payload: { scene_id: sceneId, map_notes: listMapNotes(db, sceneId) ?? [] },
+    });
+  };
+
+  return {
+    io,
+    count: (room) => io.sockets.adapter.rooms.get(room)?.size ?? 0,
+    refresh,
+    notesChanged,
+    mapNotesChanged,
+  };
 }
 
 const validateScreen = compileSchema<Screen>(ScreenSchema);

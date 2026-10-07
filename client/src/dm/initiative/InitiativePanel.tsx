@@ -22,12 +22,15 @@ import { t } from '../../ui/messages.js';
 import { useFocusLater } from '../../ui/useFocusLater.js';
 import { TokenStatsBadge } from '../tokens/TokenStats.js';
 import { tokenHasNotes, tokenNotesPreview } from '../notes/Notes.js';
+import { dragOrder, moved, reconciled, useSlidingRows } from './reorder.js';
+import { createWheelStepper, type WheelStepper } from './wheel.js';
 
 // The Initiative tab of the DM view (TBL-06, DMT-02, specs/08-ux-journeys.md §12, specs/04-live-sync.md §14,
 // Q-111, Q-117, Q-118, D-180). The table rolls physical dice; this records the order. Start combat builds it
 // from the player characters, monsters and npcs players see; each row has a drag handle, the token's avatar,
 // its name and a number field. Typing a number sorts the rows (the server does), a drag sets the order, and
-// Move up and Move down do what a drag does from the keyboard. The turn's row is highlighted and the next one
+// Move up and Move down do what a drag does from the keyboard. While a row is dragged the others make room for it,
+// sliding, so its slot shows where it will land; the order dropped is shown until the server's arrives. The turn's row is highlighted and the next one
 // marked; a row passed over is dimmed, a Dead monster's greyed. The turn's row, when its token has notes, has a
 // button that opens them (DMT-04). Tokens players can now see without an entry
 // are offered together, each with an optional number. Every change is a live command; the panel holds no
@@ -44,13 +47,6 @@ export interface InitiativePanelProps {
   onCommand: (type: CommandType, payload: object) => Promise<boolean>;
   /** Opens the token's notes (DMT-04): from the turn's row, when its token has any. */
   onOpenNotes?: ((tokenId: string) => void) | undefined;
-}
-
-/** `ids` with `id` moved to where `target` is. */
-function moved(ids: readonly string[], id: string, target: string): string[] {
-  const next = ids.filter((each) => each !== id);
-  next.splice(ids.indexOf(target), 0, id);
-  return next;
 }
 
 /** A number typed in an initiative field: null when empty, undefined when it is not a whole number in bounds. */
@@ -74,8 +70,11 @@ export function InitiativePanel({
   const [confirmingEnd, setConfirmingEnd] = useState(false);
   // The tokens the DM skipped adding, or removed, in this browser only: not offered again.
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(new Set());
-  const [dragging, setDragging] = useState<string>();
-  const [over, setOver] = useState<string>();
+  // The row being dragged and the order shown meanwhile; `lifted` marks its slot once the browser has taken the
+  // drag image, so the image is the row as it was.
+  const [drag, setDrag] = useState<{ id: string; order: readonly string[]; lifted: boolean }>();
+  // The order dropped, shown until the encounter's order changes from `base` (the server's answer) or it is refused.
+  const [dropped, setDropped] = useState<{ order: readonly string[]; base: string }>();
   // "No enemies left. End combat?": asked when the turn passes while no monster or npc entry can act (Q-118),
   // until the DM answers it or one can act again.
   const [askEnd, setAskEnd] = useState(false);
@@ -90,6 +89,7 @@ export function InitiativePanel({
   if (askEnd && !enemiesGone) setAskEnd(false);
   const focusLater = useFocusLater();
   const list = useRef<HTMLOListElement>(null);
+  useSlidingRows(list);
   const send = (type: CommandType, payload: object = {}) => onCommand(type, { scene_id: sceneId, ...payload });
 
   if (!live) return <p className="eg-dm__status">{t('initiative.notLive')}</p>;
@@ -107,6 +107,13 @@ export function InitiativePanel({
   const byId = new Map(tokens.map((token) => [token.id, token]));
   const next = nextIndex(encounter, view);
   const ids = encounter.entries.map((entry) => entry.id);
+  if (dropped && dropped.base !== ids.join()) setDropped(undefined);
+  // The order held by a drag, kept up with entries added or removed meanwhile, so the drop sends every entry.
+  const dragged = drag ? reconciled(drag.order, ids) : undefined;
+  const shown = dragged ?? dropped?.order ?? ids;
+  const entryById = new Map(encounter.entries.map((entry) => [entry.id, entry]));
+  const currentId = encounter.entries[encounter.current_index]?.id;
+  const nextId = next === null ? undefined : encounter.entries[next]?.id;
   const offers = missingTokens(encounter, tokens, fog).filter((token) => !dismissed.has(token.id));
   const dead = encounter.entries.filter((entry) => entry.kind === 'monster' && view.dead.has(entry.token_id));
   const dismiss = (tokenIds: readonly string[]) => setDismissed(new Set([...dismissed, ...tokenIds]));
@@ -117,10 +124,20 @@ export function InitiativePanel({
       list.current?.querySelector<HTMLElement>(`[data-entry="${id}"] .eg-initiative__move:not(:disabled)`),
     );
 
-  const reorder = async (order: string[], focus?: string) => {
-    if (await send('encounter.reorder', { entry_ids: order })) {
-      if (focus !== undefined) focusRow(focus);
-    }
+  const reorder = async (order: readonly string[], focus?: string) => {
+    const applied = await send('encounter.reorder', { entry_ids: order });
+    if (applied && focus !== undefined) focusRow(focus);
+    return applied;
+  };
+  const drop = () => {
+    if (!dragged) return;
+    setDrag(undefined);
+    if (dragged.join() === ids.join()) return;
+    setDropped({ order: dragged, base: ids.join() });
+    void reorder(dragged).then((applied) => {
+      // Applied, the encounter's new order replaces it when it arrives; refused, the order goes back at once.
+      if (!applied) setDropped(undefined);
+    });
   };
   const remove = (entries: readonly EncounterEntry[]) => {
     // A token removed is not offered back at once.
@@ -172,38 +189,54 @@ export function InitiativePanel({
           onSkip={() => dismiss(offers.map((token) => token.id))}
         />
       ) : null}
-      <ol ref={list} className="eg-initiative__list" aria-label={t('initiative.order')}>
-        {encounter.entries.map((entry, index) => {
+      <ol
+        ref={list}
+        className="eg-initiative__list"
+        aria-label={t('initiative.order')}
+        {...(drag
+          ? {
+              onDragOver: (event: DragEvent) => {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = 'move';
+              },
+              onDrop: (event: DragEvent) => {
+                event.preventDefault();
+                drop();
+              },
+            }
+          : {})}
+      >
+        {shown.map((id) => {
+          const entry = entryById.get(id);
+          if (!entry) return null;
+          const index = ids.indexOf(id);
           const token = byId.get(entry.token_id);
           const name = nameOf(entry);
-          const isCurrent = index === encounter.current_index;
-          const isNext = index === next;
+          const isCurrent = entry.id === currentId;
+          const isNext = entry.id === nextId;
           const unseen = !view.seen.has(entry.token_id);
           const isDead = entry.kind === 'monster' && view.dead.has(entry.token_id);
           const passed = !takesTurn(entry, view);
-          const drop =
-            dragging !== undefined && dragging !== entry.id
+          // Over another row, the dragged one takes its place once past its middle; the others slide aside.
+          const makeRoom =
+            drag !== undefined && dragged !== undefined && drag.id !== entry.id
               ? {
                   onDragOver: (event: DragEvent) => {
-                    event.preventDefault();
-                    event.dataTransfer.dropEffect = 'move';
-                    if (over !== entry.id) setOver(entry.id);
-                  },
-                  onDragLeave: () => {
-                    if (over === entry.id) setOver(undefined);
-                  },
-                  onDrop: (event: DragEvent) => {
-                    event.preventDefault();
-                    setOver(undefined);
-                    setDragging(undefined);
-                    void reorder(moved(ids, dragging, entry.id));
+                    const order = dragOrder(
+                      dragged,
+                      drag.id,
+                      entry.id,
+                      event.currentTarget.getBoundingClientRect(),
+                      event.clientY,
+                    );
+                    if (order !== dragged) setDrag({ ...drag, order });
                   },
                 }
               : {};
           const className = [
             'eg-initiative__row',
             isCurrent ? 'eg-initiative__row--current' : '',
-            over === entry.id ? 'eg-initiative__row--drop' : '',
+            drag?.id === entry.id && drag.lifted ? 'eg-initiative__row--dragging' : '',
             passed ? 'eg-initiative__row--passed' : '',
             unseen ? 'eg-initiative__row--unseen' : '',
             isDead ? 'eg-initiative__row--dead' : '',
@@ -221,13 +254,12 @@ export function InitiativePanel({
               onDragStart={(event) => {
                 event.dataTransfer.effectAllowed = 'move';
                 event.dataTransfer.setData('text/plain', entry.id);
-                setDragging(entry.id);
+                setDrag({ id: entry.id, order: ids, lifted: false });
+                setTimeout(() => setDrag((now) => (now?.id === entry.id ? { ...now, lifted: true } : now)), 0);
               }}
-              onDragEnd={() => {
-                setDragging(undefined);
-                setOver(undefined);
-              }}
-              {...drop}
+              // Dropped outside the list, or Escape: the order goes back as it was.
+              onDragEnd={() => setDrag(undefined)}
+              {...makeRoom}
             >
               <div className="eg-initiative__line">
                 <span className="eg-initiative__grip" aria-hidden="true">
@@ -432,9 +464,7 @@ function InitiativeField({
   }
   // The number last sent, so that the blur after Enter does not send it again before the server answers.
   const sent = useRef<number | null | undefined>(undefined);
-  const commit = () => {
-    const next = initiativeOf(draft);
-    if (next === undefined) return setDraft(shown);
+  const send = (next: number | null) => {
     if (next === value || next === sent.current) return;
     sent.current = next;
     void onCommit(next).then((stored) => {
@@ -443,13 +473,54 @@ function InitiativeField({
       if (!stored) setDraft(shown);
     });
   };
+  const commit = () => {
+    const next = initiativeOf(draft);
+    if (next === undefined) return setDraft(shown);
+    send(next);
+  };
+  // The mouse wheel over the field steps the number (`wheel.ts`); it is sent once the wheel rests, so the row does
+  // not sort away from under the pointer while the DM is still turning it.
+  const field = useRef<HTMLInputElement>(null);
+  const stepper = useRef<WheelStepper>(undefined);
+  const latest = useRef({ draft, send });
+  useEffect(() => {
+    latest.current = { draft, send };
+  });
+  useEffect(() => {
+    const input = field.current;
+    if (!input) return;
+    const wheel = createWheelStepper({
+      start: () => initiativeOf(latest.current.draft) ?? null,
+      onStep: (next) => setDraft(String(next)),
+      onRest: (next) => latest.current.send(next),
+    });
+    stepper.current = wheel;
+    const onWheel = (event: WheelEvent) => {
+      // Ctrl and the wheel stays the browser's zoom.
+      if (event.ctrlKey) return;
+      event.preventDefault();
+      wheel.turn(event.deltaY, event.deltaMode);
+    };
+    const flush = () => wheel.rest();
+    input.addEventListener('wheel', onWheel, { passive: false });
+    input.addEventListener('pointerleave', flush);
+    input.addEventListener('blur', flush);
+    return () => {
+      input.removeEventListener('wheel', onWheel);
+      input.removeEventListener('pointerleave', flush);
+      input.removeEventListener('blur', flush);
+      wheel.rest();
+    };
+  }, []);
   return (
     <input
+      ref={field}
       className="eg-field__input eg-initiative__number"
       type="text"
       inputMode="numeric"
       aria-label={t('initiative.numberOf', { name })}
       placeholder={t('initiative.numberPlaceholder')}
+      title={t('initiative.numberHint')}
       value={draft}
       onChange={(event) => setDraft(event.target.value)}
       onBlur={commit}
@@ -459,6 +530,8 @@ function InitiativeField({
           commit();
         } else if (event.key === 'Escape') {
           event.preventDefault();
+          // The steps the wheel has not sent yet go too.
+          stepper.current?.cancel();
           setDraft(shown);
         }
       }}

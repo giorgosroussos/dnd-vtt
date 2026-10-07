@@ -647,6 +647,24 @@ main[data-cursor='hidden'] * {
   opacity: 0.82;
 }
 
+/* Each turn's two cards fade in as they replace the last turn's (Q-127). */
+.eg-player__initiative-card {
+  animation: eg-initiative-card-in 300ms ease-out;
+}
+
+@keyframes eg-initiative-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .eg-player__initiative-card {
+    animation: none;
+  }
+}
+
 .eg-player__initiative-card--current {
   border-color: var(--color-accent);
   background: rgb(232 145 58 / 22%);

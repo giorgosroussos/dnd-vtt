@@ -269,6 +269,19 @@ export {
   type NotesUpdatedPayload,
 } from './notes.js';
 export {
+  API_MAP_NOTE_PATHS,
+  MapNoteCreateBodySchema,
+  MapNoteDeleteQuerySchema,
+  MapNoteSchema,
+  MapNoteUpdateBodySchema,
+  MapNotesUpdatedPayloadSchema,
+  type MapNote,
+  type MapNoteCreateBody,
+  type MapNoteDeleteQuery,
+  type MapNoteUpdateBody,
+  type MapNotesUpdatedPayload,
+} from './mapNotes.js';
+export {
   ASSET_CATEGORIES,
   AssetSchema,
   AssetTagSchema,
@@ -337,6 +350,8 @@ export {
   ArchiveManifestSchema,
   ArchiveSceneSchema,
   ArchiveTokenSchema,
+  ArchiveMapNoteSchema,
+  ADDED_IN_FORMAT_2,
   AssetExportQuerySchema,
   IMAGE_EXTENSIONS,
   IMPORT_LIMIT_BOUNDS,
@@ -362,6 +377,7 @@ export {
   type ArchiveManifest,
   type ArchiveScene,
   type ArchiveToken,
+  type ArchiveMapNote,
   type AssetExportQuery,
   type ImportProgress,
   type ImportStage,

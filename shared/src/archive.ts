@@ -15,6 +15,8 @@ import {
 import { EncounterSchema } from './encounter.js';
 import { FogMaskSchema } from './fog.js';
 import { NotesSchema } from './notes.js';
+import { MapNoteCreateBodySchema, MapNoteSchema } from './mapNotes.js';
+import { TokenCreateBodySchema } from './tokens.js';
 
 // Export and import (DMT-05; specs/09-operations.md §7, §9, specs/07-security-and-access.md §9,
 // specs/05-assets-and-images.md §6, specs/02-architecture.md §5, Q-115, Q-119, D-181). One zip holds either a
@@ -30,7 +32,8 @@ import { NotesSchema } from './notes.js';
 // (a scene's token numbers and fog, a token's `shown`) added, so a scene comes back exactly as it was.
 
 /** The format this server writes and the newest it reads. A newer archive is refused, storing nothing. */
-export const ARCHIVE_FORMAT_VERSION = 1;
+// Format 2 (UXR-08) adds data/mapnotes.json and its count; a format-1 archive is upgraded by `migrateFormat`.
+export const ARCHIVE_FORMAT_VERSION = 2;
 
 export const ARCHIVE_KINDS = ['campaign', 'assets'] as const;
 export type ArchiveKind = (typeof ARCHIVE_KINDS)[number];
@@ -59,7 +62,7 @@ export const MAX_DATA_FILE_BYTES = 64 * 1024 * 1024;
 
 /** The data files of each kind, in the order an import reads them. */
 export const ARCHIVE_DATA_FILES = {
-  campaign: ['campaign', 'sessions', 'scenes', 'tokens', 'encounters', 'assets', 'images'],
+  campaign: ['campaign', 'sessions', 'scenes', 'tokens', 'encounters', 'mapnotes', 'assets', 'images'],
   assets: ['assets', 'images'],
 } as const satisfies Record<ArchiveKind, readonly string[]>;
 export type ArchiveDataName = (typeof ARCHIVE_DATA_FILES)['campaign'][number];
@@ -85,6 +88,7 @@ export const ArchiveCountsSchema = Type.Object(
     scenes: Count,
     tokens: Count,
     encounters: Count,
+    map_notes: Count,
     assets: Count,
     images: Count,
   },
@@ -132,8 +136,17 @@ export const ArchiveSceneSchema = Type.Object(
   strict,
 );
 
+// A token's position bounded as REST and the live commands bound it.
+const TokenCoordinate = TokenCreateBodySchema.properties.x;
 export const ArchiveTokenSchema = Type.Object(
-  { ...TokenSchema.properties, notes: NotesSchema, shown: Type.Boolean() },
+  { ...TokenSchema.properties, x: TokenCoordinate, y: TokenCoordinate, notes: NotesSchema, shown: Type.Boolean() },
+  strict,
+);
+
+// A map note (UXR-08), its point and notes bounded as a body's are.
+const MapNoteCoordinate = MapNoteCreateBodySchema.properties.x;
+export const ArchiveMapNoteSchema = Type.Object(
+  { ...MapNoteSchema.properties, x: MapNoteCoordinate, y: MapNoteCoordinate, notes: NotesSchema },
   strict,
 );
 
@@ -146,6 +159,7 @@ export const ARCHIVE_DATA_SCHEMAS = {
   scenes: records(ArchiveSceneSchema),
   tokens: records(ArchiveTokenSchema),
   encounters: records(EncounterSchema),
+  mapnotes: records(ArchiveMapNoteSchema),
   assets: records(ArchiveAssetSchema),
   images: records(ArchiveImageSchema),
 } as const;
@@ -156,18 +170,31 @@ export type ArchiveImage = Static<typeof ArchiveImageSchema>;
 export type ArchiveAsset = Static<typeof ArchiveAssetSchema>;
 export type ArchiveScene = Static<typeof ArchiveSceneSchema>;
 export type ArchiveToken = Static<typeof ArchiveTokenSchema>;
+export type ArchiveMapNote = Static<typeof ArchiveMapNoteSchema>;
 
 /** The data files of an archive, parsed but not yet checked: what `migrateFormat` upgrades. */
 export type ArchiveData = { manifest: Record<string, unknown> } & Partial<Record<ArchiveDataName, unknown>>;
 
+/** The data files a format-1 archive lacks, which `migrateFormat` adds (UXR-08). */
+export const ADDED_IN_FORMAT_2: readonly ArchiveDataName[] = ['mapnotes'];
+
 /**
  * Upgrades an archive of format `version` to the current format, before anything is checked against the schemas
- * above. Format 1 is the current one, so it changes nothing; a later format adds its step here, so an older
- * archive still imports. Never called for a version newer than ARCHIVE_FORMAT_VERSION, which is refused.
+ * above, so an older archive still imports. Format 1 to 2 (UXR-08): a campaign had no map notes, so it gains an empty
+ * data/mapnotes.json and a count of none. Never called for a version newer than ARCHIVE_FORMAT_VERSION, which is
+ * refused.
  */
 export function migrateFormat(version: number, data: ArchiveData): ArchiveData {
   if (version > ARCHIVE_FORMAT_VERSION) throw new Error(`format ${version} is newer than ${ARCHIVE_FORMAT_VERSION}`);
-  return data;
+  if (version >= 2) return data;
+  const counts = data.manifest.counts;
+  const manifest =
+    typeof counts === 'object' && counts !== null && !Array.isArray(counts)
+      ? { ...data.manifest, counts: { ...counts, map_notes: 0 } }
+      : data.manifest;
+  const upgraded: ArchiveData = { ...data, manifest };
+  if (data.manifest.kind === 'campaign') upgraded.mapnotes = [];
+  return upgraded;
 }
 
 // What an import answers once it stored everything (`08` §13): what it added and what it reused.

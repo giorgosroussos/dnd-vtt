@@ -67,6 +67,7 @@ import { labelOffset, rulerForKey, sameSquare, squareAt, squareCentre, type Rule
 import { FogLayer } from './FogLayer.js';
 import { PingLayer, type PingPoint } from './PingLayer.js';
 import { TokenLayer, type TokenControls } from './TokenLayer.js';
+import { MAP_NOTE_RADIUS_PX, MapNoteLayer, type CanvasMapNote, type MapNoteControls } from './MapNoteLayer.js';
 import { bounded, compose, type TouchView } from '../player/touchView.js';
 import { useTouchGestures } from '../player/useTouchGestures.js';
 import {
@@ -268,6 +269,8 @@ interface Drag {
 /** A token being placed: a click on the map, or Enter, says where (specs/05-assets-and-images.md §5). */
 export interface Placing {
   size: TokenSize;
+  /** What is placed: a token (the default), or a map note (UXR-08), whose point is the square's centre. */
+  kind?: 'token' | 'note' | undefined;
   /** Where the token goes, in grid units, snapped unless Alt was held. */
   onPlace: (at: Point) => void;
   onCancel: () => void;
@@ -323,6 +326,8 @@ export interface CanvasRail {
   onSelect: () => void;
   /** Add token: opens the picker; absent while tokens cannot be added. */
   onAddToken?: (() => void) | undefined;
+  /** Add note (UXR-08): places a map note by a click on the map; absent while none can be placed. */
+  onAddNote?: (() => void) | undefined;
   /** Undo and Redo, in live mode. */
   history?: { canUndo: boolean; canRedo: boolean; onUndo: () => void; onRedo: () => void } | undefined;
 }
@@ -445,6 +450,11 @@ export function MapCanvas({
   rail,
   status,
   popover,
+  preview,
+  mapNotes = [],
+  mapNoteControls,
+  notePopover,
+  notePreview,
   ref,
   labelScale = 1,
   camera: playerCamera,
@@ -477,6 +487,16 @@ export function MapCanvas({
   status?: ReactNode;
   /** DM view only: the selected token's popover, placed beside it (UIX-01). */
   popover?: ((anchor: TokenAnchor) => ReactNode) | undefined;
+  /** DM view only: the read-only preview of a token the mouse rests on, placed beside it (UXR-06). */
+  preview?: ((tokenId: string, anchor: TokenAnchor) => ReactNode) | undefined;
+  /** DM view only: the notes pinned on the map (UXR-08), drawn as icons; the player mode never draws them. */
+  mapNotes?: readonly CanvasMapNote[];
+  /** DM view only: opening, moving and previewing map notes. */
+  mapNoteControls?: MapNoteControls | undefined;
+  /** DM view only: the open map note's popover, placed beside its icon (UXR-08). */
+  notePopover?: ((anchor: TokenAnchor) => ReactNode) | undefined;
+  /** DM view only: the read-only preview of a map note the mouse rests on (UXR-08). */
+  notePreview?: ((noteId: string, anchor: TokenAnchor) => ReactNode) | undefined;
   /** DM view only: what the scene's TV camera buttons and token list ask of the canvas. */
   ref?: Ref<CanvasHandle> | undefined;
   /** Player view only: how much larger than the DM's labels and badges are drawn, to read across a room. */
@@ -544,6 +564,9 @@ export function MapCanvas({
         }
       : undefined,
   );
+  // The camera as a key: whatever moves the map under the pointer hides a preview (UXR-06,
+  // specs/08-ux-journeys.md §14).
+  const view = `${camera.x},${camera.y},${camera.scale}`;
   // From the latest camera, not this render's: wheel and drag events arrive outside React's
   // synchronous updates, and several can land before the next render (D-093).
   const changeCamera = (change: (current: Camera) => Camera) =>
@@ -591,9 +614,28 @@ export function MapCanvas({
   const [spaceHeld, setSpaceHeld] = useState(false);
   const panning = dm && spaceHeld;
   // Tokens are selected and dragged only when nothing else uses the pointer.
+  const selecting = dm && !measuring && !placingNow && !rulerOn && !pingOn && !fogOn && !panning;
+  // The token the mouse rests on, previewed only while tokens may be selected (UXR-06).
+  const [previewId, setPreviewId] = useState<string>();
+  const previewing = selecting && tokenControls !== undefined && preview !== undefined;
+  if (!previewing && previewId !== undefined) setPreviewId(undefined);
   const controls =
-    dm && !measuring && !placingNow && !rulerOn && !pingOn && !fogOn && !panning ? tokenControls : undefined;
+    selecting && tokenControls
+      ? previewing
+        ? { ...tokenControls, onPreview: setPreviewId }
+        : tokenControls
+      : undefined;
   const selected = controls && tokens.find((token) => token.id === controls.selectedId);
+  // Map notes (UXR-08) are clicked and dragged under the same conditions as tokens, and previewed likewise.
+  const [notePreviewId, setNotePreviewId] = useState<string>();
+  const notePreviewing = selecting && mapNoteControls !== undefined && notePreview !== undefined;
+  if (!notePreviewing && notePreviewId !== undefined) setNotePreviewId(undefined);
+  const noteControls =
+    dm && selecting && mapNoteControls
+      ? notePreviewing
+        ? { ...mapNoteControls, onPreview: setNotePreviewId }
+        : mapNoteControls
+      : undefined;
   // The TV frame, in world pixels: the one being dragged, or the player camera widened to the TV's shape.
   const [frameDraft, setFrameDraft] = useState<WorldBox>();
   const frameAnchor = useRef<{ x: number; y: number }>(undefined);
@@ -877,6 +919,12 @@ export function MapCanvas({
       setManual(undefined);
       return;
     }
+    // Escape closes an open map note's popover (UXR-08).
+    if (event.key === 'Escape' && mapNoteControls?.openId !== undefined) {
+      event.preventDefault();
+      mapNoteControls.onClosePopover();
+      return;
+    }
     if (controls && selected) {
       const arrow = ARROWS[event.key];
       // A group moves together, each token by its own step (UXR-02).
@@ -1082,6 +1130,7 @@ export function MapCanvas({
       if (at) place.onPlace(placeAt(place, at, event.evt.altKey));
       return;
     }
+    if (mapNoteControls?.openId !== undefined) mapNoteControls.onClosePopover();
     if (controls?.selectedId !== undefined) controls.onDeselect();
   }
 
@@ -1191,7 +1240,9 @@ export function MapCanvas({
   // A pan, by Space or by dragging the empty map, closes the selected token's popover, and it stays closed
   // when the pan ends (D-156). A token or the TV frame being dragged bubbles up here too, and is not a pan.
   function onPanStart(event: Konva.KonvaEventObject<DragEvent>) {
-    if (event.target === event.target.getStage()) tokenControls?.onClosePopover();
+    if (event.target !== event.target.getStage()) return;
+    tokenControls?.onClosePopover();
+    mapNoteControls?.onClosePopover();
   }
 
   const panHandlers = { onWheel, onDragMove: onDrag, onDragEnd: onDrag };
@@ -1318,7 +1369,11 @@ export function MapCanvas({
           mode={mode}
           controls={controls}
           labelScale={dm ? 1 : labelScale}
+          view={view}
         />
+      ) : null}
+      {dm && frame && mapNotes.length > 0 ? (
+        <MapNoteLayer notes={mapNotes} frame={frame} scale={camera.scale} controls={noteControls} view={view} />
       ) : null}
       {tv && shownFrame ? (
         <Layer name="tv-frame-layer" listening={frameMovable} opacity={tv.offline ? 0.5 : 1}>
@@ -1581,6 +1636,24 @@ export function MapCanvas({
       )
     : undefined;
 
+  // Where each map note's icon is drawn, in screen pixels from the viewport's corner, for the end-to-end tests; the
+  // DM's viewport only (UXR-08).
+  const noteBoxes =
+    dm && frame
+      ? JSON.stringify(
+          mapNotes.map((note) => {
+            const at = toWorld(frame, note);
+            return {
+              id: note.id,
+              x: note.x,
+              y: note.y,
+              left: camera.x + at.x * camera.scale,
+              top: camera.y + at.y * camera.scale,
+            };
+          }),
+        )
+      : undefined;
+
   if (!dm) {
     return (
       <div
@@ -1597,22 +1670,40 @@ export function MapCanvas({
       </div>
     );
   }
-  const selectedAnchor =
-    popover && selected && frame
-      ? (() => {
-          const at = toWorld(frame, selected);
-          return {
-            left: camera.x + at.x * camera.scale,
-            top: camera.y + at.y * camera.scale,
-            side: footprint(selected.size) * frame.square * camera.scale,
-            viewport,
-          };
-        })()
+  const anchorOf = (token: CanvasToken | undefined): TokenAnchor | undefined => {
+    if (!token || !frame) return undefined;
+    const at = toWorld(frame, token);
+    return {
+      left: camera.x + at.x * camera.scale,
+      top: camera.y + at.y * camera.scale,
+      side: footprint(token.size) * frame.square * camera.scale,
+      viewport,
+    };
+  };
+  const selectedAnchor = popover ? anchorOf(selected) : undefined;
+  // A map note's anchor: its icon, around its point (UXR-08).
+  const noteAnchorOf = (note: CanvasMapNote | undefined): TokenAnchor | undefined => {
+    if (!note || !frame) return undefined;
+    const at = toWorld(frame, note);
+    return {
+      left: camera.x + at.x * camera.scale - MAP_NOTE_RADIUS_PX,
+      top: camera.y + at.y * camera.scale - MAP_NOTE_RADIUS_PX,
+      side: MAP_NOTE_RADIUS_PX * 2,
+      viewport,
+    };
+  };
+  const openNoteAnchor =
+    notePopover && noteControls ? noteAnchorOf(mapNotes.find((note) => note.id === noteControls.openId)) : undefined;
+  const notePreviewAnchor =
+    notePreviewing && notePreviewId !== undefined
+      ? noteAnchorOf(mapNotes.find((note) => note.id === notePreviewId))
       : undefined;
+  const previewAnchor =
+    previewing && previewId !== undefined ? anchorOf(tokens.find((token) => token.id === previewId)) : undefined;
   const help = measuring
     ? t('canvas.helpMeasure')
     : placingNow
-      ? t('canvas.helpPlace')
+      ? t(place.kind === 'note' ? 'canvas.helpPlaceNote' : 'canvas.helpPlace')
       : rulerOn
         ? t(tv ? 'canvas.helpRulerLive' : 'canvas.helpRuler')
         : pingOn
@@ -1657,6 +1748,7 @@ export function MapCanvas({
         {...dropHandlers}
         data-dropping={dropping ? JSON.stringify(dropping.at) : undefined}
         data-tokens={tokenBoxes}
+        data-map-notes={noteBoxes}
       >
         {stage}
       </div>
@@ -1721,11 +1813,22 @@ export function MapCanvas({
             className="eg-rail__tool"
             data-tool="add-token"
             aria-label={t('canvas.toolAddToken')}
-            aria-pressed={placingNow}
+            aria-pressed={placingNow && place.kind !== 'note'}
             aria-disabled={!rail.onAddToken || undefined}
             onClick={() => rail.onAddToken?.()}
           >
             <Icon name="addToken" size={20} />
+          </button>
+          <button
+            type="button"
+            className="eg-rail__tool"
+            data-tool="add-note"
+            aria-label={t('canvas.toolAddNote')}
+            aria-pressed={placingNow && place.kind === 'note'}
+            aria-disabled={!rail.onAddNote || undefined}
+            onClick={() => rail.onAddNote?.()}
+          >
+            <Icon name="note" size={20} />
           </button>
           <span className="eg-rail__divider" aria-hidden="true" />
           <button
@@ -1780,6 +1883,11 @@ export function MapCanvas({
         </button>
       </div>
       {selectedAnchor && popover ? popover(selectedAnchor) : null}
+      {previewAnchor && previewId !== undefined && preview ? preview(previewId, previewAnchor) : null}
+      {openNoteAnchor && notePopover ? notePopover(openNoteAnchor) : null}
+      {notePreviewAnchor && notePreviewId !== undefined && notePreview
+        ? notePreview(notePreviewId, notePreviewAnchor)
+        : null}
     </div>
   );
 }

@@ -50,6 +50,8 @@ export const ERROR_CODES = [
   'import_invalid',
   // An image failing the checks of an upload, or whose bytes are not the sha256 it is named by.
   'import_image_refused',
+  // UXR-08 (specs/04-live-sync.md §16): a map note removed only if empty (`if_empty`) holds text, so it was kept.
+  'map_note_not_empty',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

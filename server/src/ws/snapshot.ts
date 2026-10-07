@@ -16,6 +16,7 @@ import { readScene } from '../db/campaigns.js';
 import { readEncounter } from '../db/encounters.js';
 import { readFog, sightOf } from '../db/fog.js';
 import { readImage } from '../db/images.js';
+import { listMapNotes } from '../db/mapNotes.js';
 import { readSettings } from '../db/settings.js';
 import { listTokens } from '../db/tokens.js';
 import type { PlayerCameraState, ScreenRegistry } from '../domain/camera.js';
@@ -76,6 +77,8 @@ function readDm(db: Database.Database, memory: LiveMemory): DmSnapshot {
       history: memory.history.stateFor(live.scene.id),
       fog: readFog(db, live.scene.id),
       encounter: readEncounter(db, live.scene.id),
+      // The DM's notes pinned on the map (UXR-08); readPlayers never reads them.
+      map_notes: listMapNotes(db, live.scene.id) ?? [],
     },
   };
 }

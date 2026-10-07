@@ -8,6 +8,8 @@ import type {
   EventEnvelope,
   HistoryChangedPayload,
   FogMask,
+  MapNote,
+  MapNotesUpdatedPayload,
   NotesUpdatedPayload,
   FogUpdatedPayload,
   RulerShownPayload,
@@ -27,7 +29,8 @@ import type {
 // sees what the TV sees, another DM browser's measurement included. `history.changed` (UIX-01) replaces
 // whether undo and redo would change anything, which greys the rail's Undo and Redo. `fog.updated`
 // (TBL-04) replaces the scene's painted fog. `encounter.updated` (TBL-06) replaces the scene's encounter.
-// `notes.updated` (DMT-04) replaces the scene's notes, or one of its tokens'.
+// `notes.updated` (DMT-04) replaces the scene's notes, or one of its tokens'. `mapNotes.updated` (UXR-08) replaces
+// the scene's map notes, all of them.
 
 /** The live scene, or null while nothing is live. */
 export type DmScene = DmLiveScene | null;
@@ -39,11 +42,25 @@ const stacked = (tokens: readonly SceneToken[]): SceneToken[] =>
 const masked = (fog: unknown): FogMask | undefined =>
   isFogMask(fog) ? fog.map((row) => ({ y: row.y, runs: [...row.runs] })) : undefined;
 
+/** The map notes, copied, or undefined when they are not a list of map notes. */
+const mapNotesOf = (notes: unknown): MapNote[] | undefined =>
+  Array.isArray(notes) &&
+  notes.every(
+    (note: Partial<MapNote> | null) =>
+      typeof note?.id === 'string' &&
+      typeof note.x === 'number' &&
+      typeof note.y === 'number' &&
+      typeof note.notes === 'string',
+  )
+    ? (notes as MapNote[]).map((note) => ({ ...note }))
+    : undefined;
+
 export function fromDmSnapshot(snapshot: DmSnapshot): DmScene {
   if (snapshot.scene === null) return null;
   const { encounter } = snapshot.scene;
   return {
     ...snapshot.scene,
+    map_notes: mapNotesOf(snapshot.scene.map_notes) ?? [],
     tokens: stacked(snapshot.scene.tokens),
     fog: masked(snapshot.scene.fog) ?? [],
     encounter: isEncounter(encounter) ? structuredClone(encounter) : null,
@@ -107,6 +124,13 @@ export function applyDmEvent(scene: DmScene, event: EventEnvelope): DmScene {
       if (token_id === null) return { ...scene, scene: { ...scene.scene, notes } };
       if (!scene.tokens.some((each) => each.id === token_id)) return scene;
       return { ...scene, tokens: scene.tokens.map((each) => (each.id === token_id ? { ...each, notes } : each)) };
+    }
+    case 'mapNotes.updated': {
+      const { scene_id, map_notes } = event.payload as unknown as Partial<MapNotesUpdatedPayload>;
+      const notes = mapNotesOf(map_notes);
+      // A malformed event, or one of another scene, is skipped: the map notes stay as they were.
+      if (!notes || scene_id !== scene.scene.id) return scene;
+      return { ...scene, map_notes: notes };
     }
     default:
       return scene;

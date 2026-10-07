@@ -8,7 +8,8 @@ import { images, installCanvas2d, installImageLoading, installResizeObserver } f
 import { settle } from '../ui/testing/fakeServer.js';
 import { render, type Rendered } from '../ui/testing/render.js';
 import { CELL_PX } from './geometry.js';
-import { MapCanvas, type CanvasTokenControls, type Placing } from './MapCanvas.js';
+import { MapCanvas, type CanvasTokenControls, type Placing, type TokenAnchor } from './MapCanvas.js';
+import { PREVIEW_DELAY_MS } from './hoverIntent.js';
 import { THEME } from '../ui/theme.js';
 import {
   CATEGORY_COLOURS,
@@ -820,5 +821,49 @@ describe('the notes badge (DMT-04, specs/08-ux-journeys.md §13)', () => {
     const { stage } = await draw({ grid: GRID, map: MAP, mode: 'player', tokens: [NOTED, GOBLIN] });
     expect(groups(stage)).toHaveLength(2);
     expect(stage.find('.token-note-marker')).toHaveLength(0);
+  });
+});
+
+describe('the preview of a token the mouse rests on (UXR-06, specs/08-ux-journeys.md §14)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const rest = (stage: Konva.Stage, id: string, at: number) =>
+    act(() => {
+      const group = groupOf(stage, id)!;
+      const evt = new MouseEvent('pointermove', { clientX: at, clientY: at, buttons: 0 });
+      Object.defineProperty(evt, 'pointerType', { value: 'mouse' });
+      group.fire('pointermove', { target: group, evt }, true);
+      vi.advanceTimersByTime(PREVIEW_DELAY_MS);
+    });
+  const preview = (id: string, anchor: TokenAnchor) =>
+    createElement('aside', { className: 'test-preview', 'data-id': id, 'data-left': anchor.left });
+  const shown = (view: HTMLElement) => view.querySelector('.test-preview');
+
+  it('goes with a token deleted while previewed, and does not come back with it until the mouse rests again (review)', async () => {
+    const props: Props = { grid: GRID, map: MAP, mode: 'dm', tokens: [GOBLIN], tokenControls: controls(), preview };
+    const { view, stage } = await draw(props);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    rest(stage, GOBLIN.id, 200);
+    expect(shown(view)!.getAttribute('data-id')).toBe(GOBLIN.id);
+    act(() => rendered!.rerender(createElement(MapCanvas, { ...props, tokens: [] })));
+    expect(shown(view)).toBeNull();
+    // Undo puts it back with the same id: no preview unasked, and a rest on it asks again.
+    act(() => rendered!.rerender(createElement(MapCanvas, props)));
+    act(() => {
+      vi.advanceTimersByTime(PREVIEW_DELAY_MS);
+    });
+    expect(shown(view)).toBeNull();
+    rest(Konva.stages.at(-1)!, GOBLIN.id, 200);
+    expect(shown(view)!.getAttribute('data-id')).toBe(GOBLIN.id);
+  });
+
+  it('shows nothing in player mode, whatever rests on a token (review)', async () => {
+    const { view, stage } = await draw({ grid: GRID, map: MAP, mode: 'player', tokens: [GOBLIN], preview });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    rest(stage, GOBLIN.id, 200);
+    expect(shown(view)).toBeNull();
+    expect(view.querySelector('.eg-preview, [role="tooltip"]')).toBeNull();
   });
 });

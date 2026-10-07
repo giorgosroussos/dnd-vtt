@@ -13,6 +13,7 @@ import {
 } from '@emberglass/shared';
 import { sightOf } from './fog.js';
 import { deleteUnreferencedImages, PRESET_COLUMNS, toPreset, updateGridPreset, type PresetRow } from './images.js';
+import { copyMapNotes } from './mapNotes.js';
 import { listTokens } from './tokens.js';
 
 // Campaigns, sessions and scenes in SQLite (specs/03-domain-model.md §2, §3, §5,
@@ -453,8 +454,8 @@ export function reorderScenes(db: Database.Database, sessionId: string, ids: rea
 
 /**
  * A copy of the scene, right after it in its session, with its own copy of
- * every token under new identifiers, their hit points, armour class and notes included, and of its fog and its
- * notes (specs/03-domain-model.md §7). The grid is
+ * every token under new identifiers, their hit points, armour class and notes included, and of its fog, its
+ * notes and its map notes (specs/03-domain-model.md §7). The grid is
  * the scene's own, not its image's preset, and so are the token numbers issued (Q-091).
  */
 export function duplicateScene(db: Database.Database, id: string, name: string): Scene | undefined {
@@ -504,11 +505,12 @@ export function duplicateScene(db: Database.Database, id: string, name: string):
         token.notes,
       );
     }
-    // And its own copy of its painted fog (TBL-04) and of its notes (DMT-04).
+    // And its own copy of its painted fog (TBL-04) and of its notes (DMT-04), and of its map notes (UXR-08).
     db.prepare('UPDATE scene SET (fog, notes) = (SELECT fog, notes FROM scene WHERE id = ?) WHERE id = ?').run(
       id,
       copyId,
     );
+    copyMapNotes(db, id, copyId);
     return true;
   })();
   return done ? readScene(db, copyId) : undefined;

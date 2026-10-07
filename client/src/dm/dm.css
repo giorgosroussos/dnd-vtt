@@ -1251,8 +1251,9 @@
   background: var(--color-raised);
 }
 
-/* The selected token's popover (UIX-01). */
-.eg-popover {
+/* The selected token's popover (UIX-01), and a map note's (UXR-08), which is styled the same. */
+.eg-popover,
+.eg-note-popover {
   position: absolute;
   z-index: 20;
   display: flex;
@@ -1263,6 +1264,100 @@
   border: 1px solid var(--color-border);
   background: var(--color-raised);
   box-shadow: 0 12px 32px rgb(0 0 0 / 55%);
+}
+
+/* The preview of a token the mouse rests on (UXR-06): read-only, never in the pointer's way. */
+.eg-preview {
+  position: absolute;
+  z-index: 19;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 10px 12px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  background: var(--color-raised);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 55%);
+  pointer-events: none;
+  animation: eg-preview-in 120ms ease-out;
+}
+
+@keyframes eg-preview-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .eg-preview {
+    animation: none;
+  }
+}
+
+.eg-preview__name {
+  font-family: var(--font-title);
+  font-weight: 700;
+  font-size: var(--font-size-row);
+  overflow-wrap: anywhere;
+}
+
+.eg-preview__stats {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.eg-preview__hp,
+.eg-preview__ac {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.eg-preview__ac {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.eg-preview__conditions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.eg-preview__condition {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  font-size: var(--font-size-xs);
+}
+
+.eg-preview__notes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-divider);
+}
+
+/* The whole note: the preview is where the DM reads it at a glance. */
+.eg-preview__text {
+  font-size: var(--font-size-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Taller than the canvas (a very long note): the end fades out rather than being cut on a line. */
+.eg-preview--clipped {
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, black calc(100% - 32px), transparent);
 }
 
 .eg-popover__head {
@@ -2119,8 +2214,13 @@ textarea.eg-field__input {
     inset 0 0 0 1px var(--color-selected-edge);
 }
 
-.eg-initiative__row--drop {
-  box-shadow: inset 0 3px 0 var(--color-focus);
+/* The dragged row's slot, where it will land: the others make room for it as it moves. */
+.eg-initiative__row--dragging,
+.eg-initiative__row--dragging:hover {
+  opacity: 0.45;
+  background: var(--color-hover);
+  outline: 1px dashed var(--color-focus);
+  outline-offset: -1px;
 }
 
 .eg-initiative__row--passed .eg-initiative__name {
@@ -2402,11 +2502,13 @@ textarea.eg-field__input {
 
 .eg-hp__edit {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  /* minmax(0, …): a column never widens to its input's default size, so the three fit the popover. */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
 }
 
 .eg-hp__edit-field {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -2415,7 +2517,9 @@ textarea.eg-field__input {
 }
 
 .eg-hp__edit-field input {
+  width: 100%;
   min-width: 0;
+  box-sizing: border-box;
   min-height: 28px;
   padding: 2px 6px;
   border: 1px solid var(--color-border);
@@ -2612,4 +2716,19 @@ textarea.eg-field__input {
 
 .eg-note-button:hover {
   background: var(--color-hover);
+}
+
+/* A map note's popover (UXR-08): Delete, asked first in place. */
+.eg-note-popover__actions {
+  display: flex;
+  gap: 6px;
+}
+
+.eg-note-popover__confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-divider);
+  font-size: var(--font-size-sm);
 }

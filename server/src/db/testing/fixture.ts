@@ -22,9 +22,10 @@ export const TABLES = ['image', 'asset', 'asset_tag', 'campaign', 'session', 'sc
 export type Table = (typeof TABLES)[number];
 /**
  * Every table of the latest schema: the fixture's, and those later migrations add. Migration 0005 added
- * `region` (TBL-03) and 0006 dropped it (TBL-04, D-154); 0008 adds `encounter` (TBL-06, D-160).
+ * `region` (TBL-03) and 0006 dropped it (TBL-04, D-154); 0008 adds `encounter` (TBL-06, D-160) and 0014 `map_note`
+ * (UXR-08).
  */
-export const SCHEMA_TABLES = [...TABLES, 'encounter'] as const;
+export const SCHEMA_TABLES = [...TABLES, 'encounter', 'map_note'] as const;
 export type SchemaTable = (typeof SCHEMA_TABLES)[number];
 
 export function countRows(db: Database.Database): Record<Table, number> {

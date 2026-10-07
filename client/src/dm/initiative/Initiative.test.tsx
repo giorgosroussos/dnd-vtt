@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, createElement } from 'react';
 import Konva from 'konva';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Scene, SceneToken } from '@emberglass/shared';
 import { t } from '../../ui/messages.js';
 import { installCanvas2d, installImageLoading, installResizeObserver } from '../../ui/testing/canvas2d.js';
@@ -18,6 +18,7 @@ import {
 } from '../../ui/testing/fakeServer.js';
 import { render, type Rendered } from '../../ui/testing/render.js';
 import { Workspace } from '../Workspace.js';
+import { WHEEL_REST_MS } from './wheel.js';
 
 // The Initiative tab of the DM view (TBL-06, DMT-02, specs/08-ux-journeys.md §12, specs/04-live-sync.md §14,
 // Q-111, Q-117, Q-118), against the scripted server, which applies the same encounter rules as the server
@@ -29,6 +30,7 @@ let cave: Scene;
 let hall: Scene;
 let tamsin: SceneToken;
 let goblin: SceneToken;
+let wren: SceneToken;
 
 beforeEach(() => {
   installCanvas2d();
@@ -48,7 +50,7 @@ beforeEach(() => {
     x: 1,
     y: 1,
   });
-  server.addToken(cave.id, server.addAsset({ name: 'Wren', category: 'pc', default_hidden: false }), {
+  wren = server.addToken(cave.id, server.addAsset({ name: 'Wren', category: 'pc', default_hidden: false }), {
     x: 2,
     y: 1,
   });
@@ -115,6 +117,38 @@ function key(target: EventTarget, init: KeyboardEventInit) {
   });
 }
 
+/** One notch of the mouse wheel over `input`, in lines as Firefox reports it. */
+function wheelOn(input: HTMLInputElement, deltaY: number) {
+  act(() => {
+    input.dispatchEvent(new WheelEvent('wheel', { deltaY, deltaMode: 1, bubbles: true, cancelable: true }));
+  });
+}
+
+/** Turns the wheel over `input` with the timers faked, does `then`, and lets the wheel rest. */
+async function wheelThen(input: HTMLInputElement, deltas: readonly number[], then: () => void) {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    for (const deltaY of deltas) wheelOn(input, deltaY);
+    then();
+    act(() => {
+      vi.advanceTimersByTime(WHEEL_REST_MS * 2);
+    });
+  } finally {
+    vi.useRealTimers();
+  }
+  await settle();
+}
+
+const dataTransfer = { effectAllowed: '', dropEffect: '', setData: () => {}, getData: () => '' };
+/** A drag-and-drop event on `target`, as the browser sends it. */
+function dragEvent(target: HTMLElement, name: string) {
+  act(() => {
+    const event = new Event(name, { bubbles: true, cancelable: true });
+    Object.assign(event, { dataTransfer });
+    target.dispatchEvent(event);
+  });
+}
+
 async function commit(input: HTMLInputElement, value: string) {
   await type(input, value);
   key(input, { key: 'Enter' });
@@ -122,6 +156,136 @@ async function commit(input: HTMLInputElement, value: string) {
 }
 
 describe('the Initiative tab (08 §12)', () => {
+  it('steps a number with the mouse wheel, shown at once and sent once the wheel rests, then sorted (Q-127)', async () => {
+    const view = await open(hall);
+    await click(view.querySelector(`[data-scene="${cave.id}"] .eg-scenes__select`));
+    await click(button(view, t('initiative.start')));
+    const wheel = (name: string, deltaY: number) => {
+      const event = new WheelEvent('wheel', { deltaY, deltaMode: 1, bubbles: true, cancelable: true });
+      act(() => {
+        field(view, name).dispatchEvent(event);
+      });
+      return event;
+    };
+    const sentBefore = commands().length;
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      // An empty field starts at 10; three notches up make 13, the panel left unscrolled.
+      expect(wheel('Goblin', -3).defaultPrevented).toBe(true);
+      wheel('Goblin', -3);
+      wheel('Goblin', -3);
+      wheel('Goblin', 3);
+      wheel('Goblin', -3);
+      expect(field(view, 'Goblin').value).toBe('12');
+      expect(commands()).toHaveLength(sentBefore);
+      act(() => {
+        vi.advanceTimersByTime(WHEEL_REST_MS);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    await settle();
+    const sent = commands().slice(sentBefore);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ type: 'encounter.setInitiative', payload: { initiative: 12 } });
+    expect(rows(view)[0]).toBe('Goblin');
+    // Ctrl and the wheel stays the browser's zoom.
+    const zoom = new WheelEvent('wheel', { deltaY: -3, deltaMode: 1, ctrlKey: true, bubbles: true, cancelable: true });
+    field(view, 'Wren').dispatchEvent(zoom);
+    expect(zoom.defaultPrevented).toBe(false);
+    expect(field(view, 'Wren').value).toBe('');
+  });
+
+  it('sends a wheeled number once when the field loses focus or the pointer leaves, and none after Escape', async () => {
+    const view = await open();
+    await click(button(view, t('initiative.start')));
+    const sentOf = (from: number) =>
+      commands()
+        .slice(from)
+        .filter((command) => command.type === 'encounter.setInitiative');
+    // Blur: the wheel's number and the field's commit are one command.
+    let from = commands().length;
+    const goblinField = field(view, 'Goblin');
+    const entryOf = (token: SceneToken) => encounter().entries.find((entry) => entry.token_id === token.id)!.id;
+    act(() => goblinField.focus());
+    await wheelThen(goblinField, [-1, -1], () => {
+      act(() => goblinField.blur());
+    });
+    expect(sentOf(from)).toEqual([
+      { type: 'encounter.setInitiative', payload: { scene_id: cave.id, entry_id: entryOf(goblin), initiative: 11 } },
+    ]);
+    // The pointer leaving; an empty field's first notch makes 10.
+    from = commands().length;
+    const wrenField = field(view, 'Wren');
+    await wheelThen(wrenField, [1, 1], () => {
+      act(() => {
+        wrenField.dispatchEvent(new Event('pointerleave'));
+      });
+    });
+    expect(sentOf(from)).toHaveLength(1);
+    expect(sentOf(from)[0]!.payload).toMatchObject({ initiative: 9 });
+    // Escape puts the stored number back, and the steps not yet sent are never sent.
+    from = commands().length;
+    const tamsinField = field(view, 'Tamsin');
+    await wheelThen(tamsinField, [-1, -1, -1], () => {
+      expect(tamsinField.value).toBe('12');
+      key(tamsinField, { key: 'Escape' });
+    });
+    expect(tamsinField.value).toBe('');
+    expect(sentOf(from)).toEqual([]);
+  });
+
+  it('keeps an entry added while a row is held, and sends it with the order dropped', async () => {
+    const view = await open();
+    await click(button(view, t('initiative.start')));
+    const [tamsinRow, , goblinRow] = [...view.querySelectorAll<HTMLElement>('.eg-initiative__row')];
+    dragEvent(goblinRow!, 'dragstart');
+    await settle();
+    dragEvent(tamsinRow!, 'dragover');
+    expect(rows(view)).toEqual(['Goblin', 'Tamsin', 'Wren']);
+    // A player character comes into view and is added while the goblin is still held.
+    const oren = server.addToken(cave.id, server.addAsset({ name: 'Oren', category: 'pc', default_hidden: false }), {
+      x: 3,
+      y: 3,
+    });
+    server.deliver('token.added', { token: structuredClone(oren), relabelled: [] });
+    await settle();
+    await click(button(offer(view)!, t('initiative.add')));
+    expect(rows(view)).toEqual(['Goblin', 'Tamsin', 'Wren', 'Oren']);
+    const from = commands().length;
+    dragEvent(goblinRow!, 'drop');
+    await settle();
+    const sent = commands()
+      .slice(from)
+      .filter((command) => command.type === 'encounter.reorder');
+    expect(sent).toHaveLength(1);
+    const dropped = [goblin, tamsin, wren, oren].map(
+      (token) => encounter().entries.find((entry) => entry.token_id === token.id)!.id,
+    );
+    expect(sent[0]!.payload).toMatchObject({ entry_ids: dropped });
+    // Applied: the server's order is the one dropped.
+    expect(encounter().entries.map((entry) => entry.id)).toEqual(dropped);
+    expect(rows(view)).toEqual(['Goblin', 'Tamsin', 'Wren', 'Oren']);
+  });
+
+  it('puts the order back when the server refuses the one dropped', async () => {
+    const view = await open();
+    await click(button(view, t('initiative.start')));
+    server.beforeCommand = (command) =>
+      command.type === 'encounter.reorder' ? { error: { code: 'order_mismatch', message: 'test' } } : undefined;
+    const [tamsinRow, , goblinRow] = [...view.querySelectorAll<HTMLElement>('.eg-initiative__row')];
+    dragEvent(goblinRow!, 'dragstart');
+    await settle();
+    dragEvent(tamsinRow!, 'dragover');
+    dragEvent(goblinRow!, 'drop');
+    // Shown as dropped until the server answers, then as it was.
+    expect(rows(view)).toEqual(['Goblin', 'Tamsin', 'Wren']);
+    await settle();
+    expect(commands().filter((command) => command.type === 'encounter.reorder')).toHaveLength(1);
+    expect(rows(view)).toEqual(['Tamsin', 'Wren', 'Goblin']);
+    server.beforeCommand = undefined;
+  });
+
   it('asks for the live scene, and starts combat from the visible player characters and monsters', async () => {
     const view = await open(hall);
     expect(view.textContent).toContain(t('initiative.notLive'));
@@ -156,11 +320,29 @@ describe('the Initiative tab (08 §12)', () => {
         Object.assign(event, { dataTransfer: data });
         target.dispatchEvent(event);
       });
+    // Dragged over Wren, the goblin takes its place at once, its slot marked, and Wren makes room; nothing is sent
+    // until the drop, and a drag that ends outside the list puts the order back.
+    const sentBefore = commands().length;
+    drag(goblinRow!, 'dragstart');
+    await settle();
+    drag(wrenRow!, 'dragover');
+    expect(rows(view)).toEqual(['Goblin', 'Wren', 'Tamsin']);
+    expect(goblinRow!.classList.contains('eg-initiative__row--dragging')).toBe(true);
+    expect(commands()).toHaveLength(sentBefore);
+    drag(goblinRow!, 'dragend');
+    expect(rows(view)).toEqual(['Wren', 'Goblin', 'Tamsin']);
+    expect(goblinRow!.classList.contains('eg-initiative__row--dragging')).toBe(false);
     drag(goblinRow!, 'dragstart');
     drag(wrenRow!, 'dragover');
-    drag(wrenRow!, 'drop');
+    // Dropped anywhere in the list, on its own slot included, the order shown is the one sent.
+    drag(goblinRow!, 'drop');
     await settle();
     expect(rows(view)).toEqual(['Goblin', 'Wren', 'Tamsin']);
+    expect(
+      commands()
+        .slice(sentBefore)
+        .filter((command) => command.type === 'encounter.reorder'),
+    ).toHaveLength(1);
     // Typing another number sorts again, and the tie keeps the dragged order.
     await commit(field(view, 'Tamsin'), '5');
     expect(rows(view)).toEqual(['Goblin', 'Wren', 'Tamsin']);

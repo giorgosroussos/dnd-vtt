@@ -37,3 +37,5 @@ Numbered SQL migrations, applied in order by `src/db/migrate.ts` before the serv
 `0012_notes.sql` adds `scene.notes` and `token.notes`, the DM's plain-text notes, empty on every existing scene and token, each at most 20,000 characters; additive (DMT-04, Q-114, D-186).
 
 `0013_settings_import_limit.sql` adds `settings.import_limit_bytes`, the import limit of `specs/09-operations.md` §9, 2 GB on every existing database; additive (DMT-05, Q-119).
+
+`0014_map_note.sql` adds `map_note`, the notes the DM pins at a point of a scene's map, each at most 20,000 characters, deleted with their scene; additive (UXR-08, Q-128).

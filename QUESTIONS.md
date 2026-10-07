@@ -148,6 +148,9 @@ Every card opens `Blocking` and is answered before the specification proceeds. `
 - Q-123 — One undo step for an action on a group of tokens — data — Resolved
 - Q-124 — Dragging a token from the library onto the map — ux — Resolved
 - Q-125 — The player view on phones, tablets and large screens — scope — Resolved
+- Q-126 — Clicking a token again, and previewing a token on hover — ux — Resolved
+- Q-127 — The initiative order dragged with the rows making room, numbers by the mouse wheel, and a TV strip of the turn and the next — ux — Resolved
+- Q-128 — Map notes: the DM's notes pinned at a point of the map — scope — Resolved
 
 ## Blocking
 
@@ -1581,3 +1584,39 @@ None.
 - Recommendation: A, as the owner asked; nothing hidden reaches a handheld, which receives exactly what the TV does.
 - Blocks: specification
 - Answer: A (2026-10-05; recommendation accepted)
+
+### Q-126 — Clicking a token again, and previewing a token on hover
+- Surface: ux
+- Source: The owner's brief of 2026-10-06 (more UI/UX refinements), asked in the session of that day.
+- Question: How should a click on a token whose popover is already open behave, and can the DM look a token up without opening its popover?
+- Options:
+  - A) A second click on the token whose popover is open closes it, the token staying selected; and the mouse resting on a token for about half a second shows a read-only preview beside it (name, visibility, hit points, armour class, conditions, the whole of its notes), which a pointer passing over tokens while preparing never triggers, and which leaving, pressing, zooming or another tool hides at once → effect on ux: the popover toggles like a switch and the essentials are a glance away.
+  - B) Only the toggle → effect on ux: looking a token up still opens its popover.
+  - C) The preview at once on hover, with no delay → effect on ux: cards flash up over the map whenever the pointer crosses a token.
+- Recommendation: A, as the owner asked; a delay of about half a second with a resting pointer: the rest test already keeps a sweeping pointer from triggering it, and the owner found a second too slow.
+- Blocks: specification
+- Answer: A (2026-10-06; recommendation accepted)
+
+### Q-127 — The initiative order dragged with the rows making room, numbers by the mouse wheel, and a TV strip of the turn and the next
+- Surface: ux
+- Source: The owner's brief of 2026-10-06 (more UI/UX refinements), asked in the session of that day.
+- Question: How should the initiative tracker take a drag and a number in the DM view, and how much of the order should the TV's strip show?
+- Options:
+  - A) While a row is dragged the other rows slide aside, so its slot shows where it will land before the drop; an initiative number can also be stepped by the mouse wheel over its field, sent when the wheel rests; the TV's strip shows only two cards, the turn and the next, replaced on every turn → effect on ux: a reorder is visible before it happens, numbers are set without typing, and the TV names who acts and who is up without listing the whole order.
+  - B) The DM-view changes only, the TV's strip unchanged → effect on ux: the TV keeps listing every visible entry.
+  - C) The TV's strip shows the turn alone → effect on ux: the next player does not see they are up.
+- Recommendation: A, as the owner asked; the players' projection unchanged, so the strip shows less without the server sending more or less.
+- Blocks: specification
+- Answer: A (2026-10-06; recommendation accepted)
+
+### Q-128 — Map notes: the DM's notes pinned at a point of the map
+- Surface: scope
+- Source: The owner's brief of 2026-10-06 (map notes), asked in the session of that day.
+- Question: Can the DM place notes on a scene's map, and how do they behave?
+- Options:
+  - A) Yes, on any scene, the live one included, DM-only: Add note (O) places one by a click; each is only a small icon of a constant size on the DM's map; a click opens its popover to read and edit it and a second click closes it; the mouse resting on it previews the whole text; a drag moves it, snapped to a square's centre; Delete in the popover, asked first; exported and imported with their campaign (archive format 2) → effect on scope: a new stored entity, routes, a DM-only event and an archive data file, filtered from players like every note.
+  - B) Prep only → effect on scope: the same, but placed, moved and deleted only on scenes that are not live.
+  - C) No map notes → effect on scope: none; scene and token notes only.
+- Recommendation: A, as the owner chose; the icon alone on the map, nothing beside it, as the owner asked.
+- Blocks: specification
+- Answer: A (2026-10-06; recommendation accepted)

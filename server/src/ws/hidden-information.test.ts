@@ -328,6 +328,53 @@ async function record(hidden: boolean): Promise<Recording> {
     const [token] = (await live.inject({ method: 'GET', url: `/api/scenes/${sceneB.id}/tokens` })).json<SceneToken[]>();
     expect(await notes(`/api/tokens/${token!.id}/notes`, 'Note B token: pays the toll')).toEqual([]);
   });
+  // Map notes (UXR-08, specs/04-live-sync.md §4, §16): placed, edited, moved and deleted over REST on the live scene,
+  // one beside the hidden boss, and one on a scene that is not live. The DM room hears `mapNotes.updated` for the live
+  // scene's; players hear nothing, and B's reach them not when B goes live.
+  const mapNote = async (method: 'POST' | 'PATCH' | 'DELETE', url: string, body?: object): Promise<string[]> => {
+    if (body && 'notes' in body) secrets.push(String(body.notes));
+    const response = await live.inject({ method, url, ...(body ? { payload: body } : {}) });
+    expect(response.statusCode, response.body).toBe(method === 'POST' ? 201 : method === 'DELETE' ? 204 : 200);
+    if (method !== 'DELETE') secrets.push(response.json<{ id: string }>().id);
+    return (await dm.settle()).map((event) => event.type);
+  };
+  let pinned = '';
+  await step(
+    'pin a map note beside the hidden boss, edit, move and delete it',
+    async () => {
+      const at = `/api/scenes/${sceneA.id}/map-notes`;
+      secrets.push('Map note A: the boss waits behind the curtain');
+      const response = await live.inject({
+        method: 'POST',
+        url: at,
+        payload: { x: boss!.x, y: boss!.y, notes: 'Map note A: the boss waits behind the curtain' },
+      });
+      expect(response.statusCode, response.body).toBe(201);
+      pinned = response.json<{ id: string }>().id;
+      secrets.push(pinned);
+      expect((await dm.settle()).map((event) => event.type)).toEqual(['mapNotes.updated']);
+      expect(await mapNote('PATCH', `/api/map-notes/${pinned}`, { notes: 'Map note A: he flees at half HP' })).toEqual([
+        'mapNotes.updated',
+      ]);
+      expect(await mapNote('PATCH', `/api/map-notes/${pinned}`, { x: 2, y: 2 })).toEqual(['mapNotes.updated']);
+      expect(await mapNote('DELETE', `/api/map-notes/${pinned}`)).toEqual(['mapNotes.updated']);
+    },
+    true,
+  );
+  await step('pin a map note on the live scene and leave it there', async () => {
+    expect(
+      await mapNote('POST', `/api/scenes/${sceneA.id}/map-notes`, { x: 1, y: 1, notes: 'Map note A: a draft' }),
+    ).toEqual(['mapNotes.updated']);
+  });
+  await step('pin a map note on a scene that is not live', async () => {
+    expect(
+      await mapNote('POST', `/api/scenes/${sceneB.id}/map-notes`, {
+        x: 3,
+        y: 3,
+        notes: 'Map note B: the ford is deep',
+      }),
+    ).toEqual([]);
+  });
   await step('activate B', () => send('scene.activate', { scene_id: sceneB.id }));
   await step('a second screen reports its viewport and the DM steers the TV on B', async () => {
     const second = await live.connect();
@@ -658,6 +705,15 @@ describe('what a player view receives across a live session (specs/10-testing-ac
       expect(eventsOf(name), name).toEqual(['scene.snapshot']);
     }
     expect(text).not.toContain('Note ');
+    // Map notes send players nothing at all, nor B's when B goes live (UXR-08).
+    for (const name of [
+      'pin a map note beside the hidden boss, edit, move and delete it',
+      'pin a map note on the live scene and leave it there',
+      'pin a map note on a scene that is not live',
+    ]) {
+      expect(eventsOf(name), name).toEqual(['scene.snapshot']);
+    }
+    for (const word of ['Map note', 'map_notes', 'mapNotes']) expect(text).not.toContain(word);
     expect(eventsOf('paint the vault')).toEqual(['fog.updated', 'scene.snapshot']);
     expect(eventsOf('place a lone sentry')).toEqual(['token.added', 'scene.snapshot']);
     expect(eventsOf('place a second sentry under the fog and delete it there')).toEqual(['scene.snapshot']);

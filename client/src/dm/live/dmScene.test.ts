@@ -36,6 +36,7 @@ const snapshot = (tokens: SceneToken[]): DmSnapshot => ({
     history: { can_undo: false, can_redo: false },
     fog: [],
     encounter: null,
+    map_notes: [],
   },
 });
 let version = 1;
@@ -150,5 +151,25 @@ describe('DM notes (DMT-04, specs/04-live-sync.md §3, §16)', () => {
       tokened,
     );
     expect(applyDmEvent(tokened, event('notes.updated', { scene_id: scene.id, token_id: null }))).toBe(tokened);
+  });
+});
+
+describe('map notes (UXR-08, specs/04-live-sync.md §3, §16)', () => {
+  it('starts from the snapshot’s map notes and replaces them from mapNotes.updated, skipping another scene’s and malformed ones', () => {
+    const pinned = { id: 'n1', scene_id: scene.id, x: 2.5, y: 3.5, notes: 'Pit trap.' };
+    const base = snapshot([]);
+    const live = fromDmSnapshot({ ...base, scene: { ...base.scene!, map_notes: [pinned] } });
+    expect(live?.map_notes).toEqual([pinned]);
+    expect(live?.map_notes[0]).not.toBe(pinned);
+    const moved = { ...pinned, x: 4.5 };
+    const added = { id: 'n2', scene_id: scene.id, x: 0.5, y: 0.5, notes: '' };
+    const next = applyDmEvent(live, event('mapNotes.updated', { scene_id: scene.id, map_notes: [moved, added] }));
+    expect(next?.map_notes).toEqual([moved, added]);
+    const other = '00000000-0000-4000-8000-000000000009';
+    expect(applyDmEvent(next, event('mapNotes.updated', { scene_id: other, map_notes: [] }))).toBe(next);
+    for (const map_notes of [undefined, 'none', [{ id: 'n3', x: 'east', y: 1, notes: '' }]]) {
+      expect(applyDmEvent(next, event('mapNotes.updated', { scene_id: scene.id, map_notes }))).toBe(next);
+    }
+    expect(applyDmEvent(next, event('mapNotes.updated', { scene_id: scene.id, map_notes: [] }))?.map_notes).toEqual([]);
   });
 });

@@ -11,6 +11,7 @@ import {
   type TokenMarker,
 } from '@emberglass/shared';
 import { t } from '../ui/messages.js';
+import { useHoverIntent } from './useHoverIntent.js';
 import { CANVAS_FONT, THEME } from '../ui/theme.js';
 import {
   dropPosition,
@@ -34,7 +35,8 @@ import {
 // visible one: a dashed blue ring, the circle at 60% opacity over a dark disc, a crossed-eye badge and an
 // italic blue label. A token is selected when pressed and moved by dragging it, snapping as it is dropped
 // unless Alt is held. A press released within DRAG_THRESHOLD_PX of where it went down is a click and opens
-// the token's popover; past it the press is a drag, which closes the popover (D-156). The player mode draws only visible tokens, never a hidden one, and listens to
+// the token's popover, or closes it when it is already open (UXR-06); past it the press is a drag, which closes
+// the popover (D-156). The mouse resting on a token reports it for its read-only preview (hoverIntent.ts). The player mode draws only visible tokens, never a hidden one, and listens to
 // nothing; what reaches a player view is filtered on the server (LIV-02). Labels and badges keep their
 // size on screen at every zoom, scaled up by `labelScale` on the TV to be read across a room.
 //
@@ -188,6 +190,11 @@ export interface TokenControls {
   onToggle?: ((id: string) => void) | undefined;
   /** A group dropped together: each token's new position, in grid units. */
   onMoveMany?: ((moves: { id: string; at: Point }[]) => void) | undefined;
+  /**
+   * The mouse resting on a token (UXR-06, specs/08-ux-journeys.md §14): its id once it has rested there for
+   * PREVIEW_DELAY_MS, undefined as soon as it leaves, presses or the map moves under it.
+   */
+  onPreview?: ((id: string | undefined) => void) | undefined;
 }
 
 const layerOf = (node: Konva.Node) => node.getLayer();
@@ -307,6 +314,7 @@ export function TokenLayer({
   mode,
   controls,
   labelScale = 1,
+  view,
 }: {
   tokens: readonly CanvasToken[];
   frame: GridFrame;
@@ -317,6 +325,8 @@ export function TokenLayer({
   controls: TokenControls | undefined;
   /** How much larger than the DM's the labels and badges are drawn (the TV, UIX-01). */
   labelScale?: number;
+  /** The camera as a key: a change, a zoom or a pan, hides the token's preview (UXR-06). */
+  view?: string | undefined;
 }) {
   const shown = stacked(mode === 'player' ? tokens.filter((token) => !token.hidden) : tokens);
   const images = useTokenImages(shown.map((token) => token.image_id));
@@ -325,6 +335,8 @@ export function TokenLayer({
   const onScreen = inverse * labelScale;
   // Where the press on a token went down, in screen pixels, to tell a click from a drag on release.
   const pressed = useRef<{ id: string; at: Point }>(undefined);
+  // The mouse resting on a token, for its preview (UXR-06).
+  const hover = useHoverIntent(controls?.onPreview, { ids: shown.map((token) => token.id), view });
   // The group being dragged (UXR-02): where each of the others started, in world pixels.
   const group = useRef<{ id: string; start: Point; others: { node: Konva.Node; start: Point }[] }>(undefined);
   const grouped = (id: string) => {
@@ -408,8 +420,10 @@ export function TokenLayer({
             y={at.y}
             draggable={controls !== undefined}
             dragDistance={DRAG_THRESHOLD_PX}
+            {...hover.handlers(token.id)}
             onPointerDown={(event) => {
               event.cancelBubble = true;
+              hover.cancel();
               // Ctrl or Cmd and a press: the token joins the selection or leaves it, and nothing is dragged (UXR-02).
               if (controls?.onToggle && togglesSelection(event.evt)) {
                 pressed.current = undefined;

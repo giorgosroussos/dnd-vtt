@@ -4,6 +4,8 @@ import {
   ARCHIVE_ENTRY_PATTERN,
   ARCHIVE_FORMAT_VERSION,
   ArchiveManifestSchema,
+  ArchiveMapNoteSchema,
+  ArchiveTokenSchema,
   TokenNumbersSchema,
   exportFileName,
   freeCampaignName,
@@ -57,6 +59,21 @@ describe('the format', () => {
     expect(() => migrateFormat(ARCHIVE_FORMAT_VERSION + 1, data)).toThrow(/newer/);
   });
 
+  it('upgrades a format-1 campaign to format 2 with no map notes, and a format-1 assets archive with a count of none', () => {
+    expect(ARCHIVE_FORMAT_VERSION).toBe(2);
+    const campaign = migrateFormat(1, {
+      manifest: { format_version: 1, kind: 'campaign', counts: { campaigns: 1, tokens: 3 } },
+      tokens: [],
+    });
+    expect(campaign.mapnotes).toEqual([]);
+    expect(campaign.manifest.counts).toEqual({ campaigns: 1, tokens: 3, map_notes: 0 });
+    const assets = migrateFormat(1, { manifest: { format_version: 1, kind: 'assets', counts: { assets: 2 } } });
+    expect(assets.mapnotes).toBeUndefined();
+    expect(assets.manifest.counts).toEqual({ assets: 2, map_notes: 0 });
+    // A manifest without counts is left for the schema to refuse.
+    expect(migrateFormat(1, { manifest: { kind: 'campaign' } }).manifest).toEqual({ kind: 'campaign' });
+  });
+
   it('allows only the manifest, the data files, the images and their two folders', () => {
     const sha = 'a'.repeat(64);
     for (const name of [
@@ -86,6 +103,22 @@ describe('the format', () => {
     }
   });
 
+  it('bounds a map note’s point and a token’s position as REST does, and a map note’s text as a body’s', () => {
+    const note = { id: '0e2f5f0c-1d7b-4b6a-9c3e-2a1f0b9d8c7e', scene_id: '1e2f5f0c-1d7b-4b6a-9c3e-2a1f0b9d8c7e' };
+    expect(Value.Check(ArchiveMapNoteSchema, { ...note, x: -1e6, y: 1e6, notes: 'Pit.' })).toBe(true);
+    for (const change of [{ x: 1e7 }, { y: -1e7 }, { notes: 'x'.repeat(20_001) }]) {
+      expect(
+        Value.Check(ArchiveMapNoteSchema, { ...note, x: 1, y: 1, notes: '', ...change }),
+        JSON.stringify(change).slice(0, 20),
+      ).toBe(false);
+    }
+    for (const axis of ['x', 'y'] as const) {
+      expect(Value.Check(ArchiveTokenSchema.properties[axis], 1e6)).toBe(true);
+      expect(Value.Check(ArchiveTokenSchema.properties[axis], 1e7)).toBe(false);
+      expect(Value.Check(ArchiveTokenSchema.properties[axis], -1e7)).toBe(false);
+    }
+  });
+
   it('keys token numbers by asset id only, and refuses an unknown manifest field', () => {
     expect(Value.Check(TokenNumbersSchema, { '0e2f5f0c-1d7b-4b6a-9c3e-2a1f0b9d8c7e': 3 })).toBe(true);
     expect(Value.Check(TokenNumbersSchema, { __proto__x: 3 })).toBe(false);
@@ -95,7 +128,7 @@ describe('the format', () => {
       app_version: '1.0.0',
       exported_at: '2026-10-05T18:30:00.000Z',
       kind: 'assets',
-      counts: { campaigns: 0, sessions: 0, scenes: 0, tokens: 0, encounters: 0, assets: 0, images: 0 },
+      counts: { campaigns: 0, sessions: 0, scenes: 0, tokens: 0, encounters: 0, map_notes: 0, assets: 0, images: 0 },
       images: [],
     };
     expect(Value.Check(ArchiveManifestSchema, manifest)).toBe(true);

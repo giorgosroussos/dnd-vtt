@@ -57,8 +57,9 @@ How a DM installs, starts, configures and backs up Emberglass.
 
 ## 9. Export and import
 
-- The DM MUST be able to export, as one zip, either a whole campaign, with its sessions, scenes, tokens, fog, encounters and notes and the assets and images they use, or library assets, the ones selected or all, with their tags and images. [Q-115]
+- The DM MUST be able to export, as one zip, either a whole campaign, with its sessions, scenes, tokens, fog, encounters, notes and map notes and the assets and images they use, or library assets, the ones selected or all, with their tags and images. [Q-115, Q-128]
 - The zip MUST hold a `manifest.json` naming its format version and its scope, the data as JSON, and every image file named by its sha256 (`05` §7). [Q-115]
+- An archive of an older format MUST still import: format 2 adds the map notes, which a format-1 archive, written before them, imports without. [Q-128]
 - Importing a campaign MUST always create a new copy with new identifiers for the campaign and everything in it, never merging into an existing one. [Q-115]
 - On import, an image whose sha256 the server already holds MUST be reused, and an asset whose identifier already exists MUST be reused as it is, not overwritten. [Q-115]
 - An import MUST be refused, storing nothing, as `07` §9 states. [Q-115, Q-119]

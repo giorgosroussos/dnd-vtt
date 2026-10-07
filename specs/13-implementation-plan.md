@@ -28,7 +28,7 @@ Phase 6 was added after every earlier package was done (Q-107): it packages what
 
 Phase 7 was added after every earlier package was done (Q-111 to Q-119): its packages run in order, hit points first because per-enemy initiative passes over a monster its hit points made Dead, and export and import last so that its format carries every field the others add.
 
-Phase 8 was added while Phase 7 awaited its review (Q-121 to Q-125): its packages change no stored data, and the one contract change, `token.batch`, is covered by the hidden-information suite.
+Phase 8 was added while Phase 7 awaited its review (Q-121 to Q-125, then Q-126 to Q-128): its packages change no stored data, and the one contract change, `token.batch`, is covered by the hidden-information suite.
 
 ## 3. Phase 0 — Foundations
 
@@ -446,7 +446,7 @@ The hidden-information suite of `10` §3 passes with hit points, notes and per-e
 
 ## 13. Phase 8 — UI/UX refinements
 
-Goal: the DM reaches more of the map, acts on groups of tokens and drags tokens from the library, and the player view opens on any screen from a phone to a large desktop, with hidden information still never leaving the server (`01` §11).
+Goal: the DM reaches more of the map, acts on groups of tokens, drags tokens from the library and looks a token up by resting the pointer on it, orders initiative by drag and wheel with the TV naming only the turn and the next, pins notes on the map, and the player view opens on any screen from a phone to a large desktop, with hidden information still never leaving the server (`01` §11).
 
 ### Work packages
 
@@ -491,6 +491,37 @@ Goal: the DM reaches more of the map, acts on groups of tokens and drags tokens 
 - Surfaces: data, security, scope, ux
 - Touches red line: no
 - Contract change: no
+
+`UXR-06` Token click and hover
+
+- A second click on the token whose popover is open closing it, the token kept selected (`08` §11).
+- The mouse resting on a token showing its read-only preview, hit points, armour class, conditions and notes, after a delay that a pointer passing over a token never reaches; hidden on leaving, pressing, zooming or another tool; DM view only (`08` §14).
+- Exit: unit tests cover the delay, the tolerance of a resting pointer and a sweep across tokens showing nothing; the scene panel's tests cover the toggle and the preview's content, and nothing shown for a touch, a held button or the token whose popover is open; an end-to-end test in a real browser covers the second click, a sweep, the rest and leaving.
+- Surfaces: data, scope, ux
+- Touches red line: no
+- Contract change: no
+
+`UXR-07` Initiative refinements
+
+- While a row of the order is dragged, the others making room for it, sliding, so its slot shows where it will land; one reorder sent on the drop (`08` §12).
+- An initiative number stepped by the mouse wheel over its field, sent once the wheel rests (`08` §12).
+- The TV's strip showing only the turn's card and the next one, replaced on every turn; the players' projection unchanged (`08` §12, `04` §4).
+- Exit: unit tests cover the drag order and the wheel's steps, rest and bounds; the panel's tests cover the rows reflowed before the drop and the wheel sending once; the player view's tests cover the two cards, a turn players cannot see and a lone combatant; the initiative end-to-end test covers a real drag reflowing the rows, the wheel and the strip on each turn.
+- Surfaces: security, scope, ux
+- Touches red line: yes
+- Contract change: no
+
+`UXR-08` Map notes
+
+- An additive migration: a `map_note` table, a scene's notes pinned at a point of its map, deleted with it (`03` §1, `03` §7, `03` §10).
+- REST routes on any scene, the live one included, not undoable; on the live scene `mapNotes.updated` to the DM room only, the DM snapshot carrying them, the players' never (`02` §5, `04` §3, `04` §4, `04` §16).
+- Export and import in format 2, a format-1 archive still importing (`09` §9).
+- In the DM view a small icon per note, Add note (O), a click opening its popover and a second closing it, a drag moving it, its whole text previewed on hover (`08` §14).
+- The hidden-information script extended with map notes (`10` §3).
+- Exit: integration tests on a real SQLite file cover the routes, the DM room alone told on the live scene, the players' version unmoved, the limit, duplication and deletion, and the archive's round trip and format 1; the hidden-information suite passes with map notes in its script; the panel's tests cover placing, editing, the toggle, Delete, the empty note removed, the drag and the preview; an end-to-end test with a DM and a TV context covers them and finds nothing of a map note in what the TV receives.
+- Surfaces: data, security, scope, external, ux
+- Touches red line: yes
+- Contract change: yes
 
 ### Exit criteria
 

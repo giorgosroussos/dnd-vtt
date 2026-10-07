@@ -5,6 +5,7 @@ import type {
   ArchiveImage,
   ArchiveScene,
   ArchiveToken,
+  ArchiveMapNote,
   Campaign,
   Encounter,
   ImageVariants,
@@ -14,6 +15,7 @@ import type {
 import { readAsset } from './assets.js';
 import { listSessions, readCampaign, readScene } from './campaigns.js';
 import { readEncounter } from './encounters.js';
+import { listMapNotes } from './mapNotes.js';
 import { readImage, updateGridPreset } from './images.js';
 import { markersOf } from './tokens.js';
 
@@ -80,6 +82,7 @@ export interface CampaignExport {
   scenes: ArchiveScene[];
   tokens: ArchiveToken[];
   encounters: Encounter[];
+  mapnotes: ArchiveMapNote[];
   assets: ArchiveAsset[];
   images: ArchiveImage[];
 }
@@ -116,6 +119,7 @@ export function readCampaignExport(db: Database.Database, id: string): CampaignE
       ).map(toArchiveToken),
     );
     const encounters = sceneIds.flatMap((sceneId) => readEncounter(db, sceneId) ?? []);
+    const mapnotes = sceneIds.flatMap((sceneId) => listMapNotes(db, sceneId) ?? []);
     const assets = archiveAssets(
       db,
       tokens.map((token) => token.asset_id),
@@ -125,7 +129,7 @@ export function readCampaignExport(db: Database.Database, id: string): CampaignE
       ...scenes.flatMap((scene) => (scene.map_image_id === null ? [] : [scene.map_image_id])),
     ]);
     const images = [...imageIds].sort().map((imageId) => archiveImage(db, imageId));
-    return { campaign, sessions, scenes, tokens, encounters, assets, images };
+    return { campaign, sessions, scenes, tokens, encounters, mapnotes, assets, images };
   })();
 }
 
@@ -256,6 +260,16 @@ export function insertImportedToken(db: Database.Database, token: ArchiveToken):
     token.ac,
     token.notes,
     token.shown ? 1 : 0,
+  );
+}
+
+export function insertImportedMapNote(db: Database.Database, note: ArchiveMapNote): void {
+  db.prepare('INSERT INTO map_note (id, scene_id, x, y, notes) VALUES (?, ?, ?, ?, ?)').run(
+    note.id,
+    note.scene_id,
+    note.x,
+    note.y,
+    note.notes,
   );
 }
 

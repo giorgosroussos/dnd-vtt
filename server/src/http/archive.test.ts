@@ -153,6 +153,9 @@ async function seedCampaign(s: Server, name = 'Curse of the Fallen'): Promise<Se
   await json(s, 'PATCH', `/api/tokens/${pc}`, { hp_max: 24, hp_current: 24, hp_temp: 5, ac: 16 });
   await json(s, 'PUT', `/api/tokens/${g1}/notes`, { notes: 'Carries the key.\nFlees at 2 HP.' });
   await json(s, 'PUT', `/api/scenes/${scene.id}/notes`, { notes: 'Trap at the door: DC 13.' });
+  // Map notes (UXR-08), the second empty.
+  await json(s, 'POST', `/api/scenes/${scene.id}/map-notes`, { x: 4.5, y: 2.5, notes: 'Loose flagstone: pit trap.' });
+  await json(s, 'POST', `/api/scenes/${scene.id}/map-notes`, { x: 0.25, y: 6.75 });
   await json(s, 'POST', `/api/scenes/${scene.id}/fog`, {
     stroke: {
       mode: 'paint',
@@ -265,13 +268,17 @@ function canonical(exported: CampaignExport): unknown {
     `${names.get(token.scene_id)} ${String(token.z_order).padStart(6, '0')} ${token.label}`;
   const tokens = [...exported.tokens].sort((a, b) => place(a).localeCompare(place(b)));
   tokens.forEach((token, index) => names.set(token.id, `token ${index}`));
+  // Map notes take their new ids in the order of their scene and place, which the copy keeps.
+  const at = (note: CampaignExport['mapnotes'][number]) => `${names.get(note.scene_id)} ${note.x} ${note.y}`;
+  const mapnotes = [...exported.mapnotes].sort((a, b) => at(a).localeCompare(at(b)));
+  mapnotes.forEach((note, index) => names.set(note.id, `map note ${index}`));
   exported.encounters.forEach((encounter) => {
     names.set(encounter.id, `encounter of ${names.get(encounter.scene_id)}`);
     encounter.entries.forEach((entry, index) =>
       names.set(entry.id, `entry ${index} of ${names.get(encounter.scene_id)}`),
     );
   });
-  const renamed = { ...exported, campaign: { ...exported.campaign, name: 'any' }, sessions, scenes, tokens };
+  const renamed = { ...exported, campaign: { ...exported.campaign, name: 'any' }, sessions, scenes, tokens, mapnotes };
   return JSON.parse(JSON.stringify(renamed), (_key, value: unknown) =>
     typeof value === 'string' && names.has(value) ? names.get(value) : value,
   );
@@ -302,13 +309,16 @@ describe('a campaign export and import (specs/10-testing-acceptance.md §3)', ()
     expect(manifest).toMatchObject({
       format_version: ARCHIVE_FORMAT_VERSION,
       kind: 'campaign',
-      counts: { campaigns: 1, sessions: 2, scenes: 2, tokens: 4, encounters: 1, assets: 2, images: 3 },
+      counts: { campaigns: 1, sessions: 2, scenes: 2, tokens: 4, encounters: 1, map_notes: 2, assets: 2, images: 3 },
     });
+    expect(ARCHIVE_FORMAT_VERSION).toBe(2);
     const images = manifest.images as string[];
     expect([...entries.keys()].sort()).toEqual(
       [
         'manifest.json',
-        ...['assets', 'campaign', 'encounters', 'images', 'scenes', 'sessions', 'tokens'].map((n) => `data/${n}.json`),
+        ...['assets', 'campaign', 'encounters', 'images', 'mapnotes', 'scenes', 'sessions', 'tokens'].map(
+          (n) => `data/${n}.json`,
+        ),
         ...images.map((id) => `images/${id}.png`),
       ].sort(),
     );
@@ -331,6 +341,14 @@ describe('a campaign export and import (specs/10-testing-acceptance.md §3)', ()
     const scene = parsed<Record<string, unknown>[]>(entries, 'data/scenes.json').find((each) => each.name === 'Crypt')!;
     expect(scene).toMatchObject({ notes: 'Trap at the door: DC 13.', token_numbers: { [seeded.goblin.id]: 1 } });
     expect((scene.fog as unknown[]).length).toBeGreaterThan(0);
+    const mapnotes = parsed<Record<string, unknown>[]>(entries, 'data/mapnotes.json');
+    expect(mapnotes.map((note) => [note.scene_id, note.x, note.y, note.notes]).sort()).toEqual(
+      [
+        [scene.id, 0.25, 6.75, ''],
+        [scene.id, 4.5, 2.5, 'Loose flagstone: pit trap.'],
+      ].sort(),
+    );
+    for (const note of mapnotes) expect(Object.keys(note).sort()).toEqual(['id', 'notes', 'scene_id', 'x', 'y']);
     expect(
       parsed<Record<string, unknown>[]>(entries, 'data/assets.json').find((x) => x.id === seeded.goblin.id),
     ).toEqual({ ...seeded.goblin, tags: ['cave', 'goblinoid'] });
@@ -369,7 +387,9 @@ describe('a campaign export and import (specs/10-testing-acceptance.md §3)', ()
       ...exported.scenes.map((x) => x.id),
       ...exported.tokens.map((x) => x.id),
       ...exported.encounters.flatMap((x) => [x.id, ...x.entries.map((entry) => entry.id)]),
+      ...exported.mapnotes.map((x) => x.id),
     ];
+    expect(copy.mapnotes).toHaveLength(2);
     for (const id of ids(copy)) expect(ids(original)).not.toContain(id);
     expect(copy.assets).toEqual(original.assets);
     // Every image with its three versions, produced here from the original.
@@ -388,6 +408,27 @@ describe('a campaign export and import (specs/10-testing-acceptance.md §3)', ()
         (token) => `${token.label} ${token.hp_temp}`,
       );
     expect(await labels(b, copy.scenes[0]!.id)).toEqual(await labels(a, original.scenes[0]!.id));
+  });
+
+  it('puts each map note on the new scene its own scene became (UXR-08)', async () => {
+    const a = await server();
+    const seeded = await seedCampaign(a);
+    await json(a, 'POST', `/api/scenes/${seeded.maplessId}/map-notes`, { x: 1.5, y: 1.5, notes: 'Interlude note.' });
+    const b = await server();
+
+    const summary = await imported(b, await exportCampaign(a, seeded.campaignId));
+
+    const copy = readCampaignExport(b.data.db, summary.campaign!.id)!;
+    const sceneName = new Map(copy.scenes.map((scene) => [scene.id, scene.name]));
+    expect(copy.mapnotes.map((note) => `${sceneName.get(note.scene_id)}: ${note.notes}`).sort()).toEqual([
+      'Crypt: ',
+      'Crypt: Loose flagstone: pit trap.',
+      'Interlude: Interlude note.',
+    ]);
+    for (const scene of copy.scenes) {
+      const listed = await json<{ notes: string }[]>(b, 'GET', `/api/scenes/${scene.id}/map-notes`);
+      expect(listed).toHaveLength(scene.name === 'Crypt' ? 2 : 1);
+    }
   });
 
   it('reuses every image by hash and every asset by identifier on a data directory that holds them, the copy renamed', async () => {
@@ -522,6 +563,38 @@ describe('an import refused stores nothing (specs/07-security-and-access.md §9)
     return body;
   }
 
+  it('imports a format-1 archive, written before map notes, with none (UXR-08, specs/09-operations.md §9)', async () => {
+    const a = await server();
+    const seeded = await seedCampaign(a);
+    const archive = await exportCampaign(a, seeded.campaignId);
+    const formatOne = await rezip(archive, (e) => {
+      e.delete('data/mapnotes.json');
+      const manifest = parsed<{ counts: Record<string, number> }>(e, 'manifest.json');
+      const counts = { ...manifest.counts };
+      delete counts.map_notes;
+      put(e, 'manifest.json', { ...manifest, format_version: 1, counts });
+    });
+    const b = await server();
+
+    const summary = await imported(b, formatOne);
+
+    const copy = readCampaignExport(b.data.db, summary.campaign!.id)!;
+    expect(copy.mapnotes).toEqual([]);
+    expect(copy.tokens).toHaveLength(4);
+  });
+
+  it('refuses a format-1 archive carrying data/mapnotes.json, a file format 1 never had', async () => {
+    const { s, archive } = await holding();
+    const stray = await rezip(archive, (e) => {
+      const manifest = parsed<{ counts: Record<string, number> }>(e, 'manifest.json');
+      const counts = { ...manifest.counts };
+      delete counts.map_notes;
+      put(e, 'manifest.json', { ...manifest, format_version: 1, counts });
+    });
+    const body = await refused(s, stray, 422, 'import_unsafe_entry');
+    expect(body.error.details?.[0]?.path).toBe('data/mapnotes.json');
+  });
+
   it('refuses a newer format version, naming it', async () => {
     const { s, archive } = await holding();
     const newer = await rezip(archive, (entries) => {
@@ -635,6 +708,8 @@ describe('an import refused stores nothing (specs/07-security-and-access.md §9)
       { ...tokens[0], hp_current: -4 },
       { ...tokens[0], character_id: '0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d' },
       { ...tokens[0], notes: 'x'.repeat(20_001) },
+      // A position bounded as REST and the live commands bound it.
+      { ...tokens[0], x: 1e7 },
     ]) {
       const body = await refused(
         s,
@@ -645,6 +720,37 @@ describe('an import refused stores nothing (specs/07-security-and-access.md §9)
       expect(body.error.details?.[0]?.path).toBe('data/tokens.json');
     }
     await refused(s, await rezip(archive, (e) => e.delete('data/encounters.json')), 422, 'import_invalid');
+    // Format 2 must carry its map notes (UXR-08); one too long, or on a scene not of the campaign, is refused.
+    await refused(s, await rezip(archive, (e) => e.delete('data/mapnotes.json')), 422, 'import_invalid');
+    const mapnotes = parsed<Record<string, unknown>[]>(await unzip(archive), 'data/mapnotes.json');
+    for (const change of [
+      { ...mapnotes[0], notes: 'x'.repeat(20_001) },
+      { ...mapnotes[0], x: 'east' },
+      // Bounded as REST bounds it.
+      { ...mapnotes[0], x: 1e7 },
+      { ...mapnotes[0], scene_id: '00000000-0000-4000-8000-000000000000' },
+    ]) {
+      const body = await refused(
+        s,
+        await rezip(archive, (e) => put(e, 'data/mapnotes.json', [change, ...mapnotes.slice(1)])),
+        422,
+        'import_invalid',
+      );
+      expect(body.error.details?.[0]?.path).toBe('data/mapnotes.json');
+    }
+    // The same map note twice, under one id.
+    const twin = await refused(
+      s,
+      await rezip(archive, (e) => {
+        put(e, 'data/mapnotes.json', [...mapnotes, { ...mapnotes[1], id: mapnotes[0]!.id }]);
+        const manifest = parsed<{ counts: Record<string, number> }>(e, 'manifest.json');
+        put(e, 'manifest.json', { ...manifest, counts: { ...manifest.counts, map_notes: mapnotes.length + 1 } });
+      }),
+      422,
+      'import_invalid',
+    );
+    expect(twin.error.details?.[0]?.path).toBe('data/mapnotes.json');
+    expect(twin.error.details?.[0]?.message).toMatch(/holds map note .* twice/);
     await refused(s, await rezip(archive, (e) => e.delete('manifest.json')), 422, 'import_invalid');
     await refused(
       s,

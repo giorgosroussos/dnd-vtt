@@ -13,6 +13,7 @@ import type { ErrorEnvelope } from './errors.js';
 import { FogMaskSchema, FogStrokeSchema } from './fog.js';
 import { HpDeltaSchema } from './hp.js';
 import type { NotesUpdatedPayload } from './notes.js';
+import { MapNoteSchema, type MapNotesUpdatedPayload } from './mapNotes.js';
 import { SceneTokenSchema, TokenChangeSchema, TokenCreateBodySchema } from './tokens.js';
 
 // WebSocket envelopes (specs/04-live-sync.md §2, §3, §5; D-047, D-064).
@@ -107,6 +108,7 @@ export const EVENT_TYPES = [
   'fog.updated',
   'encounter.updated',
   'notes.updated',
+  'mapNotes.updated',
 ] as const;
 
 export type CommandType = (typeof COMMAND_TYPES)[number];
@@ -271,6 +273,8 @@ export const DmLiveSceneSchema = Type.Object(
     fog: FogMaskSchema,
     // The scene's encounter, or null when it never had one (TBL-06).
     encounter: Type.Union([EncounterSchema, Type.Null()]),
+    // The notes pinned on its map (UXR-08), the DM's only.
+    map_notes: Type.Array(MapNoteSchema),
   },
   strict,
 );
@@ -542,7 +546,9 @@ export type DmEvent =
   | EventEnvelope<'fog.updated', FogUpdatedPayload>
   | EventEnvelope<'encounter.updated', DmEncounterPayload>
   // DM notes (DMT-04): the DM room's only, never the players'.
-  | EventEnvelope<'notes.updated', NotesUpdatedPayload>;
+  | EventEnvelope<'notes.updated', NotesUpdatedPayload>
+  // Map notes (UXR-08): the DM room's only, never the players'.
+  | EventEnvelope<'mapNotes.updated', MapNotesUpdatedPayload>;
 
 /** Every event of the players room with its payload: nothing here names a hidden token. */
 export type PlayerEvent =

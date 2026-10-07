@@ -210,7 +210,7 @@ test('a campaign with a running combat, fog, hit points and notes, exported here
     await initiativeTab(other).click();
     await expect(rows(other)).toHaveText(order);
     await expect(currentRow(other)).toHaveText(b1);
-    await expect(cards(tv)).toHaveText(order);
+    await expect(cards(tv)).toHaveText([b1, mage]);
     await expect(stripTurn(tv)).toHaveText(b1);
     await expect(initiativeTab(other)).toHaveText('Initiative · R1');
     for (const expected of [mage, b2, hero, b1]) {

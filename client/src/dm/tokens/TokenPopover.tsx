@@ -20,11 +20,17 @@ import { TokenNotes } from '../notes/Notes.js';
 const WIDTH = 272;
 const GAP = 14;
 
-/** Beside the token, on its right when there is room and on its left otherwise, kept inside the canvas. */
-function placement(anchor: TokenAnchor): { left: number; top: number; maxHeight: number; side: 'left' | 'right' } {
+/**
+ * Beside the token, on its right when there is room and on its left otherwise, kept inside the canvas; the
+ * token's preview (UXR-06) is placed the same way, narrower.
+ */
+export function placement(
+  anchor: TokenAnchor,
+  width = WIDTH,
+): { left: number; top: number; maxHeight: number; side: 'left' | 'right' } {
   const right = anchor.left + anchor.side + GAP;
-  const fitsRight = right + WIDTH <= anchor.viewport.width - 8;
-  const left = fitsRight ? right : Math.max(8, anchor.left - GAP - WIDTH);
+  const fitsRight = right + width <= anchor.viewport.width - 8;
+  const left = fitsRight ? right : Math.max(8, anchor.left - GAP - width);
   const top = Math.min(Math.max(8, anchor.top + anchor.side / 2 - 70), Math.max(8, anchor.viewport.height - 340));
   // Taller than the room below it (long notes), it scrolls rather than run past the canvas.
   return { left, top, maxHeight: Math.max(200, anchor.viewport.height - top - 8), side: fitsRight ? 'right' : 'left' };

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, createElement } from 'react';
 import Konva from 'konva';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LibraryAsset, Scene } from '@emberglass/shared';
 import { t } from '../../ui/messages.js';
 import { installCanvas2d, installImageLoading, installResizeObserver } from '../../ui/testing/canvas2d.js';
@@ -21,6 +21,7 @@ import {
   type,
 } from '../../ui/testing/fakeServer.js';
 import { render, type Rendered } from '../../ui/testing/render.js';
+import { PREVIEW_DELAY_MS } from '../../canvas/hoverIntent.js';
 import { SEARCH_DELAY_MS } from '../library/useAssetSearch.js';
 import { ScenePanel } from '../ScenePanel.js';
 
@@ -527,5 +528,228 @@ describe('changing tokens (specs/04-live-sync.md §2, D-100)', () => {
     const view = await open(open2);
     expect(labels()).toEqual(['Hero']);
     expect(addButton(view)).toBeDefined();
+  });
+
+  // A click on a token toggles its popover, and the mouse resting on one previews it (UXR-06,
+  // specs/08-ux-journeys.md §14).
+  describe('clicking and resting on a token', () => {
+    const NOTE = ['Flees at half HP.', 'Knows the way.', ...Array.from({ length: 8 }, (_, n) => `Clue ${n + 1}.`)].join(
+      '\n',
+    );
+    const group = (id: string) => stage().findOne<Konva.Group>(`#token-${id}`)!;
+    const fire = (
+      id: string,
+      type: string,
+      x: number,
+      y: number,
+      fields: { pointerType?: string; buttons?: number; ctrlKey?: boolean } = {},
+    ) =>
+      act(() => {
+        const evt = new MouseEvent(type, {
+          clientX: x,
+          clientY: y,
+          buttons: fields.buttons ?? 0,
+          ctrlKey: fields.ctrlKey ?? false,
+        });
+        Object.defineProperty(evt, 'pointerType', { value: fields.pointerType ?? 'mouse' });
+        group(id).fire(type, { target: group(id), evt }, true);
+      });
+    const tokenClick = (id: string) => {
+      fire(id, 'pointerdown', 200, 200, { buttons: 1 });
+      fire(id, 'pointerup', 200, 200);
+    };
+    const preview = (view: HTMLElement) => view.querySelector<HTMLElement>('.eg-preview');
+    const rest = () =>
+      act(() => {
+        vi.advanceTimersByTime(PREVIEW_DELAY_MS);
+      });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('opens the popover on a click and closes it on a second click, the token staying selected', async () => {
+      const placed = server.addToken(scene.id, goblin, { x: 1, y: 1 });
+      const view = await open();
+      tokenClick(placed.id);
+      await settle();
+      expect(popover(view)).not.toBeNull();
+      tokenClick(placed.id);
+      await settle();
+      expect(popover(view)).toBeNull();
+      expect(selectedTokenId(view)).toBe(placed.id);
+      tokenClick(placed.id);
+      await settle();
+      expect(popover(view)).not.toBeNull();
+    });
+
+    it('moves the popover to another token clicked while one is open', async () => {
+      const first = server.addToken(scene.id, goblin, { x: 1, y: 1 });
+      const second = server.addToken(scene.id, hero, { x: 6, y: 4 });
+      const view = await open();
+      tokenClick(first.id);
+      await settle();
+      tokenClick(second.id);
+      await settle();
+      expect(selectedTokenId(view)).toBe(second.id);
+      expect(popover(view)!.getAttribute('aria-label')).toBe(t('tokens.popoverOf', { label: second.label }));
+    });
+
+    it('previews a token after the mouse rests on it for half a second: visibility, hit points, armour class, conditions, notes', async () => {
+      const placed = server.addToken(scene.id, goblin, {
+        x: 1,
+        y: 1,
+        hp_current: 4,
+        hp_max: 7,
+        hp_temp: 2,
+        ac: 15,
+        markers: [{ id: 'prone' }, { id: 'exhaustion', level: 2 }],
+        notes: NOTE,
+      });
+      const view = await open();
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      fire(placed.id, 'pointerenter', 200, 200);
+      act(() => {
+        vi.advanceTimersByTime(PREVIEW_DELAY_MS - 1);
+      });
+      expect(preview(view)).toBeNull();
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      const card = preview(view)!;
+      expect(card.getAttribute('role')).toBe('tooltip');
+      expect(card.textContent).toContain(placed.label);
+      expect(card.textContent).toContain(t('tokens.playersCannotSee'));
+      expect(card.querySelector('[data-hp]')!.textContent).toBe(t('hp.value', { current: 4, max: 7 }));
+      expect(card.textContent).toContain(t('hp.temp', { temp: 2 }));
+      expect(card.querySelector('[data-ac]')!.textContent).toBe('15');
+      expect([...card.querySelectorAll('li')].map((each) => each.textContent)).toEqual([
+        'Prone',
+        t('conditions.withLevel', { label: 'Exhaustion', level: 2 }),
+      ]);
+      // The whole note, every line of it, not its first lines.
+      expect(card.querySelector('.eg-preview__text')!.textContent).toBe(NOTE);
+      // It is no popover: nothing in it can be clicked, and the map stays the selection's.
+      expect(popover(view)).toBeNull();
+      expect(card.querySelector('button, input, textarea')).toBeNull();
+      // Leaving the token hides it at once.
+      fire(placed.id, 'pointerleave', 400, 400);
+      expect(preview(view)).toBeNull();
+    });
+
+    it("shows the asset's notes when the token has none, and dashes for stats it lacks", async () => {
+      const asset = server.addAsset({ name: 'Ogre', category: 'monster', notes: 'Hates bright light.' });
+      const placed = server.addToken(scene.id, asset, { x: 2, y: 2, hidden: false });
+      const view = await open();
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      fire(placed.id, 'pointerenter', 200, 200);
+      rest();
+      const card = preview(view)!;
+      expect(card.textContent).toContain(t('tokens.playersCanSee'));
+      expect(card.textContent).toContain(t('notes.fromAsset', { name: 'Ogre' }));
+      expect(card.textContent).toContain('Hates bright light.');
+      expect(card.querySelector('[data-hp]')!.textContent).toBe(t('hp.unset'));
+      expect(card.querySelector('[data-ac]')!.textContent).toBe(t('hp.unset'));
+      expect(card.querySelector('ul')).toBeNull();
+    });
+
+    it('previews nothing for a pointer passing over, a touch, a held button, or the token whose popover is open', async () => {
+      const placed = server.addToken(scene.id, goblin, { x: 1, y: 1 });
+      const view = await open();
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      // Passing over: each move past the tolerance starts the wait again.
+      for (let step = 0; step < 5; step++) {
+        fire(placed.id, 'pointermove', 200 + step * 20, 200);
+        act(() => {
+          vi.advanceTimersByTime(PREVIEW_DELAY_MS / 2);
+        });
+      }
+      expect(preview(view)).toBeNull();
+      fire(placed.id, 'pointerleave', 400, 400);
+      fire(placed.id, 'pointerenter', 200, 200, { pointerType: 'touch' });
+      rest();
+      expect(preview(view)).toBeNull();
+      fire(placed.id, 'pointermove', 200, 200, { buttons: 1 });
+      rest();
+      expect(preview(view)).toBeNull();
+      // Pressing hides a preview already shown.
+      fire(placed.id, 'pointermove', 300, 300);
+      rest();
+      expect(preview(view)).not.toBeNull();
+      tokenClick(placed.id);
+      expect(popover(view)).not.toBeNull();
+      expect(preview(view)).toBeNull();
+      // With its popover open, resting on the token previews nothing.
+      fire(placed.id, 'pointermove', 250, 250);
+      rest();
+      expect(preview(view)).toBeNull();
+    });
+
+    it('hides a preview at once on a zoom or a pan, from the keyboard or the wheel, a tool or Space held (review)', async () => {
+      const placed = server.addToken(scene.id, goblin, { x: 1, y: 1 });
+      const view = await open();
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      let at = 200;
+      const shown = () => {
+        // A step past the tolerance, so that the wait starts again wherever the last one ended.
+        at += 20;
+        fire(placed.id, 'pointermove', at, at);
+        rest();
+        expect(preview(view)).not.toBeNull();
+      };
+      for (const key of ['+', '-', '0', 'ArrowRight']) {
+        shown();
+        press(viewport(view), key);
+        expect(preview(view), key).toBeNull();
+        // Resting on, the preview comes back only after a new wait.
+        fire(placed.id, 'pointermove', at, at);
+        act(() => {
+          vi.advanceTimersByTime(PREVIEW_DELAY_MS - 1);
+        });
+        expect(preview(view), key).toBeNull();
+      }
+      shown();
+      act(() => {
+        group(placed.id).fire(
+          'wheel',
+          { target: group(placed.id), evt: new WheelEvent('wheel', { deltaY: -100 }) },
+          true,
+        );
+      });
+      expect(preview(view)).toBeNull();
+      shown();
+      press(viewport(view), 'm');
+      expect(preview(view)).toBeNull();
+      press(viewport(view), 'm');
+      shown();
+      act(() => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space' }));
+      });
+      expect(preview(view)).toBeNull();
+      act(() => {
+        window.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', code: 'Space' }));
+      });
+      shown();
+    });
+
+    it('opens the popover of the token clicked in a group, the group left for it alone (review)', async () => {
+      const first = server.addToken(scene.id, goblin, { x: 1, y: 1 });
+      const second = server.addToken(scene.id, goblin, { x: 4, y: 1 });
+      const view = await open();
+      tokenClick(first.id);
+      await settle();
+      fire(second.id, 'pointerdown', 260, 200, { buttons: 1, ctrlKey: true });
+      fire(second.id, 'pointerup', 260, 200, { ctrlKey: true });
+      await settle();
+      expect(popover(view)).toBeNull();
+      tokenClick(first.id);
+      await settle();
+      expect(selectedTokenId(view)).toBe(first.id);
+      expect(popover(view)!.getAttribute('aria-label')).toBe(t('tokens.popoverOf', { label: first.label }));
+      tokenClick(first.id);
+      await settle();
+      expect(popover(view)).toBeNull();
+      expect(selectedTokenId(view)).toBe(first.id);
+    });
   });
 });
