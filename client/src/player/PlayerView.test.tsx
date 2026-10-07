@@ -222,6 +222,7 @@ describe('what the player view draws (specs/08-ux-journeys.md §4)', () => {
         ruler: null,
         fog: [],
         encounter: null,
+        map_notes: [],
       },
     };
     act(() => fake.sockets[0]!.deliver({ type: 'scene.snapshot', version: 2, payload: dm }));

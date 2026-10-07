@@ -36,6 +36,7 @@ const snapshot = (tokens: SceneToken[]): DmSnapshot => ({
     history: { can_undo: false, can_redo: false },
     fog: [],
     encounter: null,
+    map_notes: [],
   },
 });
 let version = 1;

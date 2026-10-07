@@ -34,6 +34,9 @@ import {
   type TokenStats,
   TokenUpdateBodySchema,
   NotesBodySchema,
+  MapNoteCreateBodySchema,
+  MapNoteUpdateBodySchema,
+  type MapNote,
   type CommandAck,
   type CommandEnvelope,
   type DmSnapshot,
@@ -165,6 +168,8 @@ export class FakeServer {
   sceneTokens: SceneToken[] = [];
   /** The painted fog of each scene that has any (TBL-04). */
   fogs: Record<string, FogMask> = {};
+  // Map notes (UXR-08), every scene's.
+  mapNotes: MapNote[] = [];
   /** The encounter of each scene that had one (TBL-06). */
   encounters: Record<string, Encounter> = {};
   /** The highest number issued per scene and asset, as `scene.token_numbers` (Q-091). */
@@ -426,6 +431,48 @@ export class FakeServer {
     return json(200, this.withAsset(token));
   }
 
+  /** A scene's map notes, in the server's order (by id). */
+  mapNotesOf(sceneId: string): MapNote[] {
+    return this.mapNotes.filter((each) => each.scene_id === sceneId).sort((a, b) => a.id.localeCompare(b.id));
+  }
+
+  addMapNote(sceneId: string, fields: Partial<MapNote> = {}): MapNote {
+    const note: MapNote = { id: uuid(), scene_id: sceneId, x: 1, y: 1, notes: '', ...fields };
+    this.mapNotes.push(note);
+    return note;
+  }
+
+  // Map notes (UXR-08), as the server keeps them: on any scene, the live one included; the live scene's whole list
+  // reaches every DM socket as `mapNotes.updated` after each change.
+  private handleMapNotes(method: string, sceneId: string | undefined, id: string | undefined, b: unknown): Reply {
+    const told = (scene: string) => {
+      if (scene === this.liveSceneId) {
+        this.deliver('mapNotes.updated', { scene_id: scene, map_notes: structuredClone(this.mapNotesOf(scene)) });
+      }
+    };
+    if (sceneId !== undefined) {
+      if (!this.scenes.some((each) => each.id === sceneId)) return failure(404, 'not_found');
+      if (method === 'GET') return json(200, structuredClone(this.mapNotesOf(sceneId)));
+      if (method !== 'POST') return failure(404, 'not_found');
+      if (!Value.Check(MapNoteCreateBodySchema, b)) return failure(400, 'validation_failed');
+      const note = this.addMapNote(sceneId, { x: b.x, y: b.y, notes: b.notes ?? '' });
+      told(sceneId);
+      return json(201, { ...note });
+    }
+    const note = this.mapNotes.find((each) => each.id === id);
+    if (!note) return failure(404, 'not_found');
+    if (method === 'DELETE') {
+      this.mapNotes = this.mapNotes.filter((each) => each !== note);
+      told(note.scene_id);
+      return json(204);
+    }
+    if (method !== 'PATCH') return failure(404, 'not_found');
+    if (!Value.Check(MapNoteUpdateBodySchema, b)) return failure(400, 'validation_failed');
+    Object.assign(note, b);
+    told(note.scene_id);
+    return json(200, { ...note });
+  }
+
   addImage(fields: Partial<Image> = {}): Image {
     const image: Image = {
       id: (++counter).toString(16).padStart(64, '0'),
@@ -491,8 +538,9 @@ export class FakeServer {
     this.calls.push(call);
     const intercepted = await this.before?.(call);
     if (intercepted) return intercepted;
-    // Notes tell the DM room by `notes.updated` alone, never by a snapshot (DMT-04).
-    if (call.method === 'GET' || /\/notes$/.test(call.path)) return this.handle(call);
+    // Notes tell the DM room by `notes.updated` alone, never by a snapshot (DMT-04), and map notes by
+    // `mapNotes.updated` (UXR-08).
+    if (call.method === 'GET' || /\/notes$/.test(call.path) || /map-notes/.test(call.path)) return this.handle(call);
     const before = this.dmSnapshot();
     const reply = this.handle(call);
     if (before.scene !== null && before.scene.scene.map_image_id !== this.liveMap()) {
@@ -534,6 +582,7 @@ export class FakeServer {
         history: this.historyState(),
         fog: structuredClone(this.fogOf(scene.id)),
         encounter: structuredClone(this.encounters[scene.id] ?? null),
+        map_notes: structuredClone(this.mapNotesOf(scene.id)),
       },
     };
   }
@@ -1245,6 +1294,10 @@ export class FakeServer {
     if (sceneTokens) return this.handleTokens(method, sceneTokens[1], undefined, b);
     const token = /^\/api\/tokens\/([^/]+)$/.exec(path);
     if (token) return this.handleTokens(method, undefined, token[1], b);
+    const sceneMapNotes = /^\/api\/scenes\/([^/]+)\/map-notes$/.exec(path);
+    if (sceneMapNotes) return this.handleMapNotes(method, sceneMapNotes[1], undefined, b);
+    const mapNote = /^\/api\/map-notes\/([^/]+)$/.exec(path);
+    if (mapNote) return this.handleMapNotes(method, undefined, mapNote[1], b);
     const sceneFog = /^\/api\/scenes\/([^/]+)\/fog$/.exec(path);
     if (sceneFog) return this.handleFog(method, sceneFog[1]!, b);
 

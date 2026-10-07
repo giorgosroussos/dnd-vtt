@@ -16,6 +16,7 @@ import { registerConnect } from './connect.js';
 import type { NetworkInterfaces } from '../connect.js';
 import { registerFog } from './fog.js';
 import { registerNotes } from './notes.js';
+import { registerMapNotes } from './mapNotes.js';
 import { registerTokens } from './tokens.js';
 import { imageFileRemover, registerImages } from './images.js';
 import { createDisplayRegenerator, type DisplayRegenerator } from '../images/regenerator.js';
@@ -134,6 +135,7 @@ export async function buildApp({
   registerAssets(app, db, removeImages, live.refresh);
   registerTokens(app, db);
   registerNotes(app, db, live.notesChanged);
+  registerMapNotes(app, db, live.mapNotesChanged);
   registerFog(app, db);
   registerConnect(
     app,

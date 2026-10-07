@@ -19,6 +19,7 @@ import {
   SettingsSchema,
   EncounterEntrySchema,
   EncounterSchema,
+  MapNoteSchema,
   TokenSchema,
 } from '@emberglass/shared';
 import { Value } from 'typebox/value';
@@ -108,6 +109,7 @@ const TABLE_OF: Record<string, SchemaTable> = {
   Scene: 'scene',
   Token: 'token',
   Encounter: 'encounter',
+  MapNote: 'map_note',
   Settings: 'settings',
 };
 
@@ -133,7 +135,7 @@ const columns = (
 const columnNames = (table: string): string[] => columns(table).map((c) => c.name);
 
 describe('migration 0001 on a fresh database', () => {
-  it('creates exactly the nine entities of specs/03-domain-model.md §1', () => {
+  it('creates exactly the ten entities of specs/03-domain-model.md §1', () => {
     migrated();
     const tables = db
       .prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
@@ -272,6 +274,13 @@ describe('migration 0001 on a fresh database', () => {
         'enemies_seen INTEGER NOT NULL',
         'entries TEXT NOT NULL',
       ],
+      map_note: [
+        'id TEXT NOT NULL',
+        'scene_id TEXT NOT NULL',
+        'x REAL NOT NULL',
+        'y REAL NOT NULL',
+        "notes TEXT NOT NULL DEFAULT ''",
+      ],
       settings: [
         'id TEXT NOT NULL',
         'live_scene_id TEXT NULL',
@@ -308,6 +317,7 @@ describe('migration 0001 on a fresh database', () => {
       'asset.image_id -> image.id on delete RESTRICT',
       'asset_tag.asset_id -> asset.id on delete CASCADE',
       'encounter.scene_id -> scene.id on delete CASCADE',
+      'map_note.scene_id -> scene.id on delete CASCADE',
       'scene.map_image_id -> image.id on delete RESTRICT',
       'scene.session_id -> session.id on delete CASCADE',
       'session.campaign_id -> campaign.id on delete CASCADE',
@@ -654,6 +664,9 @@ describe('constraints refuse what the specifications forbid', () => {
     withParents();
     insertToken({});
     db.prepare(
+      "INSERT INTO map_note (id, scene_id, x, y) VALUES ('7a1e0d3c-5b2f-4c8e-9d6a-3f4b5c6d7e8f', ?, 1, 2)",
+    ).run(SCENE);
+    db.prepare(
       "UPDATE image SET grid_preset_type = 'square', grid_preset_size = 70, grid_preset_offset_x = 0, grid_preset_offset_y = 0, " +
         'grid_preset_visible = 1, grid_preset_feet_per_square = 5, grid_preset_columns = 30, grid_preset_rows = 20',
     ).run();
@@ -662,7 +675,8 @@ describe('constraints refuse what the specifications forbid', () => {
         .filter((c) => c.type === 'REAL')
         .map((c) => [table, c.name] as const),
     );
-    expect(real.length).toBe(10);
+    // Every REAL column of the schema: image's and scene's grid offsets, token's and map_note's x and y (UXR-08).
+    expect(real.length).toBe(12);
     for (const [table, column] of real) {
       for (const value of [Infinity, -Infinity]) {
         expect(() => db.prepare(`UPDATE ${table} SET ${column} = ?`).run(value), `${table}.${column}`).toThrow(
@@ -857,6 +871,7 @@ const CONTRACT: Record<SchemaTable, TSchema & { properties: Record<string, unkno
   scene: SceneSchema,
   token: TokenSchema,
   encounter: EncounterSchema,
+  map_note: MapNoteSchema,
   settings: SettingsSchema,
 };
 
@@ -1147,6 +1162,39 @@ describe('migrations on the generated fixture database (specs/14-agent-playbook.
       expect(() => set('x'.repeat(20_001)), table).toThrow(/CHECK constraint failed/);
       expect(() => db!.prepare(`UPDATE ${table} SET notes = NULL WHERE id = ?`).run(id)).toThrow(/NOT NULL/);
     }
+  });
+
+  it('adds map notes at migration 0014, none on existing data, deleted with their scene, refusing more than the limit (Q-128)', () => {
+    createFixtureDatabase(dataDir);
+    migrateDataDirectory(dataDir, MIGRATIONS_DIR, new Date(), 13);
+    db = openDatabase(dataDir);
+    const tables = () => db!.prepare("SELECT name FROM sqlite_schema WHERE type = 'table'").pluck().all();
+    expect(tables()).not.toContain('map_note');
+    const counts = countRows(db);
+    db.close();
+
+    const result = migrateDataDirectory(dataDir, MIGRATIONS_DIR);
+
+    expect(result).toMatchObject({ from: 13, to: LATEST });
+    expect(result.backup).not.toBeNull();
+    db = openDatabase(dataDir);
+    expect(countRows(db)).toEqual(counts);
+    expect(db.prepare('SELECT count(*) FROM map_note').pluck().get()).toBe(0);
+    const scene = db.prepare('SELECT id FROM scene LIMIT 1').pluck().get() as string;
+    const insert = (id: string, notes: string) =>
+      db!.prepare('INSERT INTO map_note (id, scene_id, x, y, notes) VALUES (?, ?, 2.5, 3.5, ?)').run(id, scene, notes);
+    expect(() => insert('1b2c3d4e-5f60-4718-8293-a4b5c6d7e8f9', '🐉'.repeat(20_000))).not.toThrow();
+    expect(() => insert('2b2c3d4e-5f60-4718-8293-a4b5c6d7e8f9', 'x'.repeat(20_001))).toThrow(/CHECK constraint failed/);
+    expect(() => insert('not-a-uuid', '')).toThrow(/CHECK constraint failed/);
+    expect(() =>
+      db!
+        .prepare(
+          "INSERT INTO map_note (id, scene_id, x, y) VALUES ('3b2c3d4e-5f60-4718-8293-a4b5c6d7e8f9', 'missing', 0, 0)",
+        )
+        .run(),
+    ).toThrow(/FOREIGN KEY/);
+    db.prepare('DELETE FROM scene WHERE id = ?').run(scene);
+    expect(db.prepare('SELECT count(*) FROM map_note').pluck().get()).toBe(0);
   });
 
   it('adds the import limit at migration 0013, 2 GB on existing data, refusing one that is not positive (Q-119)', () => {

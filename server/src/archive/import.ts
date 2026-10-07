@@ -5,6 +5,7 @@ import type { Readable } from 'node:stream';
 import type Database from 'better-sqlite3';
 import type { ValidateFunction } from 'ajv';
 import {
+  ADDED_IN_FORMAT_2,
   ARCHIVE_DATA_FILES,
   ARCHIVE_DATA_SCHEMAS,
   ARCHIVE_FORMAT_VERSION,
@@ -25,6 +26,8 @@ import {
   type ArchiveManifest,
   type ArchiveScene,
   type ArchiveToken,
+  type ArchiveMapNote,
+  type ArchiveDataName,
   type Campaign,
   type Encounter,
   type ImageMime,
@@ -39,6 +42,7 @@ import {
   insertImportedAsset,
   insertImportedCampaign,
   insertImportedEncounter,
+  insertImportedMapNote,
   insertImportedImage,
   insertImportedScene,
   insertImportedSession,
@@ -90,6 +94,7 @@ interface Records {
   scenes: ArchiveScene[];
   tokens: ArchiveToken[];
   encounters: Encounter[];
+  mapnotes: ArchiveMapNote[];
   assets: ArchiveAsset[];
   images: ArchiveImage[];
 }
@@ -162,7 +167,11 @@ async function readRecords(archive: Archive): Promise<Records> {
   const raw: ArchiveData = { manifest: fields };
   for (const name of names) {
     const entry = dataEntry(name);
-    if (!archive.files.has(entry)) throw invalid(`the archive has no ${entry}`, entry);
+    if (!archive.files.has(entry)) {
+      // A file a later format added: `migrateFormat` gives an older archive its empty one (UXR-08).
+      if (version < 2 && ADDED_IN_FORMAT_2.includes(name as ArchiveDataName)) continue;
+      throw invalid(`the archive has no ${entry}`, entry);
+    }
     raw[name as keyof ArchiveData] = (await readJson(archive, entry, MAX_DATA_FILE_BYTES, 'data file')) as never;
   }
   const data = migrateFormat(version, raw);
@@ -182,6 +191,7 @@ async function readRecords(archive: Archive): Promise<Records> {
     scenes: list<ArchiveScene>('scenes'),
     tokens: list<ArchiveToken>('tokens'),
     encounters: list<Encounter>('encounters'),
+    mapnotes: list<ArchiveMapNote>('mapnotes'),
     assets: list<ArchiveAsset>('assets'),
     images: list<ArchiveImage>('images'),
   };
@@ -218,13 +228,14 @@ interface Held {
  * and every reference to a record of the archive or, for an asset or an image, of the server (`held`).
  */
 function checkRecords(records: Records, imageEntries: ReadonlyMap<string, string>, held: Held): void {
-  const { manifest, campaign, sessions, scenes, tokens, encounters, assets, images } = records;
+  const { manifest, campaign, sessions, scenes, tokens, encounters, mapnotes, assets, images } = records;
   const counts = {
     campaigns: campaign === null ? 0 : 1,
     sessions: sessions.length,
     scenes: scenes.length,
     tokens: tokens.length,
     encounters: encounters.length,
+    map_notes: mapnotes.length,
     assets: assets.length,
     images: images.length,
   };
@@ -304,6 +315,13 @@ function checkRecords(records: Records, imageEntries: ReadonlyMap<string, string
         );
       }
       named.add(entry.token_id);
+    }
+  }
+  // Map notes (UXR-08): each once, each on a scene of the campaign.
+  idsOf(mapnotes, 'map note', dataEntry('mapnotes'));
+  for (const note of mapnotes) {
+    if (!sceneIds.has(note.scene_id)) {
+      throw invalid(`map note ${note.id} is not on a scene of the campaign`, dataEntry('mapnotes'));
     }
   }
 }
@@ -457,6 +475,9 @@ function store(
             scene_id: scenes.of(token.scene_id),
             character_id: null,
           });
+        }
+        for (const note of records.mapnotes) {
+          insertImportedMapNote(db, { ...note, id: randomUUID(), scene_id: scenes.of(note.scene_id) });
         }
         for (const encounter of records.encounters) {
           const entries = remap();

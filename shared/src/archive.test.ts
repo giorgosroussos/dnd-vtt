@@ -57,6 +57,21 @@ describe('the format', () => {
     expect(() => migrateFormat(ARCHIVE_FORMAT_VERSION + 1, data)).toThrow(/newer/);
   });
 
+  it('upgrades a format-1 campaign to format 2 with no map notes, and a format-1 assets archive with a count of none', () => {
+    expect(ARCHIVE_FORMAT_VERSION).toBe(2);
+    const campaign = migrateFormat(1, {
+      manifest: { format_version: 1, kind: 'campaign', counts: { campaigns: 1, tokens: 3 } },
+      tokens: [],
+    });
+    expect(campaign.mapnotes).toEqual([]);
+    expect(campaign.manifest.counts).toEqual({ campaigns: 1, tokens: 3, map_notes: 0 });
+    const assets = migrateFormat(1, { manifest: { format_version: 1, kind: 'assets', counts: { assets: 2 } } });
+    expect(assets.mapnotes).toBeUndefined();
+    expect(assets.manifest.counts).toEqual({ assets: 2, map_notes: 0 });
+    // A manifest without counts is left for the schema to refuse.
+    expect(migrateFormat(1, { manifest: { kind: 'campaign' } }).manifest).toEqual({ kind: 'campaign' });
+  });
+
   it('allows only the manifest, the data files, the images and their two folders', () => {
     const sha = 'a'.repeat(64);
     for (const name of [
@@ -95,7 +110,7 @@ describe('the format', () => {
       app_version: '1.0.0',
       exported_at: '2026-10-05T18:30:00.000Z',
       kind: 'assets',
-      counts: { campaigns: 0, sessions: 0, scenes: 0, tokens: 0, encounters: 0, assets: 0, images: 0 },
+      counts: { campaigns: 0, sessions: 0, scenes: 0, tokens: 0, encounters: 0, map_notes: 0, assets: 0, images: 0 },
       images: [],
     };
     expect(Value.Check(ArchiveManifestSchema, manifest)).toBe(true);

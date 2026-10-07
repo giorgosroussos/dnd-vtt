@@ -35,6 +35,7 @@ export function writeArchive(
           scenes: data.scenes.length,
           tokens: data.tokens.length,
           encounters: data.encounters.length,
+          map_notes: data.mapnotes.length,
           assets: data.assets.length,
           images: data.images.length,
         }
@@ -44,6 +45,7 @@ export function writeArchive(
           scenes: 0,
           tokens: 0,
           encounters: 0,
+          map_notes: 0,
           assets: data.assets.length,
           images: data.images.length,
         };
