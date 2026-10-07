@@ -37,7 +37,7 @@ Each row's status restates the tagged statement it cites in `01`. [input, Q-099,
 | Export/import campaign as zip, and library assets | `01` §10, `09` §9 | DM toolkit (Q-115) |
 | Characters with join link/QR; per-player permissions | `01` §4 | Future (Phase 2) |
 | Mobile UI | `01` §4 | Future (Phase 2) |
-| The read-only player view on phones and tablets, with fullscreen and its own pinch zoom; a collapsible scene sidebar; several tokens selected and acted on together; a compact campaigns menu; a token's popover closed by a second click and its preview on hover; the initiative order reflowing as a row is dragged, numbers by the mouse wheel and a two-card TV strip | `01` §11 | UI/UX refinements (Q-121, Q-122, Q-123, Q-125, Q-126, Q-127) |
+| The read-only player view on phones and tablets, with fullscreen and its own pinch zoom; a collapsible scene sidebar; several tokens selected and acted on together; a compact campaigns menu; a token's popover closed by a second click and its preview on hover; the initiative order reflowing as a row is dragged, numbers by the mouse wheel and a two-card TV strip; map notes, the DM's notes pinned on the map | `01` §11 | UI/UX refinements (Q-121, Q-122, Q-123, Q-125, Q-126, Q-127, Q-128) |
 | DM-defined markers and condition durations; dice; automatic fog of war | `01` §4 | Future (Phase 2) |
 | Hit points and armour class on tokens, with Bloodied, Dead and Unconscious from them; an initiative entry per visible enemy; Follow my view; DM notes per scene and per token | `01` §10 | DM toolkit (Q-111, Q-112, Q-113, Q-114) |
 | Ping, eighteen condition markers with their rule text, manual fog painted by the DM, the initiative tracker | `01` §9 | Before the release (Q-099, Q-101, Q-103, Q-111) |

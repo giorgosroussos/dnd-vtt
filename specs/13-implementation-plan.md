@@ -28,7 +28,7 @@ Phase 6 was added after every earlier package was done (Q-107): it packages what
 
 Phase 7 was added after every earlier package was done (Q-111 to Q-119): its packages run in order, hit points first because per-enemy initiative passes over a monster its hit points made Dead, and export and import last so that its format carries every field the others add.
 
-Phase 8 was added while Phase 7 awaited its review (Q-121 to Q-125, then Q-126 and Q-127): its packages change no stored data, and the one contract change, `token.batch`, is covered by the hidden-information suite.
+Phase 8 was added while Phase 7 awaited its review (Q-121 to Q-125, then Q-126 to Q-128): its packages change no stored data, and the one contract change, `token.batch`, is covered by the hidden-information suite.
 
 ## 3. Phase 0 — Foundations
 
@@ -446,7 +446,7 @@ The hidden-information suite of `10` §3 passes with hit points, notes and per-e
 
 ## 13. Phase 8 — UI/UX refinements
 
-Goal: the DM reaches more of the map, acts on groups of tokens, drags tokens from the library and looks a token up by resting the pointer on it, orders initiative by drag and wheel with the TV naming only the turn and the next, and the player view opens on any screen from a phone to a large desktop, with hidden information still never leaving the server (`01` §11).
+Goal: the DM reaches more of the map, acts on groups of tokens, drags tokens from the library and looks a token up by resting the pointer on it, orders initiative by drag and wheel with the TV naming only the turn and the next, pins notes on the map, and the player view opens on any screen from a phone to a large desktop, with hidden information still never leaving the server (`01` §11).
 
 ### Work packages
 
@@ -510,6 +510,18 @@ Goal: the DM reaches more of the map, acts on groups of tokens, drags tokens fro
 - Surfaces: security, scope, ux
 - Touches red line: yes
 - Contract change: no
+
+`UXR-08` Map notes
+
+- An additive migration: a `map_note` table, a scene's notes pinned at a point of its map, deleted with it (`03` §1, `03` §7, `03` §10).
+- REST routes on any scene, the live one included, not undoable; on the live scene `mapNotes.updated` to the DM room only, the DM snapshot carrying them, the players' never (`02` §5, `04` §3, `04` §4, `04` §16).
+- Export and import in format 2, a format-1 archive still importing (`09` §9).
+- In the DM view a small icon per note, Add note (O), a click opening its popover and a second closing it, a drag moving it, its whole text previewed on hover (`08` §14).
+- The hidden-information script extended with map notes (`10` §3).
+- Exit: integration tests on a real SQLite file cover the routes, the DM room alone told on the live scene, the players' version unmoved, the limit, duplication and deletion, and the archive's round trip and format 1; the hidden-information suite passes with map notes in its script; the panel's tests cover placing, editing, the toggle, Delete, the empty note removed, the drag and the preview; an end-to-end test with a DM and a TV context covers them and finds nothing of a map note in what the TV receives.
+- Surfaces: data, security, scope, external, ux
+- Touches red line: yes
+- Contract change: yes
 
 ### Exit criteria
 

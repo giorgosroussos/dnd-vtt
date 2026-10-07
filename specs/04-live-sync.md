@@ -36,7 +36,7 @@ Commands flow from a DM socket to the server; the server MUST reject any command
 | `undo` | apply the most recent inverse command | — |
 | `redo` | apply again the most recently undone command | — |
 
-- The token commands on the live scene MUST be exactly `token.add`, `token.move`, `token.setVisibility`, `token.setMarkers`, `token.setStats`, `token.applyHp` and `token.delete`, and `token.batch` grouping some of them; label and stacking order are edited only on scenes that are not live, notes at any time over REST (§16); deleting a token also removes its initiative entry, and undoing the delete puts the entry back (§14). [input, Q-014, Q-099, Q-111, Q-112, Q-114, Q-123]
+- The token commands on the live scene MUST be exactly `token.add`, `token.move`, `token.setVisibility`, `token.setMarkers`, `token.setStats`, `token.applyHp` and `token.delete`, and `token.batch` grouping some of them; label and stacking order are edited only on scenes that are not live, notes and map notes at any time over REST (§16); deleting a token also removes its initiative entry, and undoing the delete puts the entry back (§14). [input, Q-014, Q-099, Q-111, Q-112, Q-114, Q-123, Q-128]
 - `token.batch` MUST apply its commands in order in one transaction, refusing the whole batch, with nothing changed, when any of them is refused; it MUST NOT nest. Its effects MUST be projected to each room exactly as the same commands sent one by one would be, so that nothing a player receives names the batch or counts its commands (§4). [Q-123]
 - Clearing the live scene MUST be possible at any time with `scene.deactivate`. [Q-025]
 - Conflicting commands MUST resolve last-write-wins. [input]
@@ -44,7 +44,7 @@ Commands flow from a DM socket to the server; the server MUST reject any command
 
 ## 3. Events
 
-Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-027, Q-038, Q-047, Q-083, D-049, Q-111, Q-112, Q-114]
+Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-027, Q-038, Q-047, Q-083, D-049, Q-111, Q-112, Q-114, Q-128]
 
 | Event | `dm` room | `players` room |
 | --- | --- | --- |
@@ -60,6 +60,7 @@ Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-02
 | `fog.updated` | when the fog changes: the whole mask | when the fog changes: the whole mask |
 | `encounter.updated` | when the encounter changes: the whole encounter | when what players see of it changes: its projection (§14) |
 | `notes.updated` | when the live scene's or one of its tokens' notes change (§16) | never |
+| `mapNotes.updated` | when the live scene's map notes change: all of them (§16) | never |
 
 ## 4. Role-filtered projection
 
@@ -68,10 +69,10 @@ Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-02
 - Filtering MUST happen on the server before emitting, never in the player client. [input]
 - Revealing a token MUST reach players as `token.added`, and hiding it as `token.removed`. [input]
 - A player client MUST NOT receive anything from which the existence of a hidden token can be learnt: no hidden token, no hidden token's ID, asset or image, no count. [input]
-- A player-room token MUST carry only what rendering needs: ID, position, size, image reference, stacking order, label, its asset's category, which colours its ring, and its condition markers; asset notes and defaults are never sent, nor a token's hit points, armour class or notes, nor the scene's notes, and a hidden token's markers never reach players. [Q-047, Q-032, Q-100, Q-099, Q-112, Q-114]
+- A player-room token MUST carry only what rendering needs: ID, position, size, image reference, stacking order, label, its asset's category, which colours its ring, and its condition markers; asset notes and defaults are never sent, nor a token's hit points, armour class or notes, nor the scene's notes or map notes, and a hidden token's markers never reach players. [Q-047, Q-032, Q-100, Q-099, Q-112, Q-114, Q-128]
 - The players' snapshot MUST carry the live scene's name, shown on the TV (`08` §11), and its painted fog, the mask alone; the undo state MUST NOT reach players, nor the count of connected player views, which the DM view reads over REST (`02` §5). [input, Q-100]
 - The players' encounter MUST carry only the round and, in order, the entries whose token players can see, each naming that token, which they already render with its label, and which of them has the turn and which is next; never an initiative number, nor an entry whose token they cannot see, nor anything from which such an entry can be counted; while the turn is an entry they cannot see, neither the turn nor the next is named (§14). [Q-111]
-- Hit points, armour class and notes MUST be filtered on the server like hidden tokens: a change of them alone sends the players room nothing and moves its version counter by nothing, and a change of hit points reaches players only as the markers it sets or removes on a token they can see (§15, §16). [Q-112, Q-114]
+- Hit points, armour class, notes and map notes MUST be filtered on the server like hidden tokens: a change of them alone sends the players room nothing and moves its version counter by nothing, and a change of hit points reaches players only as the markers it sets or removes on a token they can see (§15, §16). [Q-112, Q-114, Q-128]
 - The grid overlay MUST NOT be drawn on the player view when the scene's grid is set hidden for players (`06` §2). [input]
 
 ## 5. Snapshot and versioning
@@ -160,3 +161,4 @@ Each event MUST reach the rooms as this table states. [input, Q-014, Q-025, Q-02
 
 - A scene's and a token's notes MUST be seen and edited only by the DM, and never reach the players room (§4). [Q-114]
 - Notes are edited over REST on any scene, live included, and are not undoable; on the live scene the change reaches the `dm` room as `notes.updated`. [D-181]
+- A scene's map notes MUST be seen, placed, moved, edited and deleted only by the DM, over REST on any scene, live included, and are not undoable; on the live scene each change reaches the `dm` room as `mapNotes.updated`, every map note of the scene, and the players room never (§4). [Q-128]

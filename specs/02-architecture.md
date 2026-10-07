@@ -64,7 +64,7 @@ The REST API MUST offer these resources and operations: [input, Q-001, Q-007, Q-
 | `/api/assets` | list with search and tag filter, create, update (hit-point and AC defaults included, `03` §9), delete, list usages |
 | `/api/campaigns`, `/api/campaigns/:id/sessions` | CRUD, ordering |
 | `/api/sessions/:id/scenes` | CRUD, ordering, duplicate, each scene's token and hidden-token counts |
-| `/api/scenes/:id` | setup (map, grid), tokens with their hit points and AC, and painted fog while not live; the scene's and its tokens' notes at any time (`04` §16) |
+| `/api/scenes/:id` | setup (map, grid), tokens with their hit points and AC, and painted fog while not live; the scene's and its tokens' notes, and its map notes (`/api/scenes/:id/map-notes`, `/api/map-notes/:id`), at any time (`04` §16) |
 | `/api/settings` | ruler rule, upload limit, display variant size, TV address (`08` §5), import limit (`09` §9), PIN change |
 | `/api/screens` | how many player views are connected now (`08` §11) |
 | `/api/export`, `/api/import` | a campaign or library assets as a zip, and importing one (`09` §9) |
