@@ -564,6 +564,9 @@ export function MapCanvas({
         }
       : undefined,
   );
+  // The camera as a key: whatever moves the map under the pointer hides a preview (UXR-06,
+  // specs/08-ux-journeys.md §14).
+  const view = `${camera.x},${camera.y},${camera.scale}`;
   // From the latest camera, not this render's: wheel and drag events arrive outside React's
   // synchronous updates, and several can land before the next render (D-093).
   const changeCamera = (change: (current: Camera) => Camera) =>
@@ -1366,10 +1369,11 @@ export function MapCanvas({
           mode={mode}
           controls={controls}
           labelScale={dm ? 1 : labelScale}
+          view={view}
         />
       ) : null}
       {dm && frame && mapNotes.length > 0 ? (
-        <MapNoteLayer notes={mapNotes} frame={frame} scale={camera.scale} controls={noteControls} />
+        <MapNoteLayer notes={mapNotes} frame={frame} scale={camera.scale} controls={noteControls} view={view} />
       ) : null}
       {tv && shownFrame ? (
         <Layer name="tv-frame-layer" listening={frameMovable} opacity={tv.offline ? 0.5 : 1}>

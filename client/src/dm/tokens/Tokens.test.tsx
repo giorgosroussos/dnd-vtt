@@ -542,10 +542,15 @@ describe('changing tokens (specs/04-live-sync.md §2, D-100)', () => {
       type: string,
       x: number,
       y: number,
-      fields: { pointerType?: string; buttons?: number } = {},
+      fields: { pointerType?: string; buttons?: number; ctrlKey?: boolean } = {},
     ) =>
       act(() => {
-        const evt = new MouseEvent(type, { clientX: x, clientY: y, buttons: fields.buttons ?? 0 });
+        const evt = new MouseEvent(type, {
+          clientX: x,
+          clientY: y,
+          buttons: fields.buttons ?? 0,
+          ctrlKey: fields.ctrlKey ?? false,
+        });
         Object.defineProperty(evt, 'pointerType', { value: fields.pointerType ?? 'mouse' });
         group(id).fire(type, { target: group(id), evt }, true);
       });
@@ -678,6 +683,73 @@ describe('changing tokens (specs/04-live-sync.md §2, D-100)', () => {
       fire(placed.id, 'pointermove', 250, 250);
       rest();
       expect(preview(view)).toBeNull();
+    });
+
+    it('hides a preview at once on a zoom or a pan, from the keyboard or the wheel, a tool or Space held (review)', async () => {
+      const placed = server.addToken(scene.id, goblin, { x: 1, y: 1 });
+      const view = await open();
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      let at = 200;
+      const shown = () => {
+        // A step past the tolerance, so that the wait starts again wherever the last one ended.
+        at += 20;
+        fire(placed.id, 'pointermove', at, at);
+        rest();
+        expect(preview(view)).not.toBeNull();
+      };
+      for (const key of ['+', '-', '0', 'ArrowRight']) {
+        shown();
+        press(viewport(view), key);
+        expect(preview(view), key).toBeNull();
+        // Resting on, the preview comes back only after a new wait.
+        fire(placed.id, 'pointermove', at, at);
+        act(() => {
+          vi.advanceTimersByTime(PREVIEW_DELAY_MS - 1);
+        });
+        expect(preview(view), key).toBeNull();
+      }
+      shown();
+      act(() => {
+        group(placed.id).fire(
+          'wheel',
+          { target: group(placed.id), evt: new WheelEvent('wheel', { deltaY: -100 }) },
+          true,
+        );
+      });
+      expect(preview(view)).toBeNull();
+      shown();
+      press(viewport(view), 'm');
+      expect(preview(view)).toBeNull();
+      press(viewport(view), 'm');
+      shown();
+      act(() => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space' }));
+      });
+      expect(preview(view)).toBeNull();
+      act(() => {
+        window.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', code: 'Space' }));
+      });
+      shown();
+    });
+
+    it('opens the popover of the token clicked in a group, the group left for it alone (review)', async () => {
+      const first = server.addToken(scene.id, goblin, { x: 1, y: 1 });
+      const second = server.addToken(scene.id, goblin, { x: 4, y: 1 });
+      const view = await open();
+      tokenClick(first.id);
+      await settle();
+      fire(second.id, 'pointerdown', 260, 200, { buttons: 1, ctrlKey: true });
+      fire(second.id, 'pointerup', 260, 200, { ctrlKey: true });
+      await settle();
+      expect(popover(view)).toBeNull();
+      tokenClick(first.id);
+      await settle();
+      expect(selectedTokenId(view)).toBe(first.id);
+      expect(popover(view)!.getAttribute('aria-label')).toBe(t('tokens.popoverOf', { label: first.label }));
+      tokenClick(first.id);
+      await settle();
+      expect(popover(view)).toBeNull();
+      expect(selectedTokenId(view)).toBe(first.id);
     });
   });
 });

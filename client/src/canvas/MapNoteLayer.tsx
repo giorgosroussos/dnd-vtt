@@ -47,16 +47,19 @@ export function MapNoteLayer({
   frame,
   scale,
   controls,
+  view,
 }: {
   notes: readonly CanvasMapNote[];
   frame: GridFrame;
   scale: number;
   /** Only while map notes may be clicked and dragged; without them the layer listens to nothing. */
   controls: MapNoteControls | undefined;
+  /** The camera as a key: a change, a zoom or a pan, hides the note's preview. */
+  view?: string | undefined;
 }) {
   const inverse = 1 / scale;
   const pressed = useRef<{ id: string; at: Point }>(undefined);
-  const hover = useHoverIntent(controls?.onPreview);
+  const hover = useHoverIntent(controls?.onPreview, { ids: notes.map((note) => note.id), view });
   return (
     <Layer name="map-notes" listening={controls !== undefined}>
       {notes.map((note) => {

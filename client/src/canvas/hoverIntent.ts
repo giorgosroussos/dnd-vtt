@@ -16,6 +16,8 @@ export interface HoverIntent {
   over: (id: string, at: Point) => void;
   /** The pointer left the token, pressed it or the map moved under it: no preview until it rests again. */
   cancel: () => void;
+  /** The tokens there are now: one that went, deleted or hidden away, takes its wait and its preview with it. */
+  keep: (ids: ReadonlySet<string>) => void;
   /** Stops the timer for good. */
   dispose: () => void;
 }
@@ -45,6 +47,11 @@ export function createHoverIntent(
       onPreview(id);
     }, delayMs);
   };
+  const cancel = () => {
+    clear();
+    resting = undefined;
+    hide();
+  };
   return {
     over: (id, at) => {
       if (resting?.id === id && Math.hypot(at.x - resting.at.x, at.y - resting.at.y) <= REST_TOLERANCE_PX) return;
@@ -56,10 +63,9 @@ export function createHoverIntent(
       hide();
       wait(id, at);
     },
-    cancel: () => {
-      clear();
-      resting = undefined;
-      hide();
+    cancel,
+    keep: (ids) => {
+      if ((resting !== undefined && !ids.has(resting.id)) || (shown !== undefined && !ids.has(shown))) cancel();
     },
     dispose: () => {
       clear();

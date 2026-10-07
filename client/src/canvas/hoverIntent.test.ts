@@ -86,4 +86,27 @@ describe('createHoverIntent', () => {
     vi.advanceTimersByTime(5 * PREVIEW_DELAY_MS);
     expect(onPreview).not.toHaveBeenCalled();
   });
+
+  it('gives up the wait and the preview of a token that is gone, and nothing else (review)', () => {
+    const onPreview = vi.fn();
+    const hover = createHoverIntent(onPreview);
+    hover.over('g1', { x: 0, y: 0 });
+    vi.advanceTimersByTime(PREVIEW_DELAY_MS);
+    hover.keep(new Set(['g1', 'g2']));
+    expect(onPreview).toHaveBeenCalledExactlyOnceWith('g1');
+    hover.keep(new Set(['g2']));
+    expect(onPreview).toHaveBeenLastCalledWith(undefined);
+    // Back with the same id, under a pointer that has not moved: it rests anew before showing.
+    hover.over('g1', { x: 0, y: 0 });
+    vi.advanceTimersByTime(PREVIEW_DELAY_MS - 1);
+    expect(onPreview).toHaveBeenCalledTimes(2);
+    vi.advanceTimersByTime(1);
+    expect(onPreview).toHaveBeenLastCalledWith('g1');
+    onPreview.mockClear();
+    hover.cancel();
+    hover.over('g3', { x: 0, y: 0 });
+    hover.keep(new Set(['g1']));
+    vi.advanceTimersByTime(5 * PREVIEW_DELAY_MS);
+    expect(onPreview).toHaveBeenCalledExactlyOnceWith(undefined);
+  });
 });

@@ -4,8 +4,8 @@ import { createHoverIntent, type HoverIntent } from './hoverIntent.js';
 
 // The hover intent of a canvas layer (UXR-06, UXR-08): the pointer handlers of each item that can be previewed, and
 // `cancel` for a press or a drag. The preview is asked for through the latest `onPreview`, and given up whenever it
-// goes (a tool taking over) or the layer unmounts. Only a mouse with no button held rests: never a touch, a pen or a
-// drag passing over.
+// goes (a tool taking over), the camera moves (a zoom or a pan from the keyboard included), the item goes or the layer
+// unmounts. Only a mouse with no button held rests: never a touch, a pen or a drag passing over.
 
 type PointerEvent = Konva.KonvaEventObject<globalThis.PointerEvent>;
 
@@ -18,7 +18,11 @@ export interface HoverHandlers {
 
 const rests = (event: globalThis.PointerEvent) => event.pointerType === 'mouse' && event.buttons === 0;
 
-export function useHoverIntent(onPreview: ((id: string | undefined) => void) | undefined): {
+export function useHoverIntent(
+  onPreview: ((id: string | undefined) => void) | undefined,
+  /** The ids of the items there are, and the camera as a key that changes whenever the map moves under them. */
+  { ids, view }: { ids: readonly string[]; view: string | undefined },
+): {
   handlers: (id: string) => HoverHandlers;
   cancel: () => void;
 } {
@@ -39,6 +43,13 @@ export function useHoverIntent(onPreview: ((id: string | undefined) => void) | u
   useEffect(() => {
     if (!previewing) hover.current?.cancel();
   }, [previewing]);
+  const present = ids.join('\n');
+  useEffect(() => {
+    hover.current?.keep(new Set(present.split('\n')));
+  }, [present]);
+  useEffect(() => {
+    hover.current?.cancel();
+  }, [view]);
   const over = (id: string, event: PointerEvent) =>
     hover.current?.over(id, { x: event.evt.clientX, y: event.evt.clientY });
   return {

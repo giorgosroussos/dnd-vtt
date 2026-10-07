@@ -225,6 +225,7 @@ Affected specs: …
 - D-206 — UXR-07: D-201 restated after review: one notch is one step, Escape cancels the wheel, a held drag keeps up with the entries, the strip shows the round alone on an unseen turn — implementation
 - D-207 — UXR-08 review: a note closed empty is removed by a guarded DELETE (if_empty, 409 map_note_not_empty); archive positions bounded as REST bounds them; a format-1 archive with map notes refused — implementation
 - D-208 — sharp 0.35.4 -> 0.35.5 for GHSA-wq5f-xc86-pv6w (librsvg, CVE-2026-96889); the package's libvips list moved to 8.18.7 and cairo's licence text to the MPL-1.1 — implementation
+- D-209 — UXR-06 review: a preview hidden by any move of the camera, the keyboard's included, and given up with a token that is gone — implementation
 
 ## D-001 (2026-09-23) — Repository documentation regime
 Type: implementation
@@ -1710,3 +1711,10 @@ Decision: Within D-080 and D-166. `server/package.json` takes `sharp` ^0.35.5 an
 Why: A high advisory against sharp below 0.35.5 for its bundled librsvg was published this week and failed audit · linux and audit · windows on the UXR-06..08 pull request; `make package` refuses a libvips other than the one its vendored list belongs to.
 Alternatives: Lockfile only, leaving the range at ^0.35.4 (rejected: a fresh resolution could still pick the vulnerable version); keeping the MPL-2.0 text beside the 1.1 (rejected: nothing shipped is under it any more, and the notice should name the licences actually used).
 Affected specs: `09` §1
+
+## D-209 (2026-10-07) — UXR-06 review: a preview hidden by any move of the camera, the keyboard's included, and given up with a token that is gone
+Type: implementation
+Decision: Within Q-126 and D-195. The hover intent of a canvas layer (`useHoverIntent`, shared by the token and map-note layers) takes the ids of the items drawn and the camera as a key (`x,y,scale`, from MapCanvas). Any change of the camera cancels the wait and hides the preview, so a zoom or a pan from the keyboard (`+`, `-`, `0`, the arrow keys with nothing selected) hides it as the wheel already did. `HoverIntent.keep(ids)` cancels the wait and the preview of an item no longer drawn (deleted, or removed by another window), so a token put back by undo with the same id previews only after a new rest. No server, contract or player-view change.
+Why: The UXR-06 review of 2026-10-07: zooming from the keyboard left the preview showing, the card following the token away from the pointer, against `08` §14; a previewed token deleted and restored by undo showed its preview again unasked, and the stale intent kept a later rest on it from asking again.
+Alternatives: Clearing the preview in each keyboard camera branch of MapCanvas (rejected: every future camera change would need the same line, and the layer's intent would keep its stale state); hiding on scale changes only (rejected: a keyboard pan moves the token from under the pointer too).
+Affected specs: `08` §14

@@ -314,6 +314,7 @@ export function TokenLayer({
   mode,
   controls,
   labelScale = 1,
+  view,
 }: {
   tokens: readonly CanvasToken[];
   frame: GridFrame;
@@ -324,6 +325,8 @@ export function TokenLayer({
   controls: TokenControls | undefined;
   /** How much larger than the DM's the labels and badges are drawn (the TV, UIX-01). */
   labelScale?: number;
+  /** The camera as a key: a change, a zoom or a pan, hides the token's preview (UXR-06). */
+  view?: string | undefined;
 }) {
   const shown = stacked(mode === 'player' ? tokens.filter((token) => !token.hidden) : tokens);
   const images = useTokenImages(shown.map((token) => token.image_id));
@@ -333,7 +336,7 @@ export function TokenLayer({
   // Where the press on a token went down, in screen pixels, to tell a click from a drag on release.
   const pressed = useRef<{ id: string; at: Point }>(undefined);
   // The mouse resting on a token, for its preview (UXR-06).
-  const hover = useHoverIntent(controls?.onPreview);
+  const hover = useHoverIntent(controls?.onPreview, { ids: shown.map((token) => token.id), view });
   // The group being dragged (UXR-02): where each of the others started, in world pixels.
   const group = useRef<{ id: string; start: Point; others: { node: Konva.Node; start: Point }[] }>(undefined);
   const grouped = (id: string) => {
