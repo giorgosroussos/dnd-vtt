@@ -224,6 +224,7 @@ Affected specs: …
 - D-205 — UXR-07: D-199 restated: the initiative order reflows while dragged, numbers by the mouse wheel, and the TV's strip names the turn and the next, the round alone on a turn players cannot see — adr
 - D-206 — UXR-07: D-201 restated after review: one notch is one step, Escape cancels the wheel, a held drag keeps up with the entries, the strip shows the round alone on an unseen turn — implementation
 - D-207 — UXR-08 review: a note closed empty is removed by a guarded DELETE (if_empty, 409 map_note_not_empty); archive positions bounded as REST bounds them; a format-1 archive with map notes refused — implementation
+- D-208 — sharp 0.35.4 -> 0.35.5 for GHSA-wq5f-xc86-pv6w (librsvg, CVE-2026-96889); the package's libvips list moved to 8.18.7 and cairo's licence text to the MPL-1.1 — implementation
 
 ## D-001 (2026-09-23) — Repository documentation regime
 Type: implementation
@@ -1702,3 +1703,10 @@ Decision: Within Q-128 and D-202. (1) `DELETE /api/map-notes/:id?if_empty=true` 
 Why: The UXR-08 review of 2026-10-07: a second DM window on a prepared scene, whose list nothing refreshes, could delete a note another window had written into, judging it empty from its own stale copy; the token stayed selected under an open note; focus fell to the page; archives accepted positions REST refuses and silently dropped a stray file.
 Alternatives: Re-reading the note before deleting it (rejected: still a race between the read and the delete; the server's transaction is the only place that can judge it); a strict empty string for `if_empty` (rejected: a blank note would be refused on every close and never removed); a version number on map notes for optimistic concurrency (rejected: a migration and a contract change larger than the case needs).
 Affected specs: `04` §16; `09` §9; `08` §14
+
+## D-208 (2026-10-07) — sharp 0.35.4 -> 0.35.5 for GHSA-wq5f-xc86-pv6w (librsvg, CVE-2026-96889); the package's libvips list moved to 8.18.7 and cairo's licence text to the MPL-1.1
+Type: implementation
+Decision: Within D-080 and D-166. `server/package.json` takes `sharp` ^0.35.5 and the lockfile its prebuilt binaries, which carry sharp-libvips 1.3.4 (libvips 8.18.7, librsvg 2.63.2) on every platform, Windows' DLLs included. The vendored `scripts/package/licences/libvips-libraries.txt` names libvips 8.18.7 and copies the sharp-libvips 1.3.4 README's Licensing table, which now gives cairo as the Mozilla Public License 1.1, no longer 2.0; cairo being the only entry under a Mozilla licence, `MPL-2.0.txt` is replaced by the MPL 1.1 text from mozilla.org (`MPL-1.1.txt`) at the end of THIRD_PARTY_NOTICES.txt. Image processing, its options and its API are unchanged.
+Why: A high advisory against sharp below 0.35.5 for its bundled librsvg was published this week and failed audit · linux and audit · windows on the UXR-06..08 pull request; `make package` refuses a libvips other than the one its vendored list belongs to.
+Alternatives: Lockfile only, leaving the range at ^0.35.4 (rejected: a fresh resolution could still pick the vulnerable version); keeping the MPL-2.0 text beside the 1.1 (rejected: nothing shipped is under it any more, and the notice should name the licences actually used).
+Affected specs: `09` §1

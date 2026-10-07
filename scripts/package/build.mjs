@@ -384,7 +384,7 @@ function notices() {
       }
       sections.push(
         `This package contains libvips ${libvips} and the libraries below, each used under the licence`,
-        'named. The texts of the LGPL-3.0, the GPL-3.0 it builds on and the MPL-2.0 are at the end of',
+        'named. The texts of the LGPL-3.0, the GPL-3.0 it builds on and the MPL-1.1 are at the end of',
         'this file. Their sources: https://github.com/lovell/sharp-libvips/releases',
         '',
         table.join('\n\n').trim(),
@@ -412,7 +412,7 @@ function notices() {
   for (const [name, file] of [
     ['GNU Lesser General Public License, version 3', 'LGPL-3.0.txt'],
     ['GNU General Public License, version 3', 'GPL-3.0.txt'],
-    ['Mozilla Public License, version 2.0', 'MPL-2.0.txt'],
+    ['Mozilla Public License, version 1.1', 'MPL-1.1.txt'],
   ]) {
     sections.push(rule, name, rule, readFileSync(at('scripts', 'package', 'licences', file), 'utf8').trim(), '');
   }
