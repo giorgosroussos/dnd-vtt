@@ -35,6 +35,8 @@ const drafts = new Map<string, { text: string; base: string }>();
 
 /** How many fields hold text the server does not have yet; for the tests. */
 export const unsavedDrafts = (): number => drafts.size;
+/** The text typed into the notes of `target` that the server does not hold yet, if any (UXR-08). */
+export const unsavedText = (target: string): string | undefined => drafts.get(target)?.text;
 /** Forgets every unsaved text; for the tests only. */
 export const clearDrafts = (): void => drafts.clear();
 

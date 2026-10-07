@@ -11,7 +11,7 @@ import {
   type TokenMarker,
 } from '@emberglass/shared';
 import { t } from '../ui/messages.js';
-import { createHoverIntent, type HoverIntent } from './hoverIntent.js';
+import { useHoverIntent } from './useHoverIntent.js';
 import { CANVAS_FONT, THEME } from '../ui/theme.js';
 import {
   dropPosition,
@@ -332,27 +332,8 @@ export function TokenLayer({
   const onScreen = inverse * labelScale;
   // Where the press on a token went down, in screen pixels, to tell a click from a drag on release.
   const pressed = useRef<{ id: string; at: Point }>(undefined);
-  // The mouse resting on a token, for its preview (UXR-06): reported through the latest controls, and
-  // cancelled whenever the controls go (a tool taking over) or the layer unmounts.
-  const onPreview = useRef(controls?.onPreview);
-  useEffect(() => {
-    onPreview.current = controls?.onPreview;
-  });
-  const hover = useRef<HoverIntent>(undefined);
-  useEffect(() => {
-    const intent = createHoverIntent((id) => onPreview.current?.(id));
-    hover.current = intent;
-    return () => {
-      intent.cancel();
-      intent.dispose();
-    };
-  }, []);
-  const previewing = controls?.onPreview !== undefined;
-  useEffect(() => {
-    if (!previewing) hover.current?.cancel();
-  }, [previewing]);
-  // Only a mouse with no button held rests on a token: never a touch, a pen or a drag passing over it.
-  const rests = (event: PointerEvent) => event.pointerType === 'mouse' && event.buttons === 0;
+  // The mouse resting on a token, for its preview (UXR-06).
+  const hover = useHoverIntent(controls?.onPreview);
   // The group being dragged (UXR-02): where each of the others started, in world pixels.
   const group = useRef<{ id: string; start: Point; others: { node: Konva.Node; start: Point }[] }>(undefined);
   const grouped = (id: string) => {
@@ -436,20 +417,10 @@ export function TokenLayer({
             y={at.y}
             draggable={controls !== undefined}
             dragDistance={DRAG_THRESHOLD_PX}
-            onPointerEnter={(event) => {
-              if (previewing && rests(event.evt))
-                hover.current?.over(token.id, { x: event.evt.clientX, y: event.evt.clientY });
-            }}
-            onPointerMove={(event) => {
-              if (!previewing) return;
-              if (rests(event.evt)) hover.current?.over(token.id, { x: event.evt.clientX, y: event.evt.clientY });
-              else hover.current?.cancel();
-            }}
-            onPointerLeave={() => hover.current?.cancel()}
-            onWheel={() => hover.current?.cancel()}
+            {...hover.handlers(token.id)}
             onPointerDown={(event) => {
               event.cancelBubble = true;
-              hover.current?.cancel();
+              hover.cancel();
               // Ctrl or Cmd and a press: the token joins the selection or leaves it, and nothing is dragged (UXR-02).
               if (controls?.onToggle && togglesSelection(event.evt)) {
                 pressed.current = undefined;
