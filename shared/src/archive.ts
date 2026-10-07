@@ -15,7 +15,8 @@ import {
 import { EncounterSchema } from './encounter.js';
 import { FogMaskSchema } from './fog.js';
 import { NotesSchema } from './notes.js';
-import { MapNoteSchema } from './mapNotes.js';
+import { MapNoteCreateBodySchema, MapNoteSchema } from './mapNotes.js';
+import { TokenCreateBodySchema } from './tokens.js';
 
 // Export and import (DMT-05; specs/09-operations.md §7, §9, specs/07-security-and-access.md §9,
 // specs/05-assets-and-images.md §6, specs/02-architecture.md §5, Q-115, Q-119, D-181). One zip holds either a
@@ -135,13 +136,19 @@ export const ArchiveSceneSchema = Type.Object(
   strict,
 );
 
+// A token's position bounded as REST and the live commands bound it.
+const TokenCoordinate = TokenCreateBodySchema.properties.x;
 export const ArchiveTokenSchema = Type.Object(
-  { ...TokenSchema.properties, notes: NotesSchema, shown: Type.Boolean() },
+  { ...TokenSchema.properties, x: TokenCoordinate, y: TokenCoordinate, notes: NotesSchema, shown: Type.Boolean() },
   strict,
 );
 
-// A map note (UXR-08), its notes bounded as a body's are.
-export const ArchiveMapNoteSchema = Type.Object({ ...MapNoteSchema.properties, notes: NotesSchema }, strict);
+// A map note (UXR-08), its point and notes bounded as a body's are.
+const MapNoteCoordinate = MapNoteCreateBodySchema.properties.x;
+export const ArchiveMapNoteSchema = Type.Object(
+  { ...MapNoteSchema.properties, x: MapNoteCoordinate, y: MapNoteCoordinate, notes: NotesSchema },
+  strict,
+);
 
 const records = <T extends TSchema>(schema: T) => Type.Array(schema, { maxItems: MAX_ARCHIVE_ENTRIES });
 

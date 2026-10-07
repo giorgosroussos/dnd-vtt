@@ -271,11 +271,13 @@ export {
 export {
   API_MAP_NOTE_PATHS,
   MapNoteCreateBodySchema,
+  MapNoteDeleteQuerySchema,
   MapNoteSchema,
   MapNoteUpdateBodySchema,
   MapNotesUpdatedPayloadSchema,
   type MapNote,
   type MapNoteCreateBody,
+  type MapNoteDeleteQuery,
   type MapNoteUpdateBody,
   type MapNotesUpdatedPayload,
 } from './mapNotes.js';

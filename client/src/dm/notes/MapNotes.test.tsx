@@ -20,13 +20,15 @@ import {
 import { render, type Rendered } from '../../ui/testing/render.js';
 import { ScenePanel } from '../ScenePanel.js';
 import { Workspace } from '../Workspace.js';
-import { clearDrafts } from './NotesEditor.js';
+import { clearDrafts, unsavedDrafts } from './NotesEditor.js';
 
 // Map notes in the DM view (UXR-08, specs/08-ux-journeys.md §14, specs/04-live-sync.md §16, Q-128), against the
 // scripted server: drawn as icons of a constant size, a click opening the note's popover and a second click closing
 // it, the text saved over REST, Delete asked first, O and a click placing one with the cursor in it, one left empty
 // removed when it closes, the token's popover and a note's never open together, a drag moving it snapped, the whole
-// text previewed when the mouse rests on it, and the live scene's kept current by `mapNotes.updated`.
+// text previewed when the mouse rests on it, and the live scene's kept current by `mapNotes.updated`. One removed for
+// being empty is removed only if the server holds it empty too (`if_empty`); the keys never act on a token while a
+// note is open or placed; focus goes back to the map; a deleted note's unsaved text is forgotten.
 
 let server: FakeServer;
 let rendered: Rendered | undefined;
@@ -78,13 +80,14 @@ const clickIcon = async (id: string) => {
   fire(id, 'pointerup');
   await settle();
 };
-/** A click on the map at grid position (gx, gy), through the fitted camera. */
-async function clickMap(gx: number, gy: number) {
+/** A click on the map at grid position (gx, gy), through the fitted camera; with Alt held when `altKey`. */
+async function clickMap(gx: number, gy: number, altKey = false) {
   const s = stage();
   const evt = new MouseEvent('click', {
     clientX: s.x() + (15 + gx * 50) * s.scaleX(),
     clientY: s.y() + (125 + gy * 50) * s.scaleY(),
     bubbles: true,
+    altKey,
   });
   act(() => {
     s.setPointersPositions(evt);
@@ -102,6 +105,43 @@ const blur = (element: HTMLElement) =>
     element.blur();
   });
 const writes = () => server.calls.filter((call) => call.method !== 'GET' && call.path.includes('map-notes'));
+const reads = () => server.calls.filter((call) => call.method === 'GET' && call.path.includes('map-notes'));
+const tokenWrites = () => server.calls.filter((call) => call.method !== 'GET' && call.path.startsWith('/api/tokens'));
+const map = (view: HTMLElement) => view.querySelector<HTMLElement>('[role="application"]')!;
+const mapKey = (view: HTMLElement, name: string) =>
+  act(() => {
+    map(view).dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true }));
+  });
+const escape = (element: HTMLElement) =>
+  act(() => {
+    element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  });
+async function clickToken(id: string) {
+  const group = stage().findOne<Konva.Group>(`#token-${id}`)!;
+  act(() => {
+    group.fire(
+      'pointerdown',
+      { target: group, evt: new MouseEvent('pointerdown', { clientX: 50, clientY: 50 }) },
+      true,
+    );
+    group.fire('pointerup', { target: group, evt: new MouseEvent('pointerup', { clientX: 50, clientY: 50 }) }, true);
+  });
+  await settle();
+}
+/** The whole DM view with the scene live, its live connection bringing the scene and its map notes. */
+async function openLive(): Promise<HTMLElement> {
+  server.liveSceneId = scene.id;
+  rendered = render(createElement(Workspace, { mainId: 'main' }));
+  await settle();
+  await server.openSockets();
+  const view = rendered.container;
+  await openSwitcher(view);
+  await click(button(view, 'Lost Mine'));
+  await click(button(view, t('tree.openOf', { name: 'One' })));
+  await click(view.querySelector(`[data-scene="${scene.id}"] .eg-scenes__select`));
+  await settle();
+  return view;
+}
 
 describe('map notes on the DM map (UXR-08)', () => {
   it('draws each note as an icon of a constant size at its point, and nothing for a scene without any', async () => {
@@ -273,17 +313,7 @@ describe('map notes on the DM map (UXR-08)', () => {
 
   it('keeps the live scene’s notes current from mapNotes.updated, another window’s included', async () => {
     const note = server.addMapNote(scene.id, { x: 2.5, y: 2.5, notes: 'Pit.' });
-    server.liveSceneId = scene.id;
-    // The whole DM view, whose live connection brings the live scene and its map notes.
-    rendered = render(createElement(Workspace, { mainId: 'main' }));
-    await settle();
-    await server.openSockets();
-    const view = rendered.container;
-    await openSwitcher(view);
-    await click(button(view, 'Lost Mine'));
-    await click(button(view, t('tree.openOf', { name: 'One' })));
-    await click(view.querySelector(`[data-scene="${scene.id}"] .eg-scenes__select`));
-    await settle();
+    const view = await openLive();
     expect(icon(note.id)).toBeDefined();
     // Another DM window adds one and moves the first.
     const added: MapNote = server.addMapNote(scene.id, { x: 7.5, y: 1.5, notes: 'Ford.' });
@@ -303,5 +333,214 @@ describe('map notes on the DM map (UXR-08)', () => {
     await settle();
     expect(server.mapNotes.map((each) => each.notes)).toContain('Collapsing floor.');
     expect(stage().find('.map-note')).toHaveLength(3);
+  });
+  it('lets a selected token go when a note opens or one is placed, so the keys move and hide nothing', async () => {
+    const note = server.addMapNote(scene.id, { x: 8.5, y: 8.5, notes: 'Altar.' });
+    const token = server.addToken(scene.id, goblin, { x: 1, y: 1 });
+    const view = await open();
+    await clickToken(token.id);
+    expect(popover(view)).not.toBeNull();
+    await clickIcon(note.id);
+    expect(notePopover(view)).not.toBeNull();
+    mapKey(view, 'ArrowRight');
+    key('h');
+    await settle();
+    expect(tokenWrites()).toEqual([]);
+    expect(server.sceneTokens[0]).toMatchObject({ x: 1, y: 1, hidden: token.hidden });
+
+    // Placing a note, from a token selected again.
+    await clickToken(token.id);
+    key('o');
+    await settle();
+    expect(view.textContent).toContain(t('mapNotes.placing'));
+    mapKey(view, 'ArrowRight');
+    key('h');
+    await settle();
+    expect(tokenWrites()).toEqual([]);
+  });
+
+  it('places a note with Enter at the centre of the view, and with Alt exactly where the click is', async () => {
+    const view = await open();
+    key('o');
+    await settle();
+    // The world point at the centre of the 800 by 600 view, in grid units.
+    const s = stage();
+    const centre = { x: ((400 - s.x()) / s.scaleX() - 15) / 50, y: ((300 - s.y()) / s.scaleY() - 125) / 50 };
+    mapKey(view, 'Enter');
+    await settle();
+    expect(server.mapNotes).toHaveLength(1);
+    expect(server.mapNotes[0]).toMatchObject({ x: Math.floor(centre.x) + 0.5, y: Math.floor(centre.y) + 0.5 });
+    await type(field(view), 'Centre.');
+    blur(field(view));
+    await settle();
+    escape(notePopover(view)!);
+    await settle();
+
+    key('o');
+    await settle();
+    await clickMap(5.3, 7.8, true);
+    expect(server.mapNotes).toHaveLength(2);
+    expect(server.mapNotes[1]!.x).toBeCloseTo(5.3);
+    expect(server.mapNotes[1]!.y).toBeCloseTo(7.8);
+  });
+
+  it('says why a placement or a move was refused, and shows what the server holds', async () => {
+    const note = server.addMapNote(scene.id, { x: 1.5, y: 1.5, notes: 'Lever.' });
+    const view = await open();
+    const refusal = { status: 400, body: { error: { code: 'validation_failed', message: 'test' } } };
+    server.before = (call) => (call.method !== 'GET' && call.path.includes('map-notes') ? refusal : undefined);
+    key('o');
+    await settle();
+    await clickMap(3, 3);
+    const said = t('mapNotes.failed', { reason: t('error.code.validation_failed') });
+    expect(view.textContent).toContain(said);
+    expect(notePopover(view)).toBeNull();
+    expect(stage().find('.map-note')).toHaveLength(1);
+
+    const readsBefore = reads().length;
+    act(() => {
+      const node = icon(note.id)!;
+      node.fire('dragstart', { target: node, evt: new MouseEvent('mousedown') });
+      node.position({ x: 15 + 6.2 * 50, y: 125 + 3.9 * 50 });
+      node.fire('dragend', { target: node, evt: new MouseEvent('mouseup') });
+    });
+    await settle();
+    expect(server.mapNotes[0]).toMatchObject({ x: 1.5, y: 1.5 });
+    // Read again, and drawn where the server holds it.
+    expect(reads().length).toBeGreaterThan(readsBefore);
+    expect(icon(note.id)!.x()).toBe(15 + 1.5 * 50);
+    expect(view.textContent).toContain(said);
+  });
+
+  it('keeps a note another window wrote into when it closes here empty, and reads the notes again', async () => {
+    const note = server.addMapNote(scene.id, { x: 2.5, y: 2.5 });
+    const view = await open();
+    await clickIcon(note.id);
+    // Another DM window writes into it; this one still holds it empty.
+    server.mapNotes[0]!.notes = 'Written elsewhere.';
+    const readsBefore = reads().length;
+    escape(field(view));
+    await settle();
+    expect(notePopover(view)).toBeNull();
+    expect(writes().map((call) => `${call.method} ${call.path}`)).toEqual([
+      `DELETE /api/map-notes/${note.id}?if_empty=true`,
+    ]);
+    expect(server.mapNotes).toEqual([expect.objectContaining({ id: note.id, notes: 'Written elsewhere.' })]);
+    expect(reads().length).toBeGreaterThan(readsBefore);
+    expect(icon(note.id)).toBeDefined();
+    // Nothing went wrong that the DM must read about.
+    expect(view.querySelector('.eg-notice')).toBeNull();
+    await clickIcon(note.id);
+    expect(field(view).value).toBe('Written elsewhere.');
+  });
+
+  it('removes an empty note when it closes by a click on a token, and by a pan', async () => {
+    const token = server.addToken(scene.id, goblin, { x: 1, y: 1 });
+    const first = server.addMapNote(scene.id, { x: 8.5, y: 8.5 });
+    const second = server.addMapNote(scene.id, { x: 9.5, y: 9.5 });
+    const view = await open();
+    await clickIcon(first.id);
+    await clickToken(token.id);
+    expect(notePopover(view)).toBeNull();
+    expect(server.mapNotes.map((each) => each.id)).toEqual([second.id]);
+    await clickIcon(second.id);
+    act(() => {
+      stage().fire('dragstart', { target: stage(), evt: new MouseEvent('mousedown') });
+    });
+    await settle();
+    expect(notePopover(view)).toBeNull();
+    expect(server.mapNotes).toEqual([]);
+  });
+
+  it('removes an empty note left open when the panel goes, another scene chosen, and keeps one with text', async () => {
+    const empty = server.addMapNote(scene.id, { x: 2.5, y: 2.5 });
+    const kept = server.addMapNote(scene.id, { x: 4.5, y: 4.5, notes: 'Keep me.' });
+    await open();
+    await clickIcon(empty.id);
+    rendered!.unmount();
+    rendered = undefined;
+    await settle();
+    expect(server.mapNotes.map((each) => each.id)).toEqual([kept.id]);
+    await open();
+    await clickIcon(kept.id);
+    rendered!.unmount();
+    rendered = undefined;
+    await settle();
+    expect(server.mapNotes.map((each) => each.id)).toEqual([kept.id]);
+  });
+
+  it('gives focus back to the map when Escape closes a note or its deletion is confirmed', async () => {
+    const note = server.addMapNote(scene.id, { notes: 'Pit trap.' });
+    const view = await open();
+    await clickIcon(note.id);
+    act(() => field(view).focus());
+    escape(field(view));
+    await settle();
+    expect(notePopover(view)).toBeNull();
+    expect(document.activeElement).toBe(map(view));
+    await clickIcon(note.id);
+    await click(button(notePopover(view)!, t('mapNotes.deleteNote')));
+    await click(button(notePopover(view)!, t('mapNotes.delete')));
+    expect(server.mapNotes).toEqual([]);
+    expect(document.activeElement).toBe(map(view));
+  });
+
+  it('forgets the unsaved text of a note once it is deleted', async () => {
+    const note = server.addMapNote(scene.id, { notes: 'Old text.' });
+    const view = await open();
+    await clickIcon(note.id);
+    // Typed and, its save refused, still unsaved when the note is deleted.
+    server.before = (call) =>
+      call.method === 'PATCH'
+        ? { status: 500, body: { error: { code: 'internal_error', message: 'test' } } }
+        : undefined;
+    await type(field(view), 'Never saved.');
+    blur(field(view));
+    await settle();
+    expect(unsavedDrafts()).toBe(1);
+    server.before = undefined;
+    await click(button(notePopover(view)!, t('mapNotes.deleteNote')));
+    await click(button(notePopover(view)!, t('mapNotes.delete')));
+    expect(server.mapNotes).toEqual([]);
+    expect(unsavedDrafts()).toBe(0);
+  });
+
+  it('closes the popover of a note another window deleted on the live scene, forgetting its unsaved text', async () => {
+    const note = server.addMapNote(scene.id, { x: 2.5, y: 2.5, notes: 'Pit.' });
+    const view = await openLive();
+    await clickIcon(note.id);
+    // Typed here, not yet saved, when another window deletes it.
+    await type(field(view), 'Pit, DC 15.');
+    expect(unsavedDrafts()).toBe(1);
+    server.mapNotes = [];
+    act(() => {
+      server.deliver('mapNotes.updated', { scene_id: scene.id, map_notes: [] });
+    });
+    await settle();
+    expect(notePopover(view)).toBeNull();
+    expect(icon(note.id)).toBeUndefined();
+    // The save its closing sent finds nothing; nothing is kept for it, and nothing put back.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await settle();
+    expect(unsavedDrafts()).toBe(0);
+    expect(server.mapNotes).toEqual([]);
+  });
+
+  it('says when a scene’s notes could not be read, and reads them again on request', async () => {
+    const note = server.addMapNote(scene.id, { notes: 'Pit.' });
+    server.before = (call) =>
+      call.method === 'GET' && call.path.includes('map-notes')
+        ? { status: 500, body: { error: { code: 'internal_error', message: 'test' } } }
+        : undefined;
+    const view = await open();
+    const said = t('mapNotes.loadFailed', { reason: t('error.code.internal_error') });
+    expect(view.textContent).toContain(said);
+    expect(view.textContent).not.toContain(t('mapNotes.failed', { reason: t('error.code.internal_error') }));
+    expect(button(view, t('canvas.toolAddNote'))!.getAttribute('aria-disabled')).toBe('true');
+    server.before = undefined;
+    await click(button(view, t('mapNotes.retry')));
+    expect(view.textContent).not.toContain(said);
+    expect(icon(note.id)).toBeDefined();
+    expect(button(view, t('canvas.toolAddNote'))!.hasAttribute('aria-disabled')).toBe(false);
   });
 });

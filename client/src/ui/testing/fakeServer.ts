@@ -34,6 +34,7 @@ import {
   type TokenStats,
   TokenUpdateBodySchema,
   NotesBodySchema,
+  hasNotes,
   MapNoteCreateBodySchema,
   MapNoteUpdateBodySchema,
   type MapNote,
@@ -443,8 +444,15 @@ export class FakeServer {
   }
 
   // Map notes (UXR-08), as the server keeps them: on any scene, the live one included; the live scene's whole list
-  // reaches every DM socket as `mapNotes.updated` after each change.
-  private handleMapNotes(method: string, sceneId: string | undefined, id: string | undefined, b: unknown): Reply {
+  // reaches every DM socket as `mapNotes.updated` after each change. A DELETE with `if_empty=true` keeps a note holding
+  // text, answering 409 `map_note_not_empty`.
+  private handleMapNotes(
+    method: string,
+    sceneId: string | undefined,
+    id: string | undefined,
+    b: unknown,
+    query = new URLSearchParams(),
+  ): Reply {
     const told = (scene: string) => {
       if (scene === this.liveSceneId) {
         this.deliver('mapNotes.updated', { scene_id: scene, map_notes: structuredClone(this.mapNotesOf(scene)) });
@@ -462,6 +470,7 @@ export class FakeServer {
     const note = this.mapNotes.find((each) => each.id === id);
     if (!note) return failure(404, 'not_found');
     if (method === 'DELETE') {
+      if (query.get('if_empty') === 'true' && hasNotes(note.notes)) return failure(409, 'map_note_not_empty');
       this.mapNotes = this.mapNotes.filter((each) => each !== note);
       told(note.scene_id);
       return json(204);
@@ -1297,7 +1306,7 @@ export class FakeServer {
     const sceneMapNotes = /^\/api\/scenes\/([^/]+)\/map-notes$/.exec(path);
     if (sceneMapNotes) return this.handleMapNotes(method, sceneMapNotes[1], undefined, b);
     const mapNote = /^\/api\/map-notes\/([^/]+)$/.exec(path);
-    if (mapNote) return this.handleMapNotes(method, undefined, mapNote[1], b);
+    if (mapNote) return this.handleMapNotes(method, undefined, mapNote[1], b, query);
     const sceneFog = /^\/api\/scenes\/([^/]+)\/fog$/.exec(path);
     if (sceneFog) return this.handleFog(method, sceneFog[1]!, b);
 

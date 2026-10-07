@@ -1224,6 +1224,8 @@ export function ScenePanel({
     setFogOn(false);
     setPlacingAsset(undefined);
     setPopoverOpen(false);
+    // The keys are the map's while a note is placed: no token stays selected for them to move (UXR-08).
+    setSelectedToken(undefined);
     closeNote();
     setStatus(undefined);
     setPlacingNote(true);
@@ -1242,22 +1244,40 @@ export function ScenePanel({
     announce(t('mapNotes.placed'));
   }
   // Closing a note's popover; one left empty, with nothing typed waiting to be saved, is removed, so a stray click
-  // leaves nothing behind.
+  // leaves nothing behind. Empty as this view last heard it: the server removes it only if it holds it empty too, so
+  // a note another window has written into since is kept (`if_empty`).
+  const removeIfEmpty = (id: string | undefined) => {
+    const note = mapNotes.notes?.find((each) => each.id === id);
+    if (note && !hasNotes(note.notes) && !hasNotes(unsavedText(mapNoteTarget(note.id))))
+      void mapNotes.removeIfEmpty(note.id);
+  };
   function closeNote() {
     if (openNote === undefined) return;
-    const id = openNote;
     setOpenNote(undefined);
-    const note = mapNotes.notes?.find((each) => each.id === id);
-    if (note && !hasNotes(note.notes) && !hasNotes(unsavedText(mapNoteTarget(id)))) void mapNotes.remove(id);
+    removeIfEmpty(openNote);
+  }
+  // The same when the panel goes with a note open: another scene chosen, or the view left.
+  const leaving = useRef<() => void>(undefined);
+  useEffect(() => {
+    leaving.current = () => removeIfEmpty(openNote);
+  });
+  useEffect(() => () => leaving.current?.(), []);
+  // Escape in the popover, or Delete confirmed: focus goes back to the map, not to the page.
+  function closeNotePopover() {
+    refocus.current = 'canvas';
+    closeNote();
   }
   function toggleNote(id: string) {
     if (openNote === id) return closeNote();
     closeNote();
     setPopoverOpen(false);
+    // One popover at a time, and the keys no longer the token's: it is let go (UXR-08).
+    setSelectedToken(undefined);
     setOpenNote(id);
   }
   async function deleteNote(id: string) {
     setOpenNote(undefined);
+    refocus.current = 'canvas';
     if (await mapNotes.remove(id)) announce(t('mapNotes.deleted'));
   }
   const openedNote = mapNotes.notes?.find((note) => note.id === openNote);
@@ -1272,7 +1292,7 @@ export function ScenePanel({
           focus={focusNote}
           onSave={(text) => mapNotes.saveText(openedNote.id, text)}
           onDelete={() => void deleteNote(openedNote.id)}
-          onClose={closeNote}
+          onClose={closeNotePopover}
         />
       )
     : undefined;
@@ -1764,6 +1784,14 @@ export function ScenePanel({
         {liveFailure ? <Notice>{liveFailure}</Notice> : null}
         {!isLive && sceneTokens.failure ? <Notice>{sceneTokens.failure}</Notice> : null}
         {mapNotes.failure ? <Notice>{t('mapNotes.failed', { reason: mapNotes.failure })}</Notice> : null}
+        {mapNotes.loadFailure ? (
+          <div className="eg-tokens__failure">
+            <Notice>{t('mapNotes.loadFailed', { reason: mapNotes.loadFailure })}</Notice>
+            <Button size="small" onClick={mapNotes.retry}>
+              {t('mapNotes.retry')}
+            </Button>
+          </div>
+        ) : null}
         {mapFailedFor !== undefined && mapFailedFor === mapId ? <Notice>{t('sceneMap.loadFailed')}</Notice> : null}
         {scene ? (
           <>

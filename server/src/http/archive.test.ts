@@ -410,6 +410,27 @@ describe('a campaign export and import (specs/10-testing-acceptance.md §3)', ()
     expect(await labels(b, copy.scenes[0]!.id)).toEqual(await labels(a, original.scenes[0]!.id));
   });
 
+  it('puts each map note on the new scene its own scene became (UXR-08)', async () => {
+    const a = await server();
+    const seeded = await seedCampaign(a);
+    await json(a, 'POST', `/api/scenes/${seeded.maplessId}/map-notes`, { x: 1.5, y: 1.5, notes: 'Interlude note.' });
+    const b = await server();
+
+    const summary = await imported(b, await exportCampaign(a, seeded.campaignId));
+
+    const copy = readCampaignExport(b.data.db, summary.campaign!.id)!;
+    const sceneName = new Map(copy.scenes.map((scene) => [scene.id, scene.name]));
+    expect(copy.mapnotes.map((note) => `${sceneName.get(note.scene_id)}: ${note.notes}`).sort()).toEqual([
+      'Crypt: ',
+      'Crypt: Loose flagstone: pit trap.',
+      'Interlude: Interlude note.',
+    ]);
+    for (const scene of copy.scenes) {
+      const listed = await json<{ notes: string }[]>(b, 'GET', `/api/scenes/${scene.id}/map-notes`);
+      expect(listed).toHaveLength(scene.name === 'Crypt' ? 2 : 1);
+    }
+  });
+
   it('reuses every image by hash and every asset by identifier on a data directory that holds them, the copy renamed', async () => {
     const a = await server();
     const seeded = await seedCampaign(a);
@@ -562,6 +583,18 @@ describe('an import refused stores nothing (specs/07-security-and-access.md §9)
     expect(copy.tokens).toHaveLength(4);
   });
 
+  it('refuses a format-1 archive carrying data/mapnotes.json, a file format 1 never had', async () => {
+    const { s, archive } = await holding();
+    const stray = await rezip(archive, (e) => {
+      const manifest = parsed<{ counts: Record<string, number> }>(e, 'manifest.json');
+      const counts = { ...manifest.counts };
+      delete counts.map_notes;
+      put(e, 'manifest.json', { ...manifest, format_version: 1, counts });
+    });
+    const body = await refused(s, stray, 422, 'import_unsafe_entry');
+    expect(body.error.details?.[0]?.path).toBe('data/mapnotes.json');
+  });
+
   it('refuses a newer format version, naming it', async () => {
     const { s, archive } = await holding();
     const newer = await rezip(archive, (entries) => {
@@ -675,6 +708,8 @@ describe('an import refused stores nothing (specs/07-security-and-access.md §9)
       { ...tokens[0], hp_current: -4 },
       { ...tokens[0], character_id: '0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d' },
       { ...tokens[0], notes: 'x'.repeat(20_001) },
+      // A position bounded as REST and the live commands bound it.
+      { ...tokens[0], x: 1e7 },
     ]) {
       const body = await refused(
         s,
@@ -691,6 +726,8 @@ describe('an import refused stores nothing (specs/07-security-and-access.md §9)
     for (const change of [
       { ...mapnotes[0], notes: 'x'.repeat(20_001) },
       { ...mapnotes[0], x: 'east' },
+      // Bounded as REST bounds it.
+      { ...mapnotes[0], x: 1e7 },
       { ...mapnotes[0], scene_id: '00000000-0000-4000-8000-000000000000' },
     ]) {
       const body = await refused(
@@ -701,6 +738,19 @@ describe('an import refused stores nothing (specs/07-security-and-access.md §9)
       );
       expect(body.error.details?.[0]?.path).toBe('data/mapnotes.json');
     }
+    // The same map note twice, under one id.
+    const twin = await refused(
+      s,
+      await rezip(archive, (e) => {
+        put(e, 'data/mapnotes.json', [...mapnotes, { ...mapnotes[1], id: mapnotes[0]!.id }]);
+        const manifest = parsed<{ counts: Record<string, number> }>(e, 'manifest.json');
+        put(e, 'manifest.json', { ...manifest, counts: { ...manifest.counts, map_notes: mapnotes.length + 1 } });
+      }),
+      422,
+      'import_invalid',
+    );
+    expect(twin.error.details?.[0]?.path).toBe('data/mapnotes.json');
+    expect(twin.error.details?.[0]?.message).toMatch(/holds map note .* twice/);
     await refused(s, await rezip(archive, (e) => e.delete('manifest.json')), 422, 'import_invalid');
     await refused(
       s,

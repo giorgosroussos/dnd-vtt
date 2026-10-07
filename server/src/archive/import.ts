@@ -160,6 +160,8 @@ async function readRecords(archive: Archive): Promise<Records> {
   // The layout of this kind: its data files, every one of them, and nothing else beside the images.
   const names: readonly string[] = ARCHIVE_DATA_FILES[kind];
   const expected = new Set(names.map(dataEntry));
+  // An older format has none of the files a later one added (UXR-08): one found there is not part of the archive.
+  if (version < 2) for (const name of ADDED_IN_FORMAT_2) expected.delete(dataEntry(name));
   for (const name of archive.files.keys()) {
     if (name === MANIFEST || IMAGE_ENTRY.test(name)) continue;
     if (!expected.has(name)) throw unsafe(`${JSON.stringify(name)} is not part of an archive of ${kind}`, name);

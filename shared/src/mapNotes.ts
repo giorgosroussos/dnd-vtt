@@ -43,6 +43,18 @@ export const MapNoteUpdateBodySchema = Type.Object(
   { additionalProperties: false, minProperties: 1 },
 );
 
+/**
+ * DELETE of a map note, its query: `if_empty=true` removes it only while its stored text is empty or blank
+ * (`hasNotes`), judged by the server in the deletion's own transaction, and otherwise refuses with 409
+ * `map_note_not_empty`, leaving it as it is. The DM view's removal of a note closed empty uses it, so a note another
+ * window wrote into is never lost to a stale list; without it, the deletion the DM confirmed, which takes the note
+ * whatever it holds.
+ */
+export const MapNoteDeleteQuerySchema = Type.Object(
+  { if_empty: Type.Optional(Type.Literal('true')) },
+  { additionalProperties: false },
+);
+
 /** `mapNotes.updated` (DM room only): the live scene's map notes, all of them, after a change. */
 export const MapNotesUpdatedPayloadSchema = Type.Object(
   { scene_id: UuidSchema, map_notes: Type.Array(MapNoteSchema) },
@@ -52,4 +64,5 @@ export const MapNotesUpdatedPayloadSchema = Type.Object(
 export type MapNote = Static<typeof MapNoteSchema>;
 export type MapNoteCreateBody = Static<typeof MapNoteCreateBodySchema>;
 export type MapNoteUpdateBody = Static<typeof MapNoteUpdateBodySchema>;
+export type MapNoteDeleteQuery = Static<typeof MapNoteDeleteQuerySchema>;
 export type MapNotesUpdatedPayload = Static<typeof MapNotesUpdatedPayloadSchema>;

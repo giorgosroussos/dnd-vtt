@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
-import type { MapNote, MapNoteCreateBody, MapNoteUpdateBody } from '@emberglass/shared';
+import { hasNotes, type MapNote, type MapNoteCreateBody, type MapNoteUpdateBody } from '@emberglass/shared';
 
 // Map notes (UXR-08; specs/03-domain-model.md §1, §10, specs/04-live-sync.md §2, §16, Q-128): notes the DM pins at a
 // point of a scene's map. They change on any scene, the live one included, as notes do: they are neither preparation
@@ -52,11 +52,21 @@ export function updateMapNote(db: Database.Database, id: string, body: MapNoteUp
   })();
 }
 
-/** The map note removed, as it was; undefined when it did not exist. */
-export function deleteMapNote(db: Database.Database, id: string): MapNote | undefined {
+/**
+ * The map note removed, as it was; undefined when it did not exist. With `ifEmpty`, only a note whose stored text is
+ * empty or blank (`hasNotes`, as the DM view judges it), judged in the same transaction: one holding text is kept,
+ * and 'not_empty' says so (UXR-08).
+ */
+export function deleteMapNote(
+  db: Database.Database,
+  id: string,
+  { ifEmpty = false }: { ifEmpty?: boolean } = {},
+): MapNote | 'not_empty' | undefined {
   return db.transaction(() => {
     const note = readMapNote(db, id);
-    if (note !== undefined) db.prepare('DELETE FROM map_note WHERE id = ?').run(id);
+    if (note === undefined) return undefined;
+    if (ifEmpty && hasNotes(note.notes)) return 'not_empty' as const;
+    db.prepare('DELETE FROM map_note WHERE id = ?').run(id);
     return note;
   })();
 }

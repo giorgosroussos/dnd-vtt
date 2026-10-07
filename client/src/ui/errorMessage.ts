@@ -34,6 +34,7 @@ export const ERROR_MESSAGES: Readonly<Record<ErrorCode | 'network', MessageKey>>
   import_unsafe_entry: 'error.code.import_unsafe_entry',
   import_invalid: 'error.code.import_invalid',
   import_image_refused: 'error.code.import_image_refused',
+  map_note_not_empty: 'error.code.map_note_not_empty',
   network: 'error.code.network',
 };
 

@@ -6,14 +6,15 @@ import {
   type MapNote,
   type MapNotesUpdatedPayload,
   type Scene,
+  type Session,
 } from '@emberglass/shared';
 import { ok, startLive, type Client, type LiveHarness } from './testing/harness.js';
 
 // UXR-08 over a real port and real Socket.io clients, against a real SQLite file (specs/03-domain-model.md §1, §7,
 // §10, specs/04-live-sync.md §3, §4, §16, Q-128): map notes placed, edited, moved and deleted over REST on a prepared
 // scene and on the live one; on the live scene the DM room told by `mapNotes.updated`, every map note of the scene,
-// and the players room told nothing, its version unmoved; nothing undoable; the limit and the bounds; a duplicated
-// scene copying them; a deleted scene taking them with it.
+// and the players room told nothing, its version unmoved; nothing undoable; the limit and the bounds; a removal only if
+// empty (`if_empty`); a duplicated scene copying them; a deleted scene, session or campaign taking them with it.
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
@@ -27,6 +28,13 @@ const create = (sceneId: string, body: object) =>
   h.inject({ method: 'POST', url: `/api/scenes/${sceneId}/map-notes`, payload: body });
 const patch = (id: string, body: object) => h.inject({ method: 'PATCH', url: `/api/map-notes/${id}`, payload: body });
 const remove = (id: string) => h.inject({ method: 'DELETE', url: `/api/map-notes/${id}` });
+const removeIfEmpty = (id: string, value = 'true') =>
+  h.inject({ method: 'DELETE', url: `/api/map-notes/${id}?if_empty=${value}` });
+/** Deletes a scene, session or campaign as the DM does, sending back what its deletion summary stated. */
+async function deleteEntity(kind: 'campaigns' | 'sessions' | 'scenes', id: string): Promise<void> {
+  const confirm = ok<unknown>(await h.inject({ method: 'GET', url: `/api/${kind}/${id}/deletion` }));
+  ok(await h.inject({ method: 'DELETE', url: `/api/${kind}/${id}`, payload: { confirm } }), 204);
+}
 const list = async (sceneId: string) =>
   ok<MapNote[]>(await h.inject({ method: 'GET', url: `/api/scenes/${sceneId}/map-notes` }));
 const types = (events: { type: string }[]) => events.map((event) => event.type);
@@ -141,7 +149,15 @@ describe('map notes over REST (UXR-08, specs/04-live-sync.md §16)', () => {
       expect(response.statusCode, JSON.stringify(body).slice(0, 40)).toBe(400);
       expect(response.json<ErrorEnvelope>().error.code).toBe('validation_failed');
     }
-    for (const body of [{}, { notes: `${longest}x` }, { notes: null }, { y: Infinity }, { scene_id: prep.id }]) {
+    // JSON carries no Infinity: a y that is not a number arrives as null, and one out of bounds as itself.
+    for (const body of [
+      {},
+      { notes: `${longest}x` },
+      { notes: null },
+      { y: null },
+      { y: 2e6 },
+      { scene_id: prep.id },
+    ]) {
       expect((await patch(note.id, body)).statusCode, JSON.stringify(body).slice(0, 40)).toBe(400);
     }
     expect(stored()).toBe(1);
@@ -194,5 +210,104 @@ describe('map notes over REST (UXR-08, specs/04-live-sync.md §16)', () => {
     ok(await h.inject({ method: 'DELETE', url: `/api/scenes/${prep.id}`, payload: { confirm } }), 204);
     expect(await list(copy.id)).toHaveLength(1);
     expect(stored()).toBe(1);
+  });
+
+  it('removes a note only if empty when asked so, keeping one with text and telling no one (if_empty)', async () => {
+    const { live, dm, tv } = await table();
+    const written = ok<MapNote>(await create(live.id, { x: 1, y: 1, notes: 'Written in another window.' }), 201);
+    const empty = ok<MapNote>(await create(live.id, { x: 2, y: 2 }), 201);
+    const blank = ok<MapNote>(await create(live.id, { x: 3, y: 3, notes: ' \n ' }), 201);
+    await dm.settle();
+    await tv.settle();
+
+    const response = await removeIfEmpty(written.id);
+    expect(response.statusCode).toBe(409);
+    expect(response.json<ErrorEnvelope>().error.code).toBe('map_note_not_empty');
+    expect(await list(live.id)).toEqual(expect.arrayContaining([written, empty, blank]));
+    expect(await dm.settle()).toEqual([]);
+    // Only `true` is a value of it.
+    for (const value of ['false', 'yes', '']) {
+      const refused = await removeIfEmpty(empty.id, value);
+      expect(refused.statusCode, value).toBe(400);
+      expect(refused.json<ErrorEnvelope>().error.code).toBe('validation_failed');
+    }
+    expect(stored()).toBe(3);
+
+    // Empty or blank, as the DM view judges it: removed, and the DM room told.
+    expect((await removeIfEmpty(empty.id)).statusCode).toBe(204);
+    expect((await removeIfEmpty(blank.id)).statusCode).toBe(204);
+    const events = await dm.settle();
+    expect(types(events)).toEqual(['mapNotes.updated', 'mapNotes.updated']);
+    expect((events[1]!.payload as MapNotesUpdatedPayload).map_notes).toEqual([written]);
+    expect((await removeIfEmpty(empty.id)).statusCode).toBe(404);
+    // A plain DELETE, the one the DM confirmed, takes it whatever it holds.
+    expect((await remove(written.id)).statusCode).toBe(204);
+    expect(stored()).toBe(0);
+    expect(await tv.settle()).toEqual([]);
+  });
+
+  it('answers 404 to a change of a note whose scene was deleted, telling no one', async () => {
+    const { prep, dm } = await table();
+    const note = ok<MapNote>(await create(prep.id, { x: 1, y: 1, notes: 'Gone with the crypt.' }), 201);
+    await deleteEntity('scenes', prep.id);
+    await dm.settle();
+    for (const response of [await patch(note.id, { x: 2 }), await remove(note.id), await removeIfEmpty(note.id)]) {
+      expect(response.statusCode).toBe(404);
+      expect(response.json<ErrorEnvelope>().error.code).toBe('not_found');
+    }
+    expect(stored()).toBe(0);
+    expect(await dm.settle()).toEqual([]);
+  });
+
+  it('tells no one of a change once its scene is no longer live', async () => {
+    const { live, dm, tv } = await table();
+    const note = ok<MapNote>(await create(live.id, { x: 1, y: 1, notes: 'Bridge rope frays.' }), 201);
+    expect(await h.command(dm, 'scene.deactivate', {})).toEqual({ ok: true });
+    await dm.settle();
+    await tv.settle();
+    ok<MapNote>(await patch(note.id, { x: 4, notes: 'Rope cut.' }));
+    ok<MapNote>(await create(live.id, { x: 2, y: 2 }), 201);
+    expect((await remove(note.id)).statusCode).toBe(204);
+    expect(await dm.settle()).toEqual([]);
+    expect(await tv.settle()).toEqual([]);
+  });
+
+  it('deletes the live scene’s map notes with it, the TV blanked and told nothing of them', async () => {
+    const { live, dm, tv } = await table();
+    ok<MapNote>(await create(live.id, { x: 1, y: 1, notes: 'Troll under the bridge.' }), 201);
+    await dm.settle();
+    await deleteEntity('scenes', live.id);
+    expect(types(await dm.settle())).toEqual(['scene.cleared']);
+    expect(stored()).toBe(0);
+    expect(types(await tv.settle())).toEqual(['scene.cleared']);
+    expect(JSON.stringify(tv.events)).not.toContain('Troll');
+  });
+
+  it('deletes map notes with their session and with their campaign', async () => {
+    const { live, prep } = await table();
+    ok<MapNote>(await create(live.id, { x: 1, y: 1, notes: 'Bridge.' }), 201);
+    ok<MapNote>(await create(prep.id, { x: 2, y: 2, notes: 'Crypt.' }), 201);
+    // Another campaign's scene, whose note stays until its own campaign goes.
+    const campaign = ok<{ id: string }>(await h.post('/api/campaigns', { name: 'Other campaign' }), 201);
+    const session = ok<Session>(await h.post(`/api/campaigns/${campaign.id}/sessions`, { title: 'Elsewhere' }), 201);
+    const elsewhere = ok<Scene>(await h.post(`/api/sessions/${session.id}/scenes`, { name: 'Elsewhere' }), 201);
+    ok<MapNote>(await create(elsewhere.id, { x: 3, y: 3, notes: 'Kept.' }), 201);
+
+    await deleteEntity('sessions', prep.session_id);
+    expect(stored()).toBe(1);
+    expect(await list(elsewhere.id)).toEqual([expect.objectContaining({ notes: 'Kept.' })]);
+    await deleteEntity('campaigns', campaign.id);
+    expect(stored()).toBe(0);
+  });
+
+  it('tells every DM window of a change on the live scene', async () => {
+    const { live, dm } = await table();
+    const other = await h.connect({ cookie: h.cookie });
+    const note = ok<MapNote>(await create(live.id, { x: 1, y: 1, notes: 'Seen in both.' }), 201);
+    for (const client of [dm, other]) {
+      const events = await client.settle();
+      expect(types(events)).toEqual(['mapNotes.updated']);
+      expect((events[0]!.payload as MapNotesUpdatedPayload).map_notes).toEqual([note]);
+    }
   });
 });

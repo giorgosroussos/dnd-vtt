@@ -4,6 +4,8 @@ import {
   ARCHIVE_ENTRY_PATTERN,
   ARCHIVE_FORMAT_VERSION,
   ArchiveManifestSchema,
+  ArchiveMapNoteSchema,
+  ArchiveTokenSchema,
   TokenNumbersSchema,
   exportFileName,
   freeCampaignName,
@@ -98,6 +100,22 @@ describe('the format', () => {
       'manifest.json/',
     ]) {
       expect(ARCHIVE_ENTRY_PATTERN.test(name), name).toBe(false);
+    }
+  });
+
+  it('bounds a map note’s point and a token’s position as REST does, and a map note’s text as a body’s', () => {
+    const note = { id: '0e2f5f0c-1d7b-4b6a-9c3e-2a1f0b9d8c7e', scene_id: '1e2f5f0c-1d7b-4b6a-9c3e-2a1f0b9d8c7e' };
+    expect(Value.Check(ArchiveMapNoteSchema, { ...note, x: -1e6, y: 1e6, notes: 'Pit.' })).toBe(true);
+    for (const change of [{ x: 1e7 }, { y: -1e7 }, { notes: 'x'.repeat(20_001) }]) {
+      expect(
+        Value.Check(ArchiveMapNoteSchema, { ...note, x: 1, y: 1, notes: '', ...change }),
+        JSON.stringify(change).slice(0, 20),
+      ).toBe(false);
+    }
+    for (const axis of ['x', 'y'] as const) {
+      expect(Value.Check(ArchiveTokenSchema.properties[axis], 1e6)).toBe(true);
+      expect(Value.Check(ArchiveTokenSchema.properties[axis], 1e7)).toBe(false);
+      expect(Value.Check(ArchiveTokenSchema.properties[axis], -1e7)).toBe(false);
     }
   });
 

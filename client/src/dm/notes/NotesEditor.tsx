@@ -37,8 +37,20 @@ const drafts = new Map<string, { text: string; base: string }>();
 export const unsavedDrafts = (): number => drafts.size;
 /** The text typed into the notes of `target` that the server does not hold yet, if any (UXR-08). */
 export const unsavedText = (target: string): string | undefined => drafts.get(target)?.text;
+/**
+ * Notes whose owner is gone (a map note deleted, UXR-08): their unsaved text is forgotten, and a save still under way
+ * that fails, as it must, keeps nothing, so the page stops asking before it is left.
+ */
+const forgotten = new Set<string>();
+export const forgetDraft = (target: string): void => {
+  forgotten.add(target);
+  drafts.delete(target);
+};
 /** Forgets every unsaved text; for the tests only. */
-export const clearDrafts = (): void => drafts.clear();
+export const clearDrafts = (): void => {
+  drafts.clear();
+  forgotten.clear();
+};
 
 const warnOnLeave = (event: BeforeUnloadEvent) => {
   if (drafts.size === 0) return;
@@ -109,7 +121,7 @@ export function NotesEditor({
 
   const remember = () => {
     const { text: typed, base: stored } = now.current;
-    if (typed === stored) drafts.delete(target);
+    if (typed === stored || forgotten.has(target)) drafts.delete(target);
     else drafts.set(target, { text: typed, base: stored });
   };
 

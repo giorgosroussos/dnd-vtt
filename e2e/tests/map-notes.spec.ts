@@ -75,10 +75,11 @@ test('a map note is placed, written, moved, previewed, toggled, edited live and 
     expect(placed!.x % 1).toBe(0.5);
     expect(placed!.y % 1).toBe(0.5);
 
-    // Still there after a reload, with its text.
+    // Still there after a reload, where it was; its text, read back from the server, is what the preview below shows.
     await dm.reload();
     await selectScene(dm, names);
     await expect.poll(async () => (await notes(dm)).length).toBe(1);
+    expect((await notes(dm))[0]).toMatchObject({ id: placed!.id, x: placed!.x, y: placed!.y });
 
     // Dragged three squares right, snapped to that square's centre.
     const [before] = await notes(dm);
